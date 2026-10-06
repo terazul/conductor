@@ -541,7 +541,7 @@ below the requests, one card each, and each card's first button is the one that 
 | **Dev server down** | A dev server an agent started has stopped answering. | Open its preview, or dismiss. |
 | **Daily budget** | Today's spend reached the daily budget set in Settings. | A warning only: nothing is stopped. Change the budget in Settings. |
 | **Note due** | One of your project notes is due or late. | **✓ mark done**, open the project, or dismiss it for the day. |
-| **Waiting** | An agent is queued behind one that failed or was stopped, such as the reviewer after a failed developer. It stays queued and starts once that one is done. | **continue** the failed one (when its session can be resumed), open it, or dismiss. A stopped agent isn't coming back, so stop the waiting one too. |
+| **Waiting** | An agent waits on one that failed or was stopped. Behind a failed one, such as the reviewer after a failed developer, it stays queued and starts once that one is done. Behind a stopped one it is paused (see "Stopping an agent", §7). | Behind a failed one: **continue** it (when its session can be resumed), open it, or dismiss. Behind a stopped one: **resume** the waiting agent to run without it, open the stopped one, or dismiss. |
 
 An alert stays until the daemon says the problem is gone, or until you dismiss it.
 Dismissing is remembered across reloads.
@@ -556,7 +556,8 @@ for an alert. These work on every screen.
 
 ### When a job finishes
 
-When every agent in a job has ended, done or failed, the job has **finished**. Until you've
+When nothing in a job can go on by itself, the job has **finished**: every agent has ended,
+done, failed or stopped, or is paused, or is queued behind one of those. Until you've
 seen it, its Fleet card, its group on the Project screen and its group in the navigator say
 **finished** (green, or red if an agent in it failed), and the tab's count includes it. With
 desktop notifications on you also get one, **<project> · job finished** or **job ended with
@@ -902,9 +903,28 @@ transcript and spend stay, and nothing on disk is touched: the worktree, the bra
 every file it wrote are exactly where they were. To stop a whole job at once, use
 **✕ terminate** on that job's header on the Project screen (`2`).
 
+**The agents waiting on one you stop are paused, not left waiting.** Stop the architect
+of a full pipeline and the developer, which waited for it, goes **paused** with the note
+*waits for architect, which was stopped — resume to run without it, or remove it*. Nothing
+starts by itself, so nothing is spent until you choose. The agents further down
+(validator, reviewer, scribe) still wait on the developer. Then you can:
+
+- **resume** the developer. It runs without the architect, and its first prompt still
+  includes what the architect wrote last, marked *stopped, so it may not have finished
+  its part*.
+- **remove** the architect. The developer then waits on whatever the architect waited on
+  (nothing, here), and starts.
+
+Nothing in the job can go on by itself until you choose, so the job counts as finished
+meanwhile. Resuming opens it again. An agent waiting on one that **failed** stays queued
+instead: continue the failed one, and the waiting one starts once it is done.
+
 **Terminate stops it; remove clears it away.** Once an agent has ended, the same button
 becomes **✕ remove** — that deletes the agent and its transcript from Conductor so it
-leaves the screen. On the Project screen, a job whose agents have all ended offers
+leaves the screen. Removing also takes it out of the stack. Each agent that waited on it
+and hasn't started waits on what it waited on instead. With architect → developer →
+scribe, removing the developer makes the scribe wait for the architect, and hear the
+architect's last reply. Agents that have already started are left as they are. On the Project screen, a job whose agents have all ended offers
 **✕ remove** on its header, which takes the job and every agent in it.
 
 Removal never touches your files, and it keeps two things on purpose: the event log, so

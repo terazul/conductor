@@ -32,8 +32,10 @@ import type {
   CreateJobResponse,
   Job,
   Project,
+  Rewired,
   Snapshot,
 } from '@conductor/shared';
+import { isStuck, rewireOnRemoval } from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
 import type { Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -82,6 +84,9 @@ import {
   markReported,
   setAgentDependsOn,
   unreportedHelpers,
+  getWentWithout,
+  setWentWithout,
+  lastStatusNote,
   type AgentPersona,
 } from './store.js';
 
@@ -108,6 +113,21 @@ function personaScope(p: AgentPersona): { systemPrompt?: string; skills?: string
     ...(p.skills?.length ? { skills: p.skills } : {}),
   };
 }
+
+/**
+ * Why an agent waiting on a stopped one is paused (Amendment 88). It doesn't start by
+ * itself: resuming it runs it without that one, and removing that one from the stack
+ * points it at what that one waited on.
+ */
+export function strandNote(role: string | null): string {
+  return role === null
+    ? 'waits for an agent that was removed — resume to run without it'
+    : `waits for ${role}, which was stopped — resume to run without it, or remove it`;
+}
+
+/** Whether a pause note is `strandNote`'s. */
+export const isStrandNote = (note: string | null): boolean =>
+  note !== null && note.startsWith('waits for ') && note.includes('resume to run without it');
 
 /** Nudge text for a park that came from interrupt() rather than `defer`. */
 const RESUME_NUDGE =
@@ -244,6 +264,9 @@ export class Supervisor implements AgentControl {
     if (fixed > 0) {
       console.log(`[supervisor] reconciled ${fixed} agent(s) left working by a hard stop`);
     }
+    // Queued behind a stopped or deleted agent by a build from before Amendment 88: paused
+    // with the reason, rather than left waiting for good or started unasked.
+    this.#strand(null);
     return fixed;
   }
 
@@ -638,13 +661,47 @@ export class Supervisor implements AgentControl {
   #depsSatisfied(agent: Agent): boolean {
     for (const id of agent.dependsOn) {
       const dep = getAgent(this.#db, id);
-      if (!dep) return false;
+      // Removed (Amendment 88). Its dependants that hadn't started were pointed elsewhere;
+      // one that had, passed this gate already — an orchestrator whose helper was removed.
+      if (!dep) {
+        if (agent.sdkSessionId) continue;
+        return false;
+      }
       // A helper that failed or was stopped has still ended: its orchestrator is told
       // how, rather than waiting for it forever (Amendment 51).
       const ended = dep.parentId === agent.id && (dep.status === 'failed' || dep.status === 'stopped');
       if (dep.status !== 'done' && !ended) return false;
     }
     return true;
+  }
+
+  /**
+   * What a queued agent that hasn't started waits on that will never finish: an agent that
+   * was stopped (not its own helper, Amendment 51), or one whose row is gone. Null when
+   * there is none. Its role, or null for a row that is gone.
+   */
+  #strandedBy(agent: Agent): { role: string | null } | null {
+    for (const id of agent.dependsOn) {
+      const dep = getAgent(this.#db, id);
+      if (!dep) return { role: null };
+      if (dep.status === 'stopped' && dep.parentId !== agent.id) return { role: dep.role };
+    }
+    return null;
+  }
+
+  /**
+   * Pause every queued agent that hasn't started and waits on a stopped or removed one
+   * (Amendment 88), in one job or, with null, in all of them. Paused, not started: nothing
+   * spends money until you say so. Paused, not left queued: queued, it waited for good and
+   * its job never settled. Resuming it runs it without that one.
+   */
+  #strand(jobId: string | null): void {
+    const agents = jobId === null ? listAgents(this.#db) : agentsForJob(this.#db, jobId);
+    for (const a of agents) {
+      if (a.status !== 'queued' || a.sdkSessionId !== null) continue;
+      const by = this.#strandedBy(a);
+      if (by) this.#pause(a.id, strandNote(by.role));
+    }
   }
 
   /**
@@ -682,10 +739,14 @@ export class Supervisor implements AgentControl {
     if (!agent) return '';
     const job = getJob(this.#db, agent.jobId);
     const brief = getAgentBrief(this.#db, agentId);
-    const upstream = agent.dependsOn.flatMap((id) => {
-      const dep = getAgent(this.#db, id);
-      return dep ? [{ role: dep.role, reply: eventLog().lastText(id) }] : [];
-    });
+    const upstream = [
+      ...agent.dependsOn.flatMap((id) => {
+        const dep = getAgent(this.#db, id);
+        return dep ? [{ role: dep.role, reply: eventLog().lastText(id) }] : [];
+      }),
+      // Ones you started it without (Amendment 88): what they said, marked stopped.
+      ...getWentWithout(this.#db, agentId).map((w) => ({ role: w.role, reply: eventLog().lastText(w.id), status: 'stopped' })),
+    ];
     const handoff = handoffSection(upstream);
     const parts = [job?.prompt ?? ''];
     if (handoff) parts.push(`\n${handoff}`);
@@ -710,7 +771,8 @@ export class Supervisor implements AgentControl {
     this.#active.add(agentId);
     this.#pushSlots();
     setAgentStatus(this.#db, agentId, 'working');
-    if (job.status === 'queued') setJobStatus(this.#db, job.id, 'working');
+    // Queued, or settled while this one waited for you (Amendment 88): it is working now.
+    if (job.status !== 'working') setJobStatus(this.#db, job.id, 'working');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
       { kind: 'status', status: 'working' },
@@ -998,12 +1060,17 @@ export class Supervisor implements AgentControl {
     // `stopped` settles a job like `paused` does: the human ended it, so the job is no
     // longer waiting on anything. It is NOT counted as a failure — a deliberate stop is
     // not an error, and marking the job failed would put a red card on a decision.
+    //
+    // A queued agent that can't start without you — behind a paused, failed or stopped one —
+    // is settled too (Amendment 88). Otherwise the job said "working" for good while nothing
+    // in it could move; resuming or continuing what it waits on opens the job again.
     const allSettled = agents.every(
       (a) =>
         a.status === 'done' ||
         a.status === 'failed' ||
         a.status === 'paused' ||
-        a.status === 'stopped',
+        a.status === 'stopped' ||
+        isStuck(a, agents),
     );
     if (!allSettled) return;
 
@@ -1106,6 +1173,9 @@ export class Supervisor implements AgentControl {
 
     this.#active.add(agentId);
     this.#pushSlots();
+    // Continuing a failed agent makes its job live again (Amendment 88): a job settled
+    // `failed` behind it would otherwise keep its queued agents from ever starting.
+    this.#reopenJob(agent.jobId);
     setAgentStatus(this.#db, agentId, 'working');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
@@ -1214,6 +1284,8 @@ export class Supervisor implements AgentControl {
     const refusal = budgetRefusal(agent);
     if (refusal) throw new BudgetReachedError(refusal);
 
+    this.#goWithout(agent);
+
     /*
      * Queued, and pump() starts it when a slot is free: with its session when it has
      * one, told to carry on (WAKE_NUDGE, via #resumePrompt), and from the job prompt when
@@ -1229,6 +1301,27 @@ export class Supervisor implements AgentControl {
       { kind: 'status', status: 'queued' },
     );
     this.pump();
+  }
+
+  /**
+   * Resuming is the say-so to run without what it waited on that won't finish (Amendment
+   * 88): agents that were stopped, not its own helpers, or are gone. They leave its
+   * `dependsOn`, so it no longer waits on them, and are kept in `went_without`, so its
+   * first prompt still says what they wrote last, marked stopped.
+   */
+  #goWithout(agent: Agent): void {
+    // One that has started is past waiting, and its first prompt has been sent.
+    if (agent.sdkSessionId !== null) return;
+    const without = getWentWithout(this.#db, agent.id);
+    const keep: string[] = [];
+    for (const id of agent.dependsOn) {
+      const dep = getAgent(this.#db, id);
+      if (dep && (dep.status !== 'stopped' || dep.parentId === agent.id)) keep.push(id);
+      else if (!without.some((w) => w.id === id)) without.push({ id, role: dep?.role ?? 'an agent that was removed' });
+    }
+    if (keep.length === agent.dependsOn.length) return;
+    setAgentDependsOn(this.#db, agent.id, keep);
+    setWentWithout(this.#db, agent.id, without);
   }
 
   /**
@@ -1292,6 +1385,9 @@ export class Supervisor implements AgentControl {
 
     const stopped = getAgent(this.#db, agentId)!;
     this.#pushEntities({ agents: [stopped] });
+    // The ones waiting on it are paused, with why, rather than left waiting for good
+    // (Amendment 88). Not while the whole job is being stopped: they are next.
+    if (!this.#halting.has(agent.jobId)) this.#strand(agent.jobId);
     this.#rollUpJob(agent.jobId);
     // A freed slot is a slot something queued can have.
     this.pump();
@@ -1329,9 +1425,9 @@ export class Supervisor implements AgentControl {
    * finished project accumulates lanes nobody will look at again and there was no way
    * to clear them.
    *
-   * Terminates first, unconditionally, so this is safe on a live agent: a row deleted
-   * while its runner is mid-query would leave a process writing events for an agent the
-   * database has never heard of.
+   * Terminates before deleting, unconditionally, so this is safe on a live agent: a row
+   * deleted while its runner is mid-query would leave a process writing events for an
+   * agent the database has never heard of.
    *
    * `resync` rather than an entity push, for the reason `deleteProject` uses it — the
    * store's `#applyEvent` never creates entities but it does update them, so pushing a
@@ -1340,27 +1436,54 @@ export class Supervisor implements AgentControl {
    *
    * Touches no files. Keeps the event log and the day's spend.
    */
-  async deleteAgent(agentId: string): Promise<void> {
+  async deleteAgent(agentId: string): Promise<Rewired[]> {
     const agent = getAgent(this.#db, agentId);
     if (!agent) throw new Error(`no such agent ${agentId}`);
+    const jobId = agent.jobId;
+
+    /*
+     * REMOVED FROM THE STACK, NOT JUST DELETED (Amendment 88). Each agent that waited on
+     * this one and hasn't started waits on what this one waited on instead — before, its
+     * row was simply gone and they waited on nothing that would ever finish. Rewired
+     * FIRST, so terminating below finds nobody to pause.
+     */
+    const rewired = rewireOnRemoval(agentsForJob(this.#db, jobId), agentId);
+    for (const r of rewired) setAgentDependsOn(this.#db, r.agentId, r.dependsOn);
 
     await this.terminateAgent(agentId);
     this.#resumeWanted.delete(agentId);
-    const jobId = agent.jobId;
     deleteAgent(this.#db, agentId);
+
+    // Paused only because this one was stopped: removing it is the say-so to go on.
+    let requeued = false;
+    for (const r of rewired) {
+      const a = getAgent(this.#db, r.agentId);
+      if (!a || a.status !== 'paused' || a.sdkSessionId !== null) continue;
+      if (!isStrandNote(lastStatusNote(this.#db, a.id)) || this.#strandedBy(a)) continue;
+      setAgentStatus(this.#db, a.id, 'queued');
+      eventLog().emit({ projectId: a.projectId, jobId, agentId: a.id }, { kind: 'status', status: 'queued' });
+      requeued = true;
+    }
 
     /*
      * A job with no agents left cannot make progress, so it must stop saying it might.
      * `#rollUpJob` returns early on an empty agent list — correct for a job whose agents
      * have not been inserted yet, wrong for one whose agents have been removed — so the
-     * last-agent case is settled here instead.
+     * last-agent case is settled here instead. Otherwise the job is open again if something
+     * in it can now start, and settled if nothing can.
      */
-    if (agentsForJob(this.#db, jobId).length === 0) {
+    const left = agentsForJob(this.#db, jobId);
+    if (left.length === 0) {
       setJobStatus(this.#db, jobId, 'done');
+    } else if (requeued || left.some((a) => a.status === 'queued' && !isStuck(a, left))) {
+      this.#reopenJob(jobId);
+    } else {
+      this.#rollUpJob(jobId);
     }
 
     hub().broadcast({ type: 'resync' });
     this.pump();
+    return rewired;
   }
 
   /** The same for a job: its agents cascade, and the job row goes too. */

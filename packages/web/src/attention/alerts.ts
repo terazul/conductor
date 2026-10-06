@@ -16,10 +16,11 @@ import { alertTitle } from '../shell/describe.js';
 
 export type AlertAction =
   /**
-   * Resume the agents. `retry` when the model API gave up on them, `continue` otherwise.
-   * `role` when it isn't the agent the card is about (Amendment 85).
+   * Resume the agents. `retry` when the model API gave up on them, `resume` for one paused
+   * behind a stopped agent (Amendment 88), `continue` otherwise. `role` when it isn't the
+   * agent the card is about (Amendment 85).
    */
-  | { id: 'continue'; label: 'continue' | 'retry'; agentIds: readonly string[]; role?: string }
+  | { id: 'continue'; label: 'continue' | 'retry' | 'resume'; agentIds: readonly string[]; role?: string }
   /** Raise the cap to `to`, then continue. */
   | { id: 'raise'; agentId: string; by: number; to: number }
   | { id: 'open'; agentId: string; role?: string }
@@ -84,9 +85,16 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
     case 'blocked_dep': {
       // The fix is the agent being waited on (Amendment 85): continue it if it can be,
       // and once it is done the waiting one starts. A stopped one isn't coming back, so
-      // there is only looking at it.
+      // the waiting one, paused when it was stopped, is resumed to run without it (88).
       const by = agents.find((a) => a.id === alert.blockedBy);
       if (!by) return [...open, dismiss];
+      if (by.status === 'stopped') {
+        return [
+          ...(first?.status === 'paused' ? [{ id: 'continue', label: 'resume', agentIds: [first.id] } as const] : []),
+          { id: 'open', agentId: by.id, role: by.role },
+          dismiss,
+        ];
+      }
       return [
         ...(resumable(by) ? [{ id: 'continue', label: 'continue', agentIds: [by.id], role: by.role } as const] : []),
         { id: 'open', agentId: by.id, role: by.role },

@@ -422,6 +422,37 @@ export function setAgentDependsOn(db: Db, id: string, dependsOn: string[]): void
   db.prepare('UPDATE agents SET depends_on = ? WHERE id = ?').run(JSON.stringify(dependsOn), id);
 }
 
+/** An agent its dependant was started without, by role (Amendment 88). */
+export interface WentWithout {
+  id: string;
+  role: string;
+}
+
+/** What this agent was resumed without: agents it waited on that were stopped or removed. */
+export function getWentWithout(db: Db, id: string): WentWithout[] {
+  const r = row<{ went_without: string | null }>(db.prepare('SELECT went_without FROM agents WHERE id = ?').get(id));
+  const v = r?.went_without ? parse<unknown>(r.went_without, []) : [];
+  return Array.isArray(v)
+    ? v.filter((x): x is WentWithout => typeof x?.id === 'string' && typeof x?.role === 'string')
+    : [];
+}
+
+export function setWentWithout(db: Db, id: string, without: WentWithout[]): void {
+  db.prepare('UPDATE agents SET went_without = ? WHERE id = ?').run(without.length ? JSON.stringify(without) : null, id);
+}
+
+/** The note on an agent's last status event, if it had one: why it is paused, failed, … */
+export function lastStatusNote(db: Db, agentId: string): string | null {
+  const r = row<{ payload: string }>(
+    db
+      .prepare(`SELECT payload FROM events WHERE agent_id = ? AND kind = 'status' ORDER BY seq DESC LIMIT 1`)
+      .get(agentId),
+  );
+  if (!r) return null;
+  const p = parse<{ error?: unknown }>(r.payload, {});
+  return typeof p.error === 'string' ? p.error : null;
+}
+
 export function listAgents(db: Db): Agent[] {
   return rows<AgentRow>(db.prepare('SELECT * FROM agents').all()).map(toAgent);
 }

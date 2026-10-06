@@ -217,6 +217,16 @@ export interface CreateJobResponse {
   agents: Agent[];
 }
 
+/**
+ * What `DELETE /api/agents/:id` did (Amendment 88). The agent is removed from the stack:
+ * each agent that waited on it and hadn't started now waits on what it waited on
+ * (`rewireOnRemoval`, stack.ts). `rewired` lists them with their new `dependsOn`.
+ */
+export interface RemoveAgentResponse {
+  removed: string;
+  rewired: { agentId: string; dependsOn: string[] }[];
+}
+
 export interface CreateProjectRequest {
   /** The MAIN folder: where agents work, and where worktrees are cut. */
   path: string;

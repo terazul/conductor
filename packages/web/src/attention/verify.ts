@@ -298,8 +298,15 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
     unblock[0]?.id === 'continue' && unblock[0].role === 'developer' && unblock[1]?.id === 'open' && unblock[1].agentId === 'a1',
     JSON.stringify(unblock),
   );
-  const stoppedDep = ids(alertActions({ ...blockedDep, cause: 'stopped' }, [waiting, agent({ id: 'a1', status: 'stopped' })]));
-  check('a stopped one is not coming back, so there is only looking at it', stoppedDep === 'open dismiss', stoppedDep);
+  const stopped = agent({ id: 'a1', role: 'architect', status: 'stopped' });
+  const stoppedDep = alertActions({ ...blockedDep, cause: 'stopped' }, [{ ...waiting, status: 'paused' }, stopped]);
+  check(
+    'a stopped one is not coming back: the one waiting, paused, is resumed to run without it (Amendment 88)',
+    ids(stoppedDep) === 'resume:a3 open dismiss' && stoppedDep[0]?.id === 'continue' && stoppedDep[0].role === undefined,
+    ids(stoppedDep),
+  );
+  const oldQueued = ids(alertActions({ ...blockedDep, cause: 'stopped' }, [waiting, stopped]));
+  check('one still queued from before that has no resume, only looking', oldQueued === 'open dismiss', oldQueued);
   const told = alertTitle(blockedDep, [waiting, dev]);
   check(
     'the card says who waits on whom',

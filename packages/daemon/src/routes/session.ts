@@ -22,6 +22,7 @@ import type {
   Isolation,
   PendingRequest,
   Project,
+  RemoveAgentResponse,
   SendMessageRequest,
   SetAutonomyRequest,
   SetModelRequest,
@@ -625,12 +626,18 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    * Remove, as opposed to terminate. A DELETE this time, because something really is
    * deleted: the agent row and — via ON DELETE CASCADE — its requests and run history.
    * The event log and the day's spend survive, and so does every file it wrote.
+   *
+   * It is also "remove from the stack" (ADR 0002): the agents that waited on it and hadn't
+   * started wait on what it waited on. No second route and no mode — the only other
+   * behaviour a mode could keep is leaving them waiting for good.
    */
   app.delete<{ Params: { agentId: string } }>('/api/agents/:agentId', async (req, reply) => {
     if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
     try {
-      await sup.deleteAgent(req.params.agentId);
-      return reply.send({ removed: req.params.agentId });
+      // Removed from the stack (Amendment 88): `rewired` is who waits on what now.
+      const rewired = await sup.deleteAgent(req.params.agentId);
+      const body: RemoveAgentResponse = { removed: req.params.agentId, rewired };
+      return reply.send(body);
     } catch (err) {
       return fail(reply, 500, 'could not remove the agent', String(err));
     }

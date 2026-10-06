@@ -104,7 +104,8 @@ import { HANDOFF_CAP, handoffSection } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { costChanged } from '../daily.js';
-import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, supervisor, type ProjectRemoval } from './supervisor.js';
+import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { isStuck, rewireOnRemoval, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 
 /*
  * Nothing here may ask the real model API or start a real Claude Code: §12 answers for
@@ -3233,6 +3234,162 @@ async function main(): Promise<void> {
   // The engines registered before the fakes are put back, so later sections see the real ones.
   if (enginesBefore.copilot) registerBackend(enginesBefore.copilot);
   if (enginesBefore.openrouter) registerBackend(enginesBefore.openrouter);
+
+  console.log('\n17o · nobody waits for good on an agent that was stopped or removed (Amendment 88)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const said88 = (jobId: string, agentId: string, text: string) =>
+      eventLog().emit({ projectId: pid, jobId, agentId }, { kind: 'text', text });
+    const note88 = (id: string) => {
+      const p = lastStatus(id);
+      return p?.kind === 'status' ? (p.error ?? null) : null;
+    };
+    const pipeline = (jobId: string, prefix: string) => {
+      job(jobId, null);
+      setJobStatus(db, jobId, 'working');
+      const id = (r: string) => `${prefix}_${r}`;
+      fixture(id('arch'), jobId, { role: 'architect', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+      fixture(id('dev'), jobId, { role: 'developer', status: 'queued', dependsOn: [id('arch')], autonomy: DEFAULT_AUTONOMY });
+      fixture(id('val'), jobId, { role: 'validator', status: 'queued', dependsOn: [id('dev')], autonomy: DEFAULT_AUTONOMY });
+      fixture(id('rev'), jobId, { role: 'reviewer', status: 'queued', dependsOn: [id('dev'), id('val')], autonomy: DEFAULT_AUTONOMY });
+      fixture(id('scr'), jobId, { role: 'scribe', status: 'queued', dependsOn: [id('rev')], autonomy: DEFAULT_AUTONOMY });
+      return id;
+    };
+
+    // The pure rules first.
+    const n = (id: string, dependsOn: string[], o: Partial<StackNode> = {}): StackNode => ({ id, dependsOn, status: 'queued', sdkSessionId: null, ...o });
+    const chain = [n('a', [], { status: 'done', sdkSessionId: 's' }), n('b', ['a']), n('c', ['b'])];
+    check('A→B→C, remove B: C waits on A', JSON.stringify(rewireOnRemoval(chain, 'b')) === '[{"agentId":"c","dependsOn":["a"]}]', JSON.stringify(rewireOnRemoval(chain, 'b')));
+    check(
+      'nothing twice, and not the removed one’s helpers',
+      JSON.stringify(rewireOnRemoval([n('a', []), n('h', [], { parentId: 'b' }), n('b', ['a', 'h']), n('c', ['a', 'b'])], 'b')) === '[{"agentId":"c","dependsOn":["a"]}]',
+    );
+    check('one that has started is left alone', rewireOnRemoval([n('a', []), n('b', ['a']), n('c', ['b'], { status: 'working', sdkSessionId: 's' })], 'b').length === 0);
+    check('a paused one that never ran is rewired', rewireOnRemoval([n('b', []), n('c', ['b'], { status: 'paused' })], 'b')[0]?.dependsOn.length === 0);
+    const graph = [n('a', [], { status: 'paused' }), n('b', ['a']), n('c', ['b']), n('d', ['x']), n('e', [], { status: 'working' }), n('f', ['e'])];
+    check('queued behind a paused one, directly or further up, is stuck', isStuck(graph[1]!, graph) && isStuck(graph[2]!, graph));
+    check('so is one behind an agent that is gone', isStuck(graph[3]!, graph));
+    check('one behind a working one is not', !isStuck(graph[5]!, graph));
+    check("an orchestrator behind its own stopped helper is not (Amendment 51)", !isStuck(n('o', ['h']), [n('o', ['h']), n('h', [], { status: 'stopped', parentId: 'o' })]));
+
+    // The repro: a full pipeline, the architect stopped mid-run.
+    const start = runs.length;
+    const p = pipeline('job_strand', 's88');
+    sup.pump();
+    check('the architect starts, and only it', await until(() => runs.length === start + 1) && getAgent(db, p('dev'))?.status === 'queued');
+    await until(() => (runs[start]?.prompts.length ?? 0) > 0);
+    said88('job_strand', p('arch'), 'Plan: half of it, in PLAN.md.');
+    const stop = await send('POST', `/api/agents/${p('arch')}/terminate`, {});
+    await settle(100);
+    check('stopping it → 200', stop.status === 200 && getAgent(db, p('arch'))?.status === 'stopped');
+    check('the developer waiting on it is paused, not left waiting for good', getAgent(db, p('dev'))?.status === 'paused');
+    check('and says why, and what to do', note88(p('dev')) === strandNote('architect') && note88(p('dev')) === 'waits for architect, which was stopped — resume to run without it, or remove it', String(note88(p('dev'))));
+    check('the ones further down wait on the developer, as they should', ['val', 'rev', 'scr'].every((r) => getAgent(db, p(r))?.status === 'queued'));
+    check('nothing new started: no money spent unasked', runs.length === start + 1 && sup.slots.used === 0);
+    check('and the job settles, since nothing in it can move by itself', getJob(db, 'job_strand')?.status === 'done', getJob(db, 'job_strand')?.status);
+    const waiting88 = alerts().list().filter((a) => a.kind === 'blocked_dep' && a.agentIds[0] === p('dev'));
+    check('Needs You has it: the developer, waiting on a stopped architect', waiting88.length === 1 && waiting88[0]?.cause === 'stopped' && waiting88[0].blockedBy === p('arch'), JSON.stringify(waiting88));
+
+    const resumed = await send('POST', `/api/agents/${p('dev')}/resume`, {});
+    check('resuming it → 200, and it runs', resumed.status === 200 && (await until(() => runs.length === start + 2)));
+    const devRun = runs[start + 1];
+    await until(() => (devRun?.prompts.length ?? 0) > 0);
+    check('without the architect: it no longer waits on it', getAgent(db, p('dev'))?.dependsOn.length === 0);
+    check(
+      'and hears what the architect wrote, marked stopped, as a helper report would say it',
+      (devRun?.prompts[0] ?? '').includes('[architect — stopped, so it may not have finished its part]\nPlan: half of it, in PLAN.md.') &&
+        (devRun?.prompts[0] ?? '').includes('without waiting for every agent before you'),
+      devRun?.prompts[0],
+    );
+    check('the job is open again', getJob(db, 'job_strand')?.status === 'working');
+    check('and the alert has cleared', !alerts().list().some((a) => a.kind === 'blocked_dep' && a.agentIds[0] === p('dev')));
+    devRun?.finish({ cost: 0, reason: 'completed' });
+    check('once it is done, the rest of the pipeline goes on', await until(() => runs.length === start + 3) && getAgent(db, p('val'))?.status === 'working');
+    await send('POST', '/api/jobs/job_strand/terminate', {});
+    check('stopping the whole job pauses nobody: it stops them all', ['dev', 'val', 'rev', 'scr'].every((r) => ['stopped', 'done'].includes(getAgent(db, p(r))?.status ?? '')), JSON.stringify(['dev', 'val', 'rev', 'scr'].map((r) => getAgent(db, p(r))?.status)));
+
+    // Rows from before the fix: queued behind a stopped or a deleted agent. A restart pauses them.
+    job('job_legacy', null);
+    setJobStatus(db, 'job_legacy', 'working');
+    fixture('agt_old_stop', 'job_legacy', { role: 'analyst', status: 'stopped' });
+    fixture('agt_old_wait', 'job_legacy', { role: 'scribe', status: 'queued', dependsOn: ['agt_old_stop'], autonomy: DEFAULT_AUTONOMY });
+    fixture('agt_old_gone', 'job_legacy', { role: 'reviewer', status: 'queued', dependsOn: ['agt_never_was'], autonomy: DEFAULT_AUTONOMY });
+    const before = runs.length;
+    sup.reconcile();
+    check('a restart pauses one queued behind a stopped agent', getAgent(db, 'agt_old_wait')?.status === 'paused' && note88('agt_old_wait') === strandNote('analyst'));
+    check('and one behind an agent that is gone', getAgent(db, 'agt_old_gone')?.status === 'paused' && note88('agt_old_gone') === strandNote(null));
+    sup.pump();
+    await settle(100);
+    check('and starts neither', runs.length === before);
+
+    // Removing the stopped one is the say-so: who waited on it, and was paused for it, goes on.
+    const rm = await send<RemoveAgentResponse>('DELETE', '/api/agents/agt_old_stop');
+    check('removing it says who now waits on what', rm.status === 200 && JSON.stringify(rm.body.rewired) === '[{"agentId":"agt_old_wait","dependsOn":[]}]', JSON.stringify(rm.body));
+    check('and the one paused for it starts', await until(() => runs.length === before + 1) && getAgent(db, 'agt_old_wait')?.status === 'working');
+    runs[before]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_old_wait')?.status === 'done');
+    await send('POST', '/api/agents/agt_old_gone/resume', {});
+    check('resuming one behind a gone agent runs it without', await until(() => runs.length === before + 2) && getAgent(db, 'agt_old_gone')?.dependsOn.length === 0);
+    runs[before + 1]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_old_gone')?.status === 'done');
+
+    // Delete a queued middle agent: the one after it waits on the one before, and hears it.
+    job('job_rw', null);
+    setJobStatus(db, 'job_rw', 'working');
+    fixture('agt_rw_a', 'job_rw', { role: 'architect', status: 'working', sdkSessionId: 'sess_rw_a', autonomy: DEFAULT_AUTONOMY });
+    fixture('agt_rw_b', 'job_rw', { role: 'developer', status: 'queued', dependsOn: ['agt_rw_a'], autonomy: DEFAULT_AUTONOMY });
+    fixture('agt_rw_c', 'job_rw', { role: 'scribe', status: 'queued', dependsOn: ['agt_rw_b'], autonomy: DEFAULT_AUTONOMY });
+    const rw = await send<RemoveAgentResponse>('DELETE', '/api/agents/agt_rw_b');
+    check('deleting a middle agent rewires the one after it to the one before', rw.status === 200 && JSON.stringify(getAgent(db, 'agt_rw_c')?.dependsOn) === '["agt_rw_a"]' && getAgent(db, 'agt_rw_b') === undefined, JSON.stringify(rw.body));
+    check('and it still waits, since the architect is still working', getAgent(db, 'agt_rw_c')?.status === 'queued' && getJob(db, 'job_rw')?.status === 'working');
+    said88('job_rw', 'agt_rw_a', 'The plan is in PLAN.md.');
+    setAgentStatus(db, 'agt_rw_a', 'done');
+    const atRw = runs.length;
+    sup.pump();
+    await until(() => (runs[atRw]?.prompts.length ?? 0) > 0);
+    check('its handoff comes from the architect', (runs[atRw]?.prompts[0] ?? '').includes('[architect]\nThe plan is in PLAN.md.'), runs[atRw]?.prompts[0]);
+    runs[atRw]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_rw_c')?.status === 'done');
+
+    // Delete a running agent: its slot is freed and the one after it, rewired to nobody, starts.
+    job('job_rw2', null);
+    setJobStatus(db, 'job_rw2', 'working');
+    fixture('agt_rw2_a', 'job_rw2', { role: 'developer', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    fixture('agt_rw2_b', 'job_rw2', { role: 'reviewer', status: 'queued', dependsOn: ['agt_rw2_a'], autonomy: DEFAULT_AUTONOMY });
+    const atRw2 = runs.length;
+    sup.pump();
+    await until(() => sup.isLive('agt_rw2_a'));
+    const used = sup.slots.used;
+    const rw2 = await send<RemoveAgentResponse>('DELETE', '/api/agents/agt_rw2_a');
+    check('deleting a running agent stops it and removes it', rw2.status === 200 && !sup.isLive('agt_rw2_a') && getAgent(db, 'agt_rw2_a') === undefined);
+    check('the one after it starts, in the slot it freed', (await until(() => getAgent(db, 'agt_rw2_b')?.status === 'working')) && sup.slots.used === used && runs.length === atRw2 + 2, `${sup.slots.used} vs ${used}`);
+    runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
+    check('and the job settles', await until(() => getJob(db, 'job_rw2')?.status === 'done'));
+
+    // Behind a FAILED one it stays queued (Amendment 85), and the job still settles.
+    job('job_fail88', null);
+    setJobStatus(db, 'job_fail88', 'working');
+    fixture('agt_f_dev', 'job_fail88', { role: 'developer', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    fixture('agt_f_rev', 'job_fail88', { role: 'reviewer', status: 'queued', dependsOn: ['agt_f_dev'], autonomy: DEFAULT_AUTONOMY });
+    const atF = runs.length;
+    sup.pump();
+    await until(() => runs.length === atF + 1);
+    runs[atF]?.finish({ cost: 0, isError: true, reason: 'error' });
+    await until(() => getAgent(db, 'agt_f_dev')?.status === 'failed');
+    check('behind a failed one it stays queued', getAgent(db, 'agt_f_rev')?.status === 'queued');
+    check('and the job settles failed, rather than saying working for good', getJob(db, 'job_fail88')?.status === 'failed', getJob(db, 'job_fail88')?.status);
+    await send('POST', '/api/agents/agt_f_dev/message', { text: 'try again' });
+    check('continuing the failed one opens the job again', await until(() => runs.length === atF + 2) && getJob(db, 'job_fail88')?.status === 'working');
+    runs[atF + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('and once it is done the one waiting starts', await until(() => getAgent(db, 'agt_f_rev')?.status === 'working'));
+    runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
+    check('every job here settled', await until(() => ['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].every((j) => ['done', 'failed'].includes(getJob(db, j)?.status ?? ''))), JSON.stringify(['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].map((j) => getJob(db, j)?.status)));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
 
   console.log("\n18 · a project's other directories (Amendment 39)");
   /*

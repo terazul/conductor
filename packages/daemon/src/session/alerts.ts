@@ -11,7 +11,7 @@
  *   budget       an agent stopped on its cap, or on its job's
  *   connection   the model API can't be reached or refuses the login, or the retries ran out
  *   server_down  a dev server stopped answering and nobody asked it to stop
- *   blocked_dep  a queued agent waits on one that failed or was stopped (Amendment 85)
+ *   blocked_dep  an agent waits on one that failed or was stopped (Amendments 85, 88)
  *
  * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -398,7 +398,9 @@ export class Alerts {
 
   /**
    * Queued agents waiting on one that failed or was stopped (Amendment 85). Before this
-   * the reviewer after a failed developer sat `queued` with nothing saying why.
+   * the reviewer after a failed developer sat `queued` with nothing saying why. Since
+   * Amendment 88 the ones waiting on a stopped agent are paused instead, and still alerted:
+   * resuming runs them without it.
    *
    * It stays queued rather than failing too: continue the failed one and, once it is
    * done, the waiting one starts. One alert per waiting agent and dependency, on the
@@ -411,12 +413,15 @@ export class Alerts {
     const byId = new Map(all.map((a) => [a.id, a]));
     const out: Alert[] = [];
     for (const agent of all) {
-      if (agent.status !== 'queued') continue;
+      if (agent.status !== 'queued' && agent.status !== 'paused') continue;
       for (const depId of agent.dependsOn) {
         const dep = byId.get(depId);
         // A helper's orchestrator already goes on without it (Amendment 51).
         if (!dep || dep.parentId === agent.id) continue;
         if (dep.status !== 'failed' && dep.status !== 'stopped') continue;
+        // Paused, it is about a stopped one only: that pause is the one stopping it made
+        // (Amendment 88). One you paused yourself behind a failed one is yours to wake.
+        if (agent.status === 'paused' && dep.status !== 'stopped') continue;
         const last = row<{ seq: number; ts: string }>(
           this.#db
             .prepare(`SELECT seq, ts FROM events WHERE agent_id = ? AND kind = 'status' ORDER BY seq DESC LIMIT 1`)

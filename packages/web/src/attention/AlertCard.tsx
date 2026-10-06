@@ -169,7 +169,7 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
         {alert.kind === 'blocked_dep' && (
           <div className="atn-note">
             {alert.cause === 'stopped'
-              ? 'It stays queued, but a stopped agent is not coming back: stop this one too, or dismiss.'
+              ? 'It is paused, since a stopped agent is not coming back. Resume it to run without that one, or remove that one from the stack on its Agent screen and this waits on what it waited on.'
               : 'It stays queued: continue the failed one, and this starts once that is done.'}
           </div>
         )}
@@ -214,7 +214,7 @@ function isFix(a: AlertAction): boolean {
 function labelOf(a: AlertAction): string {
   switch (a.id) {
     case 'continue':
-      if (a.role !== undefined) return `continue ${a.role}`;
+      if (a.role !== undefined) return `${a.label} ${a.role}`;
       return a.label === 'retry' && a.agentIds.length > 1 ? `retry ${a.agentIds.length} agents` : a.label;
     case 'raise':
       return `+$${a.by} and continue`;

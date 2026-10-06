@@ -196,6 +196,62 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 88 — post-merge, applied. **Nobody waits for good on an agent that was stopped or removed.**
+
+Daemon (`packages/daemon/src/session`, `routes/session.ts`, migration `120_went_without.sql`),
+shared (new `packages/shared/src/stack.ts`; `RemoveAgentResponse` in `wire.ts`) and web
+(`packages/web/src/attention`). The first half of ADR 0002 (`docs/adr/0002-edit-running-stack.md`),
+fixed ahead of the feature it was found in.
+- **The bug.** Stop the architect of a full pipeline and the developer, validator, reviewer
+  and scribe waited for good: `#depsSatisfied` was false forever (the dependency was
+  `stopped`, or its row gone after a delete), they stayed `queued`, and `#rollUpJob` never
+  settled the job.
+- **Stopping pauses who waited on it.** `terminateAgent` now runs `#strand(jobId)`: each
+  queued agent with no session that waits on a `stopped` agent (not its own helper,
+  Amendment 51) or on a row that is gone goes `paused`, with `strandNote(role)` as the
+  note: "waits for architect, which was stopped — resume to run without it, or remove it".
+  Nothing starts by itself. Only direct dependants are paused; the ones further down wait on
+  them. Not while `terminateJob` is stopping the whole job. `reconcile` runs the same sweep
+  at startup, for rows a build from before this left queued.
+- **Resume runs it without.** `resumeAgent` (`#goWithout`) drops the stopped or gone ids from
+  `dependsOn` of an agent that hasn't started, and keeps them in the new
+  `agents.went_without` column (JSON `[{ id, role }]`, off the wire). `#promptFor` adds them to
+  the handoff with `status: 'stopped'`. `handoffSection` marks such an entry as
+  `helperReport` marks a helper that didn't finish:
+  `[architect — stopped, so it may not have finished its part]`, and opens with "You were
+  started without waiting for every agent before you to finish." A stopped agent that never
+  wrote reads "(It was stopped before it wrote a reply.)".
+- **A job always settles.** `#rollUpJob` counts a queued agent as settled when it is stuck
+  (`isStuck`, `stack.ts`): something it waits on, directly or further up, is paused, failed
+  or stopped, or is gone (a helper that ended still counts as ended for its orchestrator).
+  So a job behind a failed developer (Amendment 85) settles `failed` too, rather than saying
+  working for good. Continuing a failed agent with a message (`#launchWithPrompt`) now
+  reopens its job, and `#launch` sets a job that isn't working to working. Otherwise `pump`
+  skipped the queued agents of a job settled `failed`.
+- **`deleteAgent` rewires** (`rewireOnRemoval`, `stack.ts`). Each agent that waited on the
+  removed one and hasn't started (no session, `queued` or `paused`) waits on the removed
+  one's own dependencies instead, without duplicates and without the removed agent's
+  helpers. It rewires before it terminates, so terminating pauses nobody. An agent paused
+  only by `strandNote` that now waits on nothing stopped is queued again: the removal is the
+  say-so. Agents that have started are untouched; `#depsSatisfied` lets a gone dependency
+  through for an agent with a session. The job then reopens if something in it can start,
+  and otherwise rolls up. `DELETE /api/agents/:id` answers `RemoveAgentResponse`
+  (`{ removed, rewired: [{ agentId, dependsOn }] }`); `removed` is unchanged.
+- **Alerts.** `#blockedDeps` also covers a `paused` agent waiting on a `stopped` one. The
+  card's fix for a stopped one is now **resume** on the waiting agent (`AlertAction`
+  `continue` gains the label `resume`); one still queued from before has only open and
+  dismiss. Its note says to resume, or to remove the stopped one from the stack.
+
+**Verified:** `session/verify.ts` §17o has the pure rewire and stuck rules, and the repro: the
+architect stopped mid-run leaves the developer paused with the note, the rest queued, nothing
+started and the job settled; resuming runs the developer without the architect, with the
+stopped handoff, and the pipeline goes on. Also: `terminateJob` pauses nobody; a restart
+pauses legacy rows and starts none; deleting a stopped agent requeues the one it paused;
+deleting a queued middle agent rewires the next one and its handoff comes from the one before;
+deleting a running agent frees its slot for the one it rewired; a job behind a failed agent
+settles `failed` and reopens when continued. `attention/verify.ts` checks the resume action.
+`make test` is green.
+
 ### Amendment 87 — post-merge, applied. **A job says when it has finished, until you've seen it.**
 
 Web only: new `packages/web/src/lib/seen.ts`; `attention/notify.ts`, `attention/always.tsx`,

@@ -21,10 +21,16 @@ export interface Upstream {
   role: string;
   /** Its last prose, or null when it finished without writing any. */
   reply: string | null;
+  /**
+   * How it ended, when not `done`: an agent it was started without because it was stopped
+   * (Amendment 88), or a helper that failed (Amendment 51).
+   */
+  status?: string;
 }
 
 function body(u: Upstream): string {
   const reply = u.reply?.trim();
+  if (!reply && u.status === 'stopped') return '(It was stopped before it wrote a reply.)';
   if (!reply) return '(It finished without a written reply.)';
   if (reply.length <= HANDOFF_CAP) return reply;
   return (
@@ -33,14 +39,25 @@ function body(u: Upstream): string {
   );
 }
 
-/** The section to put in a first prompt, or '' when the agent waited for nobody. */
+/** `[role]`, or `[role — stopped, so it may not have finished its part]`, as a helper's report says it. */
+function head(u: Upstream): string {
+  return !u.status || u.status === 'done' ? `[${u.role}]` : `[${u.role} — ${u.status}, so it may not have finished its part]`;
+}
+
+/**
+ * The section to put in a first prompt, or '' when the agent waited for nobody. An agent
+ * resumed without one that was stopped (Amendment 88) hears that one too, marked stopped.
+ */
 export function handoffSection(upstream: readonly Upstream[]): string {
   if (upstream.length === 0) return '';
   const who = upstream.length === 1 ? 'the agent' : 'the agents';
+  const all = upstream.every((u) => !u.status || u.status === 'done');
   return [
-    `You started after ${who} before you finished. They worked in this same folder, so ` +
-      `what they changed is already here. What each said last:`,
-    ...upstream.map((u) => `\n[${u.role}]\n${body(u)}`),
+    (all
+      ? `You started after ${who} before you finished.`
+      : `You were started without waiting for every agent before you to finish.`) +
+      ` They worked in this same folder, so what they changed is already here. What each said last:`,
+    ...upstream.map((u) => `\n${head(u)}\n${body(u)}`),
   ].join('\n');
 }
 
@@ -72,10 +89,9 @@ export function helperBrief(orchestrator: string, task: string): string {
 
 /** What an orchestrator is told when its helpers have finished. */
 export function helperReport(helpers: readonly (Upstream & { status: string })[]): string {
-  const how = (s: string): string => (s === 'done' ? '' : ` — ${s}, so it may not have finished its part`);
   return [
     `Your helper${helpers.length === 1 ? ' has' : 's have'} finished. What each said last:`,
-    ...helpers.map((h) => `\n[${h.role}${how(h.status)}]\n${body(h)}`),
+    ...helpers.map((h) => `\n${head(h)}\n${body(h)}`),
     '\nCheck their work, combine it, and carry on. Start more helpers if something is left.',
   ].join('\n');
 }
