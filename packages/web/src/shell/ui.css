@@ -1,0 +1,280 @@
+/**
+ * Shared primitives: status dots, tags, the activity histogram, diff numbers.
+ * TRACK B.
+ *
+ * Imported by shell/ui.tsx, so any screen that renders a primitive gets its
+ * styles. Status suffixes (`live` / `need` / `fail` / `done` / `queue` / `idle`)
+ * come from STATUS_KEY and map 1:1 onto the tokens — a dot cannot be a colour
+ * that its status does not mean.
+ */
+
+/* ── small caps label ──────────────────────────────────────────────────────── */
+
+.ui-lab {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+/* ── status dot ────────────────────────────────────────────────────────────── */
+
+.ui-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+
+.ui-dot.d-live {
+  background: var(--live);
+  animation: conductor-pulse var(--pulse-slow) ease-in-out infinite;
+}
+
+.ui-dot.d-need {
+  background: var(--need);
+  animation: conductor-pulse var(--pulse-fast) ease-in-out infinite;
+  box-shadow: 0 0 9px color-mix(in srgb, var(--need) 80%, transparent);
+}
+
+.ui-dot.d-fail {
+  background: var(--fail);
+  animation: conductor-blink 0.7s steps(2) infinite;
+}
+
+.ui-dot.d-done {
+  background: var(--done);
+}
+
+.ui-dot.d-queue {
+  background: var(--queue);
+}
+
+.ui-dot.d-idle {
+  background: var(--idle);
+}
+
+/* ── tag ───────────────────────────────────────────────────────────────────── */
+
+.ui-tag {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 2.5px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  white-space: nowrap;
+  flex: none;
+}
+
+.ui-tag.t-live {
+  color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 32%, transparent);
+  background: color-mix(in srgb, var(--live) 8%, transparent);
+}
+
+.ui-tag.t-need {
+  color: var(--need);
+  border-color: color-mix(in srgb, var(--need) 42%, transparent);
+  background: color-mix(in srgb, var(--need) 12%, transparent);
+}
+
+.ui-tag.t-fail {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 35%, transparent);
+  background: color-mix(in srgb, var(--fail) 9%, transparent);
+}
+
+.ui-tag.t-done {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 30%, transparent);
+  background: color-mix(in srgb, var(--done) 8%, transparent);
+}
+
+.ui-tag.t-queue {
+  color: var(--queue);
+  border-color: color-mix(in srgb, var(--queue) 30%, transparent);
+  background: color-mix(in srgb, var(--queue) 8%, transparent);
+}
+
+.ui-tag.t-idle {
+  color: var(--ink3);
+  border-color: var(--line2);
+}
+
+/* ── provider badge (Amendment 80) ──────────────────────────────────────────── */
+
+.ui-prov {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--line2);
+  color: var(--ink3);
+  white-space: nowrap;
+  flex: none;
+}
+
+/* ── activity histogram ────────────────────────────────────────────────────── */
+
+.ui-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 20px;
+  flex: none;
+}
+
+.ui-spark i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--live);
+  opacity: 0.55;
+  transform-origin: bottom;
+  animation: ui-jig 2.4s ease-in-out infinite;
+}
+
+.ui-spark i:last-child {
+  opacity: 1;
+  box-shadow: 0 0 6px var(--live);
+}
+
+@keyframes ui-jig {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.6);
+  }
+}
+
+.ui-spark.is-need i {
+  background: var(--need);
+}
+
+.ui-spark.is-need i:last-child {
+  box-shadow: 0 0 6px var(--need);
+}
+
+/*
+ * Flat and still. The agent is thinking or stuck, not working — so the bars stop
+ * moving and lose their colour entirely. This distinction is the whole reason
+ * the histogram is on the card.
+ */
+.ui-spark.is-flat i {
+  background: var(--idle);
+  animation: none;
+  opacity: 0.3;
+  box-shadow: none;
+}
+
+/* ── diff numbers ──────────────────────────────────────────────────────────── */
+
+.ui-pos {
+  color: var(--done);
+  font-weight: 500;
+}
+
+.ui-neg {
+  color: var(--fail);
+  font-weight: 500;
+}
+
+/* ── splitter ──────────────────────────────────────────────────────────────── */
+
+/*
+ * A 7px hit area around a 1px line, so it's easy to grab and looks like a border.
+ * The line turns --live on hover and focus. Takes its 7px in the layout. A screen that
+ * wants the line where a border used to be pulls it back with negative margins.
+ */
+.ui-split {
+  flex: none;
+  position: relative;
+  background: none;
+  border: none;
+}
+
+.ui-split.is-horizontal {
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.ui-split.is-vertical {
+  width: 7px;
+  cursor: ew-resize;
+}
+
+.ui-split::after {
+  content: '';
+  position: absolute;
+  background: var(--line);
+}
+
+.ui-split.is-horizontal::after {
+  inset: 3px 0;
+}
+
+.ui-split.is-vertical::after {
+  inset: 0 3px;
+}
+
+.ui-split:hover::after,
+.ui-split:focus-visible::after {
+  background: var(--live);
+}
+
+.ui-split:focus-visible {
+  outline: none;
+}
+
+/* ── model picker (Amendment 40) ───────────────────────────────────────── */
+
+.ui-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  min-width: 0;
+  max-width: 100%;
+  background: var(--surf);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+
+.ui-select:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
+
+.ui-refresh {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink3);
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.ui-refresh:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line2);
+}

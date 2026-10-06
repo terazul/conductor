@@ -1,0 +1,895 @@
+/**
+ * Screen 7 — Spawn. Track A owns this file.
+ *
+ * Every colour is a token (CONTRACT.md §3: no hardcoded hex). `sp-` prefix so
+ * nothing here can collide with another track's stylesheet.
+ *
+ * ON AMBER. The mockup draws the launch button in amber, and that is the one
+ * thing here deliberately not copied. `--need` means "a human is required" and
+ * nothing else (CONTRACT.md §5.1) — spending it on a button the user is already
+ * looking at devalues the only signal the product is built around. Amber appears
+ * on exactly one thing on this screen: pills that mean "this will interrupt you".
+ */
+
+/*
+ * WIDTH. The screen fills the window. A 760px cap left most of a wide browser
+ * empty while the project picker and the agent plan — both of which are lists
+ * that read better with room — wrapped early. Everything inside is already
+ * fluid (`width:100%`, `flex-wrap`, `flex:1 1 210px`), so the cap was the only
+ * thing holding them in. The two places a long line genuinely hurts keep a
+ * measure of their own: the prompt you type prose into, and the hint text.
+ */
+.sp-wrap {
+  padding: 26px 32px 60px;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+
+.sp-lab {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 9px;
+}
+
+.sp-section {
+  margin-bottom: 24px;
+}
+
+/* ── 1 · the prompt ─────────────────────────────────────────────────────── */
+
+.sp-prompt {
+  width: 100%;
+  /* Prose, so it keeps a readable measure even when the screen is wide. */
+  max-width: 92ch;
+  min-height: 84px;
+  resize: vertical;
+  background: var(--well);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 11px 13px;
+  font-family: var(--sans);
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+}
+
+.sp-prompt:focus {
+  outline: none;
+  border-color: var(--live);
+}
+
+.sp-prompt::placeholder {
+  color: var(--ink3);
+}
+
+/* ── 2 · project picker ─────────────────────────────────────────────────── */
+
+.sp-projects {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* The cell carries the flex sizing so the card and its `×` sit in one box. */
+.sp-proj-cell {
+  position: relative;
+  display: flex;
+  flex: 1 1 210px;
+}
+
+.sp-proj {
+  flex: 1 1 auto;
+  text-align: left;
+  background: var(--surf);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  /* Right padding clears the `×` so a long path never runs under it. */
+  padding: 9px 30px 9px 13px;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+/*
+ * REMOVE. Always visible, never hover-revealed: a control that appears only under
+ * the cursor cannot be found by someone looking for it, and this one exists for the
+ * person scanning the row they just mistyped.
+ */
+.sp-proj-x {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink3);
+  font-family: var(--sans);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sp-proj-x:hover,
+.sp-proj-x:focus-visible {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 35%, transparent);
+  background: color-mix(in srgb, var(--fail) 10%, transparent);
+  outline: none;
+}
+
+/* Replaces the card in place, so the row keeps its width and nothing below jumps. */
+.sp-proj-confirm {
+  flex: 1 1 auto;
+  border: 1px solid color-mix(in srgb, var(--fail) 40%, var(--line));
+  border-radius: 7px;
+  background: var(--surf);
+  padding: 10px 12px;
+}
+
+.sp-cf-q {
+  font-size: var(--fs-base);
+  margin-bottom: 5px;
+}
+
+.sp-cf-b {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.45;
+  margin-bottom: 9px;
+}
+
+.sp-cf-row {
+  display: flex;
+  gap: 7px;
+}
+
+.sp-cf-go {
+  background: color-mix(in srgb, var(--fail) 14%, var(--surf));
+  border: 1px solid color-mix(in srgb, var(--fail) 45%, transparent);
+  border-radius: 6px;
+  padding: 4px 11px;
+  color: var(--fail);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.sp-cf-go:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fail) 22%, var(--surf));
+}
+
+.sp-cf-go:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sp-cf-note {
+  margin-top: 8px;
+  padding: 5px 8px;
+  border: 1px solid;
+  border-radius: 5px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+/* A note that only says something — the model list's (Amendment 40). */
+.sp-cf-note.is-still {
+  cursor: default;
+}
+
+.sp-cf-note.t-ok {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 35%, transparent);
+  background: color-mix(in srgb, var(--done) 8%, transparent);
+}
+
+/* A 409 — an agent is still running. Not a failure; a reason to wait. */
+.sp-cf-note.t-warn {
+  color: var(--ink2);
+  border-color: var(--line2);
+  background: var(--surf2);
+}
+
+.sp-cf-note.t-fail {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 35%, transparent);
+  background: color-mix(in srgb, var(--fail) 8%, transparent);
+}
+
+.sp-proj:hover {
+  border-color: var(--line2);
+}
+
+.sp-proj[aria-pressed='true'] {
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 8%, var(--surf));
+}
+
+.sp-proj-name {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.sp-proj-path {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  overflow-wrap: anywhere;
+}
+
+.sp-addproj {
+  flex: 1 1 210px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line2);
+  border-radius: 7px;
+  padding: 9px 13px;
+  background: none;
+  color: var(--ink3);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.sp-addproj:hover {
+  color: var(--ink2);
+  border-color: var(--ink3);
+}
+
+.sp-addrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+  /* The field grows downwards (the verdict line), the buttons stay level with it. */
+  align-items: flex-start;
+}
+
+/* ── path completion ─────────────────────────────────────────────────────── */
+
+/*
+ * Anchors the dropdown. The list is absolutely positioned so opening it never
+ * reflows the five numbered steps below — a form that jumps while you type is
+ * worse than no completion at all.
+ */
+.sp-pathwrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.sp-pathwrap .sp-input {
+  width: 100%;
+}
+
+.sp-paths {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: 264px;
+  overflow-y: auto;
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 34px -14px color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.sp-path {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink2);
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.sp-path:hover {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+/* Keyboard selection, which must read as stronger than hover — the caret is here. */
+.sp-path.is-sel {
+  background: color-mix(in srgb, var(--live) 16%, var(--surf));
+  color: var(--ink);
+}
+
+.sp-path-nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The mark that answers the actual question: is this one of my repos? */
+.sp-path-repo {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--live);
+  flex: none;
+}
+
+.sp-path-more {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  padding: 5px 8px 3px;
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+}
+
+.sp-pathnote {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  padding: 5px 2px 0;
+  line-height: 1.45;
+}
+
+.sp-pathnote.is-repo {
+  color: var(--done);
+}
+
+.sp-input {
+  flex: 1;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.sp-input:focus {
+  outline: none;
+  border-color: var(--live);
+}
+
+/* ── effort ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Its own row, not a pill in the rope list. Rope answers "is the agent allowed to";
+ * effort answers "how hard does it think" — mixing them is what made the old row read as
+ * a puzzle rather than a list.
+ */
+.sp-efforts {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.sp-efforts .ui-lab {
+  margin-right: 2px;
+}
+
+.sp-pill.is-tight {
+  padding: 4px 11px;
+}
+
+/* ── pills (isolation, preset, autonomy) ────────────────────────────────── */
+
+.sp-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sp-pill {
+  background: var(--surf);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: var(--fs-base);
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: border-color 120ms ease;
+}
+
+.sp-pill:hover {
+  border-color: var(--line2);
+  color: var(--ink);
+}
+
+.sp-pill[aria-pressed='true'] {
+  border-color: var(--live);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--live) 10%, var(--surf));
+}
+
+/* The only amber on this screen: "this will stop and ask you". */
+.sp-pill.sp-interrupts[aria-pressed='true'] {
+  border-color: var(--need);
+  color: var(--need);
+  background: color-mix(in srgb, var(--need) 10%, var(--surf));
+}
+
+.sp-pill.sp-danger[aria-pressed='true'] {
+  border-color: var(--fail);
+  color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 10%, var(--surf));
+}
+
+.sp-pill-note {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  opacity: 0.7;
+  margin-left: 6px;
+}
+
+.sp-hint {
+  font-size: var(--fs-md);
+  color: var(--ink3);
+  max-width: 80ch;
+  margin-top: 8px;
+  min-height: 1.3em;
+  line-height: 1.4;
+}
+
+/*
+ * An isolation the selected project cannot run. Faded rather than hidden: which
+ * options exist is information, and a pill row that changes length when you switch
+ * projects teaches nothing about why.
+ */
+.sp-pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--ink3) 70%, transparent);
+}
+
+.sp-pill:disabled:hover {
+  border-color: var(--line);
+}
+
+/*
+ * Why they are struck through. Not --fail: nothing is broken and nothing was
+ * refused. The user picked a folder, and this is what that folder supports.
+ */
+.sp-isonote {
+  font-size: var(--fs-md);
+  color: var(--ink2);
+  line-height: 1.5;
+  max-width: 80ch;
+  margin-top: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--surf2);
+}
+
+.sp-isonote b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.sp-isonote code {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--live);
+}
+
+/* ── 4 · agent plan preview ─────────────────────────────────────────────── */
+
+.sp-plan {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surf);
+  overflow: hidden;
+  margin-top: 11px;
+}
+
+.sp-plan-head {
+  padding: 7px 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surf2);
+}
+
+.sp-plan-head .sp-lab {
+  margin-bottom: 0;
+}
+
+.sp-plan-body {
+  padding: 10px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sp-arow {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: var(--fs-base);
+}
+
+.sp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--queue);
+  flex: none;
+  transform: translateY(-1px);
+}
+
+.sp-role {
+  font-weight: 500;
+  min-width: 74px;
+}
+
+.sp-does {
+  color: var(--ink2);
+  flex: 1;
+}
+
+.sp-model {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  flex: none;
+  min-width: 0;
+}
+
+/* A row's picker: as wide as the longest name would make it, but never the row. */
+.sp-model .ui-select {
+  max-width: 280px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.sp-when {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+/*
+ * This role cannot write, whatever the pills below say. --done, not --need: it is a
+ * guarantee being kept, not a thing anyone has to act on.
+ */
+.sp-ro {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--done);
+  flex: none;
+  white-space: nowrap;
+}
+
+/* ── resulting-options disclosure ───────────────────────────────────────── */
+
+.sp-resolved {
+  margin-top: 11px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  line-height: 1.6;
+}
+
+.sp-resolved summary {
+  cursor: pointer;
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+}
+
+.sp-resolved code {
+  color: var(--ink);
+}
+
+/* ── launch bar ─────────────────────────────────────────────────────────── */
+
+.sp-launch {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.sp-go {
+  font-family: var(--sans);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--bg);
+  background: var(--live);
+  border: 1px solid var(--live);
+}
+
+.sp-go:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.sp-go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sp-ghost {
+  background: none;
+  border: 1px solid var(--line2);
+  color: var(--ink2);
+  font-size: var(--fs-base);
+  padding: 8px 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.sp-ghost:hover {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.sp-slots {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.sp-kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  border: 1px solid color-mix(in srgb, var(--bg) 40%, transparent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 6px;
+  opacity: 0.8;
+}
+
+/* ── errors and the launched summary ────────────────────────────────────── */
+
+.sp-error {
+  margin-top: 12px;
+  border: 1px solid var(--fail);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fail) 8%, var(--surf));
+  padding: 9px 12px;
+  font-size: var(--fs-base);
+  color: var(--ink);
+}
+
+.sp-error code {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.sp-done {
+  margin-top: 16px;
+  border: 1px solid var(--live);
+  border-left-width: 3px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--live) 7%, var(--surf));
+  padding: 12px 14px;
+}
+
+.sp-done-title {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.sp-done-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: var(--fs-base);
+  padding: 3px 0;
+}
+
+.sp-link {
+  background: none;
+  border: none;
+  color: var(--live);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  font-family: var(--sans);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.sp-link:hover {
+  text-decoration: underline;
+}
+
+.sp-empty {
+  border: 1px dashed var(--line2);
+  border-radius: 8px;
+  padding: 22px;
+  text-align: center;
+  color: var(--ink3);
+  font-size: var(--fs-base);
+  line-height: 1.6;
+}
+
+/*
+ * A note, not an error: the add succeeded, it just did something other than what the
+ * user was expecting. --need because it wants reading before the next click.
+ */
+.sp-note {
+  margin-top: 9px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--need) 35%, transparent);
+  border-left-width: 2px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--need) 8%, transparent);
+  color: var(--ink2);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  max-width: 80ch;
+  cursor: pointer;
+}
+
+/* ── custom setups (Amendment 50) ──────────────────────────────────────────── */
+
+.sp-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sp-crow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg2);
+}
+
+.sp-crow-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sp-crole {
+  width: 13em;
+  font-family: var(--mono);
+}
+
+.sp-cwaits {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  flex: 1;
+}
+
+.sp-cwait {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  color: var(--ink2);
+}
+
+.sp-cbrief {
+  width: 100%;
+  resize: vertical;
+  font-size: var(--fs-sm);
+}
+
+.sp-csave {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-csave .sp-input {
+  width: 20em;
+}
+
+.sp-csaid {
+  font-size: var(--fs-sm);
+  color: var(--done);
+}
+
+.sp-pill.is-saved {
+  font-style: italic;
+}
+
+.sp-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Several agents on one role (Amendment 51). */
+.sp-helpers {
+  flex: none;
+  max-width: 11em;
+}
+
+/* The launch's mode (Amendment 65); bypass says what it costs, in red. */
+.sp-modes {
+  margin-bottom: 8px;
+}
+
+.sp-warnmode {
+  color: var(--fail);
+  border-left: 2px solid var(--fail);
+  padding-left: 8px;
+  margin-bottom: 8px;
+}
+
+/* A Custom row's persona (Amendment 68): the pick, and what that persona is. */
+.sp-cpersona {
+  max-width: 14em;
+}
+
+.sp-cpersona-says {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+/* The persona a plan row takes, when its role is named apart from it (Amendment 68). */
+.sp-persona {
+  font-size: var(--fs-2xs);
+  color: var(--ink3);
+  flex: none;
+}
+
+/* ── engine (Amendment 80) ───────────────────────────────────────────────── */
+
+/* Why an engine can't launch agents, under its greyed-out pill. Words, not a warning. */
+.sp-provnote {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.4;
+}
+
+/* A free-form model id on another engine: as wide as one is long. */
+.sp-input.sp-engmodel {
+  flex: none;
+  width: 36ch;
+  padding: 3px 8px;
+  font-size: var(--fs-sm);
+}

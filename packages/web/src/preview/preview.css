@@ -1,0 +1,467 @@
+/**
+ * Screen 6 — Preview. Track-local styles.
+ *
+ * TRACK D OWNS THIS FILE.
+ *
+ * Every colour is a token from @conductor/shared/tokens.css. No hex here.
+ *
+ * ONE DELIBERATE DIVERGENCE FROM THE MOCKUP, worth stating plainly: the mockup
+ * paints "send errors to agent" in amber (`btn amber`). This screen does not.
+ * `--need` means "a human is required" — it is the one signal the attention
+ * queue is built on, and CONTRACT.md §5.1 says it is never decorative. Nothing
+ * on this screen is summoning the human; the human is already here, looking at
+ * their app. Console errors are a broken thing, so they are `--fail`, and the
+ * button that acts on them borrows that accent instead. Amber on a preview pane
+ * would make the amber in the queue mean less.
+ */
+
+.pv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── head ──────────────────────────────────────────────────────────────── */
+
+.pv-head {
+  height: var(--topbar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+}
+
+.pv-crumb {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+
+.pv-crumb b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.pv-crumb i {
+  color: var(--ink3);
+  font-style: normal;
+  margin: 0 6px;
+}
+
+.pv-urlbar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 460px;
+  min-width: 180px;
+}
+
+.pv-url {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 9px;
+}
+
+.pv-url input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--ink2);
+}
+
+.pv-url input:focus {
+  color: var(--ink);
+}
+
+/* The origin is fixed — you cannot point the pane at an arbitrary host, and the
+   UI should say so rather than pretend it is a browser address bar. */
+.pv-origin {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.pv-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── buttons ───────────────────────────────────────────────────────────── */
+
+.pv-btn {
+  font: inherit;
+  font-size: var(--fs-md);
+  background: none;
+  border: 1px solid var(--line2);
+  color: var(--ink2);
+  padding: 3px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: 0.14s;
+}
+
+.pv-btn:hover:not(:disabled) {
+  background: var(--surf3);
+  color: var(--ink);
+  border-color: var(--line2);
+}
+
+.pv-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pv-btn[aria-pressed='true'] {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+/* The one prominent action: hand the breakage back to the agent. Accented with
+   --fail because errors are what it acts on. */
+.pv-btn.pv-send {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+
+.pv-btn.pv-send:hover:not(:disabled) {
+  background: var(--fail);
+  border-color: var(--fail);
+  color: var(--bg);
+}
+
+/* ── body: the embedded app ────────────────────────────────────────────── */
+
+/* The stage flexes to fill the pane so the iframe never needs a hard-coded
+   height. An earlier version used `calc(100vh - 340px)`, which encodes the
+   height of chrome this track doesn't own — Track B's shell would have silently
+   broken it.
+
+   `--well` is the recessed inset added in contract Amendment 1, whose own
+   comment names "embedded output panes". The previewed app should read as cut
+   into the console rather than sitting on it, which is what the mockup's
+   near-black backdrop was doing by hand. */
+.pv-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--well);
+}
+
+.pv-stage {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  transition: max-width 0.18s ease;
+}
+
+.pv-stage[data-device='390'] {
+  max-width: 390px;
+}
+
+.pv-stage[data-device='768'] {
+  max-width: 768px;
+}
+
+.pv-stage[data-device='full'] {
+  max-width: none;
+}
+
+.pv-frame {
+  display: block;
+  width: 100%;
+  flex: 1;
+  min-height: 420px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  /* Near-white, so a page that hasn't painted yet doesn't flash dark against a
+     light app. It used to borrow --ink, which is near-black in the light theme. */
+  background: var(--paper);
+  box-shadow: 0 26px 70px var(--shadow);
+}
+
+.pv-devicelabel {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  text-align: center;
+  padding-top: 7px;
+}
+
+/* ── dock ──────────────────────────────────────────────────────────────── */
+
+.pv-dock {
+  /* The Splitter beside it draws the edge, and sets the height inline (Amendment 34);
+     this is only what it has before that. */
+  flex: none;
+  height: 178px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg2);
+}
+
+.pv-docktabs {
+  height: 33px;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+
+.pv-docktabs > button {
+  font: inherit;
+  font-size: var(--fs-md);
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--ink3);
+  padding: 0 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pv-docktabs > button.on {
+  color: var(--ink);
+  background: var(--surf);
+  box-shadow: inset 0 -2px 0 var(--live);
+}
+
+.pv-dockright {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+}
+
+.pv-meta {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.pv-meta b {
+  color: var(--ink2);
+  font-weight: 400;
+}
+
+.pv-dockbody {
+  flex: 1;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  padding: 9px 14px;
+}
+
+/* ── console lines ─────────────────────────────────────────────────────── */
+
+.pv-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pv-line time {
+  color: var(--ink3);
+  flex: none;
+}
+
+.pv-line .pv-glyph {
+  flex: none;
+  width: 1em;
+  text-align: center;
+}
+
+/* Errors are broken things: --fail. Warnings are distinguished by brightness and
+   glyph rather than by amber, because amber is spoken for. */
+.pv-line[data-level='error'] {
+  color: var(--fail);
+}
+
+.pv-line[data-level='warn'] {
+  color: var(--ink);
+}
+
+.pv-line[data-level='log'] {
+  color: var(--ink3);
+}
+
+/* ── tag / badge ───────────────────────────────────────────────────────── */
+
+.pv-tag {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--line2);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.pv-tag[data-kind='fail'] {
+  color: var(--fail);
+  border-color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 9%, transparent);
+}
+
+.pv-tag[data-kind='live'] {
+  color: var(--live);
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 8%, transparent);
+}
+
+/* ── status dot ────────────────────────────────────────────────────────── */
+
+.pv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+  background: var(--idle);
+}
+
+.pv-dot[data-live='true'] {
+  background: var(--live);
+  animation: conductor-pulse var(--pulse-slow) ease-in-out infinite;
+}
+
+.pv-dot[data-live='false'] {
+  background: var(--fail);
+}
+
+/* ── empty / notice states ─────────────────────────────────────────────── */
+
+.pv-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 30px;
+}
+
+.pv-empty-inner {
+  max-width: 44em;
+  color: var(--ink2);
+  font-size: var(--fs-base);
+  line-height: 1.7;
+}
+
+.pv-empty-inner h2 {
+  font-family: var(--disp);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 12px;
+}
+
+.pv-empty-inner p {
+  margin-bottom: 9px;
+}
+
+.pv-empty-inner code {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+.pv-empty-inner ul {
+  list-style: none;
+  margin: 10px 0;
+}
+
+.pv-empty-inner li {
+  padding-left: 16px;
+  position: relative;
+  margin-bottom: 4px;
+  color: var(--ink3);
+}
+
+.pv-empty-inner li::before {
+  content: '·';
+  position: absolute;
+  left: 4px;
+}
+
+.pv-notice {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 5px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--ink2);
+  background: var(--surf);
+  flex: none;
+}
+
+.pv-notice[data-tone='fail'] {
+  color: var(--fail);
+}
+
+.pv-select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  color: var(--ink2);
+  padding: 3px 7px;
+}
+
+/* ── server tab ────────────────────────────────────────────────────────── */
+
+.pv-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 16px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.pv-kv dt {
+  color: var(--ink3);
+}
+
+.pv-kv dd {
+  color: var(--ink2);
+  word-break: break-all;
+}

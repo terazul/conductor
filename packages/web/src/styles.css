@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/**
+ * Base styles + the W0 fallback shell.
+ *
+ * W0 OWNS THIS FILE. Read-only for Tracks B–E.
+ * Track-local styles live next to the track's own components. Colours come from
+ * @conductor/shared/tokens.css — never hardcode a hex here or in a track.
+ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--mono);
+}
+
+/* ── W0 fallback shell — Track B's src/shell/shell.tsx supersedes this ───── */
+
+.c-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.c-top {
+  height: var(--topbar);
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  /* Two steps between --surf and --bg. Reproduces the dark theme's old literal stops
+     to the digit, and follows a theme change instead of pinning the bar dark. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surf) 67%, var(--bg2)),
+    color-mix(in srgb, var(--bg2) 67%, var(--bg))
+  );
+}
+
+.c-mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+}
+
+.c-mark b {
+  font-family: var(--disp);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+}
+
+.c-baton {
+  width: 3px;
+  height: 17px;
+  background: linear-gradient(180deg, var(--need), color-mix(in srgb, var(--need) 50%, var(--bg)));
+  border-radius: 2px;
+  transform-origin: bottom center;
+  animation: c-tick 1.9s ease-in-out infinite;
+}
+
+@keyframes c-tick {
+  0%,
+  100% {
+    transform: rotate(-19deg);
+  }
+  50% {
+    transform: rotate(19deg);
+  }
+}
+
+.c-nav {
+  display: flex;
+}
+
+.c-nav button {
+  font: inherit;
+  font-size: var(--fs-md);
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--ink3);
+  padding: 0 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: 0.15s;
+}
+
+.c-nav button b {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.c-nav button:hover {
+  color: var(--ink2);
+  background: var(--surf);
+}
+
+.c-nav button.on {
+  color: var(--ink);
+  background: var(--surf2);
+  box-shadow: inset 0 -2px 0 var(--need);
+}
+
+.c-nav button.on b {
+  border-color: var(--need);
+  color: var(--need);
+}
+
+.c-feed {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 0 15px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.c-feed[data-status="live"] {
+  color: var(--live);
+}
+.c-feed[data-status="fixture"] {
+  color: var(--queue);
+}
+.c-feed[data-status="reconnecting"] {
+  color: var(--need);
+}
+.c-feed[data-status="error"] {
+  color: var(--fail);
+}
+
+.c-main {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.c-status {
+  height: var(--statusbar);
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.c-spacer {
+  margin-left: auto;
+}
+
+.c-empty {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  gap: 6px;
+  text-align: center;
+  color: var(--ink3);
+}
+
+.c-empty code {
+  color: var(--need);
+}
+
+/* ── mermaid diagrams, in files and in replies (Amendment 60) ─────────────── */
+
+.md-diagram {
+  margin: 10px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surf);
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.md-diagram-toggle {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  padding: 1px 7px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+}
+
+.md-diagram-toggle:hover {
+  color: var(--ink);
+}
+
+.md-diagram-err {
+  margin: 8px 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--need);
+}
+
+.md-mermaid-block {
+  margin: 6px 0;
+}

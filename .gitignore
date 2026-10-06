@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Conductor runtime state
+.conductor/
+conductor.db
+conductor.db-wal
+conductor.db-shm
+
+# Agent worktrees (Claude Code)
+.claude/worktrees/
+
+# Fixtures generated at runtime
+fixtures/scratch-repo/
+
+# Editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Code review graph (tooling artifact)
+.code-review-graph/

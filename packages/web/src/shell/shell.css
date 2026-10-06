@@ -1,0 +1,712 @@
+/**
+ * Shell chrome.  TRACK B.
+ *
+ * Every colour here resolves to a token from @conductor/shared/tokens.css.
+ * Where the mockup used a literal (a gradient stop, a wash over a surface) it is
+ * reproduced with color-mix() against the token it was derived from, so there is
+ * exactly one place a colour can be changed and nothing to re-hunt later.
+ *
+ * --need appears in precisely three places in this file: the baton (the
+ * wordmark's own mark, as in W0's fallback shell), the attention rail, and the
+ * project navigator's counts of what waits on you (Amendment 66; the `s-need`
+ * project pip it replaces went in Amendment 43). The rail and the counts mean "a
+ * human is required". Do not add a fourth — in particular the active nav tab and
+ * the navigator's selected row are deliberately NOT amber, they would be lit on
+ * every screen and would say nothing.
+ */
+
+.sh-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── top bar ───────────────────────────────────────────────────────────────── */
+
+.sh-top {
+  position: relative;
+  z-index: 10;
+  height: var(--topbar);
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surf) 80%, var(--bg2)),
+    color-mix(in srgb, var(--bg2) 55%, var(--bg))
+  );
+}
+
+.sh-mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+  flex: none;
+}
+
+.sh-mark b {
+  font-family: var(--disp);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  white-space: nowrap;
+}
+
+/* The baton keeps time. The only ornamental motion in the app. */
+.sh-baton {
+  width: 3px;
+  height: 17px;
+  border-radius: 2px;
+  flex: none;
+  background: linear-gradient(180deg, var(--need), color-mix(in srgb, var(--need) 52%, var(--bg)));
+  transform-origin: bottom center;
+  animation: sh-tick 1.9s ease-in-out infinite;
+}
+
+@keyframes sh-tick {
+  0%,
+  100% {
+    transform: rotate(-19deg);
+  }
+  50% {
+    transform: rotate(19deg);
+  }
+}
+
+/* ── the attention rail ────────────────────────────────────────────────────── */
+
+.sh-alert {
+  flex: 1;
+  min-width: 0;
+  /* F19: it shrinks with the window, so what's inside has to be cut, not painted
+   * over the screen tabs. A container so the note can go by the room it actually
+   * has, which depends on how much is showing, not on the window. */
+  overflow: hidden;
+  container: sh-alert / inline-size;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+  font: inherit;
+  text-align: left;
+  border-top: 0;
+  border-left: 0;
+  border-bottom: 0;
+  background: none;
+}
+
+/* The label is cut last: the note beside it gives way a hundred times faster. */
+.sh-alert > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-alert > em {
+  flex: 0 100 auto;
+  min-width: 0;
+}
+
+/* The note only says what the dot or the count already says. */
+@container sh-alert (max-width: 540px) {
+  .sh-alert > em {
+    display: none;
+  }
+}
+
+/* Dark. Nothing needs you. */
+.sh-alert.is-clear {
+  color: var(--ink3);
+  font-size: var(--fs-base);
+}
+
+.sh-alert.is-clear em {
+  color: var(--ink3);
+  opacity: 0.62;
+  font-style: normal;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sh-alert-off {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--idle);
+  opacity: 0.55;
+}
+
+/* Lit. Someone is blocked on you. */
+.sh-alert.is-live {
+  cursor: pointer;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--need) 13%, transparent),
+    color-mix(in srgb, var(--need) 3%, transparent) 62%,
+    transparent
+  );
+  transition: background 0.15s;
+}
+
+.sh-alert.is-live:hover {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--need) 20%, transparent),
+    color-mix(in srgb, var(--need) 5%, transparent) 62%,
+    transparent
+  );
+}
+
+.sh-alert.is-live:focus-visible {
+  outline: 1px solid var(--need);
+  outline-offset: -2px;
+}
+
+.sh-alert.is-live > span {
+  font-size: var(--fs-base);
+  color: var(--need);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sh-alert-n {
+  font-family: var(--disp);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--need);
+  padding: 2px 7px;
+  border-radius: 3px;
+  flex: none;
+  font-style: normal;
+  animation: conductor-breathe 1.5s ease-in-out infinite;
+}
+
+.sh-alert.is-live em {
+  color: var(--ink3);
+  font-style: normal;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sh-alert.is-live em b {
+  color: var(--need);
+  font-weight: 400;
+  margin-left: 10px;
+}
+
+/* ── screen nav (buttons are rendered by main.tsx) ─────────────────────────── */
+
+.sh-screens {
+  display: flex;
+  flex: none;
+}
+
+.sh-screens button {
+  font: inherit;
+  font-size: var(--fs-md);
+  letter-spacing: 0.02em;
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--ink3);
+  padding: 0 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition: 0.15s;
+}
+
+.sh-screens button b {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: var(--ink3);
+}
+
+.sh-screens button:hover {
+  color: var(--ink2);
+  background: var(--surf);
+}
+
+.sh-screens button.on {
+  color: var(--ink);
+  background: var(--surf2);
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+.sh-screens button.on b {
+  border-color: var(--ink2);
+  color: var(--ink);
+}
+
+/* ── panel icons (Amendment 66) ────────────────────────────────────────────── */
+
+/* A window with one side filled: the panel that side is. Filled while it's up. */
+.sh-pane {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font: inherit;
+  background: none;
+  border: 0;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.sh-pane.is-left {
+  border-right: 1px solid var(--line);
+}
+
+.sh-pane.is-right {
+  border-left: 1px solid var(--line);
+}
+
+.sh-pane:hover {
+  color: var(--ink);
+  background: var(--surf);
+}
+
+.sh-pane:focus-visible {
+  outline: 1px solid var(--ink2);
+  outline-offset: -2px;
+}
+
+.sh-pane-ico {
+  position: relative;
+  width: 16px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.sh-pane-ico::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  border-color: currentColor;
+  border-style: solid;
+  border-width: 0;
+}
+
+.sh-pane.is-left .sh-pane-ico::before {
+  left: 0;
+  border-right-width: 1.5px;
+}
+
+.sh-pane.is-right .sh-pane-ico::before {
+  right: 0;
+  border-left-width: 1.5px;
+}
+
+.sh-pane-ico.is-on::before {
+  background: currentColor;
+}
+
+/* ── body ──────────────────────────────────────────────────────────────────── */
+
+.sh-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.sh-screen {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* ── the project navigator (Amendment 66) ──────────────────────────────────── */
+
+.sh-nav {
+  /* The Splitter beside it draws the edge, and sets the width inline; this is only what
+     it has before that. */
+  width: 236px;
+  flex: none;
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sh-nav-top {
+  padding: 12px 10px 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.sh-nav-add {
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--ink3);
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.sh-nav-add:hover {
+  color: var(--ink);
+  background: var(--surf);
+}
+
+.sh-nav-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sh-nav-none {
+  display: block;
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+/* Every row is a button: the same box, so the levels line up and differ only by indent. */
+.sh-nav-tog,
+.sh-nav-pname,
+.sh-nav-head,
+.sh-nav-row {
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  transition: 0.13s;
+}
+
+.sh-nav-tog:hover,
+.sh-nav-pname:hover,
+.sh-nav-head:hover,
+.sh-nav-row:hover {
+  background: var(--surf);
+  border-color: var(--line2);
+}
+
+.sh-nav-tog:focus-visible,
+.sh-nav-pname:focus-visible,
+.sh-nav-head:focus-visible,
+.sh-nav-row:focus-visible {
+  outline: 1px solid var(--ink2);
+  outline-offset: -1px;
+}
+
+.sh-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A project: the chevron opens it, the name goes to it. */
+.sh-nav-prow {
+  display: flex;
+  align-items: stretch;
+  border-radius: 5px;
+}
+
+.sh-nav-prow.is-sel {
+  background: var(--surf3);
+}
+
+.sh-nav-prow.is-sel .sh-nav-pname {
+  color: var(--ink);
+}
+
+/*
+ * Dragging a project into your order (Amendment 69), as a Fleet card drags: the one
+ * moving dims, and a line marks where it lands — above the row it is dropped on, or
+ * under the last one for the end. Neutral line, never amber: a drop is not a need.
+ */
+.sh-nav-prow[draggable='true'] {
+  cursor: grab;
+}
+
+.sh-nav-proj.is-dragging {
+  opacity: 0.45;
+}
+
+.sh-nav-proj.is-drop {
+  box-shadow: inset 0 2px 0 var(--ink3);
+}
+
+.sh-nav-proj.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--ink3);
+}
+
+.sh-nav-tog {
+  flex: none;
+  padding: 5px 5px;
+}
+
+.sh-nav-pname {
+  flex: 1;
+  padding: 5px 7px 5px 3px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.sh-nav-chev {
+  width: 0;
+  height: 0;
+  flex: none;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent currentColor;
+  opacity: 0.7;
+  transition: transform 0.13s;
+}
+
+.sh-nav-chev.is-open {
+  transform: rotate(90deg);
+}
+
+.sh-nav-subs {
+  padding: 1px 0 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sh-nav-head {
+  width: 100%;
+  padding: 3px 7px 3px 5px;
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+.sh-nav-n {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0;
+  color: var(--ink3);
+  flex: none;
+}
+
+/* Something in this project waits on you: the heading says so, and how many. */
+.sh-nav-head.is-need,
+.sh-nav-head.is-need .sh-nav-n,
+.sh-nav-need {
+  color: var(--need);
+}
+
+.sh-nav-need {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  flex: none;
+}
+
+.sh-nav-items {
+  padding: 1px 0 4px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sh-nav-row {
+  width: 100%;
+  padding: 3px 7px;
+  font-size: var(--fs-sm);
+}
+
+.sh-nav-row.is-sel {
+  background: var(--surf3);
+  border-color: var(--line2);
+  color: var(--ink);
+}
+
+/*
+ * A job's group under Agents (Amendment 86): a row like the agents under it, a little
+ * quieter, so the prompt reads as a heading and the agents as what's in it. Its count of
+ * what waits on you is the same amber .sh-nav-need an agent's row has, not a fourth use.
+ */
+.sh-nav-jhead {
+  color: var(--ink3);
+}
+
+.sh-nav-jhead:hover {
+  color: var(--ink2);
+}
+
+.sh-nav-job > .sh-nav-items {
+  padding: 1px 0 3px 12px;
+}
+
+.sh-nav-tag {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--ink3);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 0 4px;
+  flex: none;
+}
+
+/* A job that finished and you haven't seen (Amendment 87): green, or red if it failed. */
+.sh-nav-tag.is-done {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 45%, transparent);
+}
+
+.sh-nav-tag.is-fail {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 45%, transparent);
+}
+
+/* ── status bar ────────────────────────────────────────────────────────────── */
+
+.sh-statusbar {
+  position: relative;
+  z-index: 10;
+  height: var(--statusbar);
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sh-statusbar kbd {
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: var(--ink2);
+}
+
+.sh-statusbar .sh-right {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.sh-build {
+  cursor: help;
+}
+
+.sh-build[data-behind="true"] {
+  color: var(--need);
+}
+
+.sh-theme {
+  font: inherit;
+  color: var(--ink3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 5px;
+  cursor: pointer;
+}
+
+.sh-theme:hover {
+  color: var(--ink);
+  border-color: var(--line2);
+}
+
+.sh-feed[data-status="live"] {
+  color: var(--live);
+}
+
+.sh-feed[data-status="fixture"] {
+  color: var(--queue);
+}
+
+.sh-feed[data-status="connecting"],
+.sh-feed[data-status="reconnecting"] {
+  color: var(--ink2);
+}
+
+.sh-feed[data-status="error"] {
+  color: var(--fail);
+}
+
+/* Today's spend against the daily budget (Amendment 59): green, then yellow, then red. */
+.sh-spend {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: help;
+}
+
+.sh-spend-bar {
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line2);
+  overflow: hidden;
+}
+
+.sh-spend-bar i {
+  display: block;
+  height: 100%;
+  background: var(--done);
+  transition: width 0.3s;
+}
+
+.sh-spend[data-tone='warn'] .sh-spend-bar i {
+  background: var(--need);
+}
+
+.sh-spend[data-tone='over'] .sh-spend-bar i {
+  background: var(--fail);
+}
+
+.sh-spend[data-tone='over'] {
+  color: var(--fail);
+}

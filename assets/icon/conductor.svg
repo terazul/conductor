@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!--
+  Conductor's app icon: the top bar's baton, at the end of its beat.
+
+  The colours are the dark theme's tokens (packages/shared/src/tokens.css), written
+  out because an icon file can't read CSS: surf2 → bg for the tile, line2 for its
+  edge, ink for the grid, and need for the baton, fading as .sh-baton does.
+  The tile sits on Apple's 1024 grid (824 square, 100 in); the Ubuntu dock takes the
+  same file. Kept to what librsvg draws, since GNOME renders this SVG itself.
+
+  scripts/icon.sh renders the PNGs from this. Edit here, then run it.
+
+  This comment stays inside <svg>: GNOME finds the file type by looking for "<svg" in
+  the first 256 bytes, and a long comment above it makes the dock draw an empty tile.
+-->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#221f1c"/>
+      <stop offset="1" stop-color="#100f0e"/>
+    </linearGradient>
+    <!-- .sh-baton: need → need mixed 52% into bg -->
+    <linearGradient id="baton" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb03a"/>
+      <stop offset="1" stop-color="#8c6325"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb03a" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#ffb03a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="503" y1="0" x2="715" y2="0">
+      <stop offset="0" stop-color="#ffb03a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffb03a" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="inside">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <pattern id="grid" width="68" height="68" patternUnits="userSpaceOnUse" x="100" y="100">
+      <path d="M0 0H68M0 0V68" fill="none" stroke="#ece7de" stroke-opacity="0.045" stroke-width="2"/>
+    </pattern>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <g clip-path="url(#inside)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#grid)"/>
+  </g>
+
+  <!-- The beat it has just swept through, fading away from the tip. Pivot (593.4, 748.4). -->
+  <path d="M 503.7 287.0 A 470 470 0 0 1 715.0 294.4" fill="none"
+        stroke="url(#trail)" stroke-width="12" stroke-linecap="round" stroke-dasharray="1 30"/>
+
+  <!-- The baton, leaning into the downbeat as .sh-baton does at −19°. -->
+  <circle cx="440" cy="300" r="140" fill="url(#glow)"/>
+  <rect x="555.4" y="248.4" width="76" height="500" rx="38" fill="url(#baton)"
+        transform="rotate(-19 593.4 748.4)"/>
+
+  <rect x="100.75" y="100.75" width="822.5" height="822.5" rx="184.25" fill="none"
+        stroke="#3d3831" stroke-width="1.5"/>
+</svg>

@@ -1,0 +1,1044 @@
+/**
+ * Screen 5 (Files) styles.
+ *
+ * TRACK C owns this file. Track-local by design — CONTRACT.md keeps
+ * web/src/styles.css as W0's, so nothing here touches shared chrome.
+ *
+ * Every colour is a token from @conductor/shared/tokens.css. No hex values, and
+ * in particular NO --need: amber means "a human is required" and this screen
+ * never requires one. The mockup styles the current task marker with --need;
+ * that is the one place this implementation deliberately diverges, using --queue
+ * ("waiting") instead, because a decorative amber destroys the one signal the
+ * product is built around.
+ *
+ * Class prefix `c5-` so five agents building five screens in parallel cannot
+ * collide in the global stylesheet.
+ */
+
+.c5-root {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  font-size: var(--fs-lg);
+}
+
+/* ── left column: the tree ────────────────────────────────────────────────── */
+
+/*
+ * The width is an inline style from route.tsx, because you can drag it (F17). The
+ * splitter after this column replaces its right border.
+ */
+.c5-col {
+  flex: none;
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+ * The splitter keeps its 7px hit area but gives back 6px of it, so the column and the
+ * pane sit where they did and the line sits where the border was.
+ */
+.c5-root > .ui-split {
+  margin: 0 -3px;
+  z-index: 1;
+}
+
+.c5-colhead {
+  padding: 10px 12px 9px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.c5-lab {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+.c5-jobrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.c5-select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  flex: 1;
+  min-width: 0;
+  background: var(--surf);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+
+.c5-select:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
+
+.c5-branch {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c5-branch b {
+  color: var(--ink2);
+  font-weight: 400;
+}
+
+.c5-treewrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.c5-tree {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.95;
+  color: var(--ink2);
+}
+
+.c5-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+.c5-row:hover {
+  background: var(--surf);
+}
+
+.c5-row.on {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+.c5-row:focus-visible {
+  outline: 1px solid var(--live);
+  outline-offset: -1px;
+}
+
+.c5-row.dir {
+  color: var(--ink3);
+}
+
+/* One tree per root (Amendment 39): the job's worktree, then each project directory. */
+.c5-rootsec + .c5-rootsec {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.c5-roothead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 8px 4px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.c5-rootname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink2);
+  font-weight: 600;
+}
+
+.c5-rootstat {
+  flex: none;
+  color: var(--ink3);
+}
+
+.c5-iconbtn {
+  flex: none;
+  font: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink3);
+  padding: 0 5px;
+  cursor: pointer;
+}
+
+.c5-iconbtn:hover,
+.c5-iconbtn:focus-visible {
+  outline: none;
+  color: var(--ink);
+  border-color: var(--line2);
+}
+
+.c5-rootnote {
+  margin-top: 10px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+/* Truncation notice. Not a status — a limit of this view — so it borrows no
+   status colour, and it is inert because there is nothing behind it to open. */
+.c5-truncated {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  padding: 4px 8px;
+  margin-bottom: 5px;
+  border: 1px dashed var(--line2);
+  border-radius: 4px;
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.c5-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c5-caret {
+  width: 9px;
+  flex: none;
+  color: var(--ink3);
+}
+
+/* change badges — the whole point of the tree */
+
+.c5-badge {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.1em;
+}
+
+.c5-age {
+  color: var(--live);
+}
+
+.c5-new {
+  color: var(--live);
+  text-transform: uppercase;
+}
+
+.c5-pos {
+  color: var(--done);
+}
+
+.c5-neg {
+  color: var(--fail);
+}
+
+.c5-who {
+  color: var(--ink3);
+  text-transform: uppercase;
+}
+
+/* ── the session summary, pinned under the tree ───────────────────────────── */
+
+.c5-summary {
+  flex: none;
+  border-top: 1px solid var(--line);
+  padding: 11px 13px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.c5-kv {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.c5-kv span:first-child {
+  color: var(--ink3);
+}
+
+/* ── main pane ────────────────────────────────────────────────────────────── */
+
+.c5-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.c5-panehead {
+  min-height: 42px;
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 14px;
+  flex-wrap: wrap;
+}
+
+.c5-crumb {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--ink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c5-crumb b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.c5-crumb i {
+  color: var(--ink3);
+  font-style: normal;
+  margin: 0 5px;
+}
+
+.c5-tag {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 2.5px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--line2);
+  color: var(--ink3);
+  white-space: nowrap;
+  flex: none;
+}
+
+.c5-tag.live {
+  color: var(--live);
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 9%, transparent);
+}
+
+.c5-tag.done {
+  color: var(--done);
+  border-color: var(--done);
+  background: color-mix(in srgb, var(--done) 9%, transparent);
+}
+
+.c5-tag.idle {
+  color: var(--ink3);
+}
+
+.c5-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.c5-btn {
+  font: inherit;
+  font-size: var(--fs-md);
+  background: none;
+  border: 1px solid var(--line2);
+  color: var(--ink2);
+  padding: 3px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: 0.14s;
+}
+
+.c5-btn:hover:not(:disabled) {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+.c5-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.c5-btn.on {
+  color: var(--ink);
+  background: var(--surf2);
+  border-color: var(--live);
+}
+
+.c5-btn.primary {
+  color: var(--live);
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 10%, transparent);
+}
+
+.c5-btn kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  opacity: 0.65;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.c5-panebody {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 32px;
+}
+
+.c5-panebody.flush {
+  padding: 0;
+}
+
+.c5-note {
+  color: var(--ink3);
+  font-size: var(--fs-base);
+  font-family: var(--mono);
+}
+
+.c5-error {
+  color: var(--fail);
+  font-size: var(--fs-base);
+  font-family: var(--mono);
+  border: 1px solid var(--fail);
+  background: color-mix(in srgb, var(--fail) 8%, transparent);
+  border-radius: 6px;
+  padding: 9px 12px;
+  max-width: 640px;
+}
+
+.c5-empty {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  text-align: center;
+  gap: 12px;
+  color: var(--ink3);
+}
+
+.c5-empty code {
+  color: var(--ink2);
+  background: var(--surf2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.c5-bootstrap {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.c5-input {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  color: var(--ink);
+  padding: 4px 8px;
+  min-width: 340px;
+}
+
+.c5-input:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
+
+/* ── rendered markdown ────────────────────────────────────────────────────── */
+
+/* Fills the pane: wide tables and code blocks are what a file browser shows most.
+   `column` is the reading measure it used to be capped at (Amendment 32). */
+.c5-md {
+  font-size: var(--fs-lg);
+  line-height: 1.66;
+  color: var(--ink2);
+}
+
+.c5-md h1 {
+  font-size: var(--fs-2xl);
+  color: var(--ink);
+  margin-bottom: 9px;
+  letter-spacing: -0.015em;
+}
+
+.c5-md h2 {
+  font-size: var(--fs-xl);
+  color: var(--ink);
+  margin: 17px 0 7px;
+  letter-spacing: -0.01em;
+}
+
+.c5-md h3,
+.c5-md h4,
+.c5-md h5,
+.c5-md h6 {
+  font-size: var(--fs-base);
+  color: var(--ink);
+  margin: 14px 0 6px;
+}
+
+.c5-md p {
+  margin-bottom: 9px;
+}
+
+.c5-md a {
+  color: var(--live);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--live) 40%, transparent);
+}
+
+.c5-md code {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+.c5-md pre.md-code {
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 13px;
+  overflow-x: auto;
+  margin-bottom: 11px;
+}
+
+.c5-md pre.md-code code {
+  background: none;
+  padding: 0;
+  font-size: var(--fs-md);
+  line-height: 1.66;
+  color: var(--ink2);
+}
+
+.c5-md ul,
+.c5-md ol {
+  list-style: none;
+  margin-bottom: 9px;
+}
+
+.c5-md li {
+  padding-left: 22px;
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.c5-md li::before {
+  content: "·";
+  position: absolute;
+  left: 8px;
+  color: var(--ink3);
+}
+
+.c5-md li.task::before {
+  content: "◻";
+  left: 4px;
+  font-size: var(--fs-md);
+}
+
+.c5-md li.task.done {
+  color: var(--ink3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line2);
+}
+
+.c5-md li.task.done::before {
+  content: "◼";
+  color: var(--done);
+  text-decoration: none;
+}
+
+/* "next up", not "needs you". Amendment 2 settled the token: the task is being
+   worked on right now, so --live. Amber would mean a human is required. */
+.c5-md li.task.now {
+  color: var(--ink);
+}
+
+.c5-md li.task.now::before {
+  content: "▸";
+  color: var(--live);
+}
+
+.c5-md blockquote {
+  border-left: 2px solid var(--queue);
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--queue) 8%, transparent);
+  margin-bottom: 10px;
+  color: var(--ink);
+  font-size: var(--fs-base);
+}
+
+.c5-md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
+}
+
+.c5-md table {
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+  margin-bottom: 11px;
+}
+
+.c5-md th,
+.c5-md td {
+  border: 1px solid var(--line);
+  padding: 4px 9px;
+  text-align: left;
+}
+
+.c5-md th {
+  color: var(--ink);
+  background: var(--surf2);
+  font-weight: 500;
+}
+
+/* Of a rendered file on its own, the kind of document this is, not a column of it. */
+.c5-md.column {
+  max-width: 720px;
+}
+
+/* ── print: a rendered file as a PDF (print.ts) ─────────────────────────────
+   The sheet is a copy at the end of <body>, marked light, and the only thing that
+   prints. On screen it never shows, even for the moment it exists. */
+
+.c5-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 16mm 14mm;
+  }
+
+  body > :not(.c5-print) {
+    display: none !important;
+  }
+
+  .c5-print {
+    display: block;
+    background: var(--paper);
+    color: var(--ink2);
+    print-color-adjust: exact;
+  }
+
+  .c5-print .c5-md {
+    max-width: none;
+  }
+
+  .c5-print pre.md-code {
+    overflow: visible;
+    white-space: pre-wrap;
+    break-inside: avoid;
+  }
+
+  .c5-print h1,
+  .c5-print h2,
+  .c5-print h3 {
+    break-after: avoid;
+  }
+
+  .c5-print table,
+  .c5-print img,
+  .c5-print blockquote {
+    break-inside: avoid;
+  }
+
+  .c5-print img {
+    max-width: 100%;
+  }
+}
+
+/* ── raw + diff ───────────────────────────────────────────────────────────── */
+
+.c5-raw {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--ink2);
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* The editor is a recessed input, not a raised surface — hence --well, the
+   below-background token added in the first contract amendment. */
+.c5-editor {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  resize: none;
+  background: var(--well);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 7px;
+  padding: 13px 15px;
+  tab-size: 2;
+}
+
+.c5-editor:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
+
+.c5-diff {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.66;
+  min-width: max-content;
+}
+
+.c5-dline {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+  white-space: pre;
+}
+
+.c5-dnum {
+  color: var(--ink3);
+  flex: none;
+  width: 38px;
+  text-align: right;
+  user-select: none;
+  opacity: 0.7;
+}
+
+.c5-dline.add {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 8%, transparent);
+}
+
+.c5-dline.del {
+  color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 8%, transparent);
+}
+
+.c5-dline.hunk {
+  color: var(--queue);
+  background: var(--surf2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin: 6px 0;
+}
+
+.c5-dline.file {
+  color: var(--ink);
+  background: var(--surf2);
+  font-family: var(--disp);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line2);
+}
+
+.c5-dline.meta {
+  color: var(--ink3);
+  opacity: 0.6;
+}
+
+.c5-dline.ctx {
+  color: var(--ink2);
+}
+
+/* ── image view (Amendment 25) ─────────────────────────────────────────────── */
+
+/*
+ * Checkerboard, so a transparent PNG reads as transparent instead of as black on a
+ * dark pane — the one thing you cannot tell from a plain background.
+ */
+.c5-img {
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  min-height: 100%;
+  background-color: var(--well);
+  background-image:
+    linear-gradient(45deg, var(--surf) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--surf) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--surf) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--surf) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+}
+
+/*
+ * Fit the pane, never upscale. `image-rendering: pixelated` only kicks in past 1:1,
+ * which is what you want for a favicon and wrong for a screenshot.
+ */
+.c5-img img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ── tabs (Amendment 29) ──────────────────────────────────────────────────── */
+
+/* The strip and the pane under it share the space right of the splitter. */
+.c5-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.c5-main > .c5-pane {
+  min-height: 0;
+}
+
+.c5-tabbar {
+  flex: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.c5-tabs {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.c5-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  max-width: 260px;
+  border-right: 1px solid var(--line);
+  color: var(--ink3);
+  /* The active tab's top edge, drawn by every tab so nothing shifts when it moves. */
+  border-top: 2px solid transparent;
+}
+
+.c5-tab:hover {
+  background: var(--surf);
+  color: var(--ink2);
+}
+
+.c5-tab.on {
+  background: var(--bg2);
+  color: var(--ink);
+  border-top-color: var(--live);
+  /* Joins the pane head below, as if the tab were part of it. */
+  margin-bottom: -1px;
+  border-bottom: 1px solid var(--bg2);
+}
+
+.c5-tabbtn {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 4px 6px 11px;
+  white-space: nowrap;
+}
+
+.c5-tabbtn:focus-visible,
+.c5-tabx:focus-visible {
+  outline: 1px solid var(--live);
+  outline-offset: -2px;
+}
+
+.c5-tabname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c5-tab.gone .c5-tabname {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink3);
+}
+
+.c5-tabdir,
+.c5-tabjob {
+  font-size: var(--fs-xs);
+  color: var(--ink3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.c5-tabjob {
+  font-family: var(--disp);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.c5-dot {
+  color: var(--done);
+  font-size: var(--fs-2xs);
+}
+
+.c5-tabx {
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--ink3);
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 2px 5px;
+  margin-right: 5px;
+  /* Faint until the tab is looked at, so a row of tabs isn't a row of ×s. */
+  opacity: 0.45;
+}
+
+.c5-tab:hover .c5-tabx,
+.c5-tab.on .c5-tabx,
+.c5-tabx:focus-visible {
+  opacity: 1;
+}
+
+.c5-tabx:hover {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+.c5-tabconfirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fail) 6%, var(--bg2));
+  font-size: var(--fs-base);
+  color: var(--ink2);
+}
+
+.c5-tabconfirm b {
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.c5-btn.danger {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
+/* The safe choice is the easy one to hit. */
+.c5-btn.wide {
+  padding: 3px 16px;
+}
+
+/* ── files that are gone, or can't be shown ───────────────────────────────── */
+
+.c5-row.gone .c5-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink3);
+  color: var(--ink3);
+}
+
+.c5-gone {
+  color: var(--fail);
+  text-transform: uppercase;
+}
+
+.c5-tag.gone {
+  color: var(--fail);
+  border-color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 9%, transparent);
+}
+
+.c5-banner {
+  font-size: var(--fs-base);
+  color: var(--ink2);
+  border: 1px solid var(--line2);
+  border-left: 3px solid var(--fail);
+  background: var(--surf);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 18px;
+  max-width: 720px;
+}
+
+/* The diff view is flush to the edges, so the banner brings its own margin. */
+.c5-banner.inset {
+  margin: 12px 14px;
+}
+
+.c5-unavail {
+  max-width: 560px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 14px 16px;
+  background: var(--surf);
+  color: var(--ink2);
+  font-size: var(--fs-base);
+}
+
+.c5-unavail > b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  margin-bottom: 4px;
+}
+
+.c5-unavail.fail {
+  border-color: var(--fail);
+}
+
+.c5-unavail.fail > b {
+  color: var(--fail);
+}
+
+.c5-unavail p {
+  margin: 4px 0;
+}
+
+.c5-unavail .c5-actions {
+  margin-left: 0;
+  padding-top: 10px;
+}

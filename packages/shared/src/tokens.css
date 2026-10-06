@@ -1,0 +1,203 @@
+/**
+ * Design tokens — lifted from mockups/conductor.html.
+ *
+ * FROZEN CONTRACT (W0). Read-only for all tracks.
+ * Tracks B, C, D, E all style against these. Do not add track-local colours;
+ * if a token is missing, escalate (CONTRACT.md §3).
+ *
+ * The rule that makes the UI legible: ONE COLOUR DOES ONE JOB.
+ *   --live = working · --need = a human is required · --fail = broken
+ *   --done = finished · --queue = waiting · --idle = dormant
+ * --need must never be used decoratively. It means "you".
+ */
+
+:root {
+  /* surfaces — warm graphite, not blue-black */
+  --bg: #100f0e;
+  --bg2: #161413;
+  --surf: #1c1a18;
+  --surf2: #221f1c;
+  --surf3: #2a2622;
+
+  /* Recessed inset, DEEPER than --bg. For things that should read as cut into
+     the console rather than sitting on it: terminal command blocks, the
+     AskUserQuestion preview well, embedded output panes. Added in the first
+     contract amendment — Track E correctly reported that the scale had no
+     below-background value and refused to invent one. */
+  --well: #0c0b0a;
+
+  /* lines */
+  --line: #2e2a26;
+  --line2: #3d3831;
+
+  /* text — measured, not eyeballed. Ratios are against --surf2, the darkest
+     common background; --bg is ~1.15x more forgiving.
+       --ink   15.6:1  AAA
+       --ink2   8.1:1  AAA
+       --ink3   6.0:1  AA comfortably, AAA on --bg
+     --ink3 was #6f675e at 3.1:1 — below AA for normal text, and it is the
+     workhorse for small labels in roughly a hundred places, which is why the
+     interface read as low-contrast. The whole ramp moved up to keep three
+     distinguishable levels. */
+  --ink: #ece7de;
+  --ink2: #bdb5a9;
+  --ink3: #a79b8d;
+
+  /* status — semantic, never decorative */
+  --live: #3ddbb8;
+  --need: #ffb03a;
+  --fail: #ff5f48;
+  --done: #93c470;
+  --queue: #8fa3b8;
+  --idle: #a79b8d;
+
+  /* A drop shadow, and the near-white a framed web page is painted on before it
+     has painted itself. Both used to be literals in track CSS. */
+  --shadow: rgb(0 0 0 / 55%);
+  --paper: #ece7de;
+
+  /* Native scrollbars, form controls and the default canvas follow this. */
+  color-scheme: dark;
+
+  /* layout — grown with the type scale. The old 46/26 were sized for 13px body
+     text and 10.5px chrome; at the current scale they crowd. */
+  --projcol: 288px;
+  --topbar: 52px;
+  --statusbar: 30px;
+
+  /* type */
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --disp: "Martian Mono", monospace;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+
+  /* Type scale. The build accumulated twenty ad-hoc sizes, most of them 10-11px,
+     which is why the interface read as small. These are the only sizes now.
+     TO TUNE THE WHOLE UI: change these eight numbers. Nothing else hardcodes a
+     font size, so a global adjustment is one edit.
+
+     --fs-2xs is for Martian Mono display labels only — uppercase with .18em
+     tracking, which reads larger than its px suggests. Do not use it for prose. */
+  --fs-2xs: 11px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-md: 13.5px;
+  --fs-base: 14.5px;
+  --fs-lg: 15.5px;
+  --fs-xl: 17px;
+  --fs-2xl: 21px;
+  --fs-3xl: 25px;
+
+  /* motion */
+  --pulse-slow: 1.7s;
+  --pulse-fast: 0.95s;
+}
+
+/*
+ * The light theme. `shell/theme.ts` puts `data-theme` on <html>; it follows the
+ * system setting unless you pick one. Only colours change, never layout or type.
+ *
+ * Every text token clears 4.5:1 (AA) on every surface token, and `--bg` clears it
+ * as text on the four status fills that carry labels. `lib/verify.ts` recomputes
+ * that from this file for both themes. The dark status colours are too light for
+ * a paper background (the amber was 1.9:1), so each is its own darker value here
+ * rather than a mix of the dark one.
+ *
+ * In this theme "raised" is lighter and "recessed" is darker, the same as in the
+ * dark one: --surf is the whitest card, --well sits below --bg.
+ *
+ * Any element can ask for it, not only <html>: a PDF of a file is printed from a
+ * copy marked `data-theme='light'` (files/print.ts), because paper is light
+ * whichever theme you read it in.
+ */
+:root[data-theme='light'], [data-theme='light'] {
+  --bg: #f4f1eb;
+  --bg2: #ece8e1;
+  --surf: #fcfbf8;
+  --surf2: #efebe4;
+  --surf3: #e6e0d6;
+  --well: #e9e5de;
+
+  --line: #ddd7cd;
+  --line2: #cbc3b6;
+
+  --ink: #1c1916;
+  --ink2: #4a433b;
+  --ink3: #665d52;
+
+  --live: #066b56;
+  --need: #8a4d00;
+  --fail: #b02a16;
+  --done: #3f6a1c;
+  --queue: #4a5f76;
+  --idle: #665d52;
+
+  --shadow: rgb(60 45 30 / 16%);
+  --paper: #ffffff;
+
+  color-scheme: light;
+}
+
+/* Status colour by name — lets tracks do `var(--status-working)` from data. */
+:root {
+  --status-working: var(--live);
+  --status-blocked: var(--need);
+  --status-failed: var(--fail);
+  --status-done: var(--done);
+  --status-queued: var(--queue);
+  --status-paused: var(--idle);
+}
+
+/* ── shared atmosphere ─────────────────────────────────────────────────────
+   The faint grid and grain that make the console feel like an instrument
+   rather than a web page. Apply .conductor-grid / .conductor-grain once at
+   the app shell (Track B owns the shell). */
+
+.conductor-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 2%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 2%, transparent) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+.conductor-grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── shared animations ─────────────────────────────────────────────────────
+   Used by status dots and the attention rail. Defined once so a pulsing
+   "working" dot in the Fleet screen and in the Attention queue match exactly. */
+
+@keyframes conductor-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes conductor-blink {
+  50% { opacity: 0.15; }
+}
+
+/* The amber breath. Reserved for "needs you". */
+@keyframes conductor-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--need) 55%, transparent); }
+  70% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--need) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

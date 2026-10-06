@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conductor — mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@300;400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════
+   CONDUCTOR — mission-control console for a fleet of coding agents
+   Aesthetic: warm graphite, industrial. Amber = "a human is needed".
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#100f0e; --bg2:#161413; --surf:#1c1a18; --surf2:#221f1c; --surf3:#2a2622;
+  --line:#2e2a26; --line2:#3d3831;
+  --ink:#ece7de; --ink2:#a39c92; --ink3:#6f675e;
+  --live:#3ddbb8;  /* working */
+  --need:#ffb03a;  /* needs you — the signature */
+  --fail:#ff5f48;  /* broken */
+  --done:#93c470;  /* finished */
+  --queue:#7f93a8; /* waiting to start */
+  --idle:#6f675e;
+  --rail:56px; --projcol:272px;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --disp:"Martian Mono",monospace;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:13px;
+  line-height:1.5; -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+/* grid + grain atmosphere */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(to right,rgba(255,255,255,.02) 1px,transparent 1px),
+                   linear-gradient(to bottom,rgba(255,255,255,.02) 1px,transparent 1px);
+  background-size:34px 34px}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* ── type helpers ─────────────────────────────────────────── */
+.lab{font-family:var(--disp);font-size:8.5px;font-weight:600;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink3)}
+.mono{font-family:var(--mono)}
+h1,h2,h3{font-weight:600;letter-spacing:-.01em}
+
+/* ══ TOP BAR ══════════════════════════════════════════════ */
+.top{position:relative;z-index:10;height:46px;display:flex;align-items:stretch;
+  border-bottom:1px solid var(--line);background:linear-gradient(180deg,#1a1816,#141211)}
+.mark{display:flex;align-items:center;gap:9px;padding:0 16px;border-right:1px solid var(--line)}
+.baton{width:3px;height:17px;background:linear-gradient(180deg,var(--need),#8a5a12);
+  border-radius:2px;transform-origin:bottom center;animation:tick 1.9s ease-in-out infinite}
+@keyframes tick{0%,100%{transform:rotate(-19deg)}50%{transform:rotate(19deg)}}
+.mark b{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:.24em}
+
+/* the amber attention rail — always visible, impossible to miss */
+.alert{flex:1;display:flex;align-items:center;gap:11px;padding:0 16px;
+  background:linear-gradient(90deg,rgba(255,176,58,.13),rgba(255,176,58,.03) 62%,transparent);
+  border-right:1px solid var(--line);cursor:pointer}
+.alert:hover{background:linear-gradient(90deg,rgba(255,176,58,.2),rgba(255,176,58,.05) 62%,transparent)}
+.alert .n{font-family:var(--disp);font-size:10px;font-weight:700;color:#120e07;background:var(--need);
+  padding:2px 7px;border-radius:3px;animation:breathe 1.5s ease-in-out infinite}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 0 rgba(255,176,58,.55)}70%{box-shadow:0 0 0 9px rgba(255,176,58,0)}}
+.alert span{font-size:12px;color:var(--need);font-weight:500}
+.alert em{color:var(--ink3);font-style:normal;margin-left:auto;font-family:var(--mono);font-size:11px}
+
+nav.screens{display:flex}
+nav.screens button{font:inherit;background:none;border:0;border-right:1px solid var(--line);
+  color:var(--ink3);padding:0 13px;cursor:pointer;display:flex;align-items:center;gap:7px;
+  font-size:11.5px;letter-spacing:.02em;transition:.15s}
+nav.screens button b{font-family:var(--mono);font-size:9px;border:1px solid var(--line2);
+  border-radius:3px;padding:1px 4px;color:var(--ink3)}
+nav.screens button:hover{color:var(--ink2);background:var(--surf)}
+nav.screens button.on{color:var(--ink);background:var(--surf2);box-shadow:inset 0 -2px 0 var(--need)}
+nav.screens button.on b{border-color:var(--need);color:var(--need)}
+.annobtn{font:inherit;font-size:11px;background:none;border:0;color:var(--ink3);padding:0 15px;cursor:pointer}
+.annobtn:hover{color:var(--need)}
+body.anno .annobtn{color:var(--need)}
+
+/* ══ SCREEN FRAME ═════════════════════════════════════════ */
+main{position:relative;z-index:1;height:calc(100vh - 46px - 26px)}
+.screen{display:none;position:absolute;inset:0}
+.screen.on{display:flex}
+
+/* ── left rail: fleet health, always present ───────────────── */
+.rail{width:var(--rail);border-right:1px solid var(--line);background:var(--bg2);
+  display:flex;flex-direction:column;align-items:center;padding:11px 0;gap:7px;flex:none}
+.rail .pip{width:34px;height:34px;border-radius:7px;border:1px solid var(--line);background:var(--surf);
+  display:grid;place-items:center;font-family:var(--disp);font-size:10px;font-weight:700;
+  color:var(--ink2);cursor:pointer;position:relative;transition:.15s}
+.rail .pip:hover{border-color:var(--line2);transform:translateX(1px)}
+.rail .pip.sel{background:var(--surf3);color:var(--ink);border-color:var(--line2)}
+.rail .pip::after{content:"";position:absolute;right:-1px;bottom:-1px;width:8px;height:8px;
+  border-radius:50%;border:2px solid var(--bg2)}
+.rail .pip.s-live::after{background:var(--live);animation:pulse 1.7s ease-in-out infinite}
+.rail .pip.s-need::after{background:var(--need);animation:pulse .95s ease-in-out infinite}
+.rail .pip.s-fail::after{background:var(--fail);animation:blink .7s steps(2) infinite}
+.rail .pip.s-done::after{background:var(--done)}
+.rail .pip.s-idle::after{background:var(--idle)}
+.rail .pip.s-queue::after{background:var(--queue)}
+.rail .pip.s-need{border-color:rgba(255,176,58,.5);box-shadow:0 0 14px -3px rgba(255,176,58,.5)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes blink{50%{opacity:.15}}
+.rail .sep{width:20px;height:1px;background:var(--line);margin:3px 0}
+.rail .add{color:var(--ink3);border-style:dashed}
+
+/* ── projects column ──────────────────────────────────────── */
+.col{width:var(--projcol);border-right:1px solid var(--line);background:var(--bg2);
+  display:flex;flex-direction:column;flex:none;overflow:hidden}
+.colhead{padding:12px 14px 9px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--line)}
+.colbody{overflow-y:auto;flex:1;padding:6px}
+
+/* ── main pane ────────────────────────────────────────────── */
+.pane{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.panehead{height:42px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+  gap:12px;padding:0 15px;background:var(--bg2);flex:none}
+.panebody{flex:1;overflow-y:auto;padding:16px}
+.crumb{font-family:var(--mono);font-size:12px;color:var(--ink2)}
+.crumb b{color:var(--ink);font-weight:600}
+.crumb i{color:var(--ink3);font-style:normal;margin:0 6px}
+
+/* ── generic chrome ───────────────────────────────────────── */
+.btn{font:inherit;font-size:11px;background:var(--surf);border:1px solid var(--line2);color:var(--ink2);
+  padding:4px 10px;border-radius:5px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  transition:.14s;white-space:nowrap}
+.btn:hover{background:var(--surf3);color:var(--ink);border-color:#4a443c}
+.btn.amber{background:var(--need);border-color:var(--need);color:#140f05;font-weight:600}
+.btn.amber:hover{background:#ffc164}
+.btn.ghost{background:none}
+.btn kbd{font-family:var(--mono);font-size:9px;opacity:.65;border:1px solid currentColor;
+  border-radius:3px;padding:0 3px;line-height:1.5}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.d-live{background:var(--live);animation:pulse 1.7s ease-in-out infinite}
+.d-need{background:var(--need);animation:pulse .95s ease-in-out infinite;
+  box-shadow:0 0 9px rgba(255,176,58,.8)}
+.d-fail{background:var(--fail);animation:blink .7s steps(2) infinite}
+.d-done{background:var(--done)}.d-idle{background:var(--idle)}.d-queue{background:var(--queue)}
+.tag{font-family:var(--disp);font-size:8px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  padding:2.5px 6px;border-radius:3px;border:1px solid;white-space:nowrap}
+.t-live{color:var(--live);border-color:rgba(61,219,184,.32);background:rgba(61,219,184,.08)}
+.t-need{color:var(--need);border-color:rgba(255,176,58,.42);background:rgba(255,176,58,.12)}
+.t-fail{color:var(--fail);border-color:rgba(255,95,72,.35);background:rgba(255,95,72,.09)}
+.t-done{color:var(--done);border-color:rgba(147,196,112,.3);background:rgba(147,196,112,.08)}
+.t-idle{color:var(--ink3);border-color:var(--line2)}
+.t-queue{color:var(--queue);border-color:rgba(127,147,168,.3);background:rgba(127,147,168,.08)}
+
+/* live activity histogram — the "is it actually doing anything" signal */
+.spark{display:flex;align-items:flex-end;gap:1.5px;height:20px}
+.spark i{width:3px;background:var(--live);opacity:.55;border-radius:1px;
+  transform-origin:bottom;animation:jig 2.4s ease-in-out infinite}
+.spark i:last-child{opacity:1;box-shadow:0 0 6px var(--live)}
+@keyframes jig{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.6)}}
+.spark.dead i{background:var(--idle);animation:none;opacity:.3;box-shadow:none}
+.spark.need i{background:var(--need)}
+
+/* ══ PROJECT CARD (fleet grid) ════════════════════════════ */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(372px,1fr));gap:13px}
+.pcard{border:1px solid var(--line);border-radius:9px;background:
+  linear-gradient(180deg,var(--surf),var(--bg2));position:relative;overflow:hidden;
+  padding:13px 15px 12px 17px;cursor:pointer;transition:.16s}
+.pcard:hover{border-color:var(--line2);transform:translateY(-1px)}
+.pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--idle)}
+.pcard.s-live::before{background:var(--live)}
+.pcard.s-need::before{background:var(--need);box-shadow:0 0 16px 1px rgba(255,176,58,.6)}
+.pcard.s-fail::before{background:var(--fail)}
+.pcard.s-done::before{background:var(--done)}
+.pcard.s-queue::before{background:var(--queue)}
+.pcard.s-need{border-color:rgba(255,176,58,.38);background:
+  linear-gradient(180deg,rgba(255,176,58,.07),var(--bg2) 60%)}
+.pcard .ph{display:flex;align-items:baseline;gap:9px;margin-bottom:2px}
+.pcard .ph h3{font-size:14.5px}
+.pcard .path{font-family:var(--mono);font-size:10.5px;color:var(--ink3);margin-bottom:11px}
+.pcard .path b{color:var(--ink2);font-weight:400}
+.agents{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+.arow{display:flex;align-items:center;gap:8px;font-size:11.5px;padding:4px 7px;border-radius:5px;
+  background:rgba(0,0,0,.24);border:1px solid rgba(255,255,255,.035)}
+.arow .nm{font-family:var(--disp);font-size:9px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;width:66px;flex:none;color:var(--ink2)}
+.arow .act{font-family:var(--mono);font-size:11px;color:var(--ink2);flex:1;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.arow .act b{color:var(--ink);font-weight:500}
+.arow .el{font-family:var(--mono);font-size:10px;color:var(--ink3);flex:none}
+.arow.need{background:rgba(255,176,58,.1);border-color:rgba(255,176,58,.3)}
+.arow.need .act{color:var(--need)}
+.pfoot{display:flex;align-items:center;gap:9px;padding-top:10px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10.5px;color:var(--ink3)}
+.pfoot .sp{margin-left:auto;display:flex;gap:6px}
+.add-p{border:1px dashed var(--line2);border-radius:9px;display:grid;place-items:center;
+  color:var(--ink3);min-height:150px;cursor:pointer;font-size:12px}
+.add-p:hover{border-color:var(--need);color:var(--need)}
+.plus{font-size:22px;font-family:var(--mono);display:block;text-align:center;margin-bottom:4px}
+
+/* diff numbers */
+.pos{color:var(--done)}.neg{color:var(--fail)}
+
+/* ══ ANNOTATIONS ══════════════════════════════════════════ */
+.anno{position:absolute;z-index:60;display:flex;align-items:flex-start;gap:7px;
+  opacity:0;pointer-events:none;transition:opacity .22s;max-width:255px}
+body.anno .anno{opacity:1}
+.anno b{font-family:var(--disp);font-size:9px;font-weight:700;background:var(--need);color:#130e05;
+  width:17px;height:17px;border-radius:50%;display:grid;place-items:center;flex:none;
+  box-shadow:0 0 0 3px rgba(255,176,58,.2),0 2px 8px rgba(0,0,0,.6)}
+.anno p{background:#2a2114;border:1px solid rgba(255,176,58,.45);color:#f5e3c4;font-size:11px;
+  line-height:1.42;padding:5px 9px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.65)}
+.anno p kbd{font-family:var(--mono);font-size:9.5px;background:rgba(255,176,58,.16);
+  border:1px solid rgba(255,176,58,.3);border-radius:3px;padding:0 3px;color:var(--need)}
+
+/* ══ STATUS BAR ═══════════════════════════════════════════ */
+.statusbar{position:relative;z-index:10;height:26px;border-top:1px solid var(--line);
+  background:var(--bg2);display:flex;align-items:center;gap:14px;padding:0 14px;
+  font-family:var(--mono);font-size:10.5px;color:var(--ink3)}
+.statusbar kbd{border:1px solid var(--line2);border-radius:3px;padding:0 4px;color:var(--ink2)}
+.statusbar .r{margin-left:auto;display:flex;gap:14px;align-items:center}
+
+/* ══ AGENT LANE (project screen) ══════════════════════════ */
+.lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:13px}
+.lane{border:1px solid var(--line);border-radius:9px;background:var(--surf);overflow:hidden;
+  display:flex;flex-direction:column}
+.lane.need{border-color:rgba(255,176,58,.45);box-shadow:0 0 0 1px rgba(255,176,58,.12),0 8px 30px -12px rgba(255,176,58,.35)}
+.lanehead{padding:9px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,var(--surf2),var(--surf))}
+.lanehead .nm{font-family:var(--disp);font-size:9.5px;font-weight:700;letter-spacing:.11em;
+  text-transform:uppercase}
+.lanehead .mdl{font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-left:auto}
+.tail{padding:9px 12px;font-family:var(--mono);font-size:10.8px;line-height:1.62;flex:1;
+  color:var(--ink3);background:rgba(0,0,0,.2);min-height:96px}
+.tail div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tail .cur{color:var(--ink)}
+.tail .tool{color:var(--live)}
+.tail .cur::after{content:"▊";color:var(--live);animation:blink 1.05s steps(2) infinite;margin-left:2px}
+.lanefoot{padding:7px 12px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.meter{height:3px;border-radius:2px;background:var(--line);flex:1;overflow:hidden;min-width:34px}
+.meter i{display:block;height:100%;background:var(--live)}
+.meter.hot i{background:var(--need)}
+
+/* ══ DOCK (files / preview) ═══════════════════════════════ */
+.dock{border-top:1px solid var(--line);background:var(--bg2);height:236px;display:flex;
+  flex-direction:column;flex:none}
+.docktabs{height:33px;display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.docktabs button{font:inherit;font-size:11px;background:none;border:0;border-right:1px solid var(--line);
+  color:var(--ink3);padding:0 13px;cursor:pointer;display:flex;align-items:center;gap:7px}
+.docktabs button.on{color:var(--ink);background:var(--surf);box-shadow:inset 0 -2px 0 var(--live)}
+.docktabs .r{margin-left:auto;display:flex;align-items:center;gap:8px;padding:0 12px}
+.dockbody{flex:1;overflow-y:auto;padding:13px 17px}
+
+/* rendered markdown */
+.md{max-width:690px;font-size:13px;line-height:1.66;color:var(--ink2)}
+.md h1{font-size:19px;color:var(--ink);margin-bottom:9px;letter-spacing:-.015em}
+.md h2{font-size:14px;color:var(--ink);margin:16px 0 7px;letter-spacing:-.01em}
+.md p{margin-bottom:9px}
+.md code{font-family:var(--mono);font-size:11.5px;background:var(--surf3);padding:1px 5px;
+  border-radius:3px;color:#f0c98a}
+.md ul{list-style:none;margin-bottom:9px}
+.md li{padding-left:22px;position:relative;margin-bottom:4px}
+.md li::before{content:"◻";position:absolute;left:4px;color:var(--ink3);font-size:11px}
+.md li.done{color:var(--ink3);text-decoration:line-through;text-decoration-color:var(--line2)}
+.md li.done::before{content:"◼";color:var(--done);text-decoration:none}
+/* The in-progress task marker. NOT --need: amber means "a human is required",
+   and a current-task marker is status, not a request for the user. --live is
+   the semantically correct token — that task is being worked on right now.
+   (Amendment 2, after Track C refused to implement the original.) */
+.md li.now::before{content:"▸";color:var(--live)}
+.md li.now{color:var(--ink)}
+.md blockquote{border-left:2px solid var(--need);padding:5px 12px;background:rgba(255,176,58,.06);
+  margin-bottom:10px;color:#e8d5b2;font-size:12.5px}
+.md hr{border:0;border-top:1px solid var(--line);margin:15px 0}
+
+/* file tree */
+.tree{font-family:var(--mono);font-size:11.5px;line-height:1.95;color:var(--ink2)}
+.tree div{padding:1px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;
+  display:flex;align-items:center;gap:6px}
+.tree div:hover{background:var(--surf)}
+.tree div.on{background:var(--surf3);color:var(--ink)}
+.tree .ind1{padding-left:20px}.tree .ind2{padding-left:34px}.tree .ind3{padding-left:48px}
+.tree .ed{color:var(--live);font-size:8.5px;margin-left:auto;font-family:var(--disp);letter-spacing:.1em}
+.tree .dir{color:var(--ink3)}
+
+/* ══ TRANSCRIPT ═══════════════════════════════════════════ */
+.trans{max-width:780px;display:flex;flex-direction:column;gap:13px}
+.msg{display:flex;gap:11px}
+.msg .who{font-family:var(--disp);font-size:8px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;width:52px;flex:none;padding-top:3px;text-align:right;color:var(--ink3)}
+.msg.you .who{color:#e8dcc4}
+.msg .body{flex:1;font-size:12.8px;line-height:1.62;color:var(--ink2)}
+.msg.you .body{background:rgba(232,220,196,.05);border-left:2px solid #6b6252;padding:7px 12px;
+  border-radius:0 6px 6px 0;color:var(--ink)}
+.msg .body code{font-family:var(--mono);font-size:11.5px;color:#f0c98a}
+.toolcall{border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:8px 0;background:rgba(0,0,0,.26)}
+.toolcall .th{padding:5px 11px;display:flex;align-items:center;gap:8px;background:var(--surf2);
+  border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10.5px;color:var(--ink2);cursor:pointer}
+.toolcall .th b{font-family:var(--disp);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--live)}
+.toolcall .th .ch{margin-left:auto;color:var(--ink3)}
+.toolcall pre{font-family:var(--mono);font-size:11px;line-height:1.66;padding:8px 11px;overflow-x:auto;
+  color:var(--ink3)}
+.toolcall pre .a{color:var(--done);background:rgba(147,196,112,.07);display:block}
+.toolcall pre .d{color:var(--fail);background:rgba(255,95,72,.07);display:block}
+
+/* composer */
+.composer{border-top:1px solid var(--line);background:var(--bg2);padding:11px 15px;flex:none}
+.cbox{border:1px solid var(--line2);border-radius:8px;background:var(--surf);padding:9px 12px;
+  display:flex;flex-direction:column;gap:9px}
+.cbox:focus-within{border-color:var(--live)}
+.cbox .ph{font-family:var(--mono);font-size:12.5px;color:var(--ink3)}
+.cbox .ph b{color:var(--ink);font-weight:400}
+.crow{display:flex;align-items:center;gap:7px}
+.crow .r{margin-left:auto;display:flex;gap:7px;align-items:center}
+.pill{font-size:10.5px;border:1px solid var(--line2);border-radius:20px;padding:2px 9px;color:var(--ink3);
+  cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.pill.on{border-color:var(--live);color:var(--live);background:rgba(61,219,184,.08)}
+.pill.warn.on{border-color:var(--need);color:var(--need);background:rgba(255,176,58,.09)}
+
+/* inspector */
+.insp{width:246px;border-left:1px solid var(--line);background:var(--bg2);flex:none;overflow-y:auto}
+.isec{padding:12px 14px;border-bottom:1px solid var(--line)}
+.isec .lab{margin-bottom:8px;display:block}
+.kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
+  color:var(--ink2);padding:2.5px 0}
+.kv span:first-child{color:var(--ink3)}
+.bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin:7px 0 5px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--live),#2fa98f)}
+.bar.hot i{background:linear-gradient(90deg,var(--need),var(--fail))}
+</style>
+</head>
+<body>
+
+<!-- ══════════ TOP BAR ══════════ -->
+<header class="top">
+  <div class="mark"><i class="baton"></i><b>CONDUCTOR</b></div>
+  <div class="alert" onclick="go('input')">
+    <i class="n">2</i>
+    <span>agents are waiting on you</span>
+    <em>web-ui · 12m40s &nbsp;/&nbsp; acme-api · 41s &nbsp;→&nbsp; answer next ⏎</em>
+  </div>
+  <nav class="screens">
+    <button data-s="fleet"><b>1</b>Fleet</button>
+    <button data-s="project"><b>2</b>Project</button>
+    <button data-s="agent"><b>3</b>Agent</button>
+    <button data-s="input"><b>4</b>Needs you</button>
+    <button data-s="files"><b>5</b>Files</button>
+    <button data-s="preview"><b>6</b>Preview</button>
+    <button data-s="spawn"><b>7</b>Spawn</button>
+  </nav>
+  <button class="annobtn" onclick="document.body.classList.toggle('anno')">◉ notes <kbd>a</kbd></button>
+</header>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════
+     1 · FLEET — everything, everywhere, at once
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="fleet">
+  <div class="rail">
+    <div class="pip s-need" title="web-ui">WU</div>
+    <div class="pip s-live sel" title="acme-api">AA</div>
+    <div class="pip s-fail" title="payments-svc">PS</div>
+    <div class="pip s-live" title="docs-site">DS</div>
+    <div class="pip s-queue" title="infra-tf">IT</div>
+    <div class="pip s-idle" title="mobile-app">MA</div>
+    <div class="sep"></div>
+    <div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead">
+      <span class="crumb"><b>Fleet</b></span>
+      <span class="tag t-live">6 projects</span>
+      <span class="tag t-live">7 agents live</span>
+      <span class="tag t-need">2 blocked on you</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">⏸ pause all</button>
+        <button class="btn ghost">▦ density</button>
+        <button class="btn amber" onclick="go('spawn')">+ new work <kbd>⌘N</kbd></button>
+      </div>
+    </div>
+
+    <div class="panebody">
+      <div class="grid">
+
+        <!-- NEEDS YOU -->
+        <div class="pcard s-need" onclick="go('input')">
+          <div class="ph"><h3>web-ui</h3><span class="tag t-need">needs you · 12m40s</span></div>
+          <div class="path">~/src/web-ui <b>⑂ feat/design-tokens</b> · worktree</div>
+          <div class="agents">
+            <div class="arow need"><i class="dot d-need"></i><span class="nm">uiux</span>
+              <span class="act">wants to run <b>rm -rf dist/ &amp;&amp; npm run build</b></span><span class="el">12:40</span></div>
+            <div class="arow"><i class="dot d-idle"></i><span class="nm">validator</span>
+              <span class="act">idle — waiting for uiux</span><span class="el">—</span></div>
+          </div>
+          <div class="pfoot"><span class="spark need"><i style="height:40%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:20%"></i><i style="height:8%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i></span>
+            <span>stalled</span><span class="sp"><button class="btn amber">answer <kbd>⏎</kbd></button></span></div>
+        </div>
+
+        <!-- RUNNING -->
+        <div class="pcard s-live" onclick="go('project')">
+          <div class="ph"><h3>acme-api</h3><span class="tag t-live">2 working</span></div>
+          <div class="path">~/src/acme-api <b>⑂ feat/auth-refresh</b> · worktree</div>
+          <div class="agents">
+            <div class="arow"><i class="dot d-live"></i><span class="nm">builder</span>
+              <span class="act">Edit <b>src/auth/token.ts</b></span><span class="el">04:12</span></div>
+            <div class="arow"><i class="dot d-live"></i><span class="nm">validator</span>
+              <span class="act">Bash <b>pytest -k refresh</b></span><span class="el">00:48</span></div>
+          </div>
+          <div class="pfoot"><span class="spark"><i style="height:35%"></i><i style="height:60%"></i><i style="height:45%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:95%"></i><i style="height:70%"></i><i style="height:85%"></i></span>
+            <span><b class="pos">+142</b> <b class="neg">−31</b> · 6 files</span>
+            <span class="sp"><button class="btn ghost">▤ files</button><button class="btn ghost">↗ :3000</button></span></div>
+        </div>
+
+        <!-- FAILING -->
+        <div class="pcard s-fail">
+          <div class="ph"><h3>payments-svc</h3><span class="tag t-fail">tests red</span></div>
+          <div class="path">~/src/payments-svc <b>⑂ fix/idempotency</b></div>
+          <div class="agents">
+            <div class="arow"><i class="dot d-fail"></i><span class="nm">validator</span>
+              <span class="act"><b>7 failed</b>, 240 passed — handing to debugger</span><span class="el">02:05</span></div>
+            <div class="arow"><i class="dot d-live"></i><span class="nm">debugger</span>
+              <span class="act">Read <b>ledger/reconcile.go:88</b> · phase 2/4</span><span class="el">01:12</span></div>
+          </div>
+          <div class="pfoot"><span class="spark"><i style="height:90%"></i><i style="height:40%"></i><i style="height:65%"></i><i style="height:30%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:80%"></i><i style="height:60%"></i></span>
+            <span>auto-recovering</span><span class="sp"><button class="btn ghost">◉ watch</button></span></div>
+        </div>
+
+        <!-- DONE-ISH -->
+        <div class="pcard s-done">
+          <div class="ph"><h3>docs-site</h3><span class="tag t-done">pr open</span></div>
+          <div class="path">~/src/docs-site <b>⑂ docs/c4-refresh</b></div>
+          <div class="agents">
+            <div class="arow"><i class="dot d-done"></i><span class="nm">scribe</span>
+              <span class="act">pushed <b>#412 · C4 refresh</b> — 9 files</span><span class="el">done</span></div>
+            <div class="arow"><i class="dot d-live"></i><span class="nm">reviewer</span>
+              <span class="act">reviewing own diff · 3 notes so far</span><span class="el">00:22</span></div>
+          </div>
+          <div class="pfoot"><span class="spark"><i style="height:20%"></i><i style="height:30%"></i><i style="height:25%"></i><i style="height:40%"></i><i style="height:35%"></i><i style="height:45%"></i><i style="height:30%"></i><i style="height:38%"></i></span>
+            <span><b class="pos">+880</b> <b class="neg">−12</b></span>
+            <span class="sp"><button class="btn ghost">▤ PLAN.md</button><button class="btn ghost">↗ PR</button></span></div>
+        </div>
+
+        <!-- QUEUED -->
+        <div class="pcard s-queue">
+          <div class="ph"><h3>infra-tf</h3><span class="tag t-queue">queued</span></div>
+          <div class="path">~/src/infra-tf <b>⑂ tf/vpc-peering</b> · creating worktree…</div>
+          <div class="agents">
+            <div class="arow"><i class="dot d-queue"></i><span class="nm">private-cloud</span>
+              <span class="act">waiting — concurrency cap 7/7 reached</span><span class="el">queued</span></div>
+          </div>
+          <div class="pfoot"><span class="spark dead"><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i></span>
+            <span>starts when a slot frees</span><span class="sp"><button class="btn ghost">↑ jump queue</button></span></div>
+        </div>
+
+        <!-- PAUSED -->
+        <div class="pcard">
+          <div class="ph"><h3>mobile-app</h3><span class="tag t-idle">paused by you</span></div>
+          <div class="path">~/src/mobile-app <b>⑂ main</b> · 3d ago</div>
+          <div class="agents">
+            <div class="arow"><i class="dot d-idle"></i><span class="nm">builder</span>
+              <span class="act">context preserved — 41k tokens, resumable</span><span class="el">—</span></div>
+          </div>
+          <div class="pfoot"><span class="spark dead"><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i></span>
+            <span>uncommitted: 4 files</span><span class="sp"><button class="btn ghost">▶ resume</button></span></div>
+        </div>
+
+        <div class="add-p" onclick="go('spawn')"><div><span class="plus">+</span>add project or start new work</div></div>
+      </div>
+    </div>
+
+    <!-- annotations -->
+    <div class="anno" style="left:16px;top:-40px"><b>1</b><p>Amber rail is the <b>only</b> thing that ever moves at the top. If it's dark, nothing needs you. Click it to jump straight to the oldest blocked agent.</p></div>
+    <div class="anno" style="left:-52px;top:96px;max-width:210px"><b>2</b><p>Rail stays put on every screen — peripheral fleet health while you're deep in one project.</p></div>
+    <div class="anno" style="left:390px;top:118px"><b>3</b><p>Left stripe = worst status in the project. Amber stripe glows so a blocked project is findable from across the room.</p></div>
+    <div class="anno" style="right:24px;top:236px;max-width:230px"><b>4</b><p>Sparkline is real tool-call activity per minute. Flat bars = agent is stuck or thinking, not working.</p></div>
+    <div class="anno" style="left:30px;bottom:96px;max-width:240px"><b>5</b><p>Every card exposes the two things you actually want: <kbd>▤ files</kbd> and <kbd>↗ :3000</kbd> — no terminal hunting.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     2 · PROJECT — one project, its agents, its docs, its server
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="project">
+  <div class="rail">
+    <div class="pip s-need" onclick="go('input')">WU</div>
+    <div class="pip s-live sel">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="col">
+    <div class="colhead"><span class="lab">Projects</span><span class="lab">6</span></div>
+    <div class="colbody">
+      <div class="arow need" style="margin-bottom:5px" onclick="go('input')">
+        <i class="dot d-need"></i><span class="nm" style="width:auto;flex:1">web-ui</span><span class="el">12:40</span></div>
+      <div class="arow" style="margin-bottom:5px;background:var(--surf3);border-color:var(--line2)">
+        <i class="dot d-live"></i><span class="nm" style="width:auto;flex:1;color:var(--ink)">acme-api</span><span class="el">2</span></div>
+      <div class="arow" style="margin-bottom:5px"><i class="dot d-fail"></i><span class="nm" style="width:auto;flex:1">payments-svc</span><span class="el">2</span></div>
+      <div class="arow" style="margin-bottom:5px"><i class="dot d-done"></i><span class="nm" style="width:auto;flex:1">docs-site</span><span class="el">1</span></div>
+      <div class="arow" style="margin-bottom:5px"><i class="dot d-queue"></i><span class="nm" style="width:auto;flex:1">infra-tf</span><span class="el">—</span></div>
+      <div class="arow" style="margin-bottom:5px"><i class="dot d-idle"></i><span class="nm" style="width:auto;flex:1">mobile-app</span><span class="el">—</span></div>
+
+      <div class="isec" style="border:0;padding:16px 8px 8px"><span class="lab">This project</span>
+        <div class="kv"><span>branch</span><span>feat/auth-refresh</span></div>
+        <div class="kv"><span>worktree</span><span>.wt/auth-refresh</span></div>
+        <div class="kv"><span>diff</span><span><b class="pos">+142</b> <b class="neg">−31</b></span></div>
+        <div class="kv"><span>dev server</span><span style="color:var(--live)">:3000 ◉</span></div>
+        <div class="kv"><span>spend</span><span>$1.04</span></div>
+      </div>
+      <div style="padding:0 8px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn ghost">⏸ pause project</button>
+        <button class="btn ghost">⑂ open PR</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead">
+      <span class="crumb"><b>acme-api</b><i>/</i>⑂ feat/auth-refresh</span>
+      <span class="tag t-live">2 working</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">◫ layout</button>
+        <button class="btn ghost">+ spawn agent</button>
+        <button class="btn ghost">⎋ interrupt all</button>
+      </div>
+    </div>
+
+    <div class="panebody" style="padding:15px">
+      <div class="lanes">
+        <div class="lane" onclick="go('agent')">
+          <div class="lanehead"><i class="dot d-live"></i><span class="nm">builder</span>
+            <span class="tag t-live">working</span><span class="mdl">opus-5</span></div>
+          <div class="tail">
+            <div>› Read src/auth/token.ts</div>
+            <div class="tool">› Edit src/auth/token.ts <span style="color:var(--done)">+18</span> <span style="color:var(--fail)">−4</span></div>
+            <div>› Read src/auth/refresh.ts</div>
+            <div class="cur">writing refresh rotation guard</div>
+          </div>
+          <div class="lanefoot"><span>04:12</span><span class="meter"><i style="width:38%"></i></span>
+            <span>38% ctx</span><span>$0.61</span></div>
+        </div>
+
+        <div class="lane">
+          <div class="lanehead"><i class="dot d-live"></i><span class="nm">validator</span>
+            <span class="tag t-live">testing</span><span class="mdl">sonnet-5</span></div>
+          <div class="tail">
+            <div>› Write tests/test_refresh.py</div>
+            <div class="tool">› Bash pytest -k refresh -q</div>
+            <div style="color:var(--done)">  6 passed, 1 xfail</div>
+            <div class="cur">re-running with --cov</div>
+          </div>
+          <div class="lanefoot"><span>00:48</span><span class="meter"><i style="width:14%"></i></span>
+            <span>14% ctx</span><span>$0.09</span></div>
+        </div>
+
+        <div class="lane">
+          <div class="lanehead"><i class="dot d-idle"></i><span class="nm">reviewer</span>
+            <span class="tag t-idle">queued</span><span class="mdl">opus-5</span></div>
+          <div class="tail" style="color:var(--ink3)">
+            <div>waiting on: builder ✓ validator</div>
+            <div style="margin-top:8px;color:var(--queue)">auto-starts when both finish</div>
+          </div>
+          <div class="lanefoot"><span>—</span><span class="meter"><i style="width:0"></i></span><span>0% ctx</span><span>$0.00</span></div>
+        </div>
+
+        <div class="add-p" style="min-height:0" onclick="go('spawn')"><div><span class="plus">+</span>spawn agent here</div></div>
+      </div>
+    </div>
+
+    <!-- bottom dock: the docs + the running app, right where the work is -->
+    <div class="dock">
+      <div class="docktabs">
+        <button class="on">▤ PLAN.md</button>
+        <button onclick="go('files')">▤ files</button>
+        <button onclick="go('preview')">◈ localhost:3000</button>
+        <button>▸ terminal</button>
+        <button>⑂ diff <span class="pos">+142</span></button>
+        <div class="r"><span class="tag t-live">◉ live — rewritten 8s ago by builder</span>
+          <button class="btn ghost">↗ pop out</button></div>
+      </div>
+      <div class="dockbody">
+        <div class="md">
+          <h1>Auth refresh rotation</h1>
+          <p>Refresh tokens are currently single-use but never rotated, so a replayed token stays valid until expiry. Rotate on every exchange and revoke the ancestor chain.</p>
+          <h2>Tasks</h2>
+          <ul>
+            <li class="done">Extract <code>decodeToken()</code> into <code>auth/token.ts</code></li>
+            <li class="done">Add <code>clock</code> injection so tests can skew time</li>
+            <li class="now">Rotate refresh token on exchange, revoke ancestors</li>
+            <li>Backfill <code>token_family_id</code> migration</li>
+            <li>Rate-limit the refresh endpoint</li>
+          </ul>
+          <blockquote>Open question for you: do we hard-revoke the whole family on reuse detection, or just deny the request? Affects logged-in users on flaky mobile networks.</blockquote>
+        </div>
+      </div>
+    </div>
+
+    <div class="anno" style="left:22px;top:66px;max-width:215px"><b>1</b><p>One lane per agent. The tail streams the last 4 lines — enough to know it's on track without reading everything.</p></div>
+    <div class="anno" style="right:26px;top:150px;max-width:225px"><b>2</b><p>Context meter turns amber near the limit, so you can tell an agent to wrap up before it compacts.</p></div>
+    <div class="anno" style="left:300px;top:230px;max-width:215px"><b>3</b><p>Agents can depend on each other. Reviewer sits queued and fires itself when builder and validator both pass.</p></div>
+    <div class="anno" style="left:26px;bottom:200px;max-width:250px"><b>4</b><p>Dock is docs + preview + terminal + diff, pinned under the agents. <kbd>▤ PLAN.md</kbd> re-renders the instant an agent edits it.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     3 · AGENT — full transcript, and you can type
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="agent">
+  <div class="rail">
+    <div class="pip s-need" onclick="go('input')">WU</div>
+    <div class="pip s-live sel">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead">
+      <span class="crumb" onclick="go('project')" style="cursor:pointer">acme-api<i>/</i><b>builder</b></span>
+      <i class="dot d-live"></i><span class="tag t-live">working · 04:12</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">◫ side-by-side</button>
+        <button class="btn ghost">⤓ export</button>
+        <button class="btn ghost" style="color:var(--fail);border-color:rgba(255,95,72,.4)">⎋ interrupt</button>
+      </div>
+    </div>
+
+    <div class="panebody">
+      <div class="trans">
+        <div class="msg you"><span class="who">you</span><div class="body">
+          Refresh tokens aren't rotated — a replayed token stays valid. Rotate on every exchange and revoke the ancestor chain. Tests first.
+        </div></div>
+
+        <div class="msg"><span class="who">builder</span><div class="body">
+          Reading the current exchange path before changing anything.
+          <div class="toolcall"><div class="th"><b>read</b> src/auth/refresh.ts <span class="ch">142 lines ⌄</span></div></div>
+          <p style="margin-top:8px">The exchange marks the old token used but issues the new one with the same <code>family_id</code> and no ancestor link, so reuse detection has nothing to walk. Adding the link first.</p>
+          <div class="toolcall">
+            <div class="th"><b>edit</b> src/auth/token.ts <span style="color:var(--done)">+18</span> <span style="color:var(--fail)">−4</span><span class="ch">⌃</span></div>
+            <pre><span class="d">- export function decodeToken(raw: string) {</span>
+<span class="d">-   return jwt.verify(raw, KEY)</span>
+<span class="a">+ export function decodeToken(raw: string, opts: DecodeOpts = {}) {</span>
+<span class="a">+   const clock = opts.clock ?? Date.now</span>
+<span class="a">+   return jwt.verify(raw, KEY, { clockTimestamp: clock() / 1000 })</span>
+  }
+
+<span class="a">+ export function rotate(prev: RefreshToken, clock = Date.now): RefreshToken {</span>
+<span class="a">+   return { ...mint(prev.subject, clock), familyId: prev.familyId, ancestorId: prev.id }</span>
+<span class="a">+ }</span></pre>
+          </div>
+          <div class="toolcall"><div class="th"><b>bash</b> npx tsc --noEmit
+            <span style="color:var(--done);margin-left:auto">clean · 2.4s</span></div></div>
+        </div></div>
+
+        <div class="msg you"><span class="who">you</span><div class="body">
+          Hard-revoke the whole family on reuse. Log it at warn with the family id.
+        </div></div>
+
+        <div class="msg"><span class="who">builder</span><div class="body">
+          Hard-revoke it is. Writing the guard in <code>refresh.ts</code>, then a regression test that replays a used token and asserts the whole family is dead.
+          <div class="toolcall"><div class="th"><b>edit</b> src/auth/refresh.ts <span style="color:var(--done)">+24</span> <span style="color:var(--fail)">−6</span><span class="ch">⌄</span></div></div>
+          <p style="margin-top:8px;color:var(--ink)">writing refresh rotation guard<span style="color:var(--live)">▊</span></p>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="cbox">
+        <div class="ph">Reply to <b>builder</b> — it keeps working while you type…</div>
+        <div class="crow">
+          <span class="pill on">▸ auto-accept edits</span>
+          <span class="pill warn on">⚠ ask before bash</span>
+          <span class="pill">◫ plan mode</span>
+          <div class="r"><span class="lab">⌥⏎ newline</span><button class="btn amber">send <kbd>⏎</kbd></button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="anno" style="left:120px;top:78px;max-width:235px"><b>1</b><p>Your turns are set off with a pale left bar, so you can scan a long transcript for <em>what did I actually tell it</em>.</p></div>
+    <div class="anno" style="left:330px;top:300px;max-width:225px"><b>2</b><p>Tool calls collapse to one line; diffs expand inline. You never open an editor to see what changed.</p></div>
+    <div class="anno" style="left:34px;bottom:104px;max-width:255px"><b>3</b><p>These pills <em>are</em> the permission policy. Flip <kbd>⚠ ask before bash</kbd> off and the agent stops interrupting you for shell commands.</p></div>
+  </div>
+
+  <div class="insp">
+    <div class="isec"><span class="lab">Agent</span>
+      <div class="kv"><span>role</span><span>builder</span></div>
+      <div class="kv"><span>model</span><span>opus-5</span></div>
+      <div class="kv"><span>elapsed</span><span>04:12</span></div>
+      <div class="kv"><span>spend</span><span>$0.61</span></div>
+    </div>
+    <div class="isec"><span class="lab">Context</span>
+      <div class="bar"><i style="width:38%"></i></div>
+      <div class="kv"><span>38% · 76k</span><span>200k</span></div>
+    </div>
+    <div class="isec"><span class="lab">Todo</span>
+      <div class="md" style="font-size:12px"><ul style="margin:0">
+        <li class="done">extract decodeToken</li>
+        <li class="done">clock injection</li>
+        <li class="now">rotation guard</li>
+        <li>family migration</li>
+      </ul></div>
+    </div>
+    <div class="isec"><span class="lab">Files touched</span>
+      <div class="tree" style="font-size:11px">
+        <div>token.ts <span class="ed">+18 −4</span></div>
+        <div>refresh.ts <span class="ed">+24 −6</span></div>
+        <div>test_refresh.py <span class="ed">new</span></div>
+      </div>
+    </div>
+    <div class="isec"><span class="lab">Guardrails</span>
+      <div class="kv"><span>network</span><span style="color:var(--fail)">denied</span></div>
+      <div class="kv"><span>writes</span><span style="color:var(--live)">worktree only</span></div>
+      <div class="kv"><span>git push</span><span style="color:var(--need)">asks</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     4 · NEEDS YOU — the interrupt. The whole point of the app.
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="input">
+  <div class="rail">
+    <div class="pip s-need sel">WU</div>
+    <div class="pip s-live">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="pane" style="background:radial-gradient(1100px 380px at 42% -8%,rgba(255,176,58,.09),transparent)">
+    <div class="panehead" style="border-bottom-color:rgba(255,176,58,.3)">
+      <span class="crumb">web-ui<i>/</i><b>uiux</b></span>
+      <i class="dot d-need"></i><span class="tag t-need">blocked · 12m40s</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">⤳ next blocked <kbd>⇥</kbd></button>
+        <button class="btn ghost">⏸ pause instead</button>
+      </div>
+    </div>
+
+    <div class="panebody">
+      <div class="trans">
+        <div class="msg"><span class="who">uiux</span><div class="body">
+          Tokens are migrated. The old build output is stale and Vite is serving cached chunks, so I need a clean rebuild before the preview is trustworthy.
+        </div></div>
+
+        <!-- PERMISSION REQUEST -->
+        <div style="border:1px solid rgba(255,176,58,.5);border-radius:10px;overflow:hidden;
+          background:linear-gradient(180deg,rgba(255,176,58,.1),var(--surf) 55%);
+          box-shadow:0 0 0 1px rgba(255,176,58,.13),0 20px 60px -24px rgba(255,176,58,.5)">
+          <div style="padding:8px 14px;display:flex;align-items:center;gap:9px;
+            border-bottom:1px solid rgba(255,176,58,.28);background:rgba(255,176,58,.08)">
+            <i class="dot d-need"></i><span class="lab" style="color:var(--need)">Permission required</span>
+            <span style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--need)">waiting 12m 40s</span>
+          </div>
+          <div style="padding:14px">
+            <div style="font-family:var(--mono);font-size:13px;background:#0c0b0a;border:1px solid var(--line2);
+              border-radius:6px;padding:10px 13px;margin-bottom:11px">
+              <span style="color:var(--ink3)">$</span> <span style="color:var(--need)">rm -rf</span> dist/ &amp;&amp; npm run build
+            </div>
+            <div class="kv"><span>cwd</span><span>~/src/web-ui/.wt/design-tokens</span></div>
+            <div class="kv"><span>matched rule</span><span style="color:var(--need)">deny-list: recursive delete</span></div>
+            <div class="kv"><span>reversible</span><span style="color:var(--fail)">no — dist/ is gitignored</span></div>
+            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn amber">allow once <kbd>⏎</kbd></button>
+              <button class="btn">allow <code style="font-family:var(--mono)">rm -rf dist/</code> all session</button>
+              <button class="btn">✎ edit command</button>
+              <button class="btn ghost" style="color:var(--fail);border-color:rgba(255,95,72,.4)">deny <kbd>⎋</kbd></button>
+            </div>
+            <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--line)">
+              <div class="ph" style="font-family:var(--mono);font-size:12px;color:var(--ink3)">
+                …or just tell it something else ⌄</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- stacked peek: the next one waiting -->
+        <div style="margin-top:4px;border:1px solid var(--line2);border-radius:9px;background:var(--surf);
+          padding:10px 14px;display:flex;align-items:center;gap:10px;opacity:.72">
+          <i class="dot d-need"></i>
+          <span class="lab" style="color:var(--need)">acme-api · builder</span>
+          <span style="font-family:var(--mono);font-size:11.5px;color:var(--ink2)">
+            question — “hard-revoke the family on reuse, or deny only?”</span>
+          <span style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink3)">41s</span>
+          <button class="btn ghost">⇥</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="anno" style="left:250px;top:190px;max-width:250px"><b>1</b><p>The request shows the <em>exact</em> command, the rule it tripped, and whether it can be undone — everything you need to answer without reading the transcript.</p></div>
+    <div class="anno" style="left:60px;bottom:170px;max-width:245px"><b>2</b><p>"Allow all session" is how you stop being asked twelve times. The answer becomes a rule, visible in the agent's guardrails panel.</p></div>
+    <div class="anno" style="right:30px;bottom:120px;max-width:235px"><b>3</b><p><kbd>⏎</kbd> answers and immediately loads the next blocked agent. Clear the whole queue without touching the mouse.</p></div>
+  </div>
+
+  <div class="insp">
+    <div class="isec" style="background:rgba(255,176,58,.06)">
+      <span class="lab" style="color:var(--need)">Attention queue · 2</span>
+      <div style="margin-top:9px;display:flex;flex-direction:column;gap:8px">
+        <div style="border:1px solid rgba(255,176,58,.4);border-radius:6px;padding:8px 9px;background:rgba(255,176,58,.09)">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+            <i class="dot d-need"></i><span class="lab" style="color:var(--need)">web-ui · uiux</span></div>
+          <div style="font-family:var(--mono);font-size:10.5px;color:var(--ink2)">permission · rm -rf</div>
+          <div class="bar hot" style="margin:6px 0 3px"><i style="width:84%"></i></div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:var(--fail)">12m40s — aging</div>
+        </div>
+        <div style="border:1px solid var(--line2);border-radius:6px;padding:8px 9px">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+            <i class="dot d-need"></i><span class="lab">acme-api · builder</span></div>
+          <div style="font-family:var(--mono);font-size:10.5px;color:var(--ink2)">question · 2 options</div>
+          <div class="bar hot" style="margin:6px 0 3px"><i style="width:8%"></i></div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:var(--ink3)">41s</div>
+        </div>
+      </div>
+    </div>
+    <div class="isec"><span class="lab">Tell me how</span>
+      <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
+        <span class="pill on">◉ browser tab badge</span>
+        <span class="pill on">🔔 macOS notification</span>
+        <span class="pill on">♪ sound after 60s</span>
+        <span class="pill">✉ Slack DM after 5m</span>
+        <span class="pill">☎ phone push after 15m</span>
+      </div>
+    </div>
+    <div class="isec"><span class="lab">Recently auto-allowed</span>
+      <div class="kv"><span>npm test</span><span>×12</span></div>
+      <div class="kv"><span>git status</span><span>×31</span></div>
+      <div class="kv"><span>Edit src/**</span><span>×48</span></div>
+      <div style="margin-top:9px"><button class="btn ghost" style="width:100%">manage rules</button></div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div style="position:absolute;right:20px;bottom:20px;z-index:70;width:290px;
+    border:1px solid rgba(255,176,58,.5);border-radius:9px;background:#221a0e;
+    box-shadow:0 18px 50px rgba(0,0,0,.7);padding:11px 13px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <i class="dot d-need"></i><span class="lab" style="color:var(--need)">Conductor</span>
+      <span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink3)">now</span></div>
+    <div style="font-size:12px;color:#f3e2c2;line-height:1.45">
+      <b>web-ui · uiux</b> is blocked on a permission request and has been waiting 12 minutes.</div>
+    <div style="display:flex;gap:6px;margin-top:9px">
+      <button class="btn amber" style="font-size:10px">answer</button>
+      <button class="btn ghost" style="font-size:10px">snooze 10m</button></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     5 · FILES — read what the agents are writing, live
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="files">
+  <div class="rail">
+    <div class="pip s-need" onclick="go('input')">WU</div>
+    <div class="pip s-live sel">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="col" style="width:248px">
+    <div class="colhead"><span class="lab">acme-api · worktree</span>
+      <span class="tag t-live">◉ watching</span></div>
+    <div class="colbody">
+      <div class="tree">
+        <div class="dir">▾ docs/</div>
+        <div class="ind1 on">PLAN.md <span class="ed">8s</span></div>
+        <div class="ind1">DESIGN.md</div>
+        <div class="ind1 dir">▾ adr/</div>
+        <div class="ind2">0007-token-rotation.md <span class="ed">new</span></div>
+        <div class="dir">▾ src/</div>
+        <div class="ind1 dir">▾ auth/</div>
+        <div class="ind2">token.ts <span class="ed">+18 −4</span></div>
+        <div class="ind2">refresh.ts <span class="ed">+24 −6</span></div>
+        <div class="ind2">session.ts</div>
+        <div class="ind1 dir">▸ api/</div>
+        <div class="dir">▾ tests/</div>
+        <div class="ind1">test_refresh.py <span class="ed">new</span></div>
+        <div>README.md</div>
+        <div>CLAUDE.md</div>
+      </div>
+      <div class="isec" style="border:0;padding:16px 8px 8px"><span class="lab">Changed this session</span>
+        <div class="kv"><span>6 files</span><span><b class="pos">+142</b> <b class="neg">−31</b></span></div>
+        <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
+          <button class="btn ghost">⑂ review full diff</button>
+          <button class="btn ghost">↺ revert a file</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead">
+      <span class="crumb">docs<i>/</i><b>PLAN.md</b></span>
+      <span class="tag t-live">◉ rewritten 8s ago by builder</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">rendered</button>
+        <button class="btn ghost">raw</button>
+        <button class="btn ghost">⑂ diff</button>
+        <button class="btn ghost">✎ edit</button>
+        <button class="btn ghost">↗ open in editor</button>
+      </div>
+    </div>
+    <div class="panebody" style="padding:26px 34px">
+      <div class="md">
+        <h1>Auth refresh rotation</h1>
+        <p>Refresh tokens are currently single-use but never rotated, so a replayed token stays valid until natural expiry. We rotate on every exchange and revoke the ancestor chain on reuse detection.</p>
+
+        <h2>Decision log</h2>
+        <blockquote>2026-09-21 — you: hard-revoke the entire token family on reuse, log at <code>warn</code> with the family id. Accepts the risk that a flaky mobile client can log itself out.</blockquote>
+
+        <h2>Tasks</h2>
+        <ul>
+          <li class="done">Extract <code>decodeToken()</code> into <code>auth/token.ts</code></li>
+          <li class="done">Inject <code>clock</code> so tests can skew time</li>
+          <li class="now">Rotate refresh token on exchange, revoke ancestors</li>
+          <li>Backfill <code>token_family_id</code> migration</li>
+          <li>Rate-limit <code>POST /auth/refresh</code> to 10/min/subject</li>
+        </ul>
+
+        <h2>Files in play</h2>
+        <p><code>src/auth/token.ts</code> mints and rotates. <code>src/auth/refresh.ts</code> owns the exchange endpoint and the reuse guard. <code>tests/test_refresh.py</code> holds the replay regression test — written before the fix, per <code>CLAUDE.md</code>.</p>
+        <hr>
+        <p style="color:var(--ink3);font-size:12px">Maintained by <b>builder</b>. Your edits are preserved — the agent appends, it does not overwrite your text.</p>
+      </div>
+    </div>
+
+    <div class="anno" style="left:262px;top:56px;max-width:230px"><b>1</b><p>Markdown renders properly — checkboxes, code, quotes. This is where you read PLAN.md, DESIGN.md and ADRs while the work happens.</p></div>
+    <div class="anno" style="left:-26px;top:180px;max-width:200px"><b>2</b><p>Green badges show exactly which files each agent has touched, and how recently. Live file watcher, no refresh.</p></div>
+    <div class="anno" style="right:30px;top:62px;max-width:215px"><b>3</b><p><kbd>⑂ diff</kbd> and <kbd>✎ edit</kbd> in the same view — correct a plan in place instead of describing the correction in chat.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     6 · PREVIEW — the agent's dev server, embedded
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="preview">
+  <div class="rail">
+    <div class="pip s-need" onclick="go('input')">WU</div>
+    <div class="pip s-live sel">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add" onclick="go('spawn')">+</div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead">
+      <span class="crumb">acme-api<i>/</i><b>preview</b></span>
+      <div style="flex:1;display:flex;align-items:center;gap:8px;max-width:440px">
+        <button class="btn ghost">↺</button>
+        <div style="flex:1;font-family:var(--mono);font-size:11.5px;background:var(--surf);
+          border:1px solid var(--line2);border-radius:5px;padding:4px 10px;color:var(--ink2)">
+          <span style="color:var(--live)">◉</span> localhost:3000/settings/security</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn ghost">▯ 390</button>
+        <button class="btn ghost">▭ 768</button>
+        <button class="btn ghost" style="color:var(--ink);border-color:var(--line2);background:var(--surf3)">▬ full</button>
+        <button class="btn ghost">↗ real browser</button>
+      </div>
+    </div>
+
+    <div class="panebody" style="padding:22px;display:grid;place-items:start center;background:#0a0a09">
+      <!-- fake rendered app -->
+      <div style="width:100%;max-width:700px;border:1px solid var(--line2);border-radius:8px;
+        background:#faf8f4;color:#2a2724;overflow:hidden;box-shadow:0 26px 70px rgba(0,0,0,.6)">
+        <div style="padding:13px 20px;border-bottom:1px solid #e6e1d8;display:flex;align-items:center;gap:10px">
+          <div style="width:20px;height:20px;border-radius:5px;background:#2a2724"></div>
+          <b style="font-size:13px;letter-spacing:-.01em">Acme</b>
+          <span style="margin-left:auto;font-size:11px;color:#8b857b">dtavares@acme.io</span>
+        </div>
+        <div style="padding:22px 20px">
+          <div style="font-family:var(--disp);font-size:8.5px;letter-spacing:.16em;color:#a09a8f;
+            text-transform:uppercase;margin-bottom:7px">Security</div>
+          <h2 style="font-size:19px;margin-bottom:5px;color:#1c1a18">Active sessions</h2>
+          <p style="font-size:12.5px;color:#6d675e;margin-bottom:17px">
+            Signing out revokes every refresh token in the session family.</p>
+          <div style="border:1px solid #e6e1d8;border-radius:7px;overflow:hidden">
+            <div style="padding:11px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid #eee9e0">
+              <div style="width:7px;height:7px;border-radius:50%;background:#3a9e6f"></div>
+              <div><div style="font-size:12.5px;font-weight:600">MacBook Pro · Safari</div>
+                <div style="font-size:11px;color:#8b857b;font-family:var(--mono)">this device · rotated 40s ago</div></div>
+              <span style="margin-left:auto;font-size:11px;color:#a09a8f">current</span>
+            </div>
+            <div style="padding:11px 14px;display:flex;align-items:center;gap:11px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#c9c3b8"></div>
+              <div><div style="font-size:12.5px;font-weight:600">iPhone · Acme iOS 4.2</div>
+                <div style="font-size:11px;color:#8b857b;font-family:var(--mono)">2 days ago · 14 rotations</div></div>
+              <button style="margin-left:auto;font:inherit;font-size:11px;background:#fff;border:1px solid #d9d3c8;
+                border-radius:5px;padding:4px 10px;color:#2a2724;cursor:pointer">Revoke</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dock" style="height:168px">
+      <div class="docktabs">
+        <button class="on">▸ console <span class="tag t-fail" style="margin-left:5px">2</span></button>
+        <button>⇅ network</button>
+        <button>▤ server log</button>
+        <div class="r">
+          <span style="font-family:var(--mono);font-size:10.5px;color:var(--ink3)">
+            vite · pid 48210 · owned by <span style="color:var(--ink2)">builder</span></span>
+          <button class="btn ghost">⏹ stop server</button>
+          <button class="btn" style="color:var(--fail);border-color:rgba(255,95,72,.45)">⇪ send errors to builder</button>
+        </div>
+      </div>
+      <div class="dockbody" style="font-family:var(--mono);font-size:11px;line-height:1.75;padding:10px 15px">
+        <div style="color:var(--ink3)">14:22:08 <span style="color:var(--live)">[vite]</span> hmr update /src/auth/session.ts</div>
+        <div style="color:var(--fail)">14:22:09 ⨯ Warning: prop `rotatedAt` is undefined in &lt;SessionRow&gt;</div>
+        <div style="color:var(--fail)">14:22:09 ⨯ GET /api/sessions 500 — token_family_id does not exist</div>
+        <div style="color:var(--ink3)">14:22:11 <span style="color:var(--live)">[vite]</span> page reload</div>
+        <div style="color:var(--need)">14:22:12 ↪ 2 errors queued — <span style="color:var(--ink2)">builder was notified automatically</span></div>
+      </div>
+    </div>
+
+    <div class="anno" style="left:120px;top:54px;max-width:230px"><b>1</b><p>The dev server the agent started, embedded here. You see the change land without alt-tabbing or guessing the port.</p></div>
+    <div class="anno" style="right:34px;top:108px;max-width:205px"><b>2</b><p>Device widths for responsive checks, and <kbd>↗ real browser</kbd> when you need devtools.</p></div>
+    <div class="anno" style="right:34px;bottom:130px;max-width:250px"><b>3</b><p>Console errors get piped back to the agent — one click turns "it's broken" into a fix, no copy-paste.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     7 · SPAWN — how work starts
+     ═══════════════════════════════════════════════════════ -->
+<section class="screen" id="spawn">
+  <div class="rail">
+    <div class="pip s-need" onclick="go('input')">WU</div>
+    <div class="pip s-live">AA</div>
+    <div class="pip s-fail">PS</div>
+    <div class="pip s-live">DS</div>
+    <div class="pip s-queue">IT</div>
+    <div class="pip s-idle">MA</div>
+    <div class="sep"></div><div class="pip add sel">+</div>
+  </div>
+
+  <div class="pane">
+    <div class="panehead"><span class="crumb"><b>New work</b></span>
+      <span class="lab" style="margin-left:6px">⌘N from anywhere</span></div>
+
+    <div class="panebody" style="padding:28px 34px">
+      <div style="max-width:730px">
+
+        <span class="lab">1 · what needs doing</span>
+        <div class="cbox" style="margin:9px 0 22px">
+          <div class="ph" style="font-size:13px;color:var(--ink)">
+            Rotate refresh tokens on every exchange and revoke the ancestor chain on reuse. Tests first.<span style="color:var(--live)">▊</span></div>
+          <div class="crow"><span class="pill">📎 attach file</span><span class="pill">⑂ from Jira</span>
+            <span class="pill">▤ from DESIGN.md</span></div>
+        </div>
+
+        <span class="lab">2 · where</span>
+        <div style="display:flex;gap:9px;margin:9px 0 22px;flex-wrap:wrap">
+          <div style="border:1px solid var(--live);background:rgba(61,219,184,.08);border-radius:7px;
+            padding:9px 13px;flex:1;min-width:200px">
+            <div style="font-size:12.5px;color:var(--ink);font-weight:500;margin-bottom:2px">acme-api</div>
+            <div style="font-family:var(--mono);font-size:10.5px;color:var(--ink3)">~/src/acme-api</div>
+          </div>
+          <div style="border:1px dashed var(--line2);border-radius:7px;padding:9px 13px;flex:1;min-width:200px;
+            color:var(--ink3);font-size:12px;display:grid;place-items:center">+ different project…</div>
+        </div>
+
+        <span class="lab">3 · isolation</span>
+        <div style="display:flex;gap:8px;margin:9px 0 22px;flex-wrap:wrap">
+          <span class="pill on">⑂ new worktree <b style="font-family:var(--mono);opacity:.7">.wt/auth-refresh</b></span>
+          <span class="pill">⑂ branch in place</span>
+          <span class="pill">⚠ this folder, as-is <b style="font-family:var(--mono);opacity:.7">no branch, no undo</b></span>
+        </div>
+
+        <span class="lab">4 · who works on it</span>
+        <div style="display:flex;gap:8px;margin:9px 0 14px;flex-wrap:wrap">
+          <span class="pill on">⚙ full build pipeline</span>
+          <span class="pill">✱ bug fix</span>
+          <span class="pill">◉ review only</span>
+          <span class="pill">✎ custom…</span>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;background:var(--surf);overflow:hidden;margin-bottom:22px">
+          <div style="padding:7px 13px;border-bottom:1px solid var(--line);background:var(--surf2)"
+            ><span class="lab">Will launch 4 agents</span></div>
+          <div style="padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+            <div class="arow"><i class="dot d-queue"></i><span class="nm">builder</span>
+              <span class="act">implements · <b>opus-5</b></span><span class="el">starts now</span></div>
+            <div class="arow"><i class="dot d-queue"></i><span class="nm">validator</span>
+              <span class="act">writes tests first, then verifies · <b>sonnet-5</b></span><span class="el">parallel</span></div>
+            <div class="arow"><i class="dot d-queue"></i><span class="nm">reviewer</span>
+              <span class="act">spec + quality review · <b>opus-5</b></span><span class="el">after both</span></div>
+            <div class="arow"><i class="dot d-queue"></i><span class="nm">scribe</span>
+              <span class="act">updates PLAN.md and ADR · <b>sonnet-5</b></span><span class="el">at the end</span></div>
+          </div>
+        </div>
+
+        <span class="lab">5 · how much rope</span>
+        <div style="display:flex;gap:8px;margin:9px 0 24px;flex-wrap:wrap">
+          <span class="pill on">▸ auto-accept edits in worktree</span>
+          <span class="pill warn on">⚠ ask before bash</span>
+          <span class="pill warn on">⚠ ask before push</span>
+          <span class="pill">🌐 allow network</span>
+          <span class="pill">⏱ stop after $25</span>
+        </div>
+
+        <div style="display:flex;gap:9px;align-items:center;padding-top:18px;border-top:1px solid var(--line)">
+          <button class="btn amber" style="font-size:12.5px;padding:7px 15px">launch 4 agents <kbd>⌘⏎</kbd></button>
+          <button class="btn ghost">◫ plan first, don't write code</button>
+          <span style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink3)">
+            1 slot free · infra-tf will stay queued</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="anno" style="right:40px;top:96px;max-width:245px"><b>1</b><p>One prompt, then four decisions: which project, how isolated, which agents, how much autonomy. Presets mean it's usually two clicks.</p></div>
+    <div class="anno" style="right:40px;top:290px;max-width:235px"><b>2</b><p>You see the agent plan <em>before</em> launching — including what runs in parallel and what waits.</p></div>
+    <div class="anno" style="left:40px;bottom:110px;max-width:250px"><b>3</b><p>Autonomy is set here, per job. Tight rope = more amber interrupts. Loose rope = it runs for an hour untouched.</p></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="statusbar">
+  <span><kbd>1</kbd>–<kbd>7</kbd> screens</span>
+  <span><kbd>a</kbd> annotations</span>
+  <span><kbd>⏎</kbd> answer next blocked agent</span>
+  <span><kbd>⌘K</kbd> jump to project</span>
+  <span class="r">
+    <span>7/7 agent slots</span>
+    <span>$4.18 today</span>
+    <span style="color:var(--live)">◉ daemon :7777</span>
+  </span>
+</footer>
+
+<script>
+function go(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+  document.querySelectorAll('nav.screens button').forEach(b=>b.classList.toggle('on',b.dataset.s===id));
+  history.replaceState(null,'','#'+id);
+}
+document.querySelectorAll('nav.screens button').forEach(b=>b.onclick=()=>go(b.dataset.s));
+const order=['fleet','project','agent','input','files','preview','spawn'];
+addEventListener('keydown',e=>{
+  if(e.key==='a')document.body.classList.toggle('anno');
+  const n=parseInt(e.key,10); if(n>=1&&n<=7)go(order[n-1]);
+});
+// stagger the sparkline animations so they don't march in lockstep
+document.querySelectorAll('.spark i').forEach(i=>{
+  i.style.animationDelay=(Math.random()*2.4).toFixed(2)+'s';
+});
+go(location.hash.slice(1)||'fleet');
+</script>
+</body>
+</html>

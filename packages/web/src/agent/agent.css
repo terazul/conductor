@@ -1,0 +1,1421 @@
+/**
+ * Screen 3 — the transcript, composer and inspector.  TRACK B.
+ *
+ * The typographic job here is scanning, not reading: a user turn has to be
+ * findable in a 400-line transcript at a glance, and a tool call has to be
+ * skippable. Hence the pale left bar on your turns and the single-line tool
+ * headers.
+ *
+ * Every colour resolves to a token. --need appears only where a human is
+ * genuinely required: the blocked banner, a live ask, and the `held`/`parked`
+ * note. Not on the composer's pills, not on the send button, and not on your own
+ * turn's label — all three are lit while nothing is wrong.
+ */
+
+/* ── transcript ────────────────────────────────────────────────────────────── */
+
+/*
+ * No width cap on the transcript itself (F18): code blocks, diffs and tool detail are
+ * what want the room when the inspector is hidden. Prose is capped by the line instead —
+ * see the `80ch` rule under agent markdown.
+ */
+.ag-trans {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.ag-none {
+  color: var(--ink3);
+  font-size: var(--fs-base);
+}
+
+.ag-msg {
+  display: flex;
+  gap: 11px;
+}
+
+.ag-who {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  width: 52px;
+  flex: none;
+  padding-top: 3px;
+  text-align: right;
+  color: var(--ink3);
+}
+
+.ag-msg.is-you .ag-who {
+  color: var(--ink);
+}
+
+.ag-body {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-base);
+  line-height: 1.62;
+  color: var(--ink2);
+}
+
+.ag-body > p + p,
+.ag-body > p + .ag-tool,
+.ag-body > .ag-tool + p {
+  margin-top: 8px;
+}
+
+/*
+ * Your turns. The pale bar is the whole point: it lets you scan a long
+ * transcript for what you actually said without reading the replies.
+ */
+.ag-msg.is-you .ag-body {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--ink3) 80%, var(--line));
+  padding: 7px 12px;
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+  max-width: 80ch;
+}
+
+/* Inline code sits in a well rather than taking a colour of its own — there is
+ * no status being reported, so there is no status colour to borrow. */
+.ag-body code {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  background: var(--well);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.ag-cursor::after {
+  content: "▊";
+  color: var(--live);
+  animation: conductor-blink 1.05s steps(2) infinite;
+  margin-left: 2px;
+}
+
+/* The armed terminate question, inline in the header rather than in a modal. */
+.ag-confirm-q {
+  font-size: var(--fs-md);
+  color: var(--ink2);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.ag-confirm-q b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* The scoped exceptions beside a policy word — dimmer, because they qualify it. */
+.ag-policy-x {
+  font-style: normal;
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+}
+
+/* ── agent markdown ────────────────────────────────────────────────────────── */
+
+/*
+ * Agents write markdown, and it used to render inside a bare <p> where CSS collapsed
+ * every newline — a report with headings and fenced code arrived as one paragraph. The
+ * renderer (markdown.tsx) now emits real elements; these are their styles.
+ *
+ * Restrained on purpose. This is a transcript, not a document viewer: headings step down
+ * in weight and spacing rather than size, so a report with eight `##` sections does not
+ * become eight billboards.
+ */
+.ag-md > * + * {
+  margin-top: 8px;
+}
+
+/*
+ * Prose reads best around 80 characters a line, however wide the pane is. Code blocks
+ * are not capped: they are the part a wide pane is for (F18).
+ */
+.ag-md p,
+.ag-md li,
+.ag-md blockquote,
+.ag-md h1,
+.ag-md h2,
+.ag-md h3,
+.ag-md h4,
+.ag-md h5,
+.ag-md h6 {
+  max-width: 80ch;
+}
+
+.ag-md h1,
+.ag-md h2,
+.ag-md h3,
+.ag-md h4,
+.ag-md h5,
+.ag-md h6 {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.ag-md h1,
+.ag-md h2 {
+  font-size: var(--fs-lg);
+}
+
+/* A heading that follows prose needs air above it more than below. */
+.ag-md * + h1,
+.ag-md * + h2,
+.ag-md * + h3 {
+  margin-top: 15px;
+}
+
+.ag-md ul,
+.ag-md ol {
+  padding-left: 20px;
+}
+
+.ag-md li {
+  margin: 2px 0;
+}
+
+.ag-md li > ul {
+  margin-top: 2px;
+}
+
+.ag-md blockquote {
+  border-left: 2px solid var(--line2);
+  padding: 2px 0 2px 11px;
+  color: var(--ink3);
+}
+
+.ag-md pre {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 11px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--ink2);
+}
+
+/* Inline code is already styled by .ag-body code; inside a block it must not
+   double up on the well or the padding. */
+.ag-md pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+.ag-md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 13px 0;
+}
+
+.ag-md a {
+  color: var(--live);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* A file the agent named, opening in Files (F16). The code well stays; the ink says link. */
+.ag-md a.ag-file code {
+  color: var(--live);
+}
+
+.ag-md strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Tables, task boxes and quotes that hold blocks (Amendment 62). */
+.md-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.ag-md table {
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.ag-md th,
+.ag-md td {
+  border: 1px solid var(--line);
+  padding: 4px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ag-md th {
+  background: var(--surf);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ag-md tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surf) 45%, transparent);
+}
+
+.ag-md li.md-task {
+  list-style: none;
+  margin-left: -18px;
+}
+
+.ag-md li.md-task > input {
+  margin: 0 7px 0 0;
+  vertical-align: -1px;
+  accent-color: var(--done);
+}
+
+.ag-md li.md-task.is-done {
+  color: var(--ink3);
+}
+
+.ag-md li > p,
+.ag-md li > pre,
+.ag-md li > ol,
+.ag-md li > ul,
+.ag-md blockquote > * + * {
+  margin-top: 6px;
+}
+
+/* ── folding a reply (Amendment 33) ────────────────────────────────────────── */
+
+/*
+ * The role label is the reply's fold control, with its chevron under the name: the
+ * same `⌃`/`⌄` a tool row has, in the one place every reply already carries.
+ */
+.ag-who-fold {
+  background: none;
+  border: 0;
+  padding: 3px 0 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  transition: color 0.14s;
+}
+
+.ag-who-fold:hover,
+.ag-who-fold:focus-visible {
+  color: var(--ink2);
+}
+
+.ag-fold-ch {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+  color: var(--ink3);
+  opacity: 0.6;
+}
+
+.ag-who-fold:hover .ag-fold-ch,
+.ag-msg.is-folded .ag-fold-ch {
+  opacity: 1;
+}
+
+/* One line, like a tool row: the reply's first line, and what else it carried. */
+.ag-folded {
+  font: inherit;
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  color: var(--ink2);
+  cursor: pointer;
+}
+
+.ag-folded-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-folded-n {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.ag-folded:hover .ag-folded-line {
+  color: var(--ink);
+}
+
+/* ── what you last asked ───────────────────────────────────────────────────── */
+
+/*
+ * Sticky at the top of the scroller. --bg2 rather than transparent because it scrolls
+ * over live text and has to stay legible doing it.
+ *
+ * `top` is minus `.fl-panebody`'s padding: sticky offsets start inside the scroller's
+ * padding, so at 0 the bar stuck 16px down and the transcript showed through above it.
+ */
+.ag-lastask {
+  position: sticky;
+  top: -16px;
+  z-index: 3;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg2);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.ag-lastask:hover {
+  border-color: var(--line2);
+}
+
+.ag-lastask .ui-lab {
+  flex: none;
+}
+
+.ag-lastask-t {
+  font-size: var(--fs-md);
+  color: var(--ink2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── new below you ─────────────────────────────────────────────────────────── */
+
+/*
+ * Sticky to the bottom of the scroller, the last-ask bar's mirror. It only exists while
+ * there is something below you, so the row it takes is never empty space.
+ */
+.ag-latest {
+  position: sticky;
+  bottom: 10px;
+  z-index: 3;
+  display: block;
+  margin: 11px auto 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+  background: var(--bg2);
+  color: var(--live);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.ag-latest:hover,
+.ag-latest:focus-visible {
+  border-color: var(--live);
+}
+
+/* ── interaction modes ─────────────────────────────────────────────────────── */
+
+.ag-modes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.ag-modes .ui-lab {
+  margin-right: 3px;
+}
+
+.ag-mode {
+  font: inherit;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 2px 9px;
+  color: var(--ink3);
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.14s;
+}
+
+.ag-mode:hover:not(:disabled) {
+  color: var(--ink2);
+  background: var(--surf3);
+}
+
+/*
+ * The selected mode. --live, not amber: this is the agent's operating state, and amber
+ * means "a human is required right now" and nothing else (CONTRACT §5.1).
+ */
+.ag-mode.is-on {
+  color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 55%, transparent);
+  background: color-mix(in srgb, var(--live) 13%, transparent);
+}
+
+.ag-mode.is-danger {
+  color: color-mix(in srgb, var(--fail) 78%, var(--ink3));
+  border-color: color-mix(in srgb, var(--fail) 32%, transparent);
+}
+
+.ag-mode.is-danger.is-on {
+  color: var(--fail);
+  border-color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 13%, transparent);
+}
+
+.ag-mode:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ag-modesays {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.45;
+}
+
+.ag-modesays.is-danger {
+  color: var(--fail);
+}
+
+.ag-modesays-when {
+  color: var(--ink3);
+}
+
+/* ── budget ────────────────────────────────────────────────────────────────── */
+
+/* Sits at the end of the model row, and wraps under it when the panel is narrow. */
+.ag-budget {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ag-budget-box {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+.ag-budget-box:focus-within {
+  border-color: var(--live);
+}
+
+/*
+ * At or over the cap. Amber: the agent will not run again until a person raises it —
+ * the one case in this panel where a human is genuinely required.
+ */
+.ag-budget-box.is-over {
+  border-color: var(--need);
+}
+
+.ag-budget-in {
+  font: inherit;
+  width: 5.5ch;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  padding: 0 0 0 1px;
+}
+
+.ag-budget-in::placeholder {
+  color: var(--ink3);
+}
+
+.ag-budget-spent {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.ag-budget-spent.is-over {
+  color: var(--need);
+}
+
+/* ── tool call ─────────────────────────────────────────────────────────────── */
+
+
+.ag-tool {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+  margin: 8px 0;
+  background: var(--well);
+}
+
+.ag-tool-h {
+  position: relative;
+  width: 100%;
+  padding: 5px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surf2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  cursor: pointer;
+}
+
+.ag-tool-h:hover {
+  background: var(--surf3);
+}
+
+/*
+ * The toggle is only the tool's name, but its hit area is stretched over the whole row,
+ * so the row opens wherever you click it. The file name is a link and sits above that
+ * (F16) — a link can't live inside a button.
+ */
+.ag-tool-tog {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+  display: flex;
+}
+
+.ag-tool-tog::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ag-tool-tog:focus-visible {
+  outline: none;
+}
+
+.ag-tool-tog:focus-visible::after {
+  outline: 1px solid var(--live);
+  outline-offset: -1px;
+}
+
+a.ag-tool-subj {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line2);
+  text-underline-offset: 2px;
+}
+
+a.ag-tool-subj:hover,
+a.ag-tool-subj:focus-visible {
+  color: var(--live);
+  text-decoration-color: currentColor;
+}
+
+.ag-tool-h b {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--live);
+  flex: none;
+}
+
+.ag-tool-subj {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ag-tool-nums,
+.ag-tool-new,
+.ag-tool-ok,
+.ag-tool-bad,
+.ag-tool-running {
+  flex: none;
+  margin-left: auto;
+}
+
+.ag-tool-nums + .ag-tool-new,
+.ag-tool-nums + .ag-tool-ok {
+  margin-left: 0;
+}
+
+.ag-tool-new {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+
+.ag-tool-ok {
+  color: var(--done);
+}
+
+.ag-tool-bad {
+  color: var(--fail);
+}
+
+.ag-tool-running {
+  color: var(--live);
+  animation: conductor-pulse var(--pulse-slow) ease-in-out infinite;
+}
+
+.ag-tool-ch {
+  color: var(--ink3);
+  flex: none;
+  width: 9px;
+  text-align: right;
+}
+
+.ag-tool-nums ~ .ag-tool-ch,
+.ag-tool-ok ~ .ag-tool-ch,
+.ag-tool-bad ~ .ag-tool-ch,
+.ag-tool-new ~ .ag-tool-ch,
+.ag-tool-running ~ .ag-tool-ch {
+  margin-left: 0;
+}
+
+/* ── inline diff ───────────────────────────────────────────────────────────── */
+
+.ag-diff {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1.66;
+  padding: 8px 11px;
+  overflow-x: auto;
+  color: var(--ink3);
+  white-space: pre;
+}
+
+.ag-diff .is-add {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 7%, transparent);
+  display: block;
+}
+
+.ag-diff .is-del {
+  color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 7%, transparent);
+  display: block;
+}
+
+/* ── an ask, live or answered ──────────────────────────────────────────────── */
+
+.ag-ask {
+  border: 1px solid color-mix(in srgb, var(--need) 45%, transparent);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--need) 9%, transparent), var(--surf) 60%);
+}
+
+/* Answered: it is history now, so it stops shouting. */
+.ag-ask.is-answered {
+  border-color: var(--line);
+  background: var(--well);
+}
+
+.ag-ask-h {
+  padding: 5px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--need) 25%, transparent);
+  background: color-mix(in srgb, var(--need) 8%, transparent);
+}
+
+.ag-ask.is-answered .ag-ask-h {
+  border-bottom-color: var(--line);
+  background: var(--surf2);
+}
+
+.ag-ask-h .ui-lab {
+  color: var(--need);
+}
+
+.ag-ask.is-answered .ag-ask-h .ui-lab {
+  color: var(--ink3);
+}
+
+.ag-ask-mode {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.ag-ask-body {
+  padding: 9px 12px;
+  font-size: var(--fs-base);
+  color: var(--ink);
+}
+
+.ag-ask-answer,
+.ag-ask-waiting {
+  padding: 0 12px 9px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.ag-ask-answer {
+  color: var(--done);
+}
+
+.ag-ask-waiting {
+  color: var(--need);
+}
+
+/* ── status note ───────────────────────────────────────────────────────────── */
+
+.ag-note {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 4px 0;
+  color: var(--ink3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ag-note::before {
+  content: "";
+  height: 1px;
+  width: 18px;
+  background: currentColor;
+  opacity: 0.4;
+  flex: none;
+}
+
+.ag-note.t-need {
+  color: var(--need);
+}
+
+.ag-note.t-fail {
+  color: var(--fail);
+}
+
+.ag-note.t-done {
+  color: var(--done);
+}
+
+.ag-note.t-live {
+  color: var(--live);
+}
+
+/* ── blocked banner ────────────────────────────────────────────────────────── */
+
+.ag-blocked {
+  font: inherit;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 15px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--need) 30%, transparent);
+  background: color-mix(in srgb, var(--need) 10%, transparent);
+  cursor: pointer;
+}
+
+.ag-blocked:hover {
+  background: color-mix(in srgb, var(--need) 15%, transparent);
+}
+
+.ag-blocked .ui-lab {
+  color: var(--need);
+  flex: none;
+}
+
+.ag-blocked-act {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--need);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-blocked-act b {
+  color: var(--need);
+  font-weight: 600;
+}
+
+.ag-blocked-go {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--need);
+}
+
+/* ── crumb as a button ─────────────────────────────────────────────────────── */
+
+.ag-crumb {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+}
+
+.ag-crumb:hover b {
+  color: var(--live);
+}
+
+.ag-model {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+/* ── composer ──────────────────────────────────────────────────────────────── */
+
+.ag-composer {
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+  padding: 11px 15px;
+  flex: none;
+}
+
+.ag-cbox {
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--surf);
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ag-cbox:focus-within {
+  border-color: var(--live);
+}
+
+.ag-input {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  background: none;
+  border: 0;
+  outline: 0;
+  resize: none;
+  color: var(--ink);
+  width: 100%;
+}
+
+.ag-input::placeholder {
+  color: var(--ink3);
+}
+
+.ag-crow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.ag-crow-r {
+  margin-left: auto;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.ag-pill {
+  font: inherit;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--line2);
+  border-radius: 20px;
+  padding: 2px 9px;
+  color: var(--ink3);
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: 0.14s;
+}
+
+.ag-pill:hover:not(:disabled) {
+  color: var(--ink2);
+  border-color: color-mix(in srgb, var(--line2) 55%, var(--ink3));
+}
+
+.ag-pill:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ag-pill.is-on {
+  border-color: var(--live);
+  color: var(--live);
+  background: color-mix(in srgb, var(--live) 8%, transparent);
+}
+
+/*
+ * A guard pill that is armed. Deliberately NOT amber: it is on most of the time
+ * and while nothing is wrong, and amber has to keep meaning "you, now".
+ */
+.ag-pill.is-guard.is-on {
+  border-color: var(--ink3);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+/* ── notices (a 404 from an endpoint that is not built yet) ─────────────────── */
+
+.ag-notice {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  padding: 5px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.ag-notice.is-banner {
+  border-radius: 0;
+  border-width: 0 0 1px;
+  padding: 6px 15px;
+  flex: none;
+}
+
+.ag-notice.t-ok {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 35%, transparent);
+  background: color-mix(in srgb, var(--done) 8%, transparent);
+}
+
+.ag-notice.t-warn {
+  color: var(--ink2);
+  border-color: var(--line2);
+  background: var(--surf2);
+}
+
+.ag-notice.t-fail {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 35%, transparent);
+  background: color-mix(in srgb, var(--fail) 8%, transparent);
+}
+
+/* ── inspector ─────────────────────────────────────────────────────────────── */
+
+.ag-insp {
+  /* The Splitter beside it draws the edge, and sets the width inline (Amendment 34);
+     this is only what it has before that. */
+  width: 246px;
+  flex: none;
+  background: var(--bg2);
+  overflow-y: auto;
+}
+
+.ag-isec {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ag-isec > .ui-lab {
+  margin-bottom: 8px;
+  display: block;
+}
+
+.ag-isec-note {
+  font-size: var(--fs-md);
+  color: var(--ink3);
+  margin-top: 7px;
+  line-height: 1.5;
+}
+
+.ag-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 7px 0 5px;
+}
+
+.ag-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--live), color-mix(in srgb, var(--live) 65%, var(--bg)));
+  transition: width 0.4s;
+}
+
+.ag-bar.is-over i {
+  background: linear-gradient(90deg, var(--fail), color-mix(in srgb, var(--fail) 70%, var(--bg)));
+}
+
+.ag-todo {
+  list-style: none;
+  font-size: var(--fs-base);
+  color: var(--ink2);
+}
+
+.ag-todo li {
+  padding-left: 20px;
+  position: relative;
+  margin-bottom: 4px;
+  line-height: 1.45;
+}
+
+.ag-todo li::before {
+  content: "◻";
+  position: absolute;
+  left: 2px;
+  color: var(--ink3);
+  font-size: var(--fs-md);
+}
+
+.ag-todo li.is-done {
+  color: var(--ink3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line2);
+}
+
+.ag-todo li.is-done::before {
+  content: "◼";
+  color: var(--done);
+  text-decoration: none;
+}
+
+.ag-todo li.is-active {
+  color: var(--ink);
+}
+
+.ag-todo li.is-active::before {
+  content: "▸";
+  color: var(--live);
+}
+
+.ag-files {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.ag-files > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1.5px 0;
+}
+
+.ag-files-p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.ag-files-p {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.ag-files-p:hover,
+a.ag-files-p:focus-visible {
+  color: var(--live);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ag-files-n {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-sm);
+}
+
+.ag-policy.is-denied {
+  color: var(--fail);
+}
+
+.ag-policy.is-asks {
+  color: var(--ink);
+}
+
+.ag-policy.is-allowed {
+  color: var(--live);
+}
+
+/* ── resizable composer (Amendment 25) ─────────────────────────────────────── */
+
+/* The drag handle is `shell/Splitter.tsx`, styled in `shell/ui.css` (F17). */
+
+/*
+ * The height comes from the inline style the drag sets; this only has to stop the
+ * composer from being squeezed by flex and let it scroll when the guardrail rows
+ * need more room than the height allows.
+ */
+.ag-composer-wrap {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+/*
+ * The height has to reach the textarea. Stretching only the composer left it a block
+ * box: the box inside kept its natural height, the textarea kept `rows={2}`, and every
+ * pixel of a drag pooled as blank space under the last row. So each level down is a
+ * flex column, the textarea is the one thing that grows, and every row below it keeps
+ * its natural height. Dragging down gives lines back until two are left; past that
+ * the flex minimums hold and the wrap above scrolls.
+ */
+.ag-composer-wrap > .ag-composer {
+  flex: 1;
+  border-top: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.ag-composer-wrap .ag-cbox {
+  flex: 1;
+}
+
+.ag-composer-wrap .ag-input {
+  flex: 1;
+  min-height: 3em; /* two lines at line-height 1.5 */
+}
+
+.ag-composer-wrap .ag-cbox > :not(.ag-input) {
+  flex: none;
+}
+
+/* ── one tab per agent in the project (Amendment 49) ───────────────────────── */
+
+.ag-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex: none;
+}
+
+.ag-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+}
+
+.ag-tab:hover {
+  color: var(--ink);
+  background: var(--surf);
+}
+
+.ag-tab.is-on {
+  color: var(--ink);
+  background: var(--surf2);
+  border-color: var(--line);
+}
+
+/* Something in here waits on you: amber, whether or not it's the tab in front. */
+.ag-tab.is-need {
+  color: var(--need);
+  background: color-mix(in srgb, var(--need) 10%, transparent);
+}
+
+.ag-tab.is-newjob {
+  margin-left: 10px;
+}
+
+.ag-tab-need {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+/* ── the terminal (Amendment 58) ───────────────────────────────────────────── */
+
+.ag-bottom-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.ag-bottom-tab {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+}
+
+.ag-bottom-tab[aria-selected='true'] {
+  color: var(--ink);
+  background: var(--surf2);
+  border-color: var(--line);
+}
+
+.ag-term {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--well);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.ag-term-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink3);
+  font-family: var(--sans);
+}
+
+.ag-term-note code {
+  font-family: var(--mono);
+  color: var(--ink2);
+}
+
+.ag-term-out {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+}
+
+.ag-term-run + .ag-term-run {
+  margin-top: 10px;
+}
+
+.ag-term-cmd {
+  color: var(--ink);
+}
+
+.ag-term-prompt {
+  color: var(--live);
+}
+
+.ag-term-out pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink2);
+  font: inherit;
+}
+
+.ag-term-out pre.is-err {
+  color: var(--need);
+}
+
+.ag-term-end {
+  color: var(--ink3);
+  font-size: var(--fs-2xs);
+}
+
+.ag-term-end.is-fail {
+  color: var(--fail);
+}
+
+.ag-term-in {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* The prompt gives way; the input never does (Amendment 61). */
+.ag-term-in .ag-term-prompt {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-term-in input {
+  flex: 1 1 12em;
+  min-width: 8em;
+  font: inherit;
+  background: none;
+  border: none;
+  color: var(--ink);
+}
+
+.ag-term-in input:focus {
+  outline: none;
+}
+
+.ag-term-err {
+  padding: 4px 10px 6px;
+  color: var(--fail);
+  font-family: var(--sans);
+}
+
+/*
+ * A model id on an engine that isn't Claude (Amendment 80): typed or picked from what
+ * the engine lists, so a text field rather than the Claude picker.
+ */
+.ag-model-in {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  width: 32ch;
+  min-width: 0;
+  background: var(--surf);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+
+.ag-model-in:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
