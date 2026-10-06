@@ -43,6 +43,7 @@ import {
   useCommand,
   type CommandHandle,
 } from './endpoints.js';
+import { rewirePreview } from '../spawn/stack.js';
 import '../fleet/fleet.css';
 import './agent.css';
 
@@ -106,17 +107,49 @@ const ENDED: ReadonlySet<string> = new Set(['done', 'failed', 'stopped']);
  *
  * What terminate does NOT do, and the confirm says so: delete anything. The transcript,
  * the spend and every file the agent wrote all survive.
+ *
+ *   remove from stack — terminate and remove in one (Amendment 89), offered in terminate's
+ *                confirm. The banner under the header says who waits for what afterwards
+ *                (`rewirePreview`): "scribe will wait for architect instead." So does an
+ *                ended agent's remove, which is the same call.
  */
-function StopControls({ agent, cmd }: { agent: Agent; cmd: CommandHandle }) {
+function StopControls({
+  agent,
+  cmd,
+  onAsk,
+}: {
+  agent: Agent;
+  cmd: CommandHandle;
+  /** What removing it does to the rest of its job, for the banner under the header; null when not asked. */
+  onAsk: (consequence: string | null) => void;
+}) {
   const [armed, setArmed] = useState(false);
+  const job = useAgents(agent.jobId);
 
   const ended = ENDED.has(agent.status);
   const sleep = sleepControl(agent.status);
+  /*
+   * Removing is also removing from the stack (Amendments 88, 89): who moves is said before
+   * you press, in the banner under the header, since it can be longer than the header is wide.
+   */
+  const moves = rewirePreview(job, agent.id) || 'Nothing in its job waits for it.';
+  const consequence = !armed
+    ? null
+    : ended
+      ? moves
+      : `Or remove it from the stack: it stops, leaves its job and its transcript goes; your files stay. ${moves}`;
+  useEffect(() => {
+    onAsk(consequence);
+    return () => onAsk(null);
+  }, [consequence, onAsk]);
 
   if (armed) {
+    const question = ended
+      ? `Remove ${agent.role} from Conductor? Its transcript goes; your files do not.`
+      : `Terminate ${agent.role}? It stops for good — nothing on disk is touched.`;
     return (
       <>
-        <span className="ag-confirm-q">
+        <span className="ag-confirm-q" title={question}>
           {ended ? (
             <>
               Remove <b>{agent.role}</b> from Conductor? Its transcript goes; your files
@@ -144,6 +177,26 @@ function StopControls({ agent, cmd }: { agent: Agent; cmd: CommandHandle }) {
         >
           {cmd.busy ? 'working…' : ended ? '✕ remove' : '✕ terminate'}
         </button>
+        {/*
+         * Terminate and remove in one, while it is live or still waiting (Amendment 89): it
+         * leaves its job, and the agents waiting for it wait for what it waited for. Once it
+         * has ended, ✕ remove is the same call.
+         */}
+        {!ended && (
+          <button
+            type="button"
+            className="fl-btn is-danger"
+            disabled={cmd.busy}
+            title={consequence ?? undefined}
+            onClick={() =>
+              void cmd.run('Removing', () => removeAgent(agent.id)).then((ok) => {
+                if (ok) setArmed(false);
+              })
+            }
+          >
+            remove from stack
+          </button>
+        )}
         <button
           type="button"
           className="fl-btn is-ghost"
@@ -190,7 +243,7 @@ function StopControls({ agent, cmd }: { agent: Agent; cmd: CommandHandle }) {
         title={
           ended
             ? 'Remove this agent from Conductor — the transcript goes, your files stay'
-            : 'Stop this agent for good'
+            : 'Stop this agent for good, or remove it from its job'
         }
       >
         {ended ? '✕ remove' : '✕ terminate'}
@@ -282,6 +335,8 @@ export function AgentScreen() {
   const allAlerts = useAlerts();
   // Shared by interrupt, pause and terminate — see StopControls.
   const control = useCommand();
+  // What removing it would do to its job, while that confirm is armed (Amendment 89).
+  const [ask, setAsk] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const elapsedMs = useElapsedMs(
     agent ? startedMs(agent, events) : null,
@@ -475,7 +530,11 @@ export function AgentScreen() {
                 </>
               )}
             </button>
-            {replies.length > 0 && (
+            {/*
+             * While terminate or remove is armed, the header is the decision: its confirm
+             * needs the room, and these can wait (Amendment 89).
+             */}
+            {ask === null && replies.length > 0 && (
               <button
                 type="button"
                 className="fl-btn is-ghost"
@@ -489,21 +548,26 @@ export function AgentScreen() {
                 {anyOpen ? '⌃ fold all' : '⌄ unfold all'}
               </button>
             )}
-            <button type="button" className="fl-btn is-ghost" onClick={exportTranscript}>
-              ⤓ export
-            </button>
-            <button
-              type="button"
-              className="fl-btn is-danger"
-              disabled={control.busy || ENDED.has(agent.status) || agent.status === 'paused'}
-              onClick={() => void control.run('Interrupting', () => interruptAgent(agent.id))}
-            >
-              ⎋ {control.busy ? 'working…' : 'interrupt'}
-            </button>
-            <StopControls agent={agent} cmd={control} />
+            {ask === null && (
+              <>
+                <button type="button" className="fl-btn is-ghost" onClick={exportTranscript}>
+                  ⤓ export
+                </button>
+                <button
+                  type="button"
+                  className="fl-btn is-danger"
+                  disabled={control.busy || ENDED.has(agent.status) || agent.status === 'paused'}
+                  onClick={() => void control.run('Interrupting', () => interruptAgent(agent.id))}
+                >
+                  ⎋ {control.busy ? 'working…' : 'interrupt'}
+                </button>
+              </>
+            )}
+            <StopControls agent={agent} cmd={control} onAsk={setAsk} />
           </div>
         </div>
 
+        {ask && <div className="ag-notice is-banner t-warn" role="status">{ask}</div>}
         {control.notice && (
           <div className={`ag-notice is-banner t-${control.notice.tone}`} onClick={control.dismiss}>
             {control.notice.text}

@@ -5,6 +5,8 @@
  * Models aren't set here. Each row of the plan preview below already has its own model
  * picker (Amendment 41), and a custom setup is shown there like any preset.
  *
+ * Each row is a `RoleRow`, the same one a job's "+ agent" uses (Amendment 89).
+ *
  * Each row can pick a persona (Amendment 68). Picking one names the row after it, unless
  * the row was already named something of its own, and its brief shows as the row's
  * placeholder: typing one overrides it for this launch. A persona's model reaches the row's
@@ -13,10 +15,9 @@
 
 import { useState } from 'react';
 import type { AgentRole } from '@conductor/shared';
-import { KNOWN_ROLES, customProblems, nextRole, removeRole, renameRole, roleFromName, rowPersona, type CustomRole } from './custom.js';
+import { KNOWN_ROLES, customProblems, nextRole, removeRole, renameRole, roleFromName, rowPersona, untouchedRole, type CustomRole } from './custom.js';
 import { personaFor, type Persona } from './personas.js';
-
-const BRIEF_HINT = 'What this agent does, on top of the prompt above. Optional.';
+import { RoleRow } from './RoleRow.js';
 
 export function CustomSetup({
   roles,
@@ -49,8 +50,7 @@ export function CustomSetup({
     const r = roles[i]!;
     const was = rowPersona(r, personas);
     const next = id ? personaFor(personas, id) : undefined;
-    const untouched =
-      r.role === '' || (was !== undefined && r.role === roleFromName(was.name)) || personas.some((p) => roleFromName(p.name) === r.role);
+    const untouched = untouchedRole(r.role, was, personas);
     const renamed = next && untouched ? renameRole(roles, i, roleFromName(next.name)) : roles;
     onChange(
       renamed.map((x, j) => {
@@ -74,73 +74,26 @@ export function CustomSetup({
           <option key={r} value={r} />
         ))}
       </datalist>
-      {roles.map((r, i) => {
-        const p = r.persona ? personaFor(personas, r.persona) : undefined;
-        return (
-        <div className="sp-crow" key={i}>
-          <div className="sp-crow-head">
-            <input
-              className="sp-input sp-crole"
-              value={r.role}
-              list="sp-known-roles"
-              spellCheck={false}
-              aria-label={`Agent ${i + 1}'s role`}
-              onChange={(e) => onChange(renameRole(roles, i, e.target.value.trim().toLowerCase()))}
-            />
-            <select
-              className="ui-select sp-cpersona"
-              // What applies, not only what was picked: a row named developer runs as developer.
-              value={rowPersona(r, personas)?.id ?? ''}
-              aria-label={`Agent ${i + 1}'s persona`}
-              title="What this agent is: its brief, system prompt, model, tool rules and skills. Settings → Personas edits them."
-              onChange={(e) => pickPersona(i, e.target.value)}
-            >
-              <option value="">no persona</option>
-              {personas.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.name}
-                </option>
-              ))}
-              {/* Deleted since the setup was saved: said so, rather than shown as none. */}
-              {r.persona && !p && <option value={r.persona}>{r.persona} · deleted</option>}
-            </select>
-            {i > 0 && (
-              <span className="sp-cwaits">
-                waits for
-                {roles.slice(0, i).map((above) => (
-                  <label key={above.role} className="sp-cwait">
-                    <input
-                      type="checkbox"
-                      checked={r.dependsOnRoles.includes(above.role)}
-                      onChange={() => toggleWait(i, above.role)}
-                    />
-                    {above.role}
-                  </label>
-                ))}
-              </span>
-            )}
-            <button
-              type="button"
-              className="sp-ghost"
-              aria-label={`Remove ${r.role}`}
-              disabled={roles.length === 1}
-              onClick={() => onChange(removeRole(roles, i))}
-            >
-              ✕
-            </button>
-          </div>
-          {p?.description && <div className="sp-cpersona-says">{p.description}</div>}
-          <textarea
-            className="sp-input sp-cbrief"
-            rows={2}
-            value={r.brief}
-            placeholder={p?.brief ? p.brief : BRIEF_HINT}
-            title={p?.brief ? `${p.name}'s brief. Type here to use your own for this launch.` : undefined}
-            onChange={(e) => set(i, { brief: e.target.value })}
-          />
-        </div>
-        );
-      })}
+      {roles.map((r, i) => (
+        <RoleRow
+          key={i}
+          label={`Agent ${i + 1}`}
+          role={r.role}
+          persona={r.persona}
+          shownPersona={rowPersona(r, personas)}
+          brief={r.brief}
+          personas={personas}
+          rolesList="sp-known-roles"
+          waitOptions={roles.slice(0, i).map((above) => above.role)}
+          waits={r.dependsOnRoles}
+          onRole={(name) => onChange(renameRole(roles, i, name))}
+          onPersona={(id) => pickPersona(i, id)}
+          onToggleWait={(on) => toggleWait(i, on)}
+          onBrief={(brief) => set(i, { brief })}
+          onRemove={() => onChange(removeRole(roles, i))}
+          removeDisabled={roles.length === 1}
+        />
+      ))}
       <button
         type="button"
         className="sp-addproj"

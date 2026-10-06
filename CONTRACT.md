@@ -196,6 +196,76 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
+
+Daemon (`session/supervisor.ts`, `routes/session.ts`), shared (`stack.ts`, `wire.ts`) and web
+(`spawn/stack.ts`, `spawn/AddAgent.tsx`, `spawn/RoleRow.tsx`, `spawn/CustomSetup.tsx`,
+`spawn/custom.ts`, `spawn/presets.ts`, `spawn/endpoints.ts`, `fleet/project.tsx`,
+`fleet/fleet.css`, `agent/agent.tsx`, `agent/agent.css`, `agent/endpoints.ts`). The second half
+of ADR 0002 (`docs/adr/0002-edit-running-stack.md`). A launched job doesn't remember its preset,
+so all of this reads the job's agent rows, the same for a built-in or a custom stack.
+- **`POST /api/jobs/:jobId/agents`**, body `AddAgentRequest` (an `AgentSpec` plus `feeds?:
+  AgentRole[]`), answers 201 `AddAgentResponse` (`{ agent, fed }`), 404 for no such job, and 400
+  with the sentence otherwise. The spec goes through `parseAgentSpec`, the per-entry half of
+  `parseAgentSpecs`, and `checkProviderModels`: checked exactly as a launch's agents are.
+  `Supervisor.addAgent` then checks it against the job:
+  - the role isn't taken;
+  - `dependsOnRoles` names roles in the job, none of them `stopped`;
+  - `feeds` names agents that are `queued`, have no session and aren't helpers;
+  - no loop (`createsCycle`): a fed agent upstream of the new one;
+  - the same engine as the job's own agents;
+  - a cap of its own (`budgetUsd` or `budgetTokens`);
+  - `readOnlyRefusal`: a reading role must deny `WRITE_TOOLS` and be in plan or default mode.
+    It is refused, not pinned.
+- **Then** it inserts the row with `agentRow()`, which `createJob` now uses for each spec too,
+  appends the new id to each fed agent's `dependsOn`, emits `queued`, runs `#reopenJob` (a
+  finished job comes back), pushes the new and fed rows, `pump()`s, and rolls up, so an agent
+  added behind a failed one leaves the job settled. The job's cap grows by the new cap through
+  `jobCap`, unchanged.
+- **Remove from stack is `DELETE /api/agents/:id`** (Amendment 88). The ADR chose no new route
+  and no mode, because the only other behaviour a mode could keep is the stranding.
+- **Shared.** `READ_ONLY_ROLES`, `isReadOnlyRole`, `WRITE_TOOLS` and `readOnlyRefusal` move to
+  `stack.ts`, with `createsCycle`. `spawn/presets.ts` imports them and re-exports
+  `isReadOnlyRole`, so every reading role is still listed once.
+- **Web: `+ agent`** on each job's header on the Project screen opens `AddAgent`. The row is
+  `RoleRow`, taken out of `CustomSetup` (which now renders its rows with it):
+  - role, persona, brief, and **waits for** (`waitOptions`: not helpers, not stopped);
+  - **also feeds** (`feedOptions`), model (`ModelSelect` on Claude, an id with the engine's
+    list elsewhere) and a cap (dollars or tokens, `parseCap`, required);
+  - `addAgentProblems` says what's wrong before the daemon is asked;
+  - `addAgentSpec` builds the request. Its autonomy (`addedAutonomy`) is a sibling's that reads
+    alike, never a reader's for a writer, else Spawn's defaults. The persona's tool rules go
+    over it, a reading role or persona is pinned as `toAgentSpecs` pins one, and the cap is its
+    own. Escape closes the editor.
+  - Picking a persona renames a row not named by hand (`untouchedRole`, now shared with Custom).
+- **Web: remove from stack.** Terminate's confirm on the Agent screen offers **remove from
+  stack** beside **✕ terminate**. The banner under the header says what moves
+  (`rewirePreview`): "scribe will wait for architect instead.", "validator will start: architect
+  is done.", or "developer stays paused, and will wait for no one." An ended agent's **✕
+  remove** shows the same banner. While a confirm is armed, the header hides fold all, export
+  and interrupt, and the question ends in an ellipsis rather than push its buttons under the
+  inspector. The old terminate confirm did that at a normal window width. `removeAgent`
+  answers `RemoveAgentResponse`.
+
+**Verified:** `session/verify.ts` §17p:
+- adds an agent mid-job, waiting on the developer and feeding the scribe; the job's cap goes
+  from $10 to $15;
+- refuses a loop (two ways), a duplicate role, an unknown dependency, feeding a started agent,
+  a non-list `feeds`, no cap, a reading role that could write or accepts edits, a nickname
+  model, another engine, and an unknown job (404), and leaves no row behind;
+- the added validator starts after the developer and hears it, and the fed scribe waits for it;
+- adding to a finished job reopens it and runs;
+- adding behind a failed agent keeps the job settled.
+
+§17o (Amendment 88) covers removing a queued middle agent, removing a running one, and stopping
+an upstream one. `spawn/verify.ts` §17 checks `rewirePreview`, the wait and feed options, the
+engine, every `addAgentProblems` sentence, `addAgentSpec` on Claude and on OpenRouter, the
+read-only pin (which `readOnlyRefusal` accepts), a writer added to a job of readers, a reading
+persona, and the cap's default. A headless Chrome against `make fixture` showed the editor in
+a job group and the remove-from-stack confirm with its banner, with no console errors.
+`make test` is green. `docs/ARCHITECTURE.md` isn't in this repository (Amendment 81), so it
+wasn't updated; the ADR carries the design.
+
 ### Amendment 88 — post-merge, applied. **Nobody waits for good on an agent that was stopped or removed.**
 
 Daemon (`packages/daemon/src/session`, `routes/session.ts`, migration `120_went_without.sql`),

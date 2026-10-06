@@ -145,6 +145,15 @@ export function personaPicks(roles: CustomRole[], personas: readonly Persona[]):
   return out;
 }
 
+/**
+ * Whether a row's role is still one it was given rather than typed: empty, the name of the
+ * persona it had, or the name of any persona. Picking a persona renames such a row after
+ * it (Amendment 68) — on Spawn's Custom setup and in a job's "+ agent" (Amendment 89).
+ */
+export function untouchedRole(role: AgentRole, was: Persona | undefined, personas: readonly Persona[]): boolean {
+  return role === '' || (was !== undefined && role === roleFromName(was.name)) || personas.some((p) => roleFromName(p.name) === role);
+}
+
 /** A persona's name as a role: lowercase, dashes for anything else (Amendment 68). */
 export function roleFromName(name: string): AgentRole {
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '');

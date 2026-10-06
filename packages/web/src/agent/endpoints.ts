@@ -20,6 +20,7 @@ import { api } from '../lib/feed.js';
 import { explain, type Notice } from '../lib/errors.js';
 import type {
   Agent,
+  RemoveAgentResponse,
   SendMessageRequest,
   SetAutonomyRequest,
   SetModelRequest,
@@ -70,8 +71,11 @@ export function terminateJob(jobId: string): Promise<{ agents: Agent[] }> {
  * Terminate ends the work and leaves the lane reading `stopped`, which is what you want
  * while you still care what it did. This is for afterwards. It terminates first, so it is
  * safe on a live agent, and it touches nothing on disk.
+ *
+ * It is also "remove from stack" (Amendment 88): the agents that waited on it and hadn't
+ * started wait on what it waited on, and `rewired` says which.
  */
-export function removeAgent(agentId: string): Promise<{ removed: string }> {
+export function removeAgent(agentId: string): Promise<RemoveAgentResponse> {
   return api(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' });
 }
 

@@ -15,6 +15,7 @@
  * gives names the agent.
  */
 
+import type { AddAgentRequest, AddAgentResponse } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /**
@@ -36,4 +37,12 @@ export interface ProjectRemoval {
 
 export function removeProject(projectId: string): Promise<{ removed: ProjectRemoval }> {
   return api(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+}
+
+/**
+ * One more agent in a job already running, or finished — which reopens it (Amendment 89).
+ * The daemon checks it against the job and answers 400 with the sentence when it can't.
+ */
+export function addAgent(jobId: string, body: AddAgentRequest): Promise<AddAgentResponse> {
+  return api(`/api/jobs/${encodeURIComponent(jobId)}/agents`, { method: 'POST', body });
 }

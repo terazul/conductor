@@ -218,6 +218,23 @@ export interface CreateJobResponse {
 }
 
 /**
+ * `POST /api/jobs/:jobId/agents` (Amendment 89): one more agent in a job that is already
+ * running, or finished (it reopens). The spec is checked as a launch's is, and
+ * `dependsOnRoles` names roles already in the job. `feeds` names roles of agents in the job
+ * that haven't started (queued, no session) that should now wait for this one as well —
+ * inserting it in the middle.
+ */
+export interface AddAgentRequest extends AgentSpec {
+  feeds?: AgentRole[];
+}
+
+export interface AddAgentResponse {
+  agent: Agent;
+  /** The agents named in `feeds`, now waiting for it too. */
+  fed: Agent[];
+}
+
+/**
  * What `DELETE /api/agents/:id` did (Amendment 88). The agent is removed from the stack:
  * each agent that waited on it and hadn't started now waits on what it waited on
  * (`rewireOnRemoval`, stack.ts). `rewired` lists them with their new `dependsOn`.

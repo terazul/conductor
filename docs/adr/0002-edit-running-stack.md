@@ -90,7 +90,9 @@ Amendment 85 made one related decision that stays: an agent waiting on a **faile
   - the **model** (the catalog picker on Claude, a model id on another engine);
   - a **cap** (dollars or tokens, as the job's engine reports).
 - **Its autonomy comes from the job.** The added agent takes the permissions of a sibling that writes (or reads, if it is a reading role), with its own cap and its persona's tool rules. A reading role, or a reading persona, is pinned read-only exactly as `toAgentSpecs` pins it. The rules live in `web/src/spawn/stack.ts` (`addAgentSpec`, `addAgentProblems`), which are pure and checked in `spawn/verify.ts`.
-- **Agent screen → remove from stack.** A live or waiting agent gets **remove from stack** beside pause and terminate. The confirm says what moves, using `rewirePreview`: *"scribe will wait for architect instead."*, or *"developer will start, waiting for no one."* An ended agent's existing **remove** is the same call, and its confirm now says the same. Terminate and pause are unchanged.
+- **Agent screen → remove from stack.** For a live or waiting agent, terminate's confirm offers **remove from stack** beside **✕ terminate**. A banner under the header says what moves, using `rewirePreview`: *"scribe will wait for architect instead."*, or *"developer will start, waiting for no one."* An ended agent's existing **remove** is the same call, and its banner says the same. Terminate and pause are unchanged.
+  - A fourth button in the idle header didn't fit beside the inspector at a normal window width. So the option sits in the confirm, where the decision is made.
+  - While a confirm is armed, the header hides fold all, export and interrupt. The question shortens with an ellipsis rather than pushing its buttons under the inspector, which the old terminate confirm already did.
 - Every call goes through `api()` (`lib/feed.ts`). Every control is a button or input, reachable with Tab.
 
 ## Consequences

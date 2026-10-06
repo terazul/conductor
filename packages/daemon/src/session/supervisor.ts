@@ -35,7 +35,7 @@ import type {
   Rewired,
   Snapshot,
 } from '@conductor/shared';
-import { isStuck, rewireOnRemoval } from '@conductor/shared';
+import { createsCycle, isStuck, readOnlyRefusal, rewireOnRemoval } from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
 import type { Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -103,6 +103,35 @@ function personaFields(p: AgentPersona): { persona?: string; systemPrompt?: stri
     ...(p.persona ? { persona: p.persona } : {}),
     ...(p.systemPrompt ? { systemPrompt: p.systemPrompt } : {}),
     ...(p.skills?.length ? { skills: p.skills } : {}),
+  };
+}
+
+/**
+ * One agent's row from its spec — what `createJob` inserts for each spec and `addAgent` for
+ * one more (ADR 0002), so the two can't copy a spec differently.
+ */
+function agentRow(
+  spec: AgentSpec,
+  at: { id: string; jobId: string; projectId: string; dependsOn: string[] },
+): Parameters<typeof insertAgent>[1] {
+  return {
+    ...at,
+    role: spec.role,
+    model: spec.model,
+    sdkSessionId: null,
+    status: 'queued',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    autonomy: spec.autonomy,
+    brief: spec.brief,
+    ...(spec.helpers ? { helperCap: spec.helpers } : {}),
+    // Copied, not referenced: the agent keeps these if the persona changes (Amendment 68).
+    ...(spec.persona ? { persona: spec.persona } : {}),
+    ...(spec.systemPrompt ? { systemPrompt: spec.systemPrompt } : {}),
+    ...(spec.skills?.length ? { skills: spec.skills } : {}),
+    ...(spec.provider && spec.provider !== 'claude' ? { provider: spec.provider } : {}),
   };
 }
 
@@ -584,30 +613,7 @@ export class Supervisor implements AgentControl {
         .map((role) => idByRole.get(role))
         .filter((x): x is string => Boolean(x) && x !== id);
 
-      agents.push(
-        insertAgent(this.#db, {
-          id,
-          jobId,
-          projectId: project.id,
-          role: spec.role,
-          model: spec.model,
-          sdkSessionId: null,
-          status: 'queued',
-          blockMode: null,
-          costUsd: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          dependsOn,
-          autonomy: spec.autonomy,
-          brief: spec.brief,
-          ...(spec.helpers ? { helperCap: spec.helpers } : {}),
-          // Copied, not referenced: the agent keeps these if the persona changes (Amendment 68).
-          ...(spec.persona ? { persona: spec.persona } : {}),
-          ...(spec.systemPrompt ? { systemPrompt: spec.systemPrompt } : {}),
-          ...(spec.skills?.length ? { skills: spec.skills } : {}),
-          ...(spec.provider && spec.provider !== 'claude' ? { provider: spec.provider } : {}),
-        }),
-      );
+      agents.push(insertAgent(this.#db, agentRow(spec, { id, jobId, projectId: project.id, dependsOn })));
     }
 
     eventLog().emit(
@@ -625,6 +631,72 @@ export class Supervisor implements AgentControl {
     this.#pushEntities({ jobs: [job], agents });
     this.pump();
     return { job, agents };
+  }
+
+  /**
+   * One more agent in a job that is running, or has finished (ADR 0002, Amendment 89).
+   * The spec has been checked as a launch's is (routes/session.ts); this checks it against
+   * the job. `feeds` are roles of agents that haven't started, which now wait for this one
+   * as well — inserting it in the middle.
+   *
+   * Then as `startHelper` does: queued, the job reopened, every tab told, and `pump()`. Its
+   * cap is one more agent's, so the job's cap — the sum of its agents' — grows by it.
+   */
+  addAgent(jobId: string, spec: AgentSpec, feeds: readonly string[] = []): { agent: Agent; fed: Agent[] } {
+    const job = getJob(this.#db, jobId);
+    if (!job) throw new Error(`no such job ${jobId}`);
+    const siblings = agentsForJob(this.#db, jobId);
+    const byRole = new Map(siblings.map((a) => [a.role, a]));
+
+    if (byRole.has(spec.role)) {
+      throw new Error(`${spec.role} is already in this job — agents wait for each other by role, so each role is there once`);
+    }
+    const dependsOn: string[] = [];
+    for (const role of spec.dependsOnRoles ?? []) {
+      const dep = byRole.get(role);
+      if (!dep) throw new Error(`${spec.role} waits for ${role}, which is not in this job`);
+      if (dep.status === 'stopped') throw new Error(`${spec.role} can't wait for ${role}: it was stopped, so it won't finish`);
+      if (!dependsOn.includes(dep.id)) dependsOn.push(dep.id);
+    }
+    const fed: Agent[] = [];
+    for (const role of feeds) {
+      const f = byRole.get(role);
+      if (!f) throw new Error(`${spec.role} feeds ${role}, which is not in this job`);
+      if (f.parentId) throw new Error(`${role} is a helper: its orchestrator decides when it runs`);
+      if (f.status !== 'queued' || f.sdkSessionId !== null) {
+        throw new Error(`${role} has already started, so it can't be made to wait for ${spec.role}`);
+      }
+      if (!fed.includes(f)) fed.push(f);
+    }
+    if (createsCycle(siblings, dependsOn, fed.map((f) => f.id))) {
+      throw new Error(`${spec.role} would wait for an agent that waits for it — a loop that nothing in it could start`);
+    }
+
+    // One engine per job, as Spawn launches it (Amendment 80).
+    const provider = spec.provider ?? 'claude';
+    const engines = new Set(siblings.filter((a) => !a.parentId).map((a) => a.provider ?? 'claude'));
+    if (engines.size > 0 && !engines.has(provider)) {
+      throw new Error(`this job runs on ${[...engines].join(' and ')}, so ${spec.role} must too, not ${provider}`);
+    }
+    if (spec.autonomy.budgetUsd === null && (spec.autonomy.budgetTokens ?? null) === null) {
+      throw new Error(`${spec.role} needs a budget of its own — a cap per agent, as Spawn sets one`);
+    }
+    const readOnly = readOnlyRefusal(spec.role, spec.autonomy);
+    if (readOnly) throw new Error(readOnly);
+
+    const agent = insertAgent(this.#db, agentRow(spec, { id: newId('agt'), jobId, projectId: job.projectId, dependsOn }));
+    for (const f of fed) setAgentDependsOn(this.#db, f.id, [...f.dependsOn, agent.id]);
+    eventLog().emit(
+      { projectId: agent.projectId, jobId, agentId: agent.id },
+      { kind: 'status', status: 'queued' },
+    );
+    this.#reopenJob(jobId);
+    const fedNow = fed.map((f) => getAgent(this.#db, f.id)!);
+    this.#pushEntities({ agents: [agent, ...fedNow] });
+    this.pump();
+    // Behind something that can't move without you, it changes nothing: settled again.
+    this.#rollUpJob(jobId);
+    return { agent: getAgent(this.#db, agent.id) ?? agent, fed: fedNow };
   }
 
   // ── scheduling ────────────────────────────────────────────────────────────

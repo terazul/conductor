@@ -11,6 +11,7 @@
  */
 
 import type { AgentSpec, AgentRole, Autonomy, EffortLevel, ModelCatalog, ModelTier } from '@conductor/shared';
+import { WRITE_TOOLS, isReadOnlyRole } from '@conductor/shared';
 import { toAutonomy, type PillState } from './autonomy.js';
 import { personaFor, pillsWith, type Persona } from './personas.js';
 
@@ -223,20 +224,12 @@ export function startsWhen(role: PresetRole): string {
 }
 
 /**
- * Roles whose entire job is to read.
- *
- * EVERY NEW READING ROLE BELONGS HERE. Forgetting is silent in the worst way: the
- * agent still runs, the plan preview still says it writes nothing, and it writes.
- * A list is easier to audit than a condition, which is why this is a Set and not
- * four `||`s. 'auditor' stays after leaving the analysis preset: agents launched as
- * one still exist, and their role is what they were promised. (Amendment 41)
+ * Roles whose entire job is to read. The list is `READ_ONLY_ROLES` in shared/src/stack.ts
+ * since Amendment 89, so the daemon checks an added agent against the same one; every new
+ * reading role belongs there. Re-exported so the plan preview and its checks keep their
+ * import.
  */
-const READ_ONLY_ROLES = new Set<AgentRole>(['reviewer', 'debugger', 'analyst', 'auditor']);
-
-/** Whether this role writes nothing — exported so the plan preview can say so. */
-export function isReadOnlyRole(role: AgentRole): boolean {
-  return READ_ONLY_ROLES.has(role);
-}
+export { isReadOnlyRole };
 
 /** The persona a role takes: the one it picked, else the one of its role's name (Amendment 68). */
 export function personaOf(r: PresetRole, personas?: readonly Persona[]): Persona | undefined {
@@ -253,8 +246,8 @@ export function readsOnly(r: PresetRole, personas?: readonly Persona[]): boolean
   return isReadOnlyRole(r.role) || personaOf(r, personas)?.tools.write === false;
 }
 
-/**
- * The file-mutating tools, denied outright for a reading role.
+/*
+ * The file-mutating tools, denied outright for a reading role (`WRITE_TOOLS`, shared).
  *
  * Turning off auto-accept is NOT enough on its own, and it took writing the
  * analysis preset to notice. Without `acceptEdits` a write is not forbidden, it is
@@ -268,7 +261,6 @@ export function readsOnly(r: PresetRole, personas?: readonly Persona[]): boolean
  * `git log` is an analyst that cannot answer how the code got this way. The line
  * is "cannot change files unattended or otherwise", not "cannot act".
  */
-const WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 
 /**
  * Turn the chosen preset into the AgentSpec[] the daemon takes.

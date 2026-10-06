@@ -44,6 +44,7 @@ import {
   tildePath,
 } from '../shell/ui.js';
 import { removeJob, terminateJob, useCommand } from '../agent/endpoints.js';
+import { AddAgent } from '../spawn/AddAgent.js';
 import { Lane } from './lane.js';
 import { nestHelpers } from './nest.js';
 import { NotesPanel } from './Notes.js';
@@ -87,6 +88,8 @@ function JobGroup({
 }) {
   const [open, setOpen] = useState(true);
   const [armed, setArmed] = useState(false);
+  // One more agent in this job (Amendment 89): the editor opens under the header.
+  const [adding, setAdding] = useState(false);
   const cmd = useCommand();
 
   const blocked = agents.filter((a) => pending.some((p) => p.agentId === a.id)).length;
@@ -121,6 +124,19 @@ function JobGroup({
           <Tag tone={STATUS_KEY[worstOf(agents)]}>{STATUS_WORD[worstOf(agents)]}</Tag>
         )}
         {finished && <Tag tone={job.status === 'failed' ? 'fail' : 'done'}>finished</Tag>}
+
+        <button
+          type="button"
+          className="fl-btn is-ghost"
+          aria-expanded={adding}
+          onClick={() => {
+            setAdding((a) => !a);
+            setOpen(true);
+          }}
+          title="Add an agent to this job, running or finished: it can wait for the agents here, and the ones that haven't started can wait for it"
+        >
+          + agent
+        </button>
 
         {/*
          * Two stages, one at a time, because the job is the unit you launched and so it is
@@ -185,6 +201,8 @@ function JobGroup({
           {cmd.notice.text}
         </div>
       )}
+
+      {adding && <AddAgent job={job} agents={agents} onClose={() => setAdding(false)} />}
 
       {open &&
         (agents.length === 0 ? (

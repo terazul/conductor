@@ -11,6 +11,7 @@
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type {
+  AddAgentResponse,
   Agent,
   AgentSpec,
   Autonomy,
@@ -166,53 +167,62 @@ function parsePersona(role: string, e: Record<string, unknown>): Pick<AgentSpec,
   return out;
 }
 
+/**
+ * One agent's spec, checked as a launch checks each of its agents: what Spawn sends, and
+ * what `POST /api/jobs/:jobId/agents` adds to a running job (Amendment 89). Its
+ * `dependsOnRoles` are checked by the caller, against the launch or against the job.
+ */
+function parseAgentSpec(entry: unknown): AgentSpec {
+  const e = asRecord(entry);
+  const role = typeof e['role'] === 'string' ? e['role'].trim() : '';
+  const model = typeof e['model'] === 'string' ? e['model'].trim() : '';
+  if (!role) throw new Error('every agent needs a role');
+  if (!model) throw new Error(`agent ${role} needs a model`);
+  // The engine (Amendment 74): absent is claude, as every spawn before this was.
+  const provider = e['provider'] ?? 'claude';
+  if (!isProvider(provider)) {
+    throw new Error(`agent ${role}: unknown provider ${JSON.stringify(provider)} — one of ${PROVIDERS.join(', ')}`);
+  }
+  const unavailable = providerRefusal(provider);
+  if (unavailable) throw new Error(`agent ${role}: ${unavailable}`);
+  // Claude's model list checks Claude's models. Each other provider's is asked for, so it
+  // is checked after these, in checkProviderModels (Amendment 78).
+  const refused = provider === 'claude' ? refusal(model) : null;
+  if (refused) throw new Error(`agent ${role}: ${refused}`);
+  const helpers = e['helpers'] ?? 0;
+  if (typeof helpers !== 'number' || !Number.isInteger(helpers) || helpers < 0 || helpers > HELPERS_MAX) {
+    throw new Error(`agent ${role}: helpers is a whole number from 0 to ${HELPERS_MAX}`);
+  }
+  let autonomy: Autonomy;
+  try {
+    autonomy = autonomyFor(provider, e['autonomy']);
+  } catch (err) {
+    throw new Error(`agent ${role}: ${(err as Error).message}`);
+  }
+
+  return {
+    role,
+    model,
+    ...(typeof e['brief'] === 'string' && e['brief'].trim() ? { brief: e['brief'].trim() } : {}),
+    dependsOnRoles: Array.isArray(e['dependsOnRoles'])
+      ? e['dependsOnRoles'].filter((x): x is string => typeof x === 'string')
+      : [],
+    autonomy,
+    ...(helpers > 0 ? { helpers } : {}),
+    ...parsePersona(role, e),
+    ...(provider !== 'claude' ? { provider } : {}),
+  };
+}
+
 function parseAgentSpecs(raw: unknown): AgentSpec[] {
   if (!Array.isArray(raw)) throw new Error('agents must be an array');
   const specs: AgentSpec[] = [];
   const seen = new Set<string>();
-
   for (const entry of raw) {
-    const e = asRecord(entry);
-    const role = typeof e['role'] === 'string' ? e['role'].trim() : '';
-    const model = typeof e['model'] === 'string' ? e['model'].trim() : '';
-    if (!role) throw new Error('every agent needs a role');
-    if (!model) throw new Error(`agent ${role} needs a model`);
-    // The engine (Amendment 74): absent is claude, as every spawn before this was.
-    const provider = e['provider'] ?? 'claude';
-    if (!isProvider(provider)) {
-      throw new Error(`agent ${role}: unknown provider ${JSON.stringify(provider)} — one of ${PROVIDERS.join(', ')}`);
-    }
-    const unavailable = providerRefusal(provider);
-    if (unavailable) throw new Error(`agent ${role}: ${unavailable}`);
-    // Claude's model list checks Claude's models. Each other provider's is asked for, so it
-    // is checked after these, in checkProviderModels (Amendment 78).
-    const refused = provider === 'claude' ? refusal(model) : null;
-    if (refused) throw new Error(`agent ${role}: ${refused}`);
-    if (seen.has(role)) throw new Error(`duplicate role ${role} — roles resolve dependsOn`);
-    seen.add(role);
-    const helpers = e['helpers'] ?? 0;
-    if (typeof helpers !== 'number' || !Number.isInteger(helpers) || helpers < 0 || helpers > HELPERS_MAX) {
-      throw new Error(`agent ${role}: helpers is a whole number from 0 to ${HELPERS_MAX}`);
-    }
-    let autonomy: Autonomy;
-    try {
-      autonomy = autonomyFor(provider, e['autonomy']);
-    } catch (err) {
-      throw new Error(`agent ${role}: ${(err as Error).message}`);
-    }
-
-    specs.push({
-      role,
-      model,
-      ...(typeof e['brief'] === 'string' && e['brief'].trim() ? { brief: e['brief'].trim() } : {}),
-      dependsOnRoles: Array.isArray(e['dependsOnRoles'])
-        ? e['dependsOnRoles'].filter((x): x is string => typeof x === 'string')
-        : [],
-      autonomy,
-      ...(helpers > 0 ? { helpers } : {}),
-      ...parsePersona(role, e),
-      ...(provider !== 'claude' ? { provider } : {}),
-    });
+    const spec = parseAgentSpec(entry);
+    if (seen.has(spec.role)) throw new Error(`duplicate role ${spec.role} — roles resolve dependsOn`);
+    seen.add(spec.role);
+    specs.push(spec);
   }
   if (specs.length === 0) throw new Error('at least one agent is required');
 
@@ -537,6 +547,33 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       return reply.code(201).send(await sup.createJob(request));
     } catch (err) {
       return fail(reply, 400, 'could not create job', String(err));
+    }
+  });
+
+  /**
+   * One more agent in a job already running, or finished (ADR 0002, Amendment 89). The spec
+   * is checked as a launch's; the supervisor checks it against the job — role, waits,
+   * feeds, loops, engine, budget and reading roles — and answers 400 with the sentence.
+   */
+  app.post<{ Params: { jobId: string } }>('/api/jobs/:jobId/agents', async (req, reply) => {
+    if (!getJob(db, req.params.jobId)) return fail(reply, 404, 'no such job');
+    const body = asRecord(req.body);
+    let spec: AgentSpec;
+    let feeds: string[];
+    try {
+      spec = parseAgentSpec(body);
+      await checkProviderModels([spec]);
+      const raw = body['feeds'] ?? [];
+      if (!Array.isArray(raw) || raw.some((r) => typeof r !== 'string')) throw new Error('feeds is a list of roles in this job');
+      feeds = raw as string[];
+    } catch (err) {
+      return fail(reply, 400, 'invalid agent', String(err));
+    }
+    try {
+      const added: AddAgentResponse = sup.addAgent(req.params.jobId, spec, feeds);
+      return reply.code(201).send(added);
+    } catch (err) {
+      return fail(reply, 400, 'could not add the agent', String(err));
     }
   });
 

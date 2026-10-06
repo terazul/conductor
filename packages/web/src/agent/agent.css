@@ -98,12 +98,27 @@
   margin-left: 2px;
 }
 
-/* The armed terminate question, inline in the header rather than in a modal. */
+/*
+ * The armed terminate question, inline in the header rather than in a modal. On a narrow
+ * header it is the question that gives way, never its buttons: it ends in an ellipsis, its
+ * title has all of it, and what removing does is in the banner under the header (Amendment 89).
+ */
 .ag-confirm-q {
   font-size: var(--fs-md);
   color: var(--ink2);
   margin-right: 2px;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-panehead-r:has(> .ag-confirm-q) {
+  min-width: 0;
+}
+
+.fl-panehead-r:has(> .ag-confirm-q) > button {
+  flex: none;
 }
 
 .ag-confirm-q b {

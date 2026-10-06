@@ -20,7 +20,8 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, readOnlyRefusal, type Agent, type ModelCatalog } from '@conductor/shared';
+import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
   DEFAULT_MODE,
@@ -759,6 +760,71 @@ console.log('\n16 · fewer built-in personas, and the full pipeline reads the pl
   ], models: { builder: 'x.model' } }]))[0]!;
   check('a saved setup: a builder row runs as developer, keeping its name and what waits on it', setup.roles[0]?.role === 'builder' && setup.roles[0]?.persona === 'developer' && setup.roles[1]?.dependsOnRoles.join() === 'builder' && setup.models['builder'] === 'x.model');
   check('a documenter pick is now scribe; a uiux pick runs with no persona; none stays none', setup.roles[1]?.persona === 'scribe' && rowPersona(setup.roles[2]!, personasFrom(null)) === undefined && setup.roles[3]?.persona === '');
+}
+
+console.log('\n17 · one more agent in a running job, and removing one from its stack (Amendments 88, 89)');
+{
+  const ag = (id: string, role: string, o: Partial<Agent> = {}): Agent => ({
+    id, jobId: 'j', projectId: 'p', role, model: 'us.anthropic.claude-opus-5-5', sdkSessionId: null, status: 'queued', blockMode: null,
+    costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], startedAt: null, endedAt: null,
+    autonomy: { mode: 'acceptEdits', allowedTools: ['Read', 'Glob', 'Grep'], disallowedTools: ['WebFetch', 'WebSearch', 'Bash(git push:*)'], budgetUsd: 25, effort: 'high' },
+    ...o,
+  });
+  const reads: Agent['autonomy'] = { mode: 'default', allowedTools: ['Read', 'Glob', 'Grep'], disallowedTools: ['WebFetch', 'WebSearch', ...WRITE_TOOLS], budgetUsd: 10 };
+  const arch = ag('a', 'architect', { status: 'done', sdkSessionId: 's1' });
+  const dev = ag('d', 'developer', { status: 'working', sdkSessionId: 's2', dependsOn: ['a'] });
+  const val = ag('v', 'validator', { dependsOn: ['d'] });
+  const rev = ag('r', 'reviewer', { dependsOn: ['d', 'v'], autonomy: reads });
+  const scr = ag('s', 'scribe', { dependsOn: ['r'] });
+  const job = [arch, dev, val, rev, scr];
+
+  check('removing the reviewer: the scribe waits for what it waited for', rewirePreview(job, 'r') === 'scribe will wait for developer and validator instead.', rewirePreview(job, 'r'));
+  check('removing the developer moves two, and one of them can start', rewirePreview(job, 'd') === 'validator will start: architect is done. reviewer will wait for architect and validator instead.', rewirePreview(job, 'd'));
+  check('an agent nobody waits for moves nobody', rewirePreview(job, 's') === '');
+  check(
+    'one paused because this one was stopped will start; one paused by you stays paused',
+    rewirePreview([ag('x', 'architect', { status: 'stopped' }), ag('y', 'developer', { status: 'paused', dependsOn: ['x'] })], 'x') === 'developer will start, waiting for no one.' &&
+      rewirePreview([ag('x', 'architect', { status: 'done' }), ag('y', 'developer', { status: 'paused', dependsOn: ['x'] })], 'x') === 'developer stays paused, and will wait for no one.',
+  );
+
+  check('it can wait for any agent here but a stopped one or a helper', waitOptions([...job, ag('h', 'developer-helper-1', { parentId: 'd' }), ag('z', 'tester', { status: 'stopped' })]).map((a) => a.role).join() === 'architect,developer,validator,reviewer,scribe');
+  check('and feed only the ones that have not started', feedOptions(job).map((a) => a.role).join() === 'validator,reviewer,scribe');
+  check("the job's engine is its agents'", jobEngine(job) === CLAUDE && jobEngine([ag('o', 'developer', { provider: 'openrouter' })]) === 'openrouter');
+
+  const draft = (o: Partial<AddDraft> = {}): AddDraft => ({ role: 'tester', brief: '', dependsOnRoles: ['developer'], feeds: ['scribe'], model: 'us.anthropic.claude-sonnet-5-5', budget: '5', ...o });
+  check('a sound draft has no problems', addAgentProblems(draft(), job, true).length === 0, addAgentProblems(draft(), job, true).join(' | '));
+  const said = (o: Partial<AddDraft>, usd = true): string => addAgentProblems(draft(o), job, usd).join(' | ');
+  check('a role already in the job is a problem', /scribe is already in this job/.test(said({ role: 'scribe', feeds: [] })));
+  check('so is a role that is not a role', /lowercase letters/.test(said({ role: 'Tester!' })));
+  check('so is feeding one that has started', /developer has already started/.test(said({ dependsOnRoles: [], feeds: ['developer'] })));
+  check('so is a loop', /a loop nothing could start/.test(said({ dependsOnRoles: ['scribe'], feeds: ['validator'] })), said({ dependsOnRoles: ['scribe'], feeds: ['validator'] }));
+  check('so is waiting for a stopped one', /won't finish/.test(addAgentProblems(draft({ dependsOnRoles: ['tester0'] }), [...job, ag('t0', 'tester0', { status: 'stopped' })], true).join()));
+  check('and a missing model or cap: every agent has one of its own', /Pick a model/.test(said({ model: '' })) && /budget in dollars/.test(said({ budget: '' })) && /budget in tokens/.test(said({ budget: '' }, false)));
+  check('a token cap reads as typed', parseCap('500k', false) && 'tokens' in parseCap('500k', false) && (parseCap('500k', false) as { tokens: number }).tokens === 500_000);
+
+  const spec = addAgentSpec(draft({ brief: '  Test the change.  ' }), job, undefined, true);
+  check(
+    'the request: role, model, brief, waits and feeds, the job’s permissions and its own cap',
+    spec.role === 'tester' && spec.model === 'us.anthropic.claude-sonnet-5-5' && spec.brief === 'Test the change.' && spec.dependsOnRoles?.join() === 'developer' &&
+      spec.feeds?.join() === 'scribe' && spec.autonomy.mode === 'acceptEdits' && spec.autonomy.budgetUsd === 5 && spec.provider === undefined,
+    JSON.stringify(spec),
+  );
+  const reviewer = addAgentSpec(draft({ role: 'auditor', feeds: [] }), job, undefined, true);
+  check(
+    'a reading role is pinned read-only, as Spawn pins one, and the daemon would take it',
+    reviewer.autonomy.mode === 'default' && WRITE_TOOLS.every((t) => reviewer.autonomy.disallowedTools.includes(t)) && readOnlyRefusal('auditor', reviewer.autonomy) === null,
+    JSON.stringify(reviewer.autonomy),
+  );
+  const writerFromReaders = addedAutonomy([rev], 'developer', undefined, { usd: 3 });
+  check('a writer added to a job of readers gets Spawn’s defaults, not a reader’s pin', writerFromReaders.mode === 'acceptEdits' && !writerFromReaders.disallowedTools.includes('Edit'), JSON.stringify(writerFromReaders));
+  const qa = personaFor(BUILT_IN_PERSONAS, 'reviewer')!;
+  const viaPersona = addAgentSpec(draft({ role: 'checker', feeds: [] }), job, { ...qa, tools: { ...qa.tools, write: false } }, true);
+  check('a reading persona pins it too, and its prompt and id go with it', WRITE_TOOLS.every((t) => viaPersona.autonomy.disallowedTools.includes(t)) && viaPersona.persona === 'reviewer' && viaPersona.brief === qa.brief.trim());
+  const onRouter = [ag('o', 'developer', { provider: 'openrouter', autonomy: { ...dev.autonomy, budgetUsd: null, budgetTokens: 2_000_000 } })];
+  const routed = addAgentSpec(draft({ dependsOnRoles: ['developer'], feeds: [], model: 'openai/gpt-5', budget: '1M' }), onRouter, undefined, false);
+  check('on another engine: its provider, and a cap in tokens, never dollars', routed.provider === 'openrouter' && routed.autonomy.budgetTokens === 1_000_000 && routed.autonomy.budgetUsd === null, JSON.stringify(routed.autonomy));
+  check('its cap field starts at a sibling’s', budgetDefault(job, 'tester', true) === '25' && budgetDefault(onRouter, 'tester', false) === '2000000');
+  check('the shared list says which roles read, for Spawn and the daemon alike', isReadOnlyRole('reviewer') && !isReadOnlyRole('scribe'));
 }
 
 console.log(

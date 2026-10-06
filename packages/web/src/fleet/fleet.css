@@ -1448,3 +1448,45 @@
   justify-content: space-between;
   flex-wrap: wrap;
 }
+
+/* ── + agent: one more agent in a job (Amendment 89) ─────────────────────── */
+
+.pj-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.pj-add-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.pj-add-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pj-add-budget {
+  width: 7em;
+}
+
+.pj-add-model {
+  min-width: 16em;
+}
+
+.pj-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pj-add-note {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}

@@ -493,6 +493,30 @@ worktree, shell commands ask first.
 Press **`1`** for **Fleet** to watch. The job appears with its agents; the
 sparklines start moving.
 
+### Add an agent to a running job
+
+A job doesn't have to stay the stack you launched. On the Project screen (`2`), each job's
+header has **+ agent**. It opens one row, the same one Spawn's Custom setup uses: a role, a
+persona, a brief, and **waits for**, which lists this job's agents (not helpers, and not one
+that was stopped). Under it:
+
+- **also feeds**: the job's agents that haven't started yet. Tick one and it waits for the new
+  agent too, which puts the new one in the middle. Add a tester that waits for the developer
+  and feeds the reviewer, and the reviewer now hears the tester as well.
+- **model**: the model picker on Claude, a model id on another engine.
+- **budget**: the new agent's own cap, in dollars, or in tokens on an engine that reports no
+  dollars. It is required, as on Spawn, and the job's cap grows by it.
+
+It runs on the job's engine, with the job's permissions (taken from an agent in it that
+writes, or reads, as this one will), plus its persona's tool rules. A reading role, or a
+reading persona, is kept read-only. Change its permissions afterwards in its inspector, as
+for any agent.
+
+**+ add** checks it first and says what's wrong: a role already in the job, a loop (it would
+wait for an agent that waits for it), feeding an agent that has already started, or no cap.
+Adding to a finished job opens it again. The agent starts as soon as what it waits for is done
+and a slot is free.
+
 ---
 
 ## 3. The core loop: when an agent needs you
@@ -603,7 +627,7 @@ waiting forty seconds, and the oldest is always first.
 | Key | Screen | What it's for |
 |---|---|---|
 | **`1`** | **Fleet** | Everything at once. One card per project, coloured by its unhappiest agent. Glance here. A card says **finished** when one of its jobs has ended and you haven't opened the project since (see [When a job finishes](#when-a-job-finishes)). **▦ density** in the header fits more cards on screen, until you leave Fleet. **Sort by** in the header orders the cards by **needs you first**, **my order**, **name**, **working** (most agents working now), **recently active**, **spend** or **newest**. Drag a card onto another to put it there, or use **← move earlier** / **→ move later** in its **…** menu; either switches to **my order**, starting from what you see. Your order is kept in Settings, so it's the same in every browser, and a new project goes at the end. **Notes:** each card shows your newest note on the project under its path, and a count (**✎ 3 notes**, or **+ note**) in its footer. Click it to add a note (**⌘⏎** adds), and **⧉ copy**, **✎ edit** or **✕ delete** one; newest first. **⧉** beside the card's note line copies it without opening the project. Copy puts the note's text on the clipboard as written, and needs Conductor open on localhost (or https). A note can be **due**: **due today**, or pick a date, when adding or editing it. Due today is amber, late is red, on the card, its count, and in the list, and the card shows the most urgent due note rather than the newest. A due or late note also shows in **Needs You** (**✓ mark done**, **open project**, or dismiss it for the day). Tick a note's box to mark it done: it stays, greyed, and stops nagging. Notes are yours: agents don't see them, and removing the project forgets them. The same notes, with the same add, copy, edit and delete, are in the Project screen's column and the Agent screen's inspector (that agent's project's). |
-| **`2`** | **Project** | One project's agents as lanes, each streaming its recent actions with a spend meter, grouped by job. A job that finished since you last looked says **finished** on its group while you're here. The left column has the project's facts, its notes and its actions: **+ spawn agent**, **▤ open files** and **◈ open preview**. The dock along the bottom can be dragged taller. |
+| **`2`** | **Project** | One project's agents as lanes, each streaming its recent actions with a spend meter, grouped by job. A job that finished since you last looked says **finished** on its group while you're here. Each job's header has **+ agent**, to add one to that job ([Add an agent to a running job](#add-an-agent-to-a-running-job)). The left column has the project's facts, its notes and its actions: **+ spawn agent**, **▤ open files** and **◈ open preview**. The dock along the bottom can be dragged taller. |
 | **`3`** | **Agent** | A tab for every agent in the project across the top, newest job first. A tab turns amber, with a count, when that agent needs you, so a blocked agent isn't hidden behind the one you're reading. The full transcript. Your turns are marked so you can scan a long conversation for what you actually said, and the last thing you asked stays pinned at the top while you scroll. Agent output renders as markdown — headings, tables, lists nested to any depth with their numbering kept, task boxes, quotes, code blocks and diagrams. Every tool call collapses to one line, diffs included — click to expand; any reply folds to one line too, by clicking the agent's name beside it, and **⌃ fold all** in the header folds every reply there is so far. Replies always arrive open, and folds are remembered per agent. Reply, switch interaction mode, set guardrails (allow bash / write / web / MCP tools / git push), change its effort, model or budget, or interrupt, from the bottom panel, which you can drag taller by its top edge. **⏎** sends a reply and **⇧⏎** starts a new line. Raising the budget is how an agent that reached its cap carries on. The details panel on the right (**details**, or `i`) shows its usage, with the budget as a bar, tokens in and out, its todo list, the files it touched and its project's notes. What you type there is kept, per agent, if you switch to the terminal, another agent, another screen or reload the page, until you send it or close the browser tab; Spawn's prompt is kept the same way. Its **›_ terminal** tab runs a command in this agent's folder (its worktree) and shows the output: **⏎** runs, **↑ ↓** go back through what you typed, **■ stop** sends Ctrl-C. It runs as you, one command at a time, with no input, so it suits `git status`, `git diff`, `npm test` and `ls`, and not editors or anything that asks a question. Output is kept until **clear** or a daemon restart. |
 | **`4`** | **Needs you** | The attention queue. §3. |
 | **`5`** | **Files** | Pick a project and see **its directories and nothing else** — one tree each, plus a job's worktree if you pick a job. See [A project's directories](#a-projects-directories). Each tree has badges showing which agent touched what and how recently. Markdown renders properly, so this is where you read `PLAN.md` while it's being written. A ` ```mermaid ` block is drawn as its diagram (flowcharts, sequence diagrams and the rest), with **source** to see the code; one that can't be drawn shows its code and why. Agent replies draw them too. Images open in the pane too — PNG, JPEG, GIF, WebP, AVIF, SVG and favicons, on a checkerboard so transparency reads as transparency. You can edit text in place — if an agent rewrites the file under you, you're told rather than overwritten. Every file you open gets a **tab**, from any job, and each tab keeps its view, scroll position and unsaved edit when you go to another screen and come back. See [Files tabs](#files-tabs). |
@@ -918,6 +942,10 @@ starts by itself, so nothing is spent until you choose. The agents further down
 Nothing in the job can go on by itself until you choose, so the job counts as finished
 meanwhile. Resuming opens it again. An agent waiting on one that **failed** stays queued
 instead: continue the failed one, and the waiting one starts once it is done.
+
+**Remove from stack** is in terminate's confirm: it stops the agent and takes it out of its
+job in one go. A banner under the header says what that does to the rest of the job, such as
+*scribe will wait for architect instead*.
 
 **Terminate stops it; remove clears it away.** Once an agent has ended, the same button
 becomes **✕ remove** — that deletes the agent and its transcript from Conductor so it

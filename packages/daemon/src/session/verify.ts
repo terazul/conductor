@@ -105,7 +105,7 @@ import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, t
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { costChanged } from '../daily.js';
 import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
-import { isStuck, rewireOnRemoval, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
+import { createsCycle, isStuck, rewireOnRemoval, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 
 /*
  * Nothing here may ask the real model API or start a real Claude Code: §12 answers for
@@ -3386,6 +3386,92 @@ async function main(): Promise<void> {
     check('and once it is done the one waiting starts', await until(() => getAgent(db, 'agt_f_rev')?.status === 'working'));
     runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
     check('every job here settled', await until(() => ['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].every((j) => ['done', 'failed'].includes(getJob(db, j)?.status ?? ''))), JSON.stringify(['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].map((j) => getJob(db, j)?.status)));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
+  console.log('\n17p · one more agent in a running job (Amendment 89)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    type Added = AddAgentResponse & { detail?: string };
+    const add = (jobId: string, body: Record<string, unknown>) => send<Added>('POST', `/api/jobs/${jobId}/agents`, body);
+    const five = { ...DEFAULT_AUTONOMY, budgetUsd: 5 };
+    const spec = (role: string, o: Record<string, unknown> = {}) => ({ role, model: OPUS, brief: `Do the ${role} part.`, autonomy: five, ...o });
+    const runOf = (role: string) => runs.find((r) => (r.prompts[0] ?? '').includes(`Your role is ${role}.`));
+
+    check('a loop is one only through a fed agent upstream', createsCycle([{ id: 'a', dependsOn: [] }, { id: 'b', dependsOn: ['a'] }], ['b'], ['a']) && !createsCycle([{ id: 'a', dependsOn: [] }, { id: 'b', dependsOn: ['a'] }], ['a'], ['b']));
+
+    job('job_add', null);
+    setJobStatus(db, 'job_add', 'working');
+    fixture('agt_add_dev', 'job_add', { role: 'developer', status: 'working', sdkSessionId: 'sess_add_dev', autonomy: five });
+    fixture('agt_add_scr', 'job_add', { role: 'scribe', status: 'queued', dependsOn: ['agt_add_dev'], autonomy: five });
+    check('two agents at $5: the job is capped at $10', jobCap(agentsForJob(db, 'job_add')) === 10);
+    const start = runs.length;
+
+    const mid = await add('job_add', spec('validator', { dependsOnRoles: ['developer'], feeds: ['scribe'] }));
+    const vid = mid.body.agent?.id ?? '';
+    check('adding one mid-job → 201, queued, waiting on the developer', mid.status === 201 && getAgent(db, vid)?.status === 'queued' && JSON.stringify(getAgent(db, vid)?.dependsOn) === '["agt_add_dev"]', JSON.stringify(mid.body));
+    check('the scribe it feeds now waits for it too', mid.body.fed?.[0]?.id === 'agt_add_scr' && JSON.stringify(getAgent(db, 'agt_add_scr')?.dependsOn) === JSON.stringify(['agt_add_dev', vid]));
+    check('built as a launch builds it: model, brief, budget', getAgent(db, vid)?.model === OPUS && getAgentBrief(db, vid) === 'Do the validator part.' && getAgent(db, vid)?.autonomy.budgetUsd === 5);
+    check("the job's cap grows by its cap", jobCap(agentsForJob(db, 'job_add')) === 15);
+    check('it is said to be queued, like any agent', lastStatus(vid)?.kind === 'status' && (lastStatus(vid) as { status?: string }).status === 'queued');
+
+    const refuse = async (label: string, body: Record<string, unknown>, why: RegExp, jobId = 'job_add') => {
+      const r = await add(jobId, body);
+      check(label, r.status === 400 && why.test(r.body.detail ?? ''), `${r.status} ${JSON.stringify(r.body)}`);
+    };
+    await refuse('a loop is refused', spec('tester', { dependsOnRoles: ['scribe'], feeds: ['validator'] }), /a loop/);
+    await refuse('so is feeding one it waits for', spec('tester', { dependsOnRoles: ['validator'], feeds: ['validator'] }), /a loop/);
+    await refuse('a role already in the job is refused', spec('scribe'), /already in this job/);
+    await refuse('waiting for a role not in the job is refused', spec('tester', { dependsOnRoles: ['nobody'] }), /nobody, which is not in this job/);
+    await refuse('feeding one that has started is refused', spec('tester', { feeds: ['developer'] }), /already started/);
+    await refuse('a feed that is not a list is refused', spec('tester', { feeds: 'scribe' }), /feeds is a list/);
+    await refuse('an agent with no cap of its own is refused', spec('tester', { autonomy: DEFAULT_AUTONOMY }), /budget of its own/);
+    await refuse('a reading role that could write is refused', spec('reviewer'), /reading role, so Edit, Write, MultiEdit, NotebookEdit must be in disallowedTools/);
+    await refuse(
+      'and one that writes nothing but accepts edits',
+      spec('reviewer', { autonomy: { ...five, mode: 'acceptEdits', disallowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] } }),
+      /mode is plan or default/,
+    );
+    await refuse('the model is checked as a launch checks it', spec('tester', { model: 'opus' }), /nickname/);
+    let engine = '';
+    try {
+      sup.addAgent('job_add', { role: 'tester', model: 'gpt-5-mini', provider: 'copilot', autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 1000 } });
+    } catch (err) {
+      engine = (err as Error).message;
+    }
+    check('another engine than the job’s is refused', /this job runs on claude, so tester must too, not copilot/.test(engine), engine);
+    check('an unknown job → 404', (await add('job_nope', spec('tester'))).status === 404);
+    const reader = await add('job_add', spec('reviewer', { dependsOnRoles: ['validator'], autonomy: { ...five, mode: 'plan', disallowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] } }));
+    check('a reading role that is read-only is taken', reader.status === 201, JSON.stringify(reader.body));
+    check('none of the refusals left a row or started anything', agentsForJob(db, 'job_add').length === 4 && runs.length === start, String(agentsForJob(db, 'job_add').length));
+
+    eventLog().emit({ projectId: pid, jobId: 'job_add', agentId: 'agt_add_dev' }, { kind: 'text', text: 'Built it in src/thing.ts.' });
+    setAgentStatus(db, 'agt_add_dev', 'done');
+    sup.pump();
+    check('once the developer is done, the added validator starts', await until(() => runOf('validator') !== undefined && (runOf('validator')?.prompts.length ?? 0) > 0));
+    check('and hears the developer', (runOf('validator')?.prompts[0] ?? '').includes('[developer]\nBuilt it in src/thing.ts.'), runOf('validator')?.prompts[0]);
+    check('the scribe it feeds still waits for it', getAgent(db, 'agt_add_scr')?.status === 'queued');
+    runOf('validator')?.finish({ cost: 0, reason: 'completed' });
+    check('then the scribe and the reviewer start', await until(() => getAgent(db, 'agt_add_scr')?.status === 'working' && getAgent(db, reader.body.agent?.id ?? '')?.status === 'working'));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes', await until(() => getJob(db, 'job_add')?.status === 'done'));
+
+    const late = await add('job_add', spec('tester', { dependsOnRoles: ['scribe'] }));
+    check('adding one to a finished job → 201, and the job reopens', late.status === 201 && getJob(db, 'job_add')?.status === 'working');
+    check('it starts at once: what it waits for is done', await until(() => runOf('tester') !== undefined));
+    runOf('tester')?.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes again', await until(() => getJob(db, 'job_add')?.status === 'done'));
+
+    // Behind something that can't move without you, adding one leaves the job settled.
+    job('job_add_stuck', null);
+    fixture('agt_stuck_dev', 'job_add_stuck', { role: 'developer', status: 'failed', autonomy: five });
+    setJobStatus(db, 'job_add_stuck', 'failed');
+    const stuck = await add('job_add_stuck', spec('reviewer', { dependsOnRoles: ['developer'], autonomy: { ...five, mode: 'default', disallowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] } }));
+    check('behind a failed agent it is added, queued, and the job stays settled', stuck.status === 201 && getAgent(db, stuck.body.agent?.id ?? '')?.status === 'queued' && getJob(db, 'job_add_stuck')?.status === 'failed', `${stuck.status} ${getJob(db, 'job_add_stuck')?.status}`);
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     sdk.query = realQuery;

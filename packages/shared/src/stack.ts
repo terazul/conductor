@@ -7,8 +7,8 @@
  * before you press anything — one copy, so the two can't disagree.
  */
 
-import type { AgentStatus } from './events.js';
-import type { Agent } from './wire.js';
+import type { AgentRole, AgentStatus } from './events.js';
+import type { Agent, Autonomy } from './wire.js';
 
 /** Just what the graph needs from an agent. */
 export type StackNode = Pick<Agent, 'id' | 'dependsOn' | 'status' | 'sdkSessionId'> & {
@@ -87,4 +87,58 @@ export function isStuck(agent: StackNode, agents: readonly StackNode[]): boolean
     return false;
   };
   return stuck(agent);
+}
+
+/**
+ * Whether adding an agent that waits on `dependsOn` and feeds `feeds` would close a loop
+ * (Amendment 89). Only a fed agent can be upstream of the new one, so it is a loop exactly
+ * when one of `feeds` is in `dependsOn`, or is something those wait on, however far up.
+ */
+export function createsCycle(agents: readonly Pick<StackNode, 'id' | 'dependsOn'>[], dependsOn: readonly string[], feeds: readonly string[]): boolean {
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const upstream = new Set<string>();
+  const walk = (id: string): void => {
+    if (upstream.has(id)) return;
+    upstream.add(id);
+    for (const d of byId.get(id)?.dependsOn ?? []) walk(d);
+  };
+  for (const id of dependsOn) walk(id);
+  return feeds.some((f) => upstream.has(f));
+}
+
+/**
+ * Roles whose entire job is to read (Amendment 41), here since Amendment 89 so the daemon
+ * checks an added agent against the same list Spawn pins.
+ *
+ * EVERY NEW READING ROLE BELONGS HERE. Forgetting is silent in the worst way: the
+ * agent still runs, the plan preview still says it writes nothing, and it writes.
+ * A list is easier to audit than a condition, which is why this is a Set and not
+ * four `||`s. 'auditor' stays after leaving the analysis preset: agents launched as
+ * one still exist, and their role is what they were promised.
+ */
+export const READ_ONLY_ROLES: ReadonlySet<AgentRole> = new Set<AgentRole>(['reviewer', 'debugger', 'analyst', 'auditor']);
+
+/** Whether this role writes nothing. */
+export function isReadOnlyRole(role: AgentRole): boolean {
+  return READ_ONLY_ROLES.has(role);
+}
+
+/**
+ * The file-mutating tools, denied outright for a reading role. `disallowedTools` is the
+ * only setting that holds in every permission mode, so it is what carries the promise.
+ */
+export const WRITE_TOOLS: readonly string[] = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+
+/**
+ * Why `autonomy` doesn't keep a reading role read-only, or null when it does: the write
+ * tools denied, and a mode that changes nothing unasked (plan, or ask me).
+ */
+export function readOnlyRefusal(role: AgentRole, autonomy: Pick<Autonomy, 'mode' | 'disallowedTools'>): string | null {
+  if (!isReadOnlyRole(role)) return null;
+  const missing = WRITE_TOOLS.filter((t) => !autonomy.disallowedTools.includes(t));
+  if (missing.length > 0) return `${role} is a reading role, so ${missing.join(', ')} must be in disallowedTools`;
+  if (autonomy.mode !== 'plan' && autonomy.mode !== 'default') {
+    return `${role} is a reading role, so its mode is plan or default, not ${autonomy.mode}`;
+  }
+  return null;
 }
