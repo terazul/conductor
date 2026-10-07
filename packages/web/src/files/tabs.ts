@@ -253,23 +253,49 @@ export function selectProject(s: FilesState, projectId: string, first: string): 
   return { ...s, project: projectId, job: null, active, pick };
 }
 
+/** A project Files could open on, resolved to one that still exists: its id, and its
+ *  first directory's root, for the default pick (Amendment 44). */
+export interface ProjectPick {
+  id: string;
+  first: string;
+}
+
+/** What `arrive` has to go on, each tier already resolved — or null if that tier has
+ *  nothing to say. Finding the project behind each id is the screen's job (route.tsx),
+ *  not this pure one's. */
+export interface ArriveWant {
+  /** The route's own `projectId` param, when it names no job (Amendment 91). */
+  route: ProjectPick | null;
+  /** `recall().projectId` (Amendment 44). */
+  remembered: ProjectPick | null;
+  /** The first project, for a screen that has never shown one at all. */
+  first: ProjectPick | null;
+}
+
 /**
- * Where the column goes when you arrive at Files without a link (Amendment 44).
+ * Where the column goes when you arrive at Files. One rule (Amendment 91, which widens
+ * Amendment 44's to a second tier):
  *
- * `highlighted` is the project the Project screen has selected. It wins over what Files
- * showed last time, because arriving from a project means wanting that project's files.
- * With nothing highlighted, Files keeps what it had, or opens the first project if it
- * had nothing. A link — a job or a file to open — decides for itself; this stays out.
+ *   1. a link naming a job or a file wins outright — `applyLink` already opened it, and
+ *      `linked` says so, so this function stays out entirely;
+ *   2. else the project the route itself names, with no job (`navigate('files', {
+ *      projectId })`);
+ *   3. else `recall().projectId`, the project last opened anywhere;
+ *   4. else, only if Files had nothing open at all, the first project.
+ *
+ * Tiers 2 and 3 win outright, including over a job already open for a DIFFERENT
+ * project: `selectProject` always clears it, so that job never gets to decide instead —
+ * which it used to, because nothing re-ran this choice once Files already agreed with
+ * itself about which project it was showing. Tier 4 is weaker than "what Files already
+ * had", so — as before — it applies only to a blank screen, never to pull you off a
+ * project you were already looking at for no better reason than it being first in the
+ * list.
  */
-export function arrive(
-  s: FilesState,
-  highlighted: { id: string; first: string } | null,
-  fallback: { id: string; first: string } | null,
-  linked: boolean,
-): FilesState {
+export function arrive(s: FilesState, want: ArriveWant, linked: boolean): FilesState {
   if (linked) return s;
-  if (highlighted) return s.project === highlighted.id ? s : selectProject(s, highlighted.id, highlighted.first);
-  if (fallback && s.project === null && s.job === null) return selectProject(s, fallback.id, fallback.first);
+  const w = want.route ?? want.remembered;
+  if (w) return s.project === w.id ? s : selectProject(s, w.id, w.first);
+  if (want.first && s.project === null && s.job === null) return selectProject(s, want.first.id, want.first.first);
   return s;
 }
 

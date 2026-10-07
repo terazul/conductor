@@ -64,10 +64,11 @@ export function recall(): Remembered {
 }
 
 /**
- * Say which project is highlighted — the one the Project screen's list shows selected.
- * Files opens on it (Amendment 44), so what you were looking at is what you get, not
- * the first project in the list. Choosing a project inside Files says so too, so the two
- * never disagree about which project is "this one".
+ * Say which project is highlighted — the one the Project screen's list shows selected,
+ * or the one an Agent screen is showing. Files opens on it (Amendment 44) when the route
+ * names no project of its own (Amendment 91), so what you were looking at is what you
+ * get, not the first project in the list. Choosing a project inside Files says so too,
+ * so the two never disagree about which project is "this one".
  */
 export function highlight(projectId: string): void {
   if (remembered.projectId !== projectId) remember({ projectId });

@@ -213,9 +213,12 @@ function Files() {
   const project = projects.find((p) => p.id === projectId) ?? null;
 
   /**
-   * Which project the column opens on, once per arrival (Amendment 44): the one the
-   * Project screen has highlighted, else what Files had, else the first. A link in the
-   * hash decides for itself, in the effect above.
+   * Which project the column opens on, once per arrival (Amendment 91's one rule, which
+   * widens Amendment 44's): the project the route itself names (with no job), else the
+   * one last highlighted anywhere, else the first — and whichever wins, a job already
+   * open for a DIFFERENT project gives way, because `arrive` always re-decides rather
+   * than trusting that Files already agrees with itself. A link naming a job or a file
+   * decides for itself, in the effect above; `linked` keeps this out of its way.
    *
    * It reads the store as it is now, not as this render saw it, so a link followed a
    * moment ago wins. That was the flash — the link opened its file, then the default
@@ -228,10 +231,14 @@ function Files() {
     if (arrived.current || projects.length === 0) return;
     arrived.current = true;
     const { id, params } = currentRoute();
-    const linked = id === 'files' && Boolean(params['jobId'] || params['projectId']);
+    const linked = id === 'files' && Boolean(params['jobId']);
     const at = (p: Project | undefined) => (p ? { id: p.id, first: dirRoot(p.id, p.path) } : null);
-    const wanted = recall().projectId;
-    update((st) => arrive(st, at(projects.find((p) => p.id === wanted)), at(projects[0]), linked));
+    // A route that names a project but no job is a weaker link than one that names a
+    // job or a file (`applyLink` already handled those, above) — but it still outranks
+    // what was merely remembered.
+    const route = id === 'files' && !linked ? at(projects.find((p) => p.id === params['projectId'])) : null;
+    const remembered = at(projects.find((p) => p.id === recall().projectId));
+    update((st) => arrive(st, { route, remembered, first: at(projects[0]) }, linked));
   }, [projects]);
 
   // The column's project is the highlighted one from here on, whoever chose it.

@@ -272,21 +272,39 @@ console.log("\na project's directories (Amendment 39)");
   const file = applyLink(EMPTY, { jobId: b, path: 'README.md' }, 5);
   check('a link to a file in a directory opens it there', file.project === 'prj_a' && activeTab(file)?.jobId === b);
 
-  // Arriving without a link (Amendment 44): the highlighted project wins.
+  // Arriving (Amendment 91's one rule, which widens Amendment 44's): a link naming a job or
+  // a file wins outright (tested above, via `applyLink`); otherwise the route's own project,
+  // else the one last remembered anywhere, else — only on a blank screen — the first.
   const B = { id: 'prj_b', first: other };
   const A = { id: 'prj_a', first: a };
-  const onB = arrive(back, B, A, false);
-  check('arriving with another project highlighted shows that project, not the one Files had', onB.project === 'prj_b' && onB.job === null && onB.active === tabKey(other, 'y.ts'), JSON.stringify({ p: onB.project, active: onB.active }));
-  check('and one never opened there waits to open its first directory', arrive(EMPTY, B, A, false).pick === other);
-  check('arriving on the project Files already shows changes nothing — your tab stays in front', arrive(back, A, B, false) === back);
-  check('a link decides for itself: the highlight stays out of it', arrive(back, B, A, true) === back);
-  check('a job beside the column is left for the highlighted project', arrive(s, B, A, false).job === null && arrive(s, B, A, false).project === 'prj_b');
-  check('with nothing highlighted, Files keeps what it had', arrive(back, null, B, false) === back);
-  check('and with nothing highlighted and nothing shown, it opens the first project', arrive(EMPTY, null, A, false).project === 'prj_a');
+  const onRoute = arrive(back, { route: B, remembered: A, first: A }, false);
+  check(
+    "the route's own project wins, even over what was remembered",
+    onRoute.project === 'prj_b' && onRoute.job === null && onRoute.active === tabKey(other, 'y.ts'),
+    JSON.stringify({ p: onRoute.project, active: onRoute.active }),
+  );
+  const onRemembered = arrive(back, { route: null, remembered: B, first: A }, false);
+  check('with no route project, the remembered one wins instead', onRemembered.project === 'prj_b' && onRemembered.job === null, JSON.stringify({ p: onRemembered.project }));
+  check('one never opened there waits to open its first directory', arrive(EMPTY, { route: B, remembered: null, first: A }, false).pick === other);
+  check('arriving on the project Files already shows changes nothing — your tab stays in front', arrive(back, { route: A, remembered: B, first: B }, false) === back);
+  check("a link decides for itself: the route and remembered projects stay out of it", arrive(back, { route: B, remembered: B, first: B }, true) === back);
+  check(
+    "another project's job already open gives way to the route's project",
+    arrive(s, { route: B, remembered: A, first: A }, false).job === null && arrive(s, { route: B, remembered: A, first: A }, false).project === 'prj_b',
+  );
+  check(
+    "another project's job already open gives way to the remembered project too",
+    arrive(s, { route: null, remembered: B, first: A }, false).job === null && arrive(s, { route: null, remembered: B, first: A }, false).project === 'prj_b',
+  );
+  check('with nothing named at all, Files keeps what it had', arrive(back, { route: null, remembered: null, first: B }, false) === back);
+  check('and with nothing shown and nothing named, it opens the first project', arrive(EMPTY, { route: null, remembered: null, first: A }, false).project === 'prj_a');
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   const projectSrc = readFileSync(new URL('../fleet/project.tsx', import.meta.url), 'utf8');
+  const agentSrc = readFileSync(new URL('../agent/agent.tsx', import.meta.url), 'utf8');
   check('the Project screen says which project it has selected, fallback included', /if \(project\) highlight\(project\.id\)/.test(projectSrc));
-  check('Files asks for the highlighted project, and says which one it shows', /recall\(\)\.projectId/.test(src) && /highlight\(projectId\)/.test(src));
+  check('the Agent screen says which project it has loaded, once the agent is known (Amendment 91)', /if \(agent\) highlight\(agent\.projectId\)/.test(agentSrc));
+  check("Files reads the route's own project, not only a job link", /params\['projectId'\]/.test(src));
+  check('Files asks for the remembered project, and says which one it shows', /recall\(\)\.projectId/.test(src) && /highlight\(projectId\)/.test(src));
 
   const round = parseState(serialize(toggleFolder(back, b, 'src', true)));
   check('the project and its folders survive a reload', round.project === 'prj_a' && round.folders[b]?.collapsed.includes('src') === true, serialize(round));
@@ -428,7 +446,7 @@ console.log('\nprinting a rendered file (Amendment 32)');
 
 console.log(
   failures === 0
-    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the highlighted project.\n'
+    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91).\n'
     : `\nTrack C files verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

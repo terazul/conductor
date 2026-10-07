@@ -11,28 +11,11 @@ one names, and this file's git history (everything up to Amendment 87 was cleare
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 91.
+  green `make test` (decided 30 Sep). The next amendment is 92.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
   Agent screen today (Amendment 58).
-
-## Files
-
-- [ ] **Files opens on the project you're in.** Asked for (7 Oct). If you were in
-  Conductor (its Project screen, one of its agents, or its navigator entry), pressing `5`
-  should show Conductor's files.
-  Today Files follows a "highlighted" project (Amendment 44), which is a variable in memory
-  (`packages/web/src/shell/nav.ts:55-74`). It's set by `openProject`, `openAgent` and
-  `openFiles` (`nav.ts:78-104`), by the Project screen (`fleet/project.tsx:254`) and by a
-  Fleet card (`fleet/fleet.tsx:160`). Files reads it once each time it mounts
-  (`packages/web/src/files/route.tsx:226-235`, `arrive` in `files/tabs.ts:264-274`).
-  Ways it misses: an Agent screen reached by its URL, or after a reload, never sets it,
-  because `agent/route.tsx` doesn't call `highlight`. And if Files already holds a job of
-  another project, the job decides (`files/route.tsx:207-208`).
-  Reproduce the user's path first, then make "the project you're in" one rule: the route's
-  project, else the last project opened. Keep a link that names a file winning, as it does
-  now.
 
 ## Navigator
 

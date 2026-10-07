@@ -18,7 +18,7 @@ import {
   useProjects,
 } from '../lib/store.js';
 import { useNavParams } from '../lib/nav.js';
-import { SCREEN, openAgent, openAttention, openProject, recall } from '../shell/nav.js';
+import { SCREEN, highlight, openAgent, openAttention, openProject, recall } from '../shell/nav.js';
 import { agentTabs } from './tabs.js';
 import { TerminalPanel } from './Terminal.js';
 import { useElapsedMs } from '../shell/clock.js';
@@ -327,6 +327,15 @@ export function AgentScreen() {
     id !== undefined && agents.some((a) => a.id === id) ? id : undefined;
   const active = exists(routed) ?? exists(remembered.agentId) ?? fallback?.id ?? null;
   const agent = useAgent(active);
+
+  /*
+   * Files follows the project you're in (Amendment 91): openAgent() already says so, but an
+   * Agent screen reached by its own URL, or still here after a reload, never called it. Once
+   * the agent is known, say so — a reload lands here before anything else is on screen.
+   */
+  useEffect(() => {
+    if (agent) highlight(agent.projectId);
+  }, [agent?.projectId]);
 
   const events = useAgentEvents(active);
   const jobs = useJobs(agent?.projectId);

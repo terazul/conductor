@@ -254,6 +254,46 @@ needed.
 
 ---
 
+### Amendment 91 — post-merge, applied. **Files opens on the project you're in, wherever you arrived from.**
+
+Web only (`shell/nav.ts`, `files/route.tsx`, `files/tabs.ts`, `agent/agent.tsx`). Files used to
+open on whichever project was last `highlight`-ed (Amendment 44), but an Agent screen reached by
+its own URL, or still open after a reload, never called `highlight` at all — so pressing `5`
+could show a stale, unrelated project. The rule is now one rule, checked afresh every time Files
+is arrived at, not just read once from memory:
+
+1. a link naming a job or a file wins outright (`applyLink`, unchanged);
+2. otherwise, the project the route itself names, with no job (`navigate('files', { projectId
+   })`);
+3. otherwise, `recall().projectId` — the project last opened or highlighted anywhere
+   (Amendment 44, unchanged in meaning, now a second tier rather than the only one);
+4. otherwise, only if Files had nothing open at all, the first project.
+
+- **`arrive(s, want: ArriveWant, linked)`** (`files/tabs.ts`) replaces the old positional
+  `arrive(s, highlighted, fallback, linked)`. `ArriveWant` carries each tier already resolved to
+  a `ProjectPick` (`{ id, first }`) or `null`, so the pure function stays free of the project
+  list and the route — resolving those is `files/route.tsx`'s job. Tiers 2 and 3 win outright,
+  including over a job already open for a *different* project: `selectProject` always clears
+  it, so the job never gets to decide instead.
+- **`agent/agent.tsx`** now calls `highlight(agent.projectId)` once the agent has loaded,
+  mirroring the Project screen's own `if (project) highlight(project.id)` (`fleet/project.tsx`).
+  This closes the actual bug: an Agent screen opened by URL or surviving a reload now says which
+  project it's showing, the same as a click into it always did.
+- **`files/route.tsx`**'s arrival effect re-reads `currentRoute()` and `recall()` fresh each time
+  it runs (once per mount, after projects have loaded) rather than trusting a value captured at
+  render time, so a link followed moments earlier still wins over the default that used to flash
+  in behind it.
+
+**Verified:** `files/verify.ts` §"a project's directories": the route's project winning over the
+remembered one; the remembered project winning when the route names none; a link deciding for
+itself regardless of either; another project's job already open giving way to both the route and
+the remembered tier; the first-project default applying only to a wholly blank screen, never
+pulling you off a project you already had open; and source checks that `agent/agent.tsx` calls
+`highlight(agent.projectId)` and that `route.tsx` reads both `params['projectId']` and
+`recall().projectId`.
+
+---
+
 ### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
 
 Daemon (`session/supervisor.ts`, `routes/session.ts`), shared (`stack.ts`, `wire.ts`) and web
