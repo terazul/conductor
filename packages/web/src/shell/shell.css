@@ -591,15 +591,39 @@
   flex: none;
 }
 
-/* A job that finished and you haven't seen (Amendment 87): green, or red if it failed. */
-.sh-nav-tag.is-done {
-  color: var(--done);
-  border-color: color-mix(in srgb, var(--done) 45%, transparent);
+/*
+ * Filled, not tinted (Amendment 94) — the same look `.ui-tag.t-live`/`.t-done` carry
+ * (shell/ui.css, Amendment 93): working and finished are what a glance down a
+ * project's Agents is for, so a job's or an agent's row carries the full status
+ * colour as a solid fill, `--bg` as the ink, in the same tokens — nothing invented.
+ */
+.sh-nav-tag.is-live {
+  color: var(--bg);
+  border-color: var(--live);
+  background: var(--live);
+  font-weight: 700;
 }
 
+/* A job or agent that finished (Amendment 87; filled since Amendment 94): green. */
+.sh-nav-tag.is-done {
+  color: var(--bg);
+  border-color: var(--done);
+  background: var(--done);
+  font-weight: 700;
+}
+
+/* Failed stays tonal, as `.ui-tag.t-fail` does: red reads loud enough unfilled. */
 .sh-nav-tag.is-fail {
   color: var(--fail);
   border-color: color-mix(in srgb, var(--fail) 45%, transparent);
+}
+
+/* A nested repo's branch, beside its folder in the Files tree it opens (Amendment 94). */
+.sh-nav-repo {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--ink3);
+  flex: none;
 }
 
 /* ── status bar ────────────────────────────────────────────────────────────── */

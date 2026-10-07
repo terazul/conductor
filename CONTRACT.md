@@ -335,6 +335,34 @@ shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTr
 
 ---
 
+### Amendment 94 — post-merge, applied. **Working and finished are filled in the navigator and agent tabs too; a nested repo's branch shows beside its folder, in Files and the navigator alike.**
+
+Web only (`shell/Navigator.tsx`, `shell/shell.css`, `agent/agent.tsx`, `agent/agent.css`,
+`files/FileTree.tsx`, `files/files.css`, `shell/verify.ts`, `files/verify.ts`,
+`agent/verify.ts`). Carries the filled-tag convention (Amendment 93) and the nested-repo
+branch mark (Amendment 90) into the places that still showed the old tinted tag, or no
+branch mark at all.
+
+- **Navigator agent rows and job groups** (`Navigator.tsx`, `.sh-nav-tag` in `shell.css`)
+  now render the same filled look as `.ui-tag.t-live`/`.t-done`: `background:
+  var(--live)`/`var(--done)`, `color: var(--bg)`, `font-weight: 700` — reusing the same
+  tokens, nothing new. An agent row shows filled **working** or filled **finished**; a job
+  group shows filled **working** when nothing in it has finished yet, filled **finished**
+  once it has. `.is-fail` is unchanged (tonal, as before).
+- **Agent tabs** (Amendment 49, `agent.tsx`/`agent.css`) gain a filled **finished** tag
+  (`.ag-tab-tag`, `background: var(--done)`, `color: var(--bg)`) on a done agent's own tab;
+  a working one already pulses via the tab's `Dot`, so no separate tag was needed for that
+  state.
+- **`FileNode.repo?.branch`** (Amendment 90) now shows beside a nested repo's folder as a
+  quiet mark — `⑂ <branch>`, or `⑂ detached` when `branch` is `null` — in both the Files
+  tree (`FileTree.tsx`'s `.c5-repo`) and the navigator's folder rows (`Navigator.tsx`'s
+  `FileRows`, `.sh-nav-repo`). Both marks are `color: var(--ink3)`, no status colour,
+  matching the icon+text convention `files/route.tsx` already uses for a job's own branch.
+
+**Verified:** `shell/verify.ts` §10 ("the carry-through: filled marks and a nested repo's
+branch"); `files/verify.ts` ("a nested repo's branch, beside its folder"); `agent/verify.ts`'s
+Tabs block (a finished agent's own tab says so, filled). `make test` is green.
+
 ### Amendment 93 — post-merge, applied. **Working and finished are filled, edged and plainly worded.**
 
 Web only (`shell/ui.tsx`, `shell/ui.css`, `fleet/card.tsx`, `fleet/lane.tsx`, `fleet/fleet.css`,

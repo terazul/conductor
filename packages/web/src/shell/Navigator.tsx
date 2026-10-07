@@ -133,6 +133,9 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
     >
       <Dot status={a.status} />
       <span className="sh-nav-label">{a.label}</span>
+      {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). */}
+      {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
+      {a.status === 'done' && <span className="sh-nav-tag is-done">finished</span>}
       {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
     </button>
   );
@@ -166,8 +169,10 @@ function JobGroup({
         <Dot status={job.status} />
         <span className="sh-nav-label">{job.label}</span>
         <span className="sh-nav-n">{job.agents.length}</span>
-        {job.finished && (
+        {job.finished ? (
           <span className={`sh-nav-tag is-${job.status === 'failed' ? 'fail' : 'done'}`}>finished</span>
+        ) : (
+          job.status === 'working' && <span className="sh-nav-tag is-live">working</span>
         )}
         {job.needs > 0 && <span className="sh-nav-need">{job.needs}</span>}
       </button>
@@ -239,6 +244,8 @@ function FileRows({
             >
               <Chevron open={shown} />
               <span className="sh-nav-label">{kid.name}</span>
+              {/* A nested repo's branch, as a quiet mark beside its folder (Amendment 94). */}
+              {kid.repo && <span className="sh-nav-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
             </button>
             {shown && (
               <div className="sh-nav-items">

@@ -597,6 +597,15 @@ reduce motion. Every agent that has ended successfully says **finished** in its 
 plainly — not just the job it belongs to, which is still the only thing "unseen" tracks
 (see above).
 
+The same filled look now reaches the navigator and the Agent screen's own tabs: an
+agent's row in the navigator reads filled **working** or filled **finished**, a job
+group there does too, and a done agent's tab on the Agent screen says **finished**
+plainly rather than waiting for its Dot to stop pulsing.
+
+A folder that is its own git repository — a nested clone or a submodule — shows its
+branch beside its name, quietly, as **⑂ branch-name** (or **⑂ detached** with no commits
+or a detached HEAD), in both the Files tree and the navigator's folder rows.
+
 Opening the project, or one of the job's agents, is seeing it. That only counts while the
 tab is in front, so a job that ends while you're in another window still waits for you. On
 the Project screen the groups you came to see keep saying **finished** until you leave. A

@@ -471,6 +471,10 @@ console.log('\nTabs · one per agent in the project (Amendment 49)');
   check('the first agent of a later job starts a new group', tabs.map((t) => t.newJob).join() === 'false,false,true,false');
   const src = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the Agent screen shows them only with more than one', /tabs\.length > 1 &&/.test(src) && /openAgent\(target\)/.test(src));
+  check(
+    "a finished agent's own tab says so, filled (Amendment 94); working already pulses via the Dot",
+    /t\.status === 'done' && <span className="ag-tab-tag">finished<\/span>/.test(src),
+  );
 }
 
 console.log('\nTerminal · a command runner in the agent\'s folder (Amendment 58)');

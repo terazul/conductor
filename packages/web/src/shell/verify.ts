@@ -415,9 +415,41 @@ console.log('\n9 · Files opens into a folder\'s directories as a tree (Amendmen
   check('applyLink reads the same shape a file row sends', /path\s*\?\s*openTab\(s, jobId, path, now, keep\)/.test(tabs));
 }
 
+console.log('\n10 · the carry-through: filled marks and a nested repo\'s branch (Amendment 94)');
+{
+  const nav = src('./Navigator.tsx');
+  const css = src('./shell.css');
+
+  const rule = (c: string, selector: string): string => {
+    const i = c.indexOf(`${selector} {`);
+    return i === -1 ? '' : c.slice(i, c.indexOf('}', i));
+  };
+
+  check(
+    "an agent row's own tag is filled live while working, filled done once finished",
+    /a\.status === 'working' && <span className="sh-nav-tag is-live">working<\/span>/.test(nav) &&
+      /a\.status === 'done' && <span className="sh-nav-tag is-done">finished<\/span>/.test(nav),
+  );
+  check(
+    "a job's group gets the same filled working tag when nothing has finished yet",
+    /job\.status === 'working' && <span className="sh-nav-tag is-live">working<\/span>/.test(nav),
+  );
+  check(
+    '.sh-nav-tag.is-live and .is-done are filled the same way .ui-tag.t-live/.t-done are (Amendment 93) — reused tokens, nothing invented',
+    /background:\s*var\(--live\)/.test(rule(css, '.sh-nav-tag.is-live')) &&
+      /font-weight:\s*700/.test(rule(css, '.sh-nav-tag.is-live')) &&
+      /background:\s*var\(--done\)/.test(rule(css, '.sh-nav-tag.is-done')) &&
+      /font-weight:\s*700/.test(rule(css, '.sh-nav-tag.is-done')),
+  );
+  check(
+    'a nested repo\'s branch shows beside its folder in FileRows, "detached" when there is none',
+    /kid\.repo && <span className="sh-nav-repo">⑂ \{kid\.repo\.branch \?\? 'detached'\}<\/span>/.test(nav),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

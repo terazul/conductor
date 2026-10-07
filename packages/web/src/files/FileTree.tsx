@@ -78,6 +78,8 @@ export function FileTree({ root, selected, onSelect, folders, onToggle, touches,
           >
             <span className="c5-caret">{open ? '▾' : '▸'}</span>
             <span className="c5-name">{kid.name}/</span>
+            {/* A nested clone or submodule's branch, as a quiet mark (Amendment 94). */}
+            {kid.repo && <span className="c5-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
             {kid.change && (kid.change.added > 0 || kid.change.removed > 0) ? (
               <span className="c5-badge">
                 {kid.change.added > 0 && <b className="c5-pos">+{kid.change.added}</b>}

@@ -1284,6 +1284,24 @@ a.ag-files-p:focus-visible {
   font-weight: 600;
 }
 
+/*
+ * A finished agent's own tab says so, filled the same way `.ui-tag.t-done` is
+ * (shell/ui.css, Amendment 93) — `--bg` on `--done`, heavier weight — so a done
+ * agent reads as done without opening it (Amendment 94).
+ */
+.ag-tab-tag {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1.5px 5px;
+  border-radius: 3px;
+  flex: none;
+  color: var(--bg);
+  background: var(--done);
+}
+
 /* ── the terminal (Amendment 58) ───────────────────────────────────────────── */
 
 .ag-bottom-tabs {

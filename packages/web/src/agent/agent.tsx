@@ -493,6 +493,9 @@ export function AgentScreen() {
               >
                 <Dot status={t.status} />
                 {t.label}
+                {/* Filled, the same look as the status Tag (Amendment 94); working
+                    already pulses via the Dot above. */}
+                {t.status === 'done' && <span className="ag-tab-tag">finished</span>}
                 {t.needs > 0 && <span className="ag-tab-need">{t.needs}</span>}
               </button>
             ))}

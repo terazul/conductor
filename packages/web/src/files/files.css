@@ -229,6 +229,15 @@
   color: var(--ink3);
 }
 
+/* A nested repo's branch, beside its folder (Amendment 94). Quiet: it's a fact
+   about the tree, not a change to review, so it borrows no status colour. */
+.c5-repo {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--ink3);
+}
+
 /* change badges — the whole point of the tree */
 
 .c5-badge {

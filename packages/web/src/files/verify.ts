@@ -444,9 +444,21 @@ console.log('\nprinting a rendered file (Amendment 32)');
   check("and one it can't draw keeps its source, with the reason", /Couldn't draw this diagram/.test(pane) && /pre\.hidden = true;/.test(pane));
 }
 
+console.log('\na nested repo\'s branch, beside its folder (Amendment 94)');
+{
+  const tree = readFileSync(new URL('./FileTree.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./files.css', import.meta.url), 'utf8');
+  check(
+    'a directory with repo set shows its branch, or "detached" when there is none',
+    /kid\.repo && <span className="c5-repo">⑂ \{kid\.repo\.branch \?\? 'detached'\}<\/span>/.test(tree),
+  );
+  check('a plain directory with no repo field shows nothing extra', /\{kid\.repo && /.test(tree));
+  check('the mark is quiet — ink3, no status colour', /\.c5-repo\s*\{[^}]*color:\s*var\(--ink3\)/.test(css));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91).\n'
+    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94).\n'
     : `\nTrack C files verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
