@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dock undock start stop restart status browser logs fixture attention test clean manual zip
+.PHONY: help init install dock undock start stop restart status browser logs fixture attention test clean manual zip
 
 # Conductor — process control.
 #
@@ -23,6 +23,7 @@ help:
 	@echo ''
 	@echo '  Conductor'
 	@echo ''
+	@echo '  make init       first-time setup: check node, pnpm and claude, then make install'
 	@echo '  make start      start daemon + web, wait until both answer'
 	@echo '  make status     what is running, health, live jobs and agents'
 	@echo '  make browser    open the app (start it first if needed)'
@@ -53,6 +54,19 @@ zip:
 	@if [ -n "$$(git status --porcelain)" ]; then echo 'note: uncommitted changes are not in the zip; commit them first to include them'; fi
 	@git archive --format=zip --prefix=conductor/ -o $(ZIP) HEAD
 	@echo "zipped $$(git rev-parse --short HEAD) ($$(git rev-parse --abbrev-ref HEAD)) → $(ZIP), $$(du -h $(ZIP) | cut -f1 | tr -d ' ')"
+
+# First-time setup: fail early on a missing node or pnpm, warn on a missing claude (the
+# fixtures still work without it), then do the normal install. DOCK=no passes through.
+init:
+	@command -v node >/dev/null 2>&1 || { echo 'init: node not found (need 22+)'; exit 1; }
+	@node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' || { echo "init: node $$(node -v) is too old (need 22+)"; exit 1; }
+	@command -v pnpm >/dev/null 2>&1 || { echo 'init: pnpm not found (need 10+)'; exit 1; }
+	@[ "$$(pnpm -v | cut -d. -f1)" -ge 10 ] || { echo "init: pnpm $$(pnpm -v) is too old (need 10+)"; exit 1; }
+	@command -v claude >/dev/null 2>&1 || echo 'init: warning — claude CLI not found; real agents cannot run until it is installed and logged in'
+	@$(MAKE) install DOCK=$(DOCK)
+	@echo ''
+	@echo '  installed. next: make start && make browser'
+	@echo ''
 
 install:
 	pnpm install
