@@ -196,145 +196,6 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
-### Amendment 90 — post-merge, applied. **Nested repos and submodules open all the way down in Files, marked with their branch.**
-
-Daemon (`workspace/tree.ts`, `workspace/git.ts`), shared (`wire.ts`), fixture
-(`fixtures/make-scratch-repo.sh`). `git ls-files` stops at another repo's boundary and hands the
-outer repo one opaque entry for the whole thing — a nested clone or an initialised submodule
-became a childless file leaf in the tree, which is the bug this amendment closes.
-
-- **`FileNode.repo?: { branch: string | null }`** (`wire.ts`) — set on a directory that is its
-  own git repo. `branch` is the nested repo's current branch, or `null` for a detached HEAD or a
-  repo with no commits yet (an unborn HEAD names a branch nothing has been committed to; a
-  detached one names no branch at all). Additive and optional: no existing `FileNode` consumer
-  changes shape.
-- **`tree.ts`'s `classifyLevel`** is the one place that notices a repo boundary, by `lstat` on a
-  `.git` entry inside a non-symlink directory — never `isRepo` (`git.ts`), which answers true for
-  *any* directory inside the outer repo, nested boundary or not. A directory for an ordinary
-  clone's `.git`, a file for a submodule's gitlink: both are caught the same way. `lstat`, never
-  `stat`, so a symlink is never mistaken for the directory it points at — a link back up the tree
-  can't be "expanded" into the infinite recursion that would be.
-- **`expandNestedRepo`** re-lists a nested repo with its own `listFiles` (filtered by the same
-  `NEVER_LISTED` deny-list — a nested repo's own `node_modules` stays hidden exactly like the
-  outer repo's), grafts the result in under the boundary's path, and marks the folder with
-  `nestedBranch` (`git.ts`, built on `hasHead`/`currentBranch`, catching every failure to `null`
-  so a corrupt or half-cloned nested repo still browses). It recurses into repos nested inside
-  that one, up to `MAX_NESTED_DEPTH` (4) levels — a repo found exactly at the limit is still
-  marked with its branch, just not listed further. Siblings expand in parallel (`Promise.all`),
-  so a project with several nested repos pays for `git ls-files` once per repo per tree request,
-  not serially.
-- **A listed directory with no `.git` inside it** — an uninitialised submodule looks exactly like
-  this: tracked, present on disk, empty — becomes an empty dir node, not a file leaf.
-- **Budget.** The outer repo's own paths are always placed ahead of every nested repo's in the
-  capped list, so one large nested clone can never push the project's own files out of a tree cut
-  short by `MAX_TREE_ENTRIES`; `truncated` and the server-side warn line report the combined total
-  dropped, own and nested together. A nested repo's folder — and its branch — is forced into the
-  tree unconditionally (`ensureDir`), independent of whether the cap trimmed away every file
-  inside it: the folder marking where a nested repo lives is not something the cap is allowed to
-  hide.
-- **`walkFiles`** (the no-git fallback for an `in_place` isolation outside any repo) stops at a
-  nested-repo boundary the same way and hands it to the same expansion, instead of recursing past
-  it, so `in_place` and a real git root behave alike.
-- **Changes stay the outer repo's own, by design (ADR 0003).** The outer `git status` only ever
-  reports a nested repo's whole directory as one opaque, possibly-dirty gitlink, never a path
-  inside it, so a nested repo's own changes don't show in the outer tree's change badges.
-- **Fixture.** `make-scratch-repo.sh` grows a nested clone (`inner/`, its own commit and branch,
-  a `node_modules`, and a symlink back up to its parent that must not be followed) and an
-  initialised submodule (`vendor-lib/`, added with `protocol.file.allow=always` since git 2.38+
-  refuses a local-path submodule by default).
-
-**Verified:** `workspace/verify.ts` §15 "nested repos browse all the way down": a nested clone's
-file and a submodule's file both list at their full path; each folder is marked with its real
-branch; `node_modules` inside the nested clone stays hidden; a cap sized to just the outer repo's
-own files drops only nested ones, with every own file surviving and the nested repos' folders
-still shown, branch and all, even with their files capped out; a symlink back up the tree doesn't
-loop. Also checked by hand: reading a file inside a nested repo through the file/image routes
-works and never asks the outer repo's git about it — pure filesystem path containment, no fix
-needed.
-
----
-
-### Amendment 91 — post-merge, applied. **Files opens on the project you're in, wherever you arrived from.**
-
-Web only (`shell/nav.ts`, `files/route.tsx`, `files/tabs.ts`, `agent/agent.tsx`). Files used to
-open on whichever project was last `highlight`-ed (Amendment 44), but an Agent screen reached by
-its own URL, or still open after a reload, never called `highlight` at all — so pressing `5`
-could show a stale, unrelated project. The rule is now one rule, checked afresh every time Files
-is arrived at, not just read once from memory:
-
-1. a link naming a job or a file wins outright (`applyLink`, unchanged);
-2. otherwise, the project the route itself names, with no job (`navigate('files', { projectId
-   })`);
-3. otherwise, `recall().projectId` — the project last opened or highlighted anywhere
-   (Amendment 44, unchanged in meaning, now a second tier rather than the only one);
-4. otherwise, only if Files had nothing open at all, the first project.
-
-- **`arrive(s, want: ArriveWant, linked)`** (`files/tabs.ts`) replaces the old positional
-  `arrive(s, highlighted, fallback, linked)`. `ArriveWant` carries each tier already resolved to
-  a `ProjectPick` (`{ id, first }`) or `null`, so the pure function stays free of the project
-  list and the route — resolving those is `files/route.tsx`'s job. Tiers 2 and 3 win outright,
-  including over a job already open for a *different* project: `selectProject` always clears
-  it, so the job never gets to decide instead.
-- **`agent/agent.tsx`** now calls `highlight(agent.projectId)` once the agent has loaded,
-  mirroring the Project screen's own `if (project) highlight(project.id)` (`fleet/project.tsx`).
-  This closes the actual bug: an Agent screen opened by URL or surviving a reload now says which
-  project it's showing, the same as a click into it always did.
-- **`files/route.tsx`**'s arrival effect re-reads `currentRoute()` and `recall()` fresh each time
-  it runs (once per mount, after projects have loaded) rather than trusting a value captured at
-  render time, so a link followed moments earlier still wins over the default that used to flash
-  in behind it.
-
-**Verified:** `files/verify.ts` §"a project's directories": the route's project winning over the
-remembered one; the remembered project winning when the route names none; a link deciding for
-itself regardless of either; another project's job already open giving way to both the route and
-the remembered tier; the first-project default applying only to a wholly blank screen, never
-pulling you off a project you already had open; and source checks that `agent/agent.tsx` calls
-`highlight(agent.projectId)` and that `route.tsx` reads both `params['projectId']` and
-`recall().projectId`.
-
----
-
-### Amendment 92 — post-merge, applied. **A project's Files folders open into their directories as a tree, in the navigator.**
-
-Web only (`shell/navtree.ts`, `shell/Navigator.tsx`). The navigator's **Files** submenu used
-to list a project's folders flat, each a button that jumped straight to the Files screen on
-that root. Now each folder is a node that opens and closes like every other row in the panel,
-and while open shows its directories and files, nested arbitrarily deep.
-
-- **`navDirId(projectId, root, path)`** names one directory's node:
-  `p:<projectId>:files:<root>:<path>`. A folder's own node is `path: ''`; a directory under it
-  is named by its own root-relative path. Because the id carries the project, the root and the
-  path, a folder opened under two different projects, or two different folders of the same
-  project, never share a node even when their trees hold a directory of the same name. Ids are
-  kept in settings exactly as every other node's is (`NAV_TREE_KEY`, `toggleOpen`).
-- **`navFileLink(root, path)`** is `{ jobId: root, path }` — the same shape `applyLink`
-  (`files/tabs.ts`) reads off a `#files` deep link, so a file row's click is indistinguishable
-  from following that link.
-- **Fetching.** Each open folder mounts its own `useFileTree(folder.root)`
-  (`files/useWorkspace.ts:297`) — the Files screen's own hook, not a second mechanism — so a
-  folder nobody opens costs nothing, and reopening one shows its last tree at once while a
-  fresh copy is asked for underneath. A directory under it is likewise fetched only once, from
-  the one tree its folder already holds; opening a nested directory draws from the same
-  response rather than issuing another request.
-- **Order.** Folders come first, then files, in the order the tree already arrives in: the
-  daemon's `buildTree` (`workspace/tree.ts`) sorts `children` dirs-first-then-alphabetical
-  before it answers, and the Files screen's own tree trusts that order rather than re-sorting,
-  so the navigator does too.
-- **No change marks.** Unlike the Files tree itself, nothing here reads a node's `change`. This
-  is a deliberate, reversible default (ADR 0003, decision 2); a later amendment may add them,
-  alongside `FileNode.repo`'s branch mark (Amendment 90).
-- **Clicks.** A folder's row toggles open/closed, with `aria-expanded` and the same keyboard and
-  focus behaviour as every other navigator row. A file's row calls
-  `navigate('files', navFileLink(root, path))`, opening it on the Files screen; the panel stays
-  up.
-
-**Verified:** `shell/verify.ts` §9: the `navDirId` format, that project/root/path each make a
-distinct id and a folder's own node never collides with one of its directories, `navFileLink`'s
-shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTree`, `toggle` and
-`navigate(SCREEN.files, navFileLink(...))` rather than the old flat click.
-
----
-
 ### Amendment 95 — post-merge, applied. **The top bar's tabs read louder, and the open one stands out with a tint and a heavier underline.**
 
 Web only (`shell/shell.css`'s `.sh-screens`, `lib/verify.ts`).
@@ -423,6 +284,145 @@ reads **stopped** — not "done", which would claim it finished."* That line quo
 `STATUS_WORD.done` value by name; the contrast it draws (stopped vs. finished) still holds,
 but the word it names no longer exists. It should become *"not **finished**"* when this text
 is applied.
+
+### Amendment 92 — post-merge, applied. **A project's Files folders open into their directories as a tree, in the navigator.**
+
+Web only (`shell/navtree.ts`, `shell/Navigator.tsx`). The navigator's **Files** submenu used
+to list a project's folders flat, each a button that jumped straight to the Files screen on
+that root. Now each folder is a node that opens and closes like every other row in the panel,
+and while open shows its directories and files, nested arbitrarily deep.
+
+- **`navDirId(projectId, root, path)`** names one directory's node:
+  `p:<projectId>:files:<root>:<path>`. A folder's own node is `path: ''`; a directory under it
+  is named by its own root-relative path. Because the id carries the project, the root and the
+  path, a folder opened under two different projects, or two different folders of the same
+  project, never share a node even when their trees hold a directory of the same name. Ids are
+  kept in settings exactly as every other node's is (`NAV_TREE_KEY`, `toggleOpen`).
+- **`navFileLink(root, path)`** is `{ jobId: root, path }` — the same shape `applyLink`
+  (`files/tabs.ts`) reads off a `#files` deep link, so a file row's click is indistinguishable
+  from following that link.
+- **Fetching.** Each open folder mounts its own `useFileTree(folder.root)`
+  (`files/useWorkspace.ts:297`) — the Files screen's own hook, not a second mechanism — so a
+  folder nobody opens costs nothing, and reopening one shows its last tree at once while a
+  fresh copy is asked for underneath. A directory under it is likewise fetched only once, from
+  the one tree its folder already holds; opening a nested directory draws from the same
+  response rather than issuing another request.
+- **Order.** Folders come first, then files, in the order the tree already arrives in: the
+  daemon's `buildTree` (`workspace/tree.ts`) sorts `children` dirs-first-then-alphabetical
+  before it answers, and the Files screen's own tree trusts that order rather than re-sorting,
+  so the navigator does too.
+- **No change marks.** Unlike the Files tree itself, nothing here reads a node's `change`. This
+  is a deliberate, reversible default (ADR 0003, decision 2); a later amendment may add them,
+  alongside `FileNode.repo`'s branch mark (Amendment 90).
+- **Clicks.** A folder's row toggles open/closed, with `aria-expanded` and the same keyboard and
+  focus behaviour as every other navigator row. A file's row calls
+  `navigate('files', navFileLink(root, path))`, opening it on the Files screen; the panel stays
+  up.
+
+**Verified:** `shell/verify.ts` §9: the `navDirId` format, that project/root/path each make a
+distinct id and a folder's own node never collides with one of its directories, `navFileLink`'s
+shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTree`, `toggle` and
+`navigate(SCREEN.files, navFileLink(...))` rather than the old flat click.
+
+---
+
+### Amendment 91 — post-merge, applied. **Files opens on the project you're in, wherever you arrived from.**
+
+Web only (`shell/nav.ts`, `files/route.tsx`, `files/tabs.ts`, `agent/agent.tsx`). Files used to
+open on whichever project was last `highlight`-ed (Amendment 44), but an Agent screen reached by
+its own URL, or still open after a reload, never called `highlight` at all — so pressing `5`
+could show a stale, unrelated project. The rule is now one rule, checked afresh every time Files
+is arrived at, not just read once from memory:
+
+1. a link naming a job or a file wins outright (`applyLink`, unchanged);
+2. otherwise, the project the route itself names, with no job (`navigate('files', { projectId
+   })`);
+3. otherwise, `recall().projectId` — the project last opened or highlighted anywhere
+   (Amendment 44, unchanged in meaning, now a second tier rather than the only one);
+4. otherwise, only if Files had nothing open at all, the first project.
+
+- **`arrive(s, want: ArriveWant, linked)`** (`files/tabs.ts`) replaces the old positional
+  `arrive(s, highlighted, fallback, linked)`. `ArriveWant` carries each tier already resolved to
+  a `ProjectPick` (`{ id, first }`) or `null`, so the pure function stays free of the project
+  list and the route — resolving those is `files/route.tsx`'s job. Tiers 2 and 3 win outright,
+  including over a job already open for a *different* project: `selectProject` always clears
+  it, so the job never gets to decide instead.
+- **`agent/agent.tsx`** now calls `highlight(agent.projectId)` once the agent has loaded,
+  mirroring the Project screen's own `if (project) highlight(project.id)` (`fleet/project.tsx`).
+  This closes the actual bug: an Agent screen opened by URL or surviving a reload now says which
+  project it's showing, the same as a click into it always did.
+- **`files/route.tsx`**'s arrival effect re-reads `currentRoute()` and `recall()` fresh each time
+  it runs (once per mount, after projects have loaded) rather than trusting a value captured at
+  render time, so a link followed moments earlier still wins over the default that used to flash
+  in behind it.
+
+**Verified:** `files/verify.ts` §"a project's directories": the route's project winning over the
+remembered one; the remembered project winning when the route names none; a link deciding for
+itself regardless of either; another project's job already open giving way to both the route and
+the remembered tier; the first-project default applying only to a wholly blank screen, never
+pulling you off a project you already had open; and source checks that `agent/agent.tsx` calls
+`highlight(agent.projectId)` and that `route.tsx` reads both `params['projectId']` and
+`recall().projectId`.
+
+---
+
+### Amendment 90 — post-merge, applied. **Nested repos and submodules open all the way down in Files, marked with their branch.**
+
+Daemon (`workspace/tree.ts`, `workspace/git.ts`), shared (`wire.ts`), fixture
+(`fixtures/make-scratch-repo.sh`). `git ls-files` stops at another repo's boundary and hands the
+outer repo one opaque entry for the whole thing — a nested clone or an initialised submodule
+became a childless file leaf in the tree, which is the bug this amendment closes.
+
+- **`FileNode.repo?: { branch: string | null }`** (`wire.ts`) — set on a directory that is its
+  own git repo. `branch` is the nested repo's current branch, or `null` for a detached HEAD or a
+  repo with no commits yet (an unborn HEAD names a branch nothing has been committed to; a
+  detached one names no branch at all). Additive and optional: no existing `FileNode` consumer
+  changes shape.
+- **`tree.ts`'s `classifyLevel`** is the one place that notices a repo boundary, by `lstat` on a
+  `.git` entry inside a non-symlink directory — never `isRepo` (`git.ts`), which answers true for
+  *any* directory inside the outer repo, nested boundary or not. A directory for an ordinary
+  clone's `.git`, a file for a submodule's gitlink: both are caught the same way. `lstat`, never
+  `stat`, so a symlink is never mistaken for the directory it points at — a link back up the tree
+  can't be "expanded" into the infinite recursion that would be.
+- **`expandNestedRepo`** re-lists a nested repo with its own `listFiles` (filtered by the same
+  `NEVER_LISTED` deny-list — a nested repo's own `node_modules` stays hidden exactly like the
+  outer repo's), grafts the result in under the boundary's path, and marks the folder with
+  `nestedBranch` (`git.ts`, built on `hasHead`/`currentBranch`, catching every failure to `null`
+  so a corrupt or half-cloned nested repo still browses). It recurses into repos nested inside
+  that one, up to `MAX_NESTED_DEPTH` (4) levels — a repo found exactly at the limit is still
+  marked with its branch, just not listed further. Siblings expand in parallel (`Promise.all`),
+  so a project with several nested repos pays for `git ls-files` once per repo per tree request,
+  not serially.
+- **A listed directory with no `.git` inside it** — an uninitialised submodule looks exactly like
+  this: tracked, present on disk, empty — becomes an empty dir node, not a file leaf.
+- **Budget.** The outer repo's own paths are always placed ahead of every nested repo's in the
+  capped list, so one large nested clone can never push the project's own files out of a tree cut
+  short by `MAX_TREE_ENTRIES`; `truncated` and the server-side warn line report the combined total
+  dropped, own and nested together. A nested repo's folder — and its branch — is forced into the
+  tree unconditionally (`ensureDir`), independent of whether the cap trimmed away every file
+  inside it: the folder marking where a nested repo lives is not something the cap is allowed to
+  hide.
+- **`walkFiles`** (the no-git fallback for an `in_place` isolation outside any repo) stops at a
+  nested-repo boundary the same way and hands it to the same expansion, instead of recursing past
+  it, so `in_place` and a real git root behave alike.
+- **Changes stay the outer repo's own, by design (ADR 0003).** The outer `git status` only ever
+  reports a nested repo's whole directory as one opaque, possibly-dirty gitlink, never a path
+  inside it, so a nested repo's own changes don't show in the outer tree's change badges.
+- **Fixture.** `make-scratch-repo.sh` grows a nested clone (`inner/`, its own commit and branch,
+  a `node_modules`, and a symlink back up to its parent that must not be followed) and an
+  initialised submodule (`vendor-lib/`, added with `protocol.file.allow=always` since git 2.38+
+  refuses a local-path submodule by default).
+
+**Verified:** `workspace/verify.ts` §15 "nested repos browse all the way down": a nested clone's
+file and a submodule's file both list at their full path; each folder is marked with its real
+branch; `node_modules` inside the nested clone stays hidden; a cap sized to just the outer repo's
+own files drops only nested ones, with every own file surviving and the nested repos' folders
+still shown, branch and all, even with their files capped out; a symlink back up the tree doesn't
+loop. Also checked by hand: reading a file inside a nested repo through the file/image routes
+works and never asks the outer repo's git about it — pure filesystem path containment, no fix
+needed.
+
+---
 
 ### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
 
