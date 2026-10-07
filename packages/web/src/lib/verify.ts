@@ -446,6 +446,26 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
     }
   }
 
+  // The top bar's tabs (Amendment 95): every tab reads `--ink2` now, and the open
+  // one `--ink`, over a tint of `--ink` mixed into `--bg2` — `shell.css`'s
+  // `color-mix(in srgb, var(--ink) 7%, var(--bg2))` on `.sh-screens button.on`,
+  // reproduced here the same way `color-mix(in srgb, A p%, B)` blends in sRGB.
+  const mix95 = (a: string, b: string, pct: number): string => {
+    const ca = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+    const cb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+    return (
+      '#' +
+      ca.map((v, i) => Math.round(v * (pct / 100) + cb[i]! * (1 - pct / 100)).toString(16).padStart(2, '0')).join('')
+    );
+  };
+  for (const [name, theme] of [['dark', dark], ['light', light]] as const) {
+    const tabBg = mix95(theme.get('ink')!, theme.get('bg2')!, 7);
+    for (const t of ['ink', 'ink2'] as const) {
+      const r = ratio(theme.get(t)!, tabBg);
+      check(`${name}: --${t} on the open top-bar tab's tinted background ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
+    }
+  }
+
   check('no stored choice follows the system', parseChoice(null) === 'system');
   check('a junk stored value follows the system', parseChoice('solarized') === 'system');
   check('system follows the OS either way', resolveTheme('system', true) === 'dark' && resolveTheme('system', false) === 'light');
@@ -1208,9 +1228,34 @@ console.log('\n32 · status marks are filled, edged and plainly finished (Amendm
   check('the agent row\'s own elapsed column says finished too, not the old word', /'done'\s*\?\s*'finished'/.test(card32));
 }
 
+console.log('\n33 · the top bar\'s tabs read louder, and the open one stands out (Amendment 95)');
+{
+  const shell95 = readFileSync(new URL('../shell/shell.css', import.meta.url), 'utf8');
+
+  const rule95 = (css: string, selector: string): string => {
+    const i = css.indexOf(`${selector} {`);
+    return i === -1 ? '' : css.slice(i, css.indexOf('}', i));
+  };
+
+  check(
+    'every tab reads --ink2 now, heavier than before',
+    /color:\s*var\(--ink2\)/.test(rule95(shell95, '.sh-screens button')) &&
+      /font-weight:\s*600/.test(rule95(shell95, '.sh-screens button')),
+  );
+  check(
+    'the open tab gets --ink, a tint of it over the bar, not a flat surface',
+    /color:\s*var\(--ink\);/.test(rule95(shell95, '.sh-screens button.on')) &&
+      /color-mix\(in srgb, var\(--ink\) 7%, var\(--bg2\)\)/.test(rule95(shell95, '.sh-screens button.on')),
+  );
+  check(
+    'its underline is 3px now, not 2',
+    /box-shadow:\s*inset 0 -3px 0 var\(--ink\)/.test(rule95(shell95, '.sh-screens button.on')),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

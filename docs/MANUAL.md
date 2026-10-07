@@ -654,6 +654,11 @@ waiting forty seconds, and the oldest is always first.
 | **`9`** | **Settings** | **Personas**: what each role is (see below); where Conductor keeps its data; how many agents run at once; a **daily budget** (then the status bar shows today's spend as a bar: green, yellow from 75%, red from 95%, and reaching it is a warning in Needs You, though nothing is stopped; it resets at local midnight); what Spawn starts from (preset, model, isolation, interaction mode, the autonomy pills, effort, budget per agent); **Allowed always**, the rules you've granted (§10); theme (also switched from the right end of the status bar: system, light, dark); and resetting panel sizes and folds. Every setting is kept in `~/.conductor/settings.json`, so it's the same in every browser. |
 | **`0`** | **Diagnostics** | The raw feed. Your first stop when something looks wrong. |
 
+Across the top of every screen, the tab you're not on reads a little louder than it used
+to — darker ink, heavier weight — so the row doesn't fade into the background between
+glances. The tab you *are* on stands out further still: its own ink colour, a faint tint
+of it washed under the label, and a 3px underline in place of the old 2px hairline.
+
 **The navigator**, the panel down the left of every screen, lists your projects. A
 project's name opens its Project screen, and its **▸** opens it to three submenus:
 

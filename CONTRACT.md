@@ -335,6 +335,25 @@ shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTr
 
 ---
 
+### Amendment 95 — post-merge, applied. **The top bar's tabs read louder, and the open one stands out with a tint and a heavier underline.**
+
+Web only (`shell/shell.css`'s `.sh-screens`, `lib/verify.ts`).
+
+- Every tab's ink moves from `--ink3` to `--ink2`, with `font-weight: 600`, so an
+  unselected tab reads louder against the bar even before you look at which one is open.
+- The open tab (`.sh-screens button.on`) now gets `color: var(--ink)`, a tinted background
+  — `color-mix(in srgb, var(--ink) 7%, var(--bg2))`, the same `color-mix` tint pattern
+  `agent.css` already uses for a selected row — in place of a flat surface colour, and a
+  3px accent underline (`box-shadow: inset 0 -3px 0 var(--ink)`), up from 2px.
+- `lib/verify.ts`'s §9 contrast block gains a check for `--ink` and `--ink2` against that
+  tinted background in both themes (computed ratios: dark `--ink` 12.72:1, `--ink2`
+  7.72:1; light `--ink` 12.54:1, `--ink2` 6.97:1 — all clear 4.5:1 with margin), and a new
+  §33 confirms the heavier ink/weight, the tint, and the 3px underline read back from
+  `shell.css` correctly.
+
+**Verified:** `lib/verify.ts` §9 (new tab-ink-on-tint checks) and §33 ("the top bar's tabs
+read louder, and the open one stands out"). `make test` is green.
+
 ### Amendment 94 — post-merge, applied. **Working and finished are filled in the navigator and agent tabs too; a nested repo's branch shows beside its folder, in Files and the navigator alike.**
 
 Web only (`shell/Navigator.tsx`, `shell/shell.css`, `agent/agent.tsx`, `agent/agent.css`,
