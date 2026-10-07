@@ -893,6 +893,19 @@
     0 8px 30px -12px color-mix(in srgb, var(--need) 35%, transparent);
 }
 
+/*
+ * Working or finished, the lane gets the same 3px left edge as the Fleet
+ * card's stripe (Amendment 93) — an inset shadow, so the rounded corners
+ * above still clip it and nothing shifts the lane's own 1px border.
+ */
+.pj-lane.s-live {
+  box-shadow: inset 3px 0 0 var(--live);
+}
+
+.pj-lane.s-done {
+  box-shadow: inset 3px 0 0 var(--done);
+}
+
 .pj-lanehead {
   padding: 9px 12px;
   display: flex;

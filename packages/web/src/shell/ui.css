@@ -29,6 +29,13 @@
   display: inline-block;
 }
 
+/*
+ * `--pulse-slow` (1.7s) reads as "about every 2 seconds" (Amendment 93) — gentler
+ * and slower than `.d-need`'s urgent pulse below, since working isn't a problem.
+ * `conductor-pulse` and the `prefers-reduced-motion: reduce` override that turns
+ * every animation here off live in tokens.css, so this dot already stops moving
+ * under it with no rule of its own.
+ */
 .ui-dot.d-live {
   background: var(--live);
   animation: conductor-pulse var(--pulse-slow) ease-in-out infinite;
@@ -72,10 +79,19 @@
   flex: none;
 }
 
+/*
+ * Filled, not tinted (Amendment 93) — working and finished are the two states a
+ * glance over the grid is for, so they carry the full status colour as a solid
+ * fill. `--bg` is the ink: on `--live` and `--done` it clears 4.5:1 in both
+ * themes (`lib/verify.ts`, same pairing as `.sp-go` and `.sh-alert-n`). The
+ * heavier weight is what reads as "filled" at `--fs-2xs`, where a colour
+ * change alone is easy to miss.
+ */
 .ui-tag.t-live {
-  color: var(--live);
-  border-color: color-mix(in srgb, var(--live) 32%, transparent);
-  background: color-mix(in srgb, var(--live) 8%, transparent);
+  color: var(--bg);
+  border-color: var(--live);
+  background: var(--live);
+  font-weight: 700;
 }
 
 .ui-tag.t-need {
@@ -90,10 +106,12 @@
   background: color-mix(in srgb, var(--fail) 9%, transparent);
 }
 
+/* Filled the same way as `.ui-tag.t-live`, in `--done` (Amendment 93). */
 .ui-tag.t-done {
-  color: var(--done);
-  border-color: color-mix(in srgb, var(--done) 30%, transparent);
-  background: color-mix(in srgb, var(--done) 8%, transparent);
+  color: var(--bg);
+  border-color: var(--done);
+  background: var(--done);
+  font-weight: 700;
 }
 
 .ui-tag.t-queue {

@@ -29,12 +29,15 @@ export const STATUS_KEY: Record<AgentStatus, 'live' | 'need' | 'fail' | 'done' |
     stopped: 'idle',
   };
 
-/** Short label for a status tag. */
+/**
+ * Short label for a status tag. `done` reads `finished` (Amendment 93) — plain,
+ * not "unseen" or "new": that distinction stays per job, in `lib/seen.ts`.
+ */
 export const STATUS_WORD: Record<AgentStatus, string> = {
   working: 'working',
   blocked: 'needs you',
   failed: 'failed',
-  done: 'done',
+  done: 'finished',
   queued: 'queued',
   paused: 'paused',
   stopped: 'stopped',
@@ -44,6 +47,10 @@ export function Dot({ status }: { status: AgentStatus }) {
   return <i className={`ui-dot d-${STATUS_KEY[status]}`} aria-hidden="true" />;
 }
 
+/**
+ * `live` and `done` render filled (Amendment 93) — the two states someone scans
+ * the grid for, working and finished. The rest stay tonal; see ui.css.
+ */
 export function Tag({
   tone,
   children,

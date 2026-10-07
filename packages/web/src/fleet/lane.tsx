@@ -59,9 +59,14 @@ export function Lane({
     agent.dependsOn.map((id) => siblings.find((s) => s.id === id)?.role ?? id),
   );
 
+  // The left edge: --live while working, --done once finished (Amendment 93). A
+  // blocked lane keeps its amber treatment instead — `shown` already reads
+  // `blocked` there, so `key` can't also be `live` or `done` at the same time.
+  const edge = key === 'live' ? ' s-live' : key === 'done' ? ' s-done' : '';
+
   return (
     <div
-      className={`pj-lane${blockedHere ? ' is-need' : ''}`}
+      className={`pj-lane${blockedHere ? ' is-need' : edge}`}
       role="button"
       tabIndex={0}
       onClick={() => openAgent(agent)}

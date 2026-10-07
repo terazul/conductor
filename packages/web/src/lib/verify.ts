@@ -436,6 +436,16 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
     check(`${name}: every text token ≥ 4.5:1 on every surface, and --bg on every fill`, low.length === 0, low.join('; '));
   }
 
+  // The filled `live`/`done` tags (Amendment 93): named on their own so a
+  // regression in either reads as its own failure, not a line buried in the
+  // generic fill loop above.
+  for (const [name, theme] of [['dark', dark], ['light', light]] as const) {
+    for (const f of ['live', 'done'] as const) {
+      const r = ratio(theme.get('bg')!, theme.get(f)!);
+      check(`${name}: --bg on the filled --${f} tag ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
+    }
+  }
+
   check('no stored choice follows the system', parseChoice(null) === 'system');
   check('a junk stored value follows the system', parseChoice('solarized') === 'system');
   check('system follows the OS either way', resolveTheme('system', true) === 'dark' && resolveTheme('system', false) === 'light');
@@ -1160,9 +1170,47 @@ console.log('\n31 · a job says it has finished until you have seen it (Amendmen
   check('the notifier counts them, announces them, and opens the project when one is clicked', /useLadderEffects\(pending, alerts, now, activate, finished\)/.test(always) && /openProject\(target\.projectId\)/.test(always) && /startSeenOnce\(\)/.test(always));
 }
 
+console.log('\n32 · status marks are filled, edged and plainly finished (Amendment 93)');
+{
+  const ui = readFileSync(new URL('../shell/ui.tsx', import.meta.url), 'utf8');
+  const uiCss = readFileSync(new URL('../shell/ui.css', import.meta.url), 'utf8');
+  const lane = readFileSync(new URL('../fleet/lane.tsx', import.meta.url), 'utf8');
+  const fleetCss = readFileSync(new URL('../fleet/fleet.css', import.meta.url), 'utf8');
+  const card32 = readFileSync(new URL('../fleet/card.tsx', import.meta.url), 'utf8');
+
+  const rule32 = (css: string, selector: string): string => {
+    const i = css.indexOf(`${selector} {`);
+    return i === -1 ? '' : css.slice(i, css.indexOf('}', i));
+  };
+
+  check('every done agent plainly says finished', /done:\s*'finished'/.test(ui));
+  check(
+    'the live tag is filled, not tinted, and heavier',
+    /background:\s*var\(--live\)/.test(rule32(uiCss, '.ui-tag.t-live')) &&
+      /font-weight:\s*700/.test(rule32(uiCss, '.ui-tag.t-live')),
+  );
+  check(
+    'the done tag is filled the same way',
+    /background:\s*var\(--done\)/.test(rule32(uiCss, '.ui-tag.t-done')) &&
+      /font-weight:\s*700/.test(rule32(uiCss, '.ui-tag.t-done')),
+  );
+  check(
+    'the working dot still pulses, with no reduced-motion rule of its own — tokens.css already turns it off',
+    /animation:\s*conductor-pulse var\(--pulse-slow\)/.test(rule32(uiCss, '.ui-dot.d-live')) &&
+      !/@media\s*\(prefers-reduced-motion/.test(uiCss),
+  );
+  check('the agent lane gets the Fleet card\'s left-edge treatment', /s-live/.test(lane) && /s-done/.test(lane));
+  check(
+    'fleet.css gives the lane an inset 3px edge in both colours',
+    /inset 3px 0 0 var\(--live\)/.test(rule32(fleetCss, '.pj-lane.s-live')) &&
+      /inset 3px 0 0 var\(--done\)/.test(rule32(fleetCss, '.pj-lane.s-done')),
+  );
+  check('the agent row\'s own elapsed column says finished too, not the old word', /'done'\s*\?\s*'finished'/.test(card32));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

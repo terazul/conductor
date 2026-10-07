@@ -335,6 +335,48 @@ shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTr
 
 ---
 
+### Amendment 93 — post-merge, applied. **Working and finished are filled, edged and plainly worded.**
+
+Web only (`shell/ui.tsx`, `shell/ui.css`, `fleet/card.tsx`, `fleet/lane.tsx`, `fleet/fleet.css`,
+`lib/verify.ts`). The three "Seeing what's happening" items of 7 Oct.
+
+- **`Tag` tones `live` and `done` are filled, not tinted** (`ui.css`): a solid `background:
+  var(--live)`/`var(--done)`, `color: var(--bg)` (the same ink `.sp-go` and `.sh-alert-n`
+  already put on a status fill), `font-weight: 700` against the base `.ui-tag`'s 600, at the
+  same `--fs-2xs`. `--bg` on `--live`/`--done` clears 4.5:1 in both themes (dark 10.96:1 /
+  9.46:1, light 5.74:1 / 5.66:1 — `lib/verify.ts`, §9 and the new §32). `need`, `fail`, `queue`
+  and `idle` are unchanged: only the two states someone scans the grid for, working and
+  finished, are filled.
+- **The 3px left edge.** The Fleet card already carried one, driven by its existing
+  `stripe`/`s-${stripe}` class and `.fl-card::before` (unchanged). The agent lane did not: it
+  now gets the same treatment as an inset shadow — `.pj-lane.s-live` /
+  `.pj-lane.s-done { box-shadow: inset 3px 0 0 var(--live|--done); }` — set from `STATUS_KEY`
+  in `lane.tsx`, mutually exclusive with the existing amber `.is-need` treatment for a blocked
+  lane.
+- **The pulse.** `.ui-dot.d-live`'s `animation: conductor-pulse var(--pulse-slow)` (1.7s) and
+  the global `@media (prefers-reduced-motion: reduce)` override in `tokens.css` already met
+  this; both predate this amendment and needed no change, only the new §32 check that pins
+  them down by name.
+- **The word.** `STATUS_WORD.done` is now `'finished'`, so every place that renders it —
+  the Fleet card's and the Project screen's fallback tag, the agent lane's tag, the Agent
+  screen's header, the navigator's agent rows — says **finished** instead of **done**. The
+  Fleet card's agent-row elapsed column had its own hardcoded `'done'` label (`card.tsx`,
+  the `fl-arow-el` span); it now reads `'finished'` too, for the same reason.
+- **Unseen is untouched.** `lib/seen.ts` and `attention/notify.ts` are unchanged: "unseen
+  finished" stays per job (Amendment 87), so the tab badge can't double-count against a
+  per-agent mark that doesn't exist.
+- **`lib/verify.ts`** gains an explicit `--bg` on `--live`/`--done` check inside the existing
+  contrast section (§9, named apart from the generic fill loop so a regression in either
+  reads as its own failure) and a new §32 that reads `ui.tsx`, `ui.css`, `lane.tsx`,
+  `fleet.css` and `card.tsx` to confirm the filled tag CSS, the lane's edge classes, the dot's
+  animation and reduced-motion handling, and the word change, all stay in place.
+
+**Known gap, not fixed here:** `docs/MANUAL.md:925` currently reads *"A terminated agent
+reads **stopped** — not "done", which would claim it finished."* That line quotes the old
+`STATUS_WORD.done` value by name; the contrast it draws (stopped vs. finished) still holds,
+but the word it names no longer exists. It should become *"not **finished**"* when this text
+is applied.
+
 ### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
 
 Daemon (`session/supervisor.ts`, `routes/session.ts`), shared (`stack.ts`, `wire.ts`) and web

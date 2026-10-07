@@ -588,6 +588,15 @@ desktop notifications on you also get one, **<project> · job finished** or **jo
 a failure**, with the job's prompt; clicking it opens the project. A finished job doesn't
 chime and never turns the tab red: nothing is waiting on you.
 
+Finished and working are easy to spot even past a glance: the **finished** and **N
+working** tags are filled with their colour rather than tinted by it, and the Fleet card
+and the agent lane carry the same colour as a thin edge down their left side. The
+working dot pulses gently, about every two seconds, so a card that's actively running
+doesn't look identical to one that's merely alive; it holds still if your system is set to
+reduce motion. Every agent that has ended successfully says **finished** in its own lane,
+plainly — not just the job it belongs to, which is still the only thing "unseen" tracks
+(see above).
+
 Opening the project, or one of the job's agents, is seeing it. That only counts while the
 tab is in front, so a job that ends while you're in another window still waits for you. On
 the Project screen the groups you came to see keep saying **finished** until you leave. A
@@ -927,7 +936,7 @@ agent is told to check what that call did. If the agent was waiting on your answ
 pausing keeps the question in Needs You, and answering it wakes the agent. If its job
 was paused, waking the agent reopens the job.
 
-A terminated agent reads **stopped** — not "done", which would claim it finished. Its
+A terminated agent reads **stopped** — not "finished", which would claim it had. Its
 transcript and spend stay, and nothing on disk is touched: the worktree, the branch and
 every file it wrote are exactly where they were. To stop a whole job at once, use
 **✕ terminate** on that job's header on the Project screen (`2`).

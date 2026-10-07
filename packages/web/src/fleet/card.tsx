@@ -106,7 +106,7 @@ function AgentRow({
         {action.subject && <b>{action.subject}</b>}
       </span>
       <span className="fl-arow-el">
-        {agent.status === 'queued' ? 'queued' : agent.status === 'done' ? 'done' : (elapsed ?? '—')}
+        {agent.status === 'queued' ? 'queued' : agent.status === 'done' ? 'finished' : (elapsed ?? '—')}
       </span>
     </button>
   );
