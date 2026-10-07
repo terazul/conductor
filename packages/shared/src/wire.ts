@@ -359,6 +359,8 @@ export interface FileNode {
    * marks a path the tree keeps listing because its deletion is a change to review.
    */
   change?: { added: number; removed: number; created: boolean; at: string; deleted?: true };
+  /** Set on a directory that is its own git repo: a nested clone or a submodule (Amendment 90). */
+  repo?: { branch: string | null };   // null: detached HEAD, or no commits yet
 }
 
 export interface FileTreeResponse {

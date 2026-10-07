@@ -196,6 +196,64 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 90 — post-merge, applied. **Nested repos and submodules open all the way down in Files, marked with their branch.**
+
+Daemon (`workspace/tree.ts`, `workspace/git.ts`), shared (`wire.ts`), fixture
+(`fixtures/make-scratch-repo.sh`). `git ls-files` stops at another repo's boundary and hands the
+outer repo one opaque entry for the whole thing — a nested clone or an initialised submodule
+became a childless file leaf in the tree, which is the bug this amendment closes.
+
+- **`FileNode.repo?: { branch: string | null }`** (`wire.ts`) — set on a directory that is its
+  own git repo. `branch` is the nested repo's current branch, or `null` for a detached HEAD or a
+  repo with no commits yet (an unborn HEAD names a branch nothing has been committed to; a
+  detached one names no branch at all). Additive and optional: no existing `FileNode` consumer
+  changes shape.
+- **`tree.ts`'s `classifyLevel`** is the one place that notices a repo boundary, by `lstat` on a
+  `.git` entry inside a non-symlink directory — never `isRepo` (`git.ts`), which answers true for
+  *any* directory inside the outer repo, nested boundary or not. A directory for an ordinary
+  clone's `.git`, a file for a submodule's gitlink: both are caught the same way. `lstat`, never
+  `stat`, so a symlink is never mistaken for the directory it points at — a link back up the tree
+  can't be "expanded" into the infinite recursion that would be.
+- **`expandNestedRepo`** re-lists a nested repo with its own `listFiles` (filtered by the same
+  `NEVER_LISTED` deny-list — a nested repo's own `node_modules` stays hidden exactly like the
+  outer repo's), grafts the result in under the boundary's path, and marks the folder with
+  `nestedBranch` (`git.ts`, built on `hasHead`/`currentBranch`, catching every failure to `null`
+  so a corrupt or half-cloned nested repo still browses). It recurses into repos nested inside
+  that one, up to `MAX_NESTED_DEPTH` (4) levels — a repo found exactly at the limit is still
+  marked with its branch, just not listed further. Siblings expand in parallel (`Promise.all`),
+  so a project with several nested repos pays for `git ls-files` once per repo per tree request,
+  not serially.
+- **A listed directory with no `.git` inside it** — an uninitialised submodule looks exactly like
+  this: tracked, present on disk, empty — becomes an empty dir node, not a file leaf.
+- **Budget.** The outer repo's own paths are always placed ahead of every nested repo's in the
+  capped list, so one large nested clone can never push the project's own files out of a tree cut
+  short by `MAX_TREE_ENTRIES`; `truncated` and the server-side warn line report the combined total
+  dropped, own and nested together. A nested repo's folder — and its branch — is forced into the
+  tree unconditionally (`ensureDir`), independent of whether the cap trimmed away every file
+  inside it: the folder marking where a nested repo lives is not something the cap is allowed to
+  hide.
+- **`walkFiles`** (the no-git fallback for an `in_place` isolation outside any repo) stops at a
+  nested-repo boundary the same way and hands it to the same expansion, instead of recursing past
+  it, so `in_place` and a real git root behave alike.
+- **Changes stay the outer repo's own, by design (ADR 0003).** The outer `git status` only ever
+  reports a nested repo's whole directory as one opaque, possibly-dirty gitlink, never a path
+  inside it, so a nested repo's own changes don't show in the outer tree's change badges.
+- **Fixture.** `make-scratch-repo.sh` grows a nested clone (`inner/`, its own commit and branch,
+  a `node_modules`, and a symlink back up to its parent that must not be followed) and an
+  initialised submodule (`vendor-lib/`, added with `protocol.file.allow=always` since git 2.38+
+  refuses a local-path submodule by default).
+
+**Verified:** `workspace/verify.ts` §15 "nested repos browse all the way down": a nested clone's
+file and a submodule's file both list at their full path; each folder is marked with its real
+branch; `node_modules` inside the nested clone stays hidden; a cap sized to just the outer repo's
+own files drops only nested ones, with every own file surviving and the nested repos' folders
+still shown, branch and all, even with their files capped out; a symlink back up the tree doesn't
+loop. Also checked by hand: reading a file inside a nested repo through the file/image routes
+works and never asks the outer repo's git about it — pure filesystem path containment, no fix
+needed.
+
+---
+
 ### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
 
 Daemon (`session/supervisor.ts`, `routes/session.ts`), shared (`stack.ts`, `wire.ts`) and web

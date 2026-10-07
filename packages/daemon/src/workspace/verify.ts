@@ -12,7 +12,8 @@
  * browse the tree, see the dirty file flagged and the untracked file marked
  * created, read docs/PLAN.md rendered, view its diff, edit it in place. Then the
  * parts a human can't see: worktree create/reuse/remove, the three isolations,
- * the watcher's real line counts, and every path-escape I could think of.
+ * the watcher's real line counts, nested repos browsing all the way down
+ * (Amendment 90), and every path-escape I could think of.
  *
  * Note on isolation and the fixture: the scratch repo's dirt lives in its MAIN
  * checkout. `git worktree add` produces a clean checkout at HEAD, so the "dirty
@@ -889,8 +890,10 @@ async function main(): Promise<void> {
   const changeSet = await scanChanges(ws.path, workspace().store.changes('job_inplace'));
   const capped = await buildTree(ws.path, 'scratch-repo', changeSet, 3);
   check(
+    // 8, not 3: the pool a cap of 3 trims from now includes the nested repos'
+    // own files too (Amendment 90), not just the outer repo's.
     'truncated reports how many entries were dropped',
-    capped.truncated === 3,
+    capped.truncated === 8,
     String(capped.truncated),
   );
   check(
@@ -1176,13 +1179,89 @@ async function main(): Promise<void> {
   rmSync(BROWSE, { recursive: true, force: true });
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n15 · nested repos browse all the way down (Amendment 90)');
+
+  /*
+   * `uncapped` (section 12) is already a full tree of the fixture, which
+   * `make-scratch-repo.sh` seeds with a nested clone (`inner/`, its own branch
+   * and a `node_modules`) and an initialised submodule (`vendor-lib/`) — the
+   * two shapes a `.git` boundary comes in. Reused rather than rebuilt: a
+   * second `buildTree` call here would just be the same work twice.
+   */
+  const innerApp = find(uncapped, 'inner/app.js');
+  const vendorLib = find(uncapped, 'vendor-lib/lib.js');
+  check('a nested clone lists a file at its full path', innerApp?.type === 'file');
+  check('so does a submodule', vendorLib?.type === 'file');
+
+  const innerDir = find(uncapped, 'inner');
+  const vendorDir = find(uncapped, 'vendor-lib');
+  check(
+    "the clone's folder is marked with its branch",
+    innerDir?.repo?.branch === 'feature/nested',
+    JSON.stringify(innerDir?.repo),
+  );
+  check(
+    "the submodule's folder is marked with its branch too",
+    vendorDir?.repo?.branch === 'main',
+    JSON.stringify(vendorDir?.repo),
+  );
+
+  check(
+    "node_modules inside the nested clone stays hidden, same as the outer repo's",
+    !flatten(uncapped.root).some((n) => n.path.startsWith('inner/node_modules')),
+  );
+
+  const loopback = find(uncapped, 'inner/loopback');
+  check(
+    "a symlink back up the tree (inner/loopback -> ..) doesn't loop",
+    loopback?.type === 'file',
+    JSON.stringify(loopback),
+  );
+
+  // Budget (ADR 0003): the outer repo's own files are never pushed out by a
+  // nested repo's. Computed from the uncapped tree rather than hardcoded, so
+  // this keeps meaning the same thing if the fixture grows a file.
+  const allPaths = flatten(uncapped.root)
+    .filter((n) => n.type === 'file')
+    .map((n) => n.path);
+  const ownPaths = allPaths.filter((p) => !p.startsWith('inner/') && !p.startsWith('vendor-lib/'));
+  const nestedPaths = allPaths.filter((p) => p.startsWith('inner/') || p.startsWith('vendor-lib/'));
+  check(
+    'the fixture actually has both an own file and a nested one to budget between',
+    ownPaths.length > 0 && nestedPaths.length > 0,
+    `own=${ownPaths.length} nested=${nestedPaths.length}`,
+  );
+
+  const nestedCapped = await buildTree(ws.path, 'scratch-repo', changeSet, ownPaths.length);
+  check(
+    'a cap sized to just the outer repo still drops only nested files',
+    nestedCapped.truncated === nestedPaths.length,
+    String(nestedCapped.truncated),
+  );
+  const cappedFlat = flatten(nestedCapped.root);
+  const cappedPaths = new Set(cappedFlat.filter((n) => n.type === 'file').map((n) => n.path));
+  check(
+    "every one of the outer repo's own files survived the cap",
+    ownPaths.every((p) => cappedPaths.has(p)),
+  );
+  check(
+    "none of the nested files did — the outer repo's own files went first",
+    nestedPaths.every((p) => !cappedPaths.has(p)),
+  );
+  check(
+    "the nested repos' folders still show, branch and all, even with their files capped out",
+    cappedFlat.find((n) => n.path === 'inner')?.repo?.branch === 'feature/nested' &&
+      cappedFlat.find((n) => n.path === 'vendor-lib')?.repo?.branch === 'main',
+  );
+
+  // ───────────────────────────────────────────────────────────────────────────
   rmSync(join(SCRATCH, '.conductor'), { recursive: true, force: true });
   execFileSync('git', ['worktree', 'prune'], { cwd: SCRATCH });
   await app.close();
 
   console.log(
     failures === 0
-      ? '\nTrack C workspace: PASS — tree, markdown, diff, in-place edit, worktrees, containment.\n'
+      ? '\nTrack C workspace: PASS — tree, markdown, diff, in-place edit, worktrees, nested repos, containment.\n'
       : `\nTrack C workspace: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

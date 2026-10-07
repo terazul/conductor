@@ -746,7 +746,9 @@ its worktree at the top of the list, marked **◉ watching**. If the job runs in
 the first directory, that tree is the job's. Tabs from different directories sit side
 by side like tabs from different jobs, and **⑂ review full diff** is for whichever
 tree your open file is in. A folder inside a larger git repository shows only its own
-changes.
+changes. A nested repo inside a folder — a clone someone checked in, or a submodule — opens the same
+way, all the way down, with its own folder marked by its branch. Its own changes don't show;
+only the outer folder's do.
 
 ### Editing or removing a project
 
