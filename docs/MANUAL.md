@@ -648,8 +648,11 @@ project's name opens its Project screen, and its **▸** opens it to three subme
   one job still shows its group. Helpers are listed in their job like any agent.
 - **Needs you**: this project's waiting requests and alerts, one row each. The heading
   turns amber, with a count, when anything waits. A click opens that item in Needs you.
-- **Files**: the project's folders, its main one first. A click opens Files on that
-  folder.
+- **Files**: the project's folders, its main one first. A folder opens and closes like any
+  other row here, and while open shows its directories as a tree — folders first, then
+  files, nested as deep as the folder goes. A file's row opens it on the Files screen; the
+  navigator stays where it is. Nothing here marks a changed file; for that, open the folder
+  on Files itself.
 
 Every project, submenu and job group opens and closes on its own, and what's open is
 remembered.

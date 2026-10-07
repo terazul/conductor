@@ -11,33 +11,11 @@ one names, and this file's git history (everything up to Amendment 87 was cleare
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 92.
+  green `make test` (decided 30 Sep). The next amendment is 93.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
   Agent screen today (Amendment 58).
-
-## Navigator
-
-- [ ] **Open folders, and files, from the left panel.** Asked for (7 Oct). In the
-  navigator, a project's **Files** should open into its directories as a tree. Clicking a
-  folder opens it, and clicking a file shows it in the Files tab.
-  Today **Files** lists only the project's top-level folders (main and referenced). A click
-  opens Files on that folder, with nothing deeper
-  (`packages/web/src/shell/Navigator.tsx:305-317`; the rows come from `folders` in
-  `shell/navtree.ts:92`). Open and closed state is node ids kept in settings
-  (`navtree.ts:16`, `NavPart` at `navtree.ts:255`). Add a node per directory.
-  The data already exists: `GET /api/projects/:projectId/dir/tree`
-  (`routes/workspace.ts:204`) is what Files uses. A link already opens a file:
-  `navigate('files', { jobId: dirRoot(projectId, dir), path })` goes through `applyLink`
-  to `openTab` (`files/tabs.ts:319-336`, `dirRoot` at `tabs.ts:87`).
-  Decide:
-  - fetch each folder's tree when it's opened, or share the Files screen's tree (the
-    hooks in `files/useWorkspace.ts`).
-  - whether changed files are marked here too, as in the Files tree.
-  *Decided (7 Oct, by the architect, as a default): share `useFileTree`, mounted only while a
-  folder is open. No change marks in the navigator.*
-  Builds on the nested-repo item above: the same folders should open the same way in both.
 
 ## Seeing what's happening
 

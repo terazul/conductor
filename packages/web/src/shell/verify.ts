@@ -14,6 +14,10 @@
  *
  * §8 (Amendment 86): a project's agents are grouped by job, newest first, headed by the
  * prompt on one line, with the worst dot and the sum of what waits; groups start open.
+ *
+ * §9 (Amendment 92): a project's folders open into their directories as a tree, sharing
+ * the Files screen's own `useFileTree`; `navDirId` names each directory's node, and
+ * `navFileLink` is the link a file row hands `navigate('files', …)`.
  */
 
 import type { Agent, Alert, PendingRequest } from '@conductor/shared';
@@ -32,7 +36,9 @@ import {
   isOpen,
   jobLine,
   jobShown,
+  navDirId,
   navDrop,
+  navFileLink,
   navId,
   navJobId,
   navProjects,
@@ -176,7 +182,9 @@ console.log('\n3 · Files lists the main folder first, then the referenced ones'
   const twice = projectFolders({ id: 'x', path: '/a', extraDirs: ['/b', '/a', '/b'] });
   check('a folder listed twice is shown once', twice.map((f) => f.dir).join() === '/a,/b', twice.map((f) => f.dir).join());
   check('a root path keeps a name', folderName('/') === '/' && folderName('C:\\src\\app') === 'app');
-  check('a row opens Files with that root', /navigate\(SCREEN\.files, \{ jobId: f\.root \}\)/.test(src('./Navigator.tsx')));
+  const nav = src('./Navigator.tsx');
+  check('a folder opens and closes, as FolderNode, rather than jumping straight to Files', /function FolderNode/.test(nav) && !/navigate\(SCREEN\.files, \{ jobId: f\.root \}\)/.test(nav));
+  check('open, it fetches its tree with the Files screen\'s own hook', /useFileTree\(root\)/.test(nav));
 }
 
 console.log('\n4 · every node opens and closes on its own');
@@ -370,9 +378,46 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check("the navigator's + adds a project, on Fleet's form, not new work (Amendment 71)", /navigate\(SCREEN\.fleet, \{ add: '1' \}\)/.test(nav) && !/openSpawn\(\)/.test(nav));
 }
 
+console.log('\n9 · Files opens into a folder\'s directories as a tree (Amendment 92)');
+{
+  check('a folder\'s own node is navDirId with no path', navDirId('web', 'root', '') === 'p:web:files:root:');
+  check('format: p:<projectId>:files:<root>:<path>', navDirId('p1', 'r1', 'src/app') === 'p:p1:files:r1:src/app');
+
+  check(
+    'a different project never shares an id with another, root and path held equal',
+    navDirId('p1', 'r', 'a/b') !== navDirId('p2', 'r', 'a/b'),
+  );
+  check(
+    'a different root never shares an id with another, project and path held equal',
+    navDirId('p1', 'r1', 'a/b') !== navDirId('p1', 'r2', 'a/b'),
+  );
+  check(
+    'a different path never shares an id with another, project and root held equal',
+    navDirId('p1', 'r', 'a') !== navDirId('p1', 'r', 'a/b') && navDirId('p1', 'r', 'a') !== navDirId('p1', 'r', 'b'),
+  );
+  check("a folder's own node and one of its directories never collide", navDirId('p1', 'r', '') !== navDirId('p1', 'r', 'a'));
+
+  check('a file row\'s link is the root as jobId, and the file\'s own path', JSON.stringify(navFileLink('root', 'src/app.ts')) === JSON.stringify({ jobId: 'root', path: 'src/app.ts' }));
+  check(
+    "that link is exactly what a #files deep link, and applyLink, read for a file (files/tabs.ts)",
+    Object.keys(navFileLink('r', 'p')).sort().join() === 'jobId,path',
+  );
+
+  const nav = src('./Navigator.tsx');
+  const tabs = src('../files/tabs.ts');
+  check("FolderNode and the top of its tree share one node id, path ''", /navDirId\(project\.id, folder\.root, ''\)/.test(nav));
+  check('a directory under it is named by its own root-relative path', /navDirId\(projectId, root, kid\.path\)/.test(nav));
+  check('a file row navigates with navFileLink, through SCREEN.files', /navigate\(SCREEN\.files, navFileLink\(root, kid\.path\)\)/.test(nav));
+  check('folders and files alike open and close by the same toggle every other nav node uses', /onClick=\{\(\) => toggle\(id\)\}/.test(nav));
+  check('every toggle says whether it is open', /aria-expanded=\{shown\}/.test(nav));
+  check('the tree is fetched with the Files screen\'s own hook, not a second one', /import \{ useFileTree \} from '\.\.\/files\/useWorkspace\.js'/.test(nav) && /useFileTree\(root\)/.test(nav));
+  check('no change marks: nothing here reads a node\'s change', !/kid\.change|node\.change/.test(nav));
+  check('applyLink reads the same shape a file row sends', /path\s*\?\s*openTab\(s, jobId, path, now, keep\)/.test(tabs));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

@@ -264,6 +264,24 @@ export function navJobId(projectId: string, jobId: string): string {
   return `p:${projectId}:job:${jobId}`;
 }
 
+/**
+ * One directory's node, inside a Files folder's tree (Amendment 92): the folder itself
+ * is `path: ''`, and each directory under it is named by its root-relative path, so a
+ * folder opened under two different projects — or two different folders of the same
+ * project — never share a node, even when their trees hold a directory of the same name.
+ */
+export function navDirId(projectId: string, root: string, path: string): string {
+  return `p:${projectId}:files:${root}:${path}`;
+}
+
+/**
+ * What a file row in the navigator's Files tree gives `navigate('files', …)` (Amendment
+ * 92): the same shape `applyLink` reads off a `#files` link (`files/tabs.ts:319-336`).
+ */
+export function navFileLink(root: string, path: string): { jobId: string; path: string } {
+  return { jobId: root, path };
+}
+
 /** A job's group starts open: its id in the set means it was closed. */
 export function jobShown(open: ReadonlySet<string>, id: string): boolean {
   return !open.has(id);

@@ -13,7 +13,10 @@
  *    count when something waits on it. A click opens the agent; the panel stays.
  *  - NEEDS YOU, this project's waiting requests and alerts, one row each. Its heading is
  *    amber, with a count, whenever any wait. A click opens that one in Needs you.
- *  - FILES, the project's folders, main first. A click opens Files on that folder.
+ *  - FILES, the project's folders, main first, each opening into its directories as a
+ *    tree (Amendment 92): a folder row opens and closes, fetching its tree with the
+ *    Files screen's own `useFileTree` the first time it's opened; a file row opens that
+ *    file on the Files screen. No change marks here, unlike the Files tree itself.
  *
  * Amber in this panel is only ever a count of things waiting on you — that heading, the
  * project's name, an agent's row — never a selection or a hover (CONTRACT §5.1).
@@ -29,18 +32,22 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import type { FileNode } from '@conductor/shared';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
+import { useFileTree } from '../files/useWorkspace.js';
 import { SCREEN, openAgent, openProject, recall } from './nav.js';
 import {
   NAV_TREE_KEY,
   currentProject,
   isOpen,
   jobShown,
+  navDirId,
   navDrop,
+  navFileLink,
   navId,
   navJobId,
   navProjects,
@@ -49,6 +56,7 @@ import {
   serializeOpen,
   toggleOpen,
   type NavAgent,
+  type NavFolder,
   type NavJob,
   type NavPart,
   type NavProject,
@@ -185,6 +193,124 @@ interface NavDrag {
   end: () => void;
 }
 
+/**
+ * One directory's children, inside a Files folder's tree (Amendment 92). Dirs first,
+ * then files: the order the daemon already builds the tree in (`workspace/tree.ts`'s
+ * `finish`), so this walks `node.children` as given rather than sorting again. A dir
+ * row opens and closes a nested copy of this same list; a file row opens the file.
+ */
+function FileRows({
+  node,
+  projectId,
+  root,
+  open,
+}: {
+  node: FileNode;
+  projectId: string;
+  root: string;
+  open: ReadonlySet<string>;
+}) {
+  return (
+    <>
+      {(node.children ?? []).map((kid) => {
+        if (kid.type === 'file') {
+          return (
+            <button
+              key={`f:${kid.path}`}
+              type="button"
+              className="sh-nav-row"
+              onClick={() => navigate(SCREEN.files, navFileLink(root, kid.path))}
+              title={kid.path}
+            >
+              <span className="sh-nav-label">{kid.name}</span>
+            </button>
+          );
+        }
+        const id = navDirId(projectId, root, kid.path);
+        const shown = isOpen(open, id);
+        return (
+          <div className="sh-nav-dir" key={`d:${kid.path}`}>
+            <button
+              type="button"
+              className="sh-nav-row"
+              aria-expanded={shown}
+              onClick={() => toggle(id)}
+              title={`${shown ? 'Close' : 'Open'} ${kid.name}`}
+            >
+              <Chevron open={shown} />
+              <span className="sh-nav-label">{kid.name}</span>
+            </button>
+            {shown && (
+              <div className="sh-nav-items">
+                <FileRows node={kid} projectId={projectId} root={root} open={open} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * A folder's tree, fetched with the same hook the Files screen uses
+ * (`useFileTree`, `files/useWorkspace.ts:297`). Mounted only while the folder's node is
+ * open, so a folder nobody opens never costs a request; reopening it shows the last
+ * copy at once while a fresh one is asked for.
+ */
+function FolderTree({
+  projectId,
+  root,
+  open,
+}: {
+  projectId: string;
+  root: string;
+  open: ReadonlySet<string>;
+}) {
+  const tree = useFileTree(root);
+  if (tree.error) return <span className="sh-nav-none">{tree.error}</span>;
+  if (!tree.data) return <span className="sh-nav-none">{tree.loading ? 'loading…' : 'no files'}</span>;
+  return <FileRows node={tree.data.root} projectId={projectId} root={root} open={open} />;
+}
+
+/**
+ * One of a project's folders under Files (Amendment 92): opens and closes like any
+ * other node, and while open shows its directories as a tree, folders first, then
+ * files. A file row opens that file on the Files screen; nothing here changes marks.
+ */
+function FolderNode({
+  project,
+  folder,
+  open,
+}: {
+  project: NavProject;
+  folder: NavFolder;
+  open: ReadonlySet<string>;
+}) {
+  const id = navDirId(project.id, folder.root, '');
+  const shown = isOpen(open, id);
+  return (
+    <div className="sh-nav-dir">
+      <button
+        type="button"
+        className="sh-nav-row"
+        aria-expanded={shown}
+        onClick={() => toggle(id)}
+        title={`${shown ? 'Close' : 'Open'} ${tildePath(folder.dir)}`}
+      >
+        <Chevron open={shown} />
+        <span className="sh-nav-label">{folder.name}</span>
+        {folder.main && <span className="sh-nav-tag">main</span>}
+      </button>
+      {shown && (
+        <div className="sh-nav-items">
+          <FolderTree projectId={project.id} root={folder.root} open={open} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectNode({
   project,
   open,
@@ -304,16 +430,7 @@ function ProjectNode({
 
           <Submenu project={project} part="files" open={open} title="Files" count={project.folders.length}>
             {project.folders.map((f) => (
-              <button
-                key={f.dir}
-                type="button"
-                className="sh-nav-row"
-                onClick={() => navigate(SCREEN.files, { jobId: f.root })}
-                title={tildePath(f.dir)}
-              >
-                <span className="sh-nav-label">{f.name}</span>
-                {f.main && <span className="sh-nav-tag">main</span>}
-              </button>
+              <FolderNode key={f.dir} project={project} folder={f} open={open} />
             ))}
           </Submenu>
         </div>

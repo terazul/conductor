@@ -294,6 +294,47 @@ pulling you off a project you already had open; and source checks that `agent/ag
 
 ---
 
+### Amendment 92 — post-merge, applied. **A project's Files folders open into their directories as a tree, in the navigator.**
+
+Web only (`shell/navtree.ts`, `shell/Navigator.tsx`). The navigator's **Files** submenu used
+to list a project's folders flat, each a button that jumped straight to the Files screen on
+that root. Now each folder is a node that opens and closes like every other row in the panel,
+and while open shows its directories and files, nested arbitrarily deep.
+
+- **`navDirId(projectId, root, path)`** names one directory's node:
+  `p:<projectId>:files:<root>:<path>`. A folder's own node is `path: ''`; a directory under it
+  is named by its own root-relative path. Because the id carries the project, the root and the
+  path, a folder opened under two different projects, or two different folders of the same
+  project, never share a node even when their trees hold a directory of the same name. Ids are
+  kept in settings exactly as every other node's is (`NAV_TREE_KEY`, `toggleOpen`).
+- **`navFileLink(root, path)`** is `{ jobId: root, path }` — the same shape `applyLink`
+  (`files/tabs.ts`) reads off a `#files` deep link, so a file row's click is indistinguishable
+  from following that link.
+- **Fetching.** Each open folder mounts its own `useFileTree(folder.root)`
+  (`files/useWorkspace.ts:297`) — the Files screen's own hook, not a second mechanism — so a
+  folder nobody opens costs nothing, and reopening one shows its last tree at once while a
+  fresh copy is asked for underneath. A directory under it is likewise fetched only once, from
+  the one tree its folder already holds; opening a nested directory draws from the same
+  response rather than issuing another request.
+- **Order.** Folders come first, then files, in the order the tree already arrives in: the
+  daemon's `buildTree` (`workspace/tree.ts`) sorts `children` dirs-first-then-alphabetical
+  before it answers, and the Files screen's own tree trusts that order rather than re-sorting,
+  so the navigator does too.
+- **No change marks.** Unlike the Files tree itself, nothing here reads a node's `change`. This
+  is a deliberate, reversible default (ADR 0003, decision 2); a later amendment may add them,
+  alongside `FileNode.repo`'s branch mark (Amendment 90).
+- **Clicks.** A folder's row toggles open/closed, with `aria-expanded` and the same keyboard and
+  focus behaviour as every other navigator row. A file's row calls
+  `navigate('files', navFileLink(root, path))`, opening it on the Files screen; the panel stays
+  up.
+
+**Verified:** `shell/verify.ts` §9: the `navDirId` format, that project/root/path each make a
+distinct id and a folder's own node never collides with one of its directories, `navFileLink`'s
+shape, and that `Navigator.tsx` wires `FolderNode`/`FileRows` through `useFileTree`, `toggle` and
+`navigate(SCREEN.files, navFileLink(...))` rather than the old flat click.
+
+---
+
 ### Amendment 89 — post-merge, applied. **Add and remove agents in a job that is already running.**
 
 Daemon (`session/supervisor.ts`, `routes/session.ts`), shared (`stack.ts`, `wire.ts`) and web
