@@ -122,6 +122,53 @@ five items below run in this order.*
   - what happens to work they already did in the worktree.
   - what happens to an agent after it that is still running: stop it, or wait for it.
 
+- [ ] **Orchestrated stacks: one agent runs the others.** Asked for (8 Oct), as a design
+  question. A new kind of stack you pick in Spawn, beside the fixed ones. An orchestrator
+  starts each agent, reads what it did, decides when the step is ready, and writes the next
+  agent's brief in full. It can send work back (start the developer again after a failed
+  review) and asks you when unsure. It answers the same problem as the items above: a stop
+  isn't "ready", and the next agent gets only a last reply.
+  - **Built on the orchestrator and helpers (Amendment 51).** An agent given **+ up to N
+    helpers** gets `start_helper` and `list_helpers` (`MCP_TOOLS`,
+    `packages/daemon/src/routes/helpers.ts:24-44`). It ends its turn, waits, and is woken with
+    each helper's reply (`#awaitHelpers`, `session/supervisor.ts:1095`; `helperReport`,
+    `session/handoff.ts:91-97`). This works on Claude, Copilot and OpenRouter.
+  - **What's missing:**
+    - **Role-aware helpers.** Every helper runs on "your model and permissions"
+      (`helpers.ts:28`; `startHelper`, `supervisor.ts:1036`), with no role or persona. A
+      reviewer started this way can edit files, and a scribe can't be put on a cheaper model.
+      `start_helper` should take a role or persona and a model tier, and a reading role should
+      stay read-only (`readOnlyRefusal`, `packages/shared/src/stack.ts:136`).
+    - **A pipeline prompt.** `orchestratorSection` is written for parallel work: "split the
+      work into parts that can run in parallel without touching the same files"
+      (`handoff.ts:69-79`). A pipeline needs the opposite. Run the steps in order, read each
+      result before the next, ask the user with the question tool when unsure, and send work
+      back when a review fails.
+    - **A preset.** "orchestrated pipeline": one orchestrator row, with the roles it may start
+      listed (`spawn/presets.ts`).
+  - **Trade-offs against a fixed stack with `hand_off`:**
+
+    | | fixed stack with `hand_off` | orchestrated |
+    |---|---|---|
+    | Order | fixed, shown in Spawn before launch | decided while it runs |
+    | Who judges a step ready | each agent judges its own | one agent judges all |
+    | Context for the next agent | the agent's own summary | a full brief the orchestrator writes |
+    | Loops (review, then fix) | no | yes |
+    | Cost | lowest | higher: the orchestrator re-reads its growing conversation each time it wakes, and wants a strong model |
+    | Failure | one agent's misjudgement | the orchestrator's misjudgement carries through every step |
+
+    Keep both. `hand_off` stays for plain stacks.
+  - **To try it today, with no change:** in Spawn's **custom…**, one row named
+    `orchestrator` with the architect persona and **+ up to 4 helpers**, and the steps in its
+    brief (plan; then a helper to implement it; then one to review; then one to document; each
+    waiting for the last). Every helper has its model and permissions, so the "reviewer" can
+    still write.
+  Decide:
+  - whether an orchestrated stack lists its roles before launch (which roles it may start, and
+    on which models), or leaves them all to the orchestrator.
+  - how many times it may send work back before it asks you.
+  - whether its helpers also get `hand_off`, or its own judgement replaces it.
+
 ## Seeing what's happening
 
 - [ ] **Project and Agent, beyond the label.** Asked for (7 Oct). The label at the top has its
