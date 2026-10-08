@@ -62,6 +62,42 @@ export function handoffSection(upstream: readonly Upstream[]): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Asking from inside a stack (Amendment 100)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Is this agent in a stack: does it wait for another, or does another wait for it?
+ * `wentWithout` is how many it was started without (Amendment 88), which still counts as
+ * having waited. Pure, so session/verify.ts checks both sides directly.
+ */
+export function inStack(
+  agentId: string,
+  jobAgents: readonly { id: string; dependsOn: readonly string[] }[],
+  wentWithout = 0,
+): boolean {
+  const me = jobAgents.find((a) => a.id === agentId);
+  return (me?.dependsOn.length ?? 0) > 0 || wentWithout > 0 || jobAgents.some((a) => a.dependsOn.includes(agentId));
+}
+
+/**
+ * The one line an agent in a stack is told about asking. A question left in its reply ends
+ * its turn, and everything waiting on it starts without an answer; the question tool holds
+ * it in Needs You and starts nothing after it until you reply. Claude's tool is called
+ * AskUserQuestion and Copilot's (and so OpenRouter's) is ask_user, so both are named.
+ * It does not replace ending a turn with "I'll wait": that still works as it did.
+ */
+export const STACK_ASK_LINE =
+  'You are one agent in a stack, and some agents wait for others to finish. When you need an answer from ' +
+  'the user, ask with the question tool (AskUserQuestion, or ask_user), not in your reply: a question in your ' +
+  'reply ends your turn and the agents after you start without the answer, while the question tool holds you, ' +
+  'and them, until the user has answered.';
+
+/** The line for a first prompt, or '' for an agent that is on its own. */
+export function stackLine(stacked: boolean): string {
+  return stacked ? STACK_ASK_LINE : '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrators and helpers (Amendment 51)
 // ─────────────────────────────────────────────────────────────────────────────
 

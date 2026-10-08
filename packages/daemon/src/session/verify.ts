@@ -100,7 +100,7 @@ import { ClaudeBackend } from './backends/claude.js';
 import { copilotSdk, excludedFor, gateCall, type CopilotClientLike } from './backends/copilot.js';
 import { CopilotEvents, askFromPermission } from './backends/copilot-events.js';
 import { forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
-import { HANDOFF_CAP, handoffSection } from './handoff.js';
+import { HANDOFF_CAP, STACK_ASK_LINE, handoffSection, inStack, stackLine } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { costChanged } from '../daily.js';
@@ -2188,6 +2188,18 @@ async function main(): Promise<void> {
       .forAgent('agt_fixer')
       .some((e) => e.payload.kind === 'user_text' && e.payload.text === told17),
   );
+  check(
+    'an agent that waited is told to ask with the question tool, after the handoff and before its brief (Amendment 100)',
+    told17.includes(STACK_ASK_LINE) &&
+      told17.indexOf('[debugger]') < told17.indexOf(STACK_ASK_LINE) &&
+      told17.indexOf(STACK_ASK_LINE) < told17.indexOf('Your role is builder.'),
+    told17,
+  );
+  check(
+    'the line names the question tool under both of its names, Claude\'s and Copilot\'s (Amendment 100)',
+    /AskUserQuestion/.test(STACK_ASK_LINE) && /ask_user/.test(STACK_ASK_LINE),
+    STACK_ASK_LINE,
+  );
   runs[0]?.finish({ cost: 0, reason: 'completed' });
   await until(() => getAgent(db, 'agt_fixer')?.status === 'done');
 
@@ -2195,8 +2207,37 @@ async function main(): Promise<void> {
   sup.pump();
   await until(() => (runs[1]?.prompts.length ?? 0) > 0);
   check('an agent that waited for nobody is told nothing extra', runs[1]?.prompts[0] === 'the job_handoff prompt', JSON.stringify(runs[1]?.prompts));
+  check('and that includes not being told how to ask: it is not in a stack (Amendment 100)', !(runs[1]?.prompts[0] ?? '').includes(STACK_ASK_LINE));
   runs[1]?.finish({ cost: 0, reason: 'completed' });
   await until(() => getAgent(db, 'agt_alone')?.status === 'done');
+
+  // The first agent of a stack waits for nobody, but the agents after it wait for it (Amendment 100).
+  fixture('agt_lead', 'job_handoff', { role: 'architect', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+  fixture('agt_follow', 'job_handoff', { role: 'builder', status: 'queued', dependsOn: ['agt_lead'], autonomy: DEFAULT_AUTONOMY });
+  const leadRun = runs.length;
+  sup.pump();
+  await until(() => (runs[leadRun]?.prompts.length ?? 0) > 0);
+  check(
+    'an agent that others wait for is told how to ask too, though it waited for nobody (Amendment 100)',
+    runs[leadRun]?.prompts[0] === `the job_handoff prompt\n\n${STACK_ASK_LINE}`,
+    JSON.stringify(runs[leadRun]?.prompts),
+  );
+  runs[leadRun]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => (runs[leadRun + 1]?.prompts.length ?? 0) > 0);
+  runs[leadRun + 1]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_follow')?.status === 'done');
+
+  const jobShape = [
+    { id: 'a', dependsOn: [] as string[] },
+    { id: 'b', dependsOn: ['a'] },
+    { id: 'c', dependsOn: [] as string[] },
+  ];
+  check(
+    'in a stack: the one that waits, and the one waited for; not an agent on its own (Amendment 100)',
+    inStack('b', jobShape) && inStack('a', jobShape) && !inStack('c', jobShape),
+  );
+  check('one started without a stopped agent still counts as having waited (Amendment 100)', inStack('c', jobShape, 1) && !inStack('c', jobShape, 0));
+  check('the line is empty for an agent on its own (Amendment 100)', stackLine(false) === '' && stackLine(true) === STACK_ASK_LINE);
 
   const long = handoffSection([{ role: 'analyst', reply: 'x'.repeat(HANDOFF_CAP + 500) }]);
   check('a very long reply is cut, and says so', long.length < HANDOFF_CAP + 400 && long.includes(`of ${(HANDOFF_CAP + 500).toLocaleString('en')} characters`), String(long.length));
@@ -3022,6 +3063,14 @@ async function main(): Promise<void> {
         sOr.config.provider.type === 'openai' && sOr.config.model === 'anthropic/claude-sonnet-4.5',
       JSON.stringify({ status: made.status, provider: sOr?.config.provider?.baseUrl }),
     );
+    // The question tool, too: OpenRouter runs on the Copilot backend, whose one config
+    // gives it `onUserInputRequest`, so ask_user reaches Needs you as for Copilot (Amendment 100).
+    const orAsk = sOr!.config.onUserInputRequest!({ question: 'Which database?', choices: ['sqlite', 'postgres'] }, { sessionId: orId });
+    await until(() => openRequestsForAgent(db, orId).length === 1);
+    const qOr = openRequestsForAgent(db, orId)[0];
+    check('an OpenRouter agent is given the question tool: ask_user is a question in Needs you (Amendment 100)', qOr?.kind === 'question' && qOr.questions?.[0]?.options.map((o) => o.label).join() === 'sqlite,postgres', JSON.stringify(qOr?.questions));
+    await send('POST', `/api/requests/${qOr!.id}/decide`, { decision: { type: 'answer', answers: { 'Which database?': 'sqlite' } } });
+    check('and your answer is its answer (Amendment 100)', JSON.stringify(await orAsk) === JSON.stringify({ answer: 'sqlite', wasFreeform: false }));
     sOr?.emit('session.idle', {});
     await until(() => getAgent(db, orId)?.status === 'done');
     const everywhere = [

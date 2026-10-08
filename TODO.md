@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 100.
+  green `make test` (decided 30 Sep). The next amendment is 101.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -93,16 +93,6 @@ the order above.*
   agent still finishes `done`; the hold survives a restart.
   *Decided (8 Oct): build it as described. The hold is an alert beside `done`, not a new
   status, and you can edit the summary before it goes.*
-
-- [ ] **Tell stack agents to ask with the question tool, not in prose.** Asked for (7 Oct).
-  One line in the prompt Conductor builds (`#promptFor`, `supervisor.ts:809-828`), for
-  agents in a stack: ask the user with the question tool. A question asked that way already
-  holds the agent in Needs You and starts nothing after it (`arbiter/index.ts:339`; `#settle`
-  at `supervisor.ts:975-985`). The architect above asked in prose. Check that OpenRouter
-  models get the question tool too: Copilot handles it (`backends/copilot.ts`), and OpenRouter
-  runs on the same backend (`backends/index.ts:51-56`).
-  *Decided (8 Oct): yes. It doesn't replace `hand_off`: an agent can still end with "I'll
-  wait".*
 
 - [ ] **Re-run from here.** Asked for (7 Oct). A button on an agent in a stack: start the
   agents after it again with its latest reply, once you've changed what it said. It's

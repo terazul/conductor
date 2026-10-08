@@ -196,6 +196,36 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 100 — post-merge, applied. **An agent in a stack is told to ask with the question tool, not in prose.**
+
+Daemon (`session/handoff.ts`, `session/supervisor.ts`'s `#promptFor`, `session/verify.ts`). A TODO.md
+item (asked 7 Oct, decided 8 Oct: "yes").
+- **One line in the first prompt** of an agent that is in a stack: it waits for another, was
+  started without one that was stopped (Amendment 88), or another agent waits for it. It says
+  to ask the user with the question tool (`AskUserQuestion`, or `ask_user` in Copilot and
+  OpenRouter), not in its reply: a question in the reply ends the turn and the agents after it
+  start without the answer; the question tool holds it, and them, until the user has answered.
+  An agent on its own gets nothing extra, so its prompt is unchanged.
+- **Where.** After the handoff section (Amendment 37) and before the agent's own brief, so the
+  brief is still last. `inStack` and `stackLine` in `handoff.ts` are pure; `#promptFor` only
+  asks them.
+- **Why it works without new machinery.** A question asked with the tool is already held in
+  Needs You (`arbiter/index.ts`) and `#settle` starts nothing after an agent that is blocked. The
+  architect in the TODO example ended its turn on a question in prose, which `#settle` read as done.
+- **OpenRouter gets the question tool.** Checked, not changed: OpenRouter runs on
+  `CopilotBackend` (`backends/index.ts`), whose one `#config()` gives every session
+  `onUserInputRequest`, and the SDK turns `ask_user` on from that (`requestUserInput:
+  !!config.onUserInputRequest`, on create and on resume). `verify.ts` now asks a question
+  through an OpenRouter agent's session and answers it.
+- **Checked** (`session/verify.ts` §17, and §17l for OpenRouter): the line is in an agent that
+  waited, after the handoff and before its brief; an agent that others wait for gets it though it
+  waited for nobody; an agent on its own does not; `inStack` is true for the waiting and the
+  waited-for, and for one started without a stopped agent; an OpenRouter agent's `ask_user` is a
+  question in Needs You and its answer comes back.
+- **Not done**: it does not replace the later `hand_off` tool. An agent can still end with "I'll
+  wait", and the line says nothing against it. An orchestrator's helpers are not told: they report
+  to the orchestrator, not to the user. A resume does not repeat the line; the session already has it.
+
 ### Amendment 99 — post-merge, applied. **Move rows in Spawn to set who each agent waits for.**
 
 Web only (`spawn/order.ts` and `spawn/reorder.tsx`, new; `spawn/route.tsx`, `spawn/CustomSetup.tsx`,

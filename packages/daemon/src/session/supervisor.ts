@@ -44,7 +44,7 @@ import { preview } from '../preview/index.js';
 import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
-import { handoffSection, helperBrief, helperReport, orchestratorSection } from './handoff.js';
+import { handoffSection, helperBrief, helperReport, inStack, orchestratorSection, stackLine } from './handoff.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
 import {
@@ -803,8 +803,9 @@ export class Supervisor implements AgentControl {
 
   /**
    * The prompt one agent sees: the job instruction, what the agents it waited for said
-   * last (Amendment 37), and its own brief — last, so "the work described above" and
-   * "the root cause the debugger identified" both have something above them.
+   * last (Amendment 37), for an agent in a stack how to ask (Amendment 100), and its own
+   * brief — last, so "the work described above" and "the root cause the debugger
+   * identified" both have something above them.
    */
   #promptFor(agentId: string): string {
     const agent = getAgent(this.#db, agentId);
@@ -820,8 +821,11 @@ export class Supervisor implements AgentControl {
       ...getWentWithout(this.#db, agentId).map((w) => ({ role: w.role, reply: eventLog().lastText(w.id), status: 'stopped' })),
     ];
     const handoff = handoffSection(upstream);
+    // In a stack, it asks with the question tool, which holds it in Needs You (Amendment 100).
+    const ask = stackLine(inStack(agentId, agentsForJob(this.#db, agent.jobId), getWentWithout(this.#db, agentId).length));
     const parts = [job?.prompt ?? ''];
     if (handoff) parts.push(`\n${handoff}`);
+    if (ask) parts.push(`\n${ask}`);
     if (brief?.trim()) parts.push(`\nYour role is ${agent.role}. ${brief.trim()}`);
     if (agent.helperCap) parts.push(`\n${orchestratorSection(agent.role, agent.helperCap)}`);
     return parts.join('\n').trim();
