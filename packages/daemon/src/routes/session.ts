@@ -226,11 +226,19 @@ function parseAgentSpecs(raw: unknown): AgentSpec[] {
   }
   if (specs.length === 0) throw new Error('at least one agent is required');
 
-  // dependsOnRoles must name a sibling, or the agent would never start.
-  for (const spec of specs) {
+  /*
+   * dependsOnRoles must name a sibling, or the agent would never start, and one listed
+   * before it (Amendment 98). Spawn only offers the agents above a row, and the order is
+   * the stack's order, so this is the same rule, held where a request can't skip it. It
+   * also rules out a loop: two agents waiting for each other, neither ever starting.
+   */
+  const order = new Map(specs.map((s, i) => [s.role, i]));
+  for (const [i, spec] of specs.entries()) {
     for (const dep of spec.dependsOnRoles ?? []) {
-      if (!seen.has(dep)) throw new Error(`agent ${spec.role} depends on unknown role ${dep}`);
-      if (dep === spec.role) throw new Error(`agent ${spec.role} cannot depend on itself`);
+      const at = order.get(dep);
+      if (at === undefined) throw new Error(`agent ${spec.role} depends on unknown role ${dep}`);
+      if (at === i) throw new Error(`agent ${spec.role} cannot depend on itself`);
+      if (at > i) throw new Error(`agent ${spec.role} depends on ${dep}, which comes after it — an agent can only wait for one before it`);
     }
   }
   return specs;

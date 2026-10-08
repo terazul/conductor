@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 98.
+  green `make test` (decided 30 Sep). The next amendment is 99.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -47,7 +47,7 @@ five items below run in this order.*
     toggled at `spawn/CustomSetup.tsx:66`), and a dependency must be above it
     (`spawn/custom.ts:67-68`). Adding an agent to a running stack checks for loops
     (`spawn/stack.ts:180-191`).
-  - **The daemon enforces "above you"** since Amendment 92 (`parseAgentSpecs`,
+  - **The daemon enforces "above you"** since Amendment 98 (`parseAgentSpecs`,
     `packages/daemon/src/routes/session.ts`). What's left is the web.
   - **Show it on preset rows.** Each preset row shows its **waits for** and lets it be
     changed. Reuse `RoleRow` (`spawn/RoleRow.tsx:48`: no roles given, no **waits for** shown).

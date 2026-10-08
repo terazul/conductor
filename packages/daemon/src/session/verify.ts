@@ -1348,6 +1348,51 @@ async function main(): Promise<void> {
     `${nickJob.status} ${nickJob.body.detail}`,
   );
 
+  // Amendment 98: an agent can only wait for one listed before it.
+  const jobsBefore = (await get<{ jobs: unknown[] }>('/api/jobs')).body.jobs.length;
+  const later = await send<{ detail?: string }>('POST', '/api/jobs', {
+    projectId: 'proj_any',
+    prompt: 'go',
+    agents: [
+      { role: 'architect', model: OPUS, dependsOnRoles: ['developer'] },
+      { role: 'developer', model: OPUS },
+    ],
+  });
+  check(
+    'waiting for an agent listed after it → 400, and says so',
+    later.status === 400 && later.body.detail?.includes('comes after it') === true,
+    `${later.status} ${later.body.detail}`,
+  );
+  const loop = await send<{ detail?: string }>('POST', '/api/jobs', {
+    projectId: 'proj_any',
+    prompt: 'go',
+    agents: [
+      { role: 'architect', model: OPUS, dependsOnRoles: ['developer'] },
+      { role: 'developer', model: OPUS, dependsOnRoles: ['architect'] },
+    ],
+  });
+  check('two agents waiting for each other → 400: neither could ever start', loop.status === 400 && loop.body.detail?.includes('comes after it') === true, `${loop.status} ${loop.body.detail}`);
+  check('and nothing was made', (await get<{ jobs: unknown[] }>('/api/jobs')).body.jobs.length === jobsBefore);
+  const self = await send<{ detail?: string }>('POST', '/api/jobs', {
+    projectId: 'proj_any',
+    prompt: 'go',
+    agents: [{ role: 'developer', model: OPUS, dependsOnRoles: ['developer'] }],
+  });
+  check('waiting for itself is still refused as before', self.status === 400 && self.body.detail?.includes('itself') === true, self.body.detail);
+  const parsed = await send<{ detail?: string }>('POST', '/api/jobs', {
+    projectId: 'proj_none',
+    prompt: 'go',
+    agents: [
+      { role: 'architect', model: OPUS },
+      { role: 'developer', model: OPUS, dependsOnRoles: ['architect'] },
+    ],
+  });
+  check(
+    'waiting for the one before it passes the check (refused later, for its missing project)',
+    parsed.body.detail?.includes('comes after it') !== true && parsed.status !== 201,
+    `${parsed.status} ${parsed.body.detail}`,
+  );
+
   const tabs = await connect();
   const toSonnet = await send<{ model: string; appliesTo: string }>('POST', '/api/agents/agt_capped/model', { model: SONNET });
   check(

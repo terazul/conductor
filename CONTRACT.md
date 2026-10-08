@@ -196,6 +196,23 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 98 — post-merge, applied. **A launched agent can only wait for one listed before it.**
+
+Daemon (`routes/session.ts`, `session/verify.ts`). The first half of a TODO.md item (8 Oct):
+"you can only depend on agents in the stack before you".
+- **`parseAgentSpecs`** refuses a launch where an agent's `dependsOnRoles` names a role listed
+  after it: 400, `invalid agents`, with "… depends on developer, which comes after it — an agent
+  can only wait for one before it". An unknown role and the agent itself are refused as
+  before.
+- **Why in the daemon.** Spawn's Custom rows already offer only the agents above them
+  (`spawn/custom.ts`), and every preset lists its roles in order. A request could still skip
+  the UI and name a later agent, or two agents waiting for each other, which leaves both
+  `queued` forever. The order is the stack's order, so "before" needs no new field.
+- **Not changed:** adding an agent to a running job (Amendment 89). Its `dependsOnRoles` can
+  only name agents that already exist, and its `feeds` are checked for loops with
+  `createsCycle`.
+- **Still open:** choosing who each agent waits for on a preset's rows.
+
 ### Amendment 97 — post-merge, applied. **The project / agent label at the top has its own backdrop.**
 
 Shared (`tokens.css`) and web (`fleet/fleet.css`, `agent/agent.css`, `lib/verify.ts`). A TODO.md
