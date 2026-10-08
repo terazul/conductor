@@ -969,6 +969,40 @@ a.ag-tool-subj:focus-visible {
   align-items: center;
 }
 
+/* The settings fold (Amendment 96): the button, and the one line shown while folded. */
+.ag-fold {
+  font: inherit;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  color: var(--ink2);
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ag-fold:hover {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.ag-summary {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A reached budget or an unsafe mode stays loud while folded. */
+.ag-summary.is-alarm {
+  color: var(--fail);
+}
+
 .ag-pill {
   font: inherit;
   font-size: var(--fs-sm);

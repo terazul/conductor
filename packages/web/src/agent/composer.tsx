@@ -23,7 +23,8 @@ import { useEffect, useState } from 'react';
 import type { Agent, Autonomy, EffortLevel } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget } from '../shell/autonomy.js';
 import { ModelSelect, fmtMoney } from '../shell/ui.js';
-import { modelProblem, useModels } from '../lib/models.js';
+import { modelProblem, shortModel, useModels } from '../lib/models.js';
+import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
   CLAUDE,
   capabilitiesOf,
@@ -39,6 +40,7 @@ import {
 } from '../lib/providers.js';
 import { DEFAULT_EFFORT, EFFORTS } from '../spawn/autonomy.js';
 import { sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
   id: string;
@@ -406,6 +408,24 @@ export function Composer({ agent }: { agent: Agent }) {
   const notice: Notice | null =
     send.notice ?? policy.notice ?? (budgetWhy ? { tone: 'warn', text: budgetWhy } : null);
 
+  // Folded or open, for every agent (Amendment 96). Folded keeps one line of what's set.
+  const open = settingsShown(useSetting(SETTINGS_KEY));
+  const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
+  const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
+  const summary = settingsSummary({
+    mode: current?.label ?? autonomy.mode,
+    effort: has.effort ? effortLabel : null,
+    model: shortModel(model),
+    budget:
+      has.budget === 'tokens'
+        ? tokensLine(
+            tokenWords(agent.inputTokens + agent.outputTokens),
+            autonomy.budgetTokens ? tokenWords(autonomy.budgetTokens) : null,
+          )
+        : dollarsLine(fmtMoney(agent.costUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd)),
+  });
+  const summaryAlarm = spend?.over === true || current?.danger === true;
+
   return (
     <div className="ag-composer">
       <div className="ag-cbox">
@@ -431,6 +451,8 @@ export function Composer({ agent }: { agent: Agent }) {
         />
 
         <div className="ag-crow">
+          {open ? (
+          <>
           <span className="ui-lab">guardrails</span>
           {PILLS.map((p) => {
             const on = p.on(autonomy);
@@ -453,8 +475,23 @@ export function Composer({ agent }: { agent: Agent }) {
               </button>
             );
           })}
+          </>
+          ) : (
+            <span className={`ag-summary${summaryAlarm ? ' is-alarm' : ''}`} title={summary}>
+              {summary}
+            </span>
+          )}
 
           <div className="ag-crow-r">
+            <button
+              type="button"
+              className="ag-fold"
+              aria-expanded={open}
+              onClick={toggleSettings}
+              title={open ? 'Hide the guardrails, interaction, effort, model and budget' : 'Show the guardrails, interaction, effort, model and budget'}
+            >
+              settings {open ? '▾' : '▸'}
+            </button>
             <span className="ui-lab">⇧⏎ newline</span>
             <button
               type="button"
@@ -467,6 +504,8 @@ export function Composer({ agent }: { agent: Agent }) {
           </div>
         </div>
 
+        {open && (
+        <>
         {/*
          * How this agent behaves. Exclusive, so it reads as a choice rather than as
          * three toggles whose combinations the user has to work out.
@@ -657,6 +696,8 @@ export function Composer({ agent }: { agent: Agent }) {
           </div>
           )}
         </div>
+        </>
+        )}
 
         {/*
          * The consequence, and when it starts. `appliesTo: 'next run'` is what the route
@@ -664,7 +705,7 @@ export function Composer({ agent }: { agent: Agent }) {
          * query() option, fixed for the life of one query, so telling someone their
          * click took effect immediately would be false.
          */}
-        {current && (
+        {current && (open || current.danger) && (
           <div className={`ag-modesays${current.danger ? ' is-danger' : ''}`}>
             {current.says}
             {agent.status === 'working' && (

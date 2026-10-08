@@ -196,6 +196,22 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 96 — post-merge, applied. **The agent's settings under the message box fold away.**
+
+Web only (`agent/settingsfold.ts`, new; `agent/composer.tsx`, `agent/agent.css`,
+`agent/verify.ts`). A TODO.md item (8 Oct).
+- **settings ▸ / ▾**, beside **⇧⏎ newline**, folds the guardrails pills and the interaction,
+  effort, model and budget rows. The message box and **send** don't fold.
+- **Folded, one line says what is set**: `ask me · high · sonnet-5-5 · $4.10 of $25`
+  (`settingsSummary`). An engine with no effort leaves it out; a token budget reads
+  `184k of 500k tokens`; no cap reads `$4.10 spent`. The line turns `--fail` when the budget is
+  reached or the mode is unsafe (`summaryAlarm`), and the unsafe mode's sentence, a model
+  warning and any notice still show.
+- **One setting for every agent**, `conductor.agentSettings`: absent or `shown` is open,
+  `hidden` is folded. It's in Settings, so it's the same in every browser, as the details
+  panel is. It isn't a layout key, so resetting panel sizes leaves it, as it leaves the
+  details panel.
+
 ### Amendment 95 — post-merge, applied. **The top bar's tabs read louder, and the open one stands out with a tint and a heavier underline.**
 
 Web only (`shell/shell.css`'s `.sh-screens`, `lib/verify.ts`).

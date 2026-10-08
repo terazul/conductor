@@ -44,6 +44,7 @@ import { isMermaid, mermaidReason } from '../lib/mermaid.js';
 import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
 import { readFileSync } from 'node:fs';
+import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 import { sleepControl } from './sleep.js';
 import { ALL_ON, NONE, capabilitiesOf, controlsFor, offersMode, parseTokens, providerModelProblem, tokenWords } from '../lib/providers.js';
 
@@ -592,9 +593,25 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   check('the engine badge is nothing for Claude, and sits by the model and on the card', /if \(!provider \|\| provider === CLAUDE\) return null;/.test(ui) && /<ProviderBadge provider=\{agent\.provider\} \/>/.test(head) && /<ProviderBadge provider=\{agent\.provider\} \/>/.test(card));
 }
 
+console.log('\n9 · the settings under the message box fold away (Amendment 96)');
+{
+  check('open unless hidden, so a first visit shows everything', settingsShown(null) && settingsShown('shown') && !settingsShown('hidden'));
+  check('the button flips it', settingsToggled(null) === 'hidden' && settingsToggled('hidden') === 'shown' && settingsToggled('shown') === 'hidden');
+  check('the folded line says what is set, in order', settingsSummary({ mode: 'ask me', effort: 'high', model: 'sonnet-5-5', budget: dollarsLine('$4.10', '$25') }) === 'ask me · high · sonnet-5-5 · $4.10 of $25');
+  check('an engine with no effort leaves it out, not a blank', settingsSummary({ mode: 'ask me', effort: null, model: 'gpt-x', budget: tokensLine('184k', '500k') }) === 'ask me · gpt-x · 184k of 500k tokens');
+  check('no cap says what was spent, not "of nothing"', dollarsLine('$4.10', null) === '$4.10 spent' && tokensLine('950', null) === '950 tokens used');
+
+  const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  check('one setting for every agent, read the same way', /const open = settingsShown\(useSetting\(SETTINGS_KEY\)\);/.test(comp) && SETTINGS_KEY === 'conductor.agentSettings');
+  check('folded hides the guardrails pills and shows the line instead', /\{open \? \(\s*<>\s*<span className="ui-lab">guardrails<\/span>/.test(comp) && /<span className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\}/.test(comp));
+  check('folded hides interaction, effort, model and budget', /\{open && \(\s*<>\s*\{\/\*[\s\S]*?\*\/\}\s*<div className="ag-modes">\s*<span className="ui-lab">interaction/.test(comp));
+  check('send stays, and the button says whether it is open', /aria-expanded=\{open\}/.test(comp) && /settings \{open \? '▾' : '▸'\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
+  check('a reached budget or an unsafe mode stays in sight while folded', /const summaryAlarm = spend\?\.over === true \|\| current\?\.danger === true;/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens.\n'
+    ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
