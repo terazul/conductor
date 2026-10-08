@@ -122,6 +122,23 @@ export class EventLog {
     return found.reverse().map(toEvent);
   }
 
+  /**
+   * What an agent was told, said and did, to pass on as text (Amendment 101): the user's
+   * messages, its replies, its tool calls and how each ended. Not its edits, spend, status
+   * or requests, which `forAgent` carries too. The newest `limit`, oldest first.
+   */
+  conversation(agentId: string, limit = 20_000): Event[] {
+    const found = rows<EventRow>(
+      this.#db
+        .prepare(
+          `SELECT * FROM events WHERE agent_id = ? AND kind IN ('user_text', 'text', 'tool_start', 'tool_end')
+           ORDER BY seq DESC LIMIT ?`,
+        )
+        .all(agentId, limit),
+    );
+    return found.reverse().map(toEvent);
+  }
+
   forJob(jobId: string, limit = 5_000): Event[] {
     const found = rows<EventRow>(
       this.#db

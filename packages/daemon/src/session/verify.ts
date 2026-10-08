@@ -100,7 +100,19 @@ import { ClaudeBackend } from './backends/claude.js';
 import { copilotSdk, excludedFor, gateCall, type CopilotClientLike } from './backends/copilot.js';
 import { CopilotEvents, askFromPermission } from './backends/copilot-events.js';
 import { forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
-import { HANDOFF_CAP, STACK_ASK_LINE, handoffSection, inStack, stackLine } from './handoff.js';
+import {
+  STACK_ASK_LINE,
+  contextWindow,
+  fitTurns,
+  handoffCap,
+  handoffSection,
+  helperReport,
+  inStack,
+  shareCap,
+  stackLine,
+  turnsFromEvents,
+  type Turn,
+} from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { costChanged } from '../daily.js';
@@ -2152,7 +2164,26 @@ async function main(): Promise<void> {
   fixture('agt_quiet', 'job_handoff', { role: 'validator', autonomy: DEFAULT_AUTONOMY });
   const said17 = (agentId: string, text: string) =>
     eventLog().emit({ projectId: pid, jobId: 'job_handoff', agentId }, { kind: 'text', text });
+  /*
+   * The debugger's whole conversation (Amendment 101), in the order the runner would log it:
+   * the launch prompt (the job instruction, then its brief), working notes, tool calls with
+   * output we must not pass on, a failed call, a question answered through the question tool,
+   * a message from the user, one Conductor wrote, edits and spend, and the final reply.
+   */
+  const log17 = (agentId: string, payload: Parameters<ReturnType<typeof eventLog>['emit']>[1]) =>
+    eventLog().emit({ projectId: pid, jobId: 'job_handoff', agentId }, payload);
+  log17('agt_debugger', { kind: 'user_text', text: 'the job_handoff prompt\n\nYour role is debugger. Find why the parser drops tokens.' });
   said17('agt_debugger', 'Reading the parser first.');
+  log17('agt_debugger', { kind: 'tool_start', toolUseId: 'tu_read', tool: 'Read', input: {}, label: 'Read src/parse.ts' });
+  log17('agt_debugger', { kind: 'tool_end', toolUseId: 'tu_read', ok: true, summary: 'SECRET-FILE-CONTENTS 412 lines' });
+  log17('agt_debugger', { kind: 'tool_start', toolUseId: 'tu_test', tool: 'Bash', input: {}, label: 'Bash · npm test' });
+  log17('agt_debugger', { kind: 'tool_end', toolUseId: 'tu_test', ok: false, summary: 'error: SECRET-TEST-OUTPUT 3 failed' });
+  log17('agt_debugger', { kind: 'user_text', text: 'switched to opus', synthetic: true });
+  log17('agt_debugger', { kind: 'tool_start', toolUseId: 'tu_ask', tool: 'AskUserQuestion', input: {}, label: 'Which tokenizer is it?' });
+  log17('agt_debugger', { kind: 'tool_end', toolUseId: 'tu_ask', ok: true, summary: '"Which tokenizer is it?"="the new one"' });
+  log17('agt_debugger', { kind: 'user_text', text: 'Check the lexer too.' });
+  log17('agt_debugger', { kind: 'file_edit', path: 'src/parse.ts', added: 3, removed: 1 });
+  log17('agt_debugger', { kind: 'usage', costUsd: 0.1, inputTokens: 10, outputTokens: 5 });
   said17('agt_debugger', 'Root cause: parse.ts:42 drops the last token.');
   insertAgent(db, {
     id: 'agt_fixer',
@@ -2173,8 +2204,39 @@ async function main(): Promise<void> {
   sup.pump();
   await until(() => (runs[0]?.prompts.length ?? 0) > 0);
   const told17 = runs[0]?.prompts[0] ?? '';
-  check('it hears what the agent before it said last', told17.includes('[debugger]\nRoot cause: parse.ts:42 drops the last token.'), told17);
-  check('and only what it said last, not its working notes', !told17.includes('Reading the parser first.'), told17);
+  check('it hears what the agent before it said last', told17.includes('[debugger]\n') && told17.includes('Agent: Root cause: parse.ts:42 drops the last token.'), told17);
+  check('and its working notes too: the whole conversation, not only the last reply (Amendment 101)', told17.includes('Agent: Reading the parser first.'), told17);
+  check(
+    "and what the user said to it, once — the job instruction is not repeated from its launch prompt, but its brief is (Amendment 101)",
+    told17.includes('User: Check the lexer too.') &&
+      told17.includes('User: (the job instruction, as above)\n\nYour role is debugger. Find why the parser drops tokens.') &&
+      told17.split('the job_handoff prompt').length === 2,
+    told17,
+  );
+  check(
+    'a line for each tool call, a failed one saying so, and none of what the tools returned (Amendment 101)',
+    told17.includes('Tool: Read src/parse.ts\nTool: Bash · npm test (failed)') && !told17.includes('SECRET-FILE-CONTENTS') && !told17.includes('SECRET-TEST-OUTPUT'),
+    told17,
+  );
+  check(
+    'a question asked with the question tool keeps its answer (Amendment 101)',
+    told17.includes('Tool: asked the user · Which tokenizer is it? → "Which tokenizer is it?"="the new one"'),
+    told17,
+  );
+  check("a message Conductor wrote is not in it, as the user's (Amendment 101)", !told17.includes('switched to opus'), told17);
+  check(
+    'in the order it happened (Amendment 101)',
+    ['Reading the parser first.', 'Tool: Read src/parse.ts', 'Tool: asked the user', 'User: Check the lexer too.', 'Agent: Root cause'].every(
+      (needle, i, all) => i === 0 || told17.indexOf(all[i - 1]!) < told17.indexOf(needle),
+    ),
+    told17,
+  );
+  check(
+    "the log gives only what a conversation is made of (Amendment 101)",
+    eventLog().conversation('agt_debugger').every((e) => ['user_text', 'text', 'tool_start', 'tool_end'].includes(e.payload.kind)) &&
+      eventLog().conversation('agt_debugger').length === 11,
+    String(eventLog().conversation('agt_debugger').length),
+  );
   check('an agent that wrote nothing is said to have written nothing', told17.includes('[validator]\n(It finished without a written reply.)'), told17);
   check(
     'in order: the job, then the handoff, then its own brief',
@@ -2239,8 +2301,155 @@ async function main(): Promise<void> {
   check('one started without a stopped agent still counts as having waited (Amendment 100)', inStack('c', jobShape, 1) && !inStack('c', jobShape, 0));
   check('the line is empty for an agent on its own (Amendment 100)', stackLine(false) === '' && stackLine(true) === STACK_ASK_LINE);
 
-  const long = handoffSection([{ role: 'analyst', reply: 'x'.repeat(HANDOFF_CAP + 500) }]);
-  check('a very long reply is cut, and says so', long.length < HANDOFF_CAP + 400 && long.includes(`of ${(HANDOFF_CAP + 500).toLocaleString('en')} characters`), String(long.length));
+  // ── Amendment 101: the whole conversation, capped by the next model's window, oldest first ──
+  const T = (kind: Turn['kind'], text: string): Turn => ({ kind, text });
+  /** `n` replies of `size` characters each, tagged #001#… so a check can say which are there. Each costs size + 9. */
+  const agentTurns = (n: number, size: number): Turn[] =>
+    Array.from({ length: n }, (_, i) => T('agent', `#${String(i + 1).padStart(3, '0')}#${'x'.repeat(size - 5)}`));
+
+  const ten = agentTurns(10, 100); // 109 characters each in the text
+  const newest3 = fitTurns(ten, 3 * 109);
+  check(
+    'over the cap the oldest go first and the newest stay, whole (Amendment 101)',
+    newest3.kept.length === 3 && newest3.dropped === 7 && newest3.kept[0]!.text.startsWith('#008#') && newest3.kept[2]!.text.startsWith('#010#'),
+    JSON.stringify([newest3.kept.length, newest3.dropped]),
+  );
+  check('and exactly at the cap nothing goes, one over it the oldest does (Amendment 101)', fitTurns(ten, 10 * 109).dropped === 0 && fitTurns(ten, 10 * 109 - 1).dropped === 1);
+  const bigReply = 'R'.repeat(5_000);
+  const bigFit = fitTurns([T('user', 'q'), T('agent', 'older'), T('agent', bigReply)], 100);
+  check('the last reply is kept whole even when it alone is over the cap (Amendment 101)', bigFit.kept.length === 1 && bigFit.kept[0]!.text === bigReply && bigFit.dropped === 2);
+  const afterReply = fitTurns([T('user', 'q'), T('agent', 'last reply'), ...Array.from({ length: 50 }, (_, i) => T('tool', `Edit f${i}.ts`))], 200);
+  check('and stays when the tool calls after it are over the cap — they do not push it out (Amendment 101)', afterReply.kept[0]?.text === 'last reply' && afterReply.dropped === 1);
+
+  const cappedSec = handoffSection([{ role: 'analyst', reply: null, turns: ten }], 3 * 109);
+  check(
+    'the section shows the newest and says how much is left out (Amendment 101)',
+    cappedSec.includes('the first 7 of 10 entries are left out to fit') && cappedSec.includes('#010#') && cappedSec.includes('#008#') && !cappedSec.includes('#007#'),
+    cappedSec,
+  );
+  const twenty = handoffSection([{ role: 'analyst', reply: 'x'.repeat(20_000) }], handoffCap('opus'));
+  check('a long last reply is no longer cut at 8,000 characters (Amendment 101)', twenty.includes('x'.repeat(20_000)) && !twenty.includes('cut at'));
+  check('an agent with only its last reply is told it as the one thing it said (Amendment 101)', handoffSection([{ role: 'analyst', reply: 'Done.' }], 1_000).includes('[analyst]\nAgent: Done.'));
+
+  // Several upstreams share the cap: equal shares, and what one does not need goes to the rest.
+  check('three needing 10, 500 and 900 of 600 get 10, 295 and 295 (Amendment 101)', shareCap(600, [10, 500, 900]).join() === '10,295,295', shareCap(600, [10, 500, 900]).join());
+  check('and when all of them fit, all of them get what they need (Amendment 101)', shareCap(10_000, [10, 500, 900]).join() === '10,500,900' && shareCap(0, [5, 5]).join() === '0,0');
+  const shared = handoffSection(
+    [
+      { role: 'a', reply: null, turns: agentTurns(10, 100) },
+      { role: 'b', reply: null, turns: agentTurns(10, 100) },
+      { role: 'c', reply: null, turns: [T('agent', 'small')] },
+    ],
+    1_000,
+  );
+  check(
+    'agents the next one waited for share the cap: the small one whole, the big ones the same cut each (Amendment 101)',
+    shared.includes('[c]\nAgent: small') && (shared.match(/the first 6 of 10 entries are left out to fit/g) ?? []).length === 2 && !shared.includes('#006#') && shared.includes('#007#'),
+    shared,
+  );
+
+  // The job instruction is outside it: #promptFor puts it first and does not count it.
+  const BIGJOB = 'J'.repeat(200_000);
+  insertJob(db, { id: 'job_big101', projectId: pid, prompt: BIGJOB, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+  fixture('agt_talker', 'job_big101', { role: 'analyst', autonomy: DEFAULT_AUTONOMY });
+  for (let i = 1; i <= 400; i++) {
+    eventLog().emit({ projectId: pid, jobId: 'job_big101', agentId: 'agt_talker' }, { kind: 'text', text: `#t${String(i).padStart(3, '0')}#${'y'.repeat(993)}` });
+  }
+  insertAgent(db, {
+    id: 'agt_listener',
+    jobId: 'job_big101',
+    projectId: pid,
+    role: 'builder',
+    model: 'opus',
+    sdkSessionId: null,
+    status: 'queued',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: ['agt_talker'],
+    autonomy: DEFAULT_AUTONOMY,
+    brief: 'Carry on.',
+  });
+  const bigRun = runs.length;
+  sup.pump();
+  await until(() => (runs[bigRun]?.prompts.length ?? 0) > 0);
+  const bigPrompt = runs[bigRun]?.prompts[0] ?? '';
+  check('a 200,000-character job instruction is first and whole, over any share of the window (Amendment 101)', bigPrompt.startsWith(BIGJOB));
+  check(
+    'and the 400 replies after it are cut to a quarter of opus\'s window, the oldest first (Amendment 101)',
+    bigPrompt.length - BIGJOB.length <= handoffCap('opus') + 2_000 && bigPrompt.includes('#t400#') && !bigPrompt.includes('#t001#') && /the first \d+ of 400 entries are left out to fit/.test(bigPrompt),
+    String(bigPrompt.length - BIGJOB.length),
+  );
+  check('and its brief is still last (Amendment 101)', bigPrompt.endsWith('Your role is builder. Carry on.'), bigPrompt.slice(-120));
+  runs[bigRun]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_listener')?.status === 'done');
+
+  // Agents that did not finish keep the wording of Amendments 51 and 88.
+  const unfinished = handoffSection(
+    [
+      { role: 'builder', reply: null, status: 'stopped' },
+      { role: 'tester', reply: null, status: 'stopped', turns: [T('user', 'run it'), T('tool', 'Bash · make')] },
+      { role: 'helper', reply: 'half done', status: 'failed' },
+    ],
+    1_000,
+  );
+  check(
+    'one it was started without says it was stopped, and the section says it did not wait for everyone (Amendments 88, 101)',
+    unfinished.startsWith('You were started without waiting for every agent before you to finish.') &&
+      unfinished.includes('[builder — stopped, so it may not have finished its part]\n(It was stopped before it wrote a reply.)') &&
+      unfinished.includes('[tester — stopped, so it may not have finished its part]\nUser: run it\n\nTool: Bash · make\n\n(It was stopped before it wrote a reply.)'),
+    unfinished,
+  );
+  check('a failed one says so, over what it said (Amendments 51, 101)', unfinished.includes('[helper — failed, so it may not have finished its part]\nAgent: half done'), unfinished);
+  check(
+    "an orchestrator's helper report is as it was: each last reply, a failed helper marked, a long one cut at 8,000 (Amendment 51)",
+    helperReport([
+      { role: 'h1', status: 'failed', reply: null },
+      { role: 'h2', status: 'done', reply: 'x'.repeat(9_000) },
+    ]).includes('[h1 — failed, so it may not have finished its part]\n(It finished without a written reply.)') &&
+      helperReport([{ role: 'h2', status: 'done', reply: 'x'.repeat(9_000) }]).includes('cut at 8,000 of 9,000 characters'),
+  );
+
+  // The seam for hand_off: a summary goes on top of an upstream's text, whole, and the cap does not touch it.
+  const summed = handoffSection([{ role: 'builder', reply: null, summary: 'Fixed parse.ts; tests pass.', turns: ten }], 109);
+  check(
+    'a summary goes first, whole, outside the cap, above the text (Amendment 101)',
+    summed.includes('[builder]\nIts summary of its work:\nFixed parse.ts; tests pass.\n\n') && summed.indexOf('Fixed parse.ts') < summed.indexOf('#010#') && !summed.includes('#009#'),
+    summed,
+  );
+  check('without one, nothing about a summary is said (Amendment 101)', !cappedSec.includes('summary'));
+
+  // How big the window is, and so the cap: a table, because nothing in the repo knew.
+  check(
+    "windows: Claude's are 200k and, with [1m], 1M; a vendor in front is ignored; gpt, o-series and gemini 128k; anything else 64k (Amendment 101)",
+    contextWindow('opus') === 200_000 && contextWindow('claude-sonnet-4-5') === 200_000 && contextWindow('claude-opus-4-1[1m]') === 1_000_000 &&
+      contextWindow('anthropic/claude-sonnet-4.5') === 200_000 && contextWindow('openai/gpt-5') === 128_000 && contextWindow('gpt-5-mini') === 128_000 &&
+      contextWindow('o3') === 128_000 && contextWindow('google/gemini-2.5-pro') === 128_000 && contextWindow('some-new-model') === 64_000 && contextWindow('') === 64_000,
+  );
+  check(
+    'the cap is a quarter of the window at three characters a token (Amendment 101)',
+    handoffCap('opus') === 150_000 && handoffCap('claude-opus-4-1[1m]') === 750_000 && handoffCap('gpt-5') === 96_000 && handoffCap('some-new-model') === 48_000,
+  );
+
+  // The turns themselves, from events written by hand.
+  type LogEvent = Parameters<typeof turnsFromEvents>[0][number];
+  const logEv = (payload: LogEvent['payload']): LogEvent => ({ seq: 1, ts: '', projectId: pid, jobId: 'j', agentId: 'a', payload });
+  const turnsText = (events: LogEvent[]) => turnsFromEvents(events, 'JOB').map((t) => `${t.kind}:${t.text}`).join(' | ');
+  check('a launch prompt that is only the job instruction says nothing (Amendment 101)', turnsText([logEv({ kind: 'user_text', text: 'JOB' })]) === '');
+  check('a first message that does not begin with the job instruction is kept whole (Amendment 101)', turnsText([logEv({ kind: 'user_text', text: 'something else' })]) === 'user:something else');
+  check(
+    'only the first message is stripped of the job instruction (Amendment 101)',
+    turnsText([logEv({ kind: 'user_text', text: 'JOB\n\nbrief' }), logEv({ kind: 'user_text', text: 'JOB again' })]) === 'user:(the job instruction, as above)\n\nbrief | user:JOB again',
+  );
+  check(
+    "the line about asking, in an upstream's launch prompt, is not passed on: the next agent has its own (Amendments 100, 101)",
+    turnsText([logEv({ kind: 'user_text', text: `JOB\n\n${STACK_ASK_LINE}\n\nYour role is x. Do y.` })]) === 'user:(the job instruction, as above)\n\nYour role is x. Do y.',
+  );
+  check(
+    'blank prose, and the end of a call it never saw start, are left out (Amendment 101)',
+    turnsText([logEv({ kind: 'text', text: '  \n' }), logEv({ kind: 'tool_end', toolUseId: 'nope', ok: false, summary: 'x' })]) === '',
+  );
   sdk.query = realQuery;
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -3393,7 +3602,7 @@ async function main(): Promise<void> {
     check('without the architect: it no longer waits on it', getAgent(db, p('dev'))?.dependsOn.length === 0);
     check(
       'and hears what the architect wrote, marked stopped, as a helper report would say it',
-      (devRun?.prompts[0] ?? '').includes('[architect — stopped, so it may not have finished its part]\nPlan: half of it, in PLAN.md.') &&
+      (devRun?.prompts[0] ?? '').includes('[architect — stopped, so it may not have finished its part]\nAgent: Plan: half of it, in PLAN.md.') &&
         (devRun?.prompts[0] ?? '').includes('without waiting for every agent before you'),
       devRun?.prompts[0],
     );
@@ -3443,7 +3652,7 @@ async function main(): Promise<void> {
     const atRw = runs.length;
     sup.pump();
     await until(() => (runs[atRw]?.prompts.length ?? 0) > 0);
-    check('its handoff comes from the architect', (runs[atRw]?.prompts[0] ?? '').includes('[architect]\nThe plan is in PLAN.md.'), runs[atRw]?.prompts[0]);
+    check('its handoff comes from the architect', (runs[atRw]?.prompts[0] ?? '').includes('[architect]\nAgent: The plan is in PLAN.md.'), runs[atRw]?.prompts[0]);
     runs[atRw]?.finish({ cost: 0, reason: 'completed' });
     await until(() => getAgent(db, 'agt_rw_c')?.status === 'done');
 
@@ -3547,7 +3756,7 @@ async function main(): Promise<void> {
     setAgentStatus(db, 'agt_add_dev', 'done');
     sup.pump();
     check('once the developer is done, the added validator starts', await until(() => runOf('validator') !== undefined && (runOf('validator')?.prompts.length ?? 0) > 0));
-    check('and hears the developer', (runOf('validator')?.prompts[0] ?? '').includes('[developer]\nBuilt it in src/thing.ts.'), runOf('validator')?.prompts[0]);
+    check('and hears the developer', (runOf('validator')?.prompts[0] ?? '').includes('[developer]\nAgent: Built it in src/thing.ts.'), runOf('validator')?.prompts[0]);
     check('the scribe it feeds still waits for it', getAgent(db, 'agt_add_scr')?.status === 'queued');
     runOf('validator')?.finish({ cost: 0, reason: 'completed' });
     check('then the scribe and the reviewer start', await until(() => getAgent(db, 'agt_add_scr')?.status === 'working' && getAgent(db, reader.body.agent?.id ?? '')?.status === 'working'));

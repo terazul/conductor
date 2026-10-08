@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 101.
+  green `make test` (decided 30 Sep). The next amendment is 102.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -38,32 +38,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 five items below run in this order.*
 *Decided (8 Oct, later): the question-tool item is one line, so it goes first. The rest keep
 the order above.*
-
-- [ ] **Pass the whole context of the agent before, not its last reply.** Asked for (8 Oct).
-  The next agent should get everything the agent before it knew, so it knows what to do.
-  - **Today it gets the last reply only.** That's the agent's last text, sent once in the
-    first prompt and cut at 8,000 characters (`#promptFor`,
-    `packages/daemon/src/session/supervisor.ts:809-828`; `handoff.ts:8-18`;
-    `eventlog.ts:135-144`). Your stack above handed on "I'll wait" and nothing else.
-  - **The whole context is already kept.** It's in two places: the event log has every
-    message, reply and tool call per agent (`forAgent`, `eventlog.ts:116-123`), and a Claude
-    session can be read back or forked (`getSessionMessages` and `forkSession`,
-    `session/backends/claude.ts:79-80`; already used at `claude.ts:709`, Amendment 30).
-  Decide how:
-  - **As text:** the agent's whole conversation (your messages, its replies, a line per tool
-    call). Works across Claude, Copilot and OpenRouter, and for an agent waiting on several
-    (the reviewer waits on three, `presets.ts:85`).
-  - **As a forked session:** the next agent starts inside the previous agent's session. That
-    is the most complete, but it works only from Claude to Claude, and only from one agent.
-  - **Size:** a whole context can be bigger than the next model's window, and every agent
-    after it pays for those tokens. Decide the limit (the next model's window, less room to
-    work), and what goes first when over (oldest first, keeping the last reply whole).
-  With the `hand_off` item, the agent's summary goes on top of the context.
-  *Decided (8 Oct): as text, not a forked session. Your messages, the agent's replies and one
-  line per tool call, with tool output left out. The `hand_off` summary goes on top. The cap
-  is about a quarter of the next model's window; when over, drop the oldest first and keep
-  the last reply whole. The job instruction stays at the top of the prompt and is not part of
-  the cap (`#promptFor` already puts it first).*
 
 - [ ] **An agent hands off only by saying so: a `hand_off` tool.** Asked for (7 Oct). An
   agent that other agents wait on hands off by calling `hand_off`, with a `summary` of what

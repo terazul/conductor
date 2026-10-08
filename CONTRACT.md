@@ -196,6 +196,64 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 101 — post-merge, applied. **The next agent gets the whole conversation of the agent before it, as text.**
+
+Daemon (`session/handoff.ts`, `eventlog.ts`, `session/supervisor.ts`'s `#promptFor`,
+`session/verify.ts`). A TODO.md item (asked 8 Oct, decided 8 Oct: "as text"). It replaces
+Amendment 37's "only the final reply, cut at 8,000 characters".
+- **What it gets.** For each agent it waited for (and each one it was started without,
+  Amendment 88), under `[role]`: the user's messages (`User:`), the agent's replies (`Agent:`) and
+  one line for each tool call (`Tool: Edit src/auth/token.ts`), in order. What a tool returned is
+  left out; a call that failed says `(failed)`. Edits, spend, status and requests are not in it.
+  Messages Conductor wrote (`synthetic`: resume nudges, "switched to opus") are not the user's and
+  are left out.
+- **Source.** The event log, so it is the same for Claude, Copilot and OpenRouter, and for an
+  agent that waited for several. `EventLog.conversation(agentId)` returns only `user_text`,
+  `text`, `tool_start` and `tool_end` (the newest 20,000, oldest first); `forAgent` carries every
+  kind and stops at 2,000, which a busy agent passes. `turnsFromEvents` turns them into lines.
+- **Its launch prompt is not repeated back.** An upstream's first message is the prompt
+  `#promptFor` built for it. Its job instruction becomes `(the job instruction, as above)`, since
+  the next agent has it at the top, and the line from Amendment 100 is dropped, since the next
+  agent gets its own. Its role brief stays, and so does the handoff it was given in turn: a chain
+  A, B, C hands C everything B knew, A's part included. That part is the oldest, so it goes first
+  when the cap is reached.
+- **The cap is about a quarter of the next model's context window** (`handoffCap`), in characters
+  at 3 to a token. The repo knew no window, so there is a small table (`contextWindow`), which
+  gives a floor, not the real figure, because a bigger window only means it is given less than it
+  could take: Claude 200,000 tokens, 1,000,000 with `[1m]`; `gpt-`, `o<digit>` and `gemini` 128,000;
+  anything else 64,000. A `vendor/` in front of the id is ignored. That is 150,000, 750,000, 96,000
+  and 48,000 characters.
+- **Over the cap, the oldest goes first.** Whole entries, from the start (`fitTurns`); the section
+  says `… (the first 7 of 10 entries are left out to fit)`. The last reply is never cut or dropped,
+  even if it alone is over the cap, and a run of tool calls after it does not push it out.
+- **Several upstreams share the cap** (`shareCap`): an equal share each, and what one does not
+  need goes to the rest. Needs of 10, 500 and 900 against 600 get 10, 295 and 295.
+- **The job instruction is outside the cap.** `#promptFor` puts it first and the cap covers only
+  the handoff section.
+- **Unfinished upstreams keep their wording** (Amendments 51, 88): `[role — stopped, so it may
+  not have finished its part]`, the "started without waiting for every agent" opening, and "(It
+  was stopped before it wrote a reply.)". An orchestrator's report on its helpers
+  (`helperReport`) is unchanged: each helper's last reply, cut at 8,000 characters. `HANDOFF_CAP`
+  is gone; that figure lives only there now.
+- **A seam for `hand_off`.** `Upstream` has an optional `summary`. When set, `handoffSection`
+  prints `Its summary of its work:` and the summary first under the role, whole and not counted in
+  the cap, then the conversation. Nothing sets it yet.
+- **A question's answer.** The log keeps the answer to a question asked with the question tool only
+  as the one-line result of the tool call (the `resolved` event holds the decision type, not the
+  answers). So a `Tool: asked the user · <question> → <result>` line carries it, the one place a
+  tool's result is passed on. It reads as long as the tool's own summary, 100 characters.
+- **Checked** (`session/verify.ts` §17): the debugger's messages, notes, replies and tool lines
+  arrive in order, with no tool output and no Conductor message; the job instruction appears once;
+  the question and its answer; the oldest go first, exactly at the cap and one over; the last reply
+  stays whole over the cap and after trailing tool calls; three upstreams share the cap; a
+  200,000-character job instruction is first and whole with 400 replies cut to a quarter of
+  opus's window; stopped and failed wording; the helper report is as it was; the summary seam; the
+  window table and the cap; the turns from hand-written events. Three tests in §17o (two) and §17p
+  now expect `[role]\nAgent: …` where they expected the bare reply.
+- **Not done**: reading a model's real window (OpenRouter's list has `context_length`; nothing
+  uses it); counting tokens, since the cap is in characters; `hand_off`; the same treatment for an
+  orchestrator's helpers. A forked session was not built. A resume is not given the text again.
+
 ### Amendment 100 — post-merge, applied. **An agent in a stack is told to ask with the question tool, not in prose.**
 
 Daemon (`session/handoff.ts`, `session/supervisor.ts`'s `#promptFor`, `session/verify.ts`). A TODO.md

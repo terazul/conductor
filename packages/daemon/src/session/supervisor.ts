@@ -44,7 +44,17 @@ import { preview } from '../preview/index.js';
 import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
-import { handoffSection, helperBrief, helperReport, inStack, orchestratorSection, stackLine } from './handoff.js';
+import {
+  handoffCap,
+  handoffSection,
+  helperBrief,
+  helperReport,
+  inStack,
+  orchestratorSection,
+  stackLine,
+  turnsFromEvents,
+  type Upstream,
+} from './handoff.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
 import {
@@ -802,25 +812,32 @@ export class Supervisor implements AgentControl {
   }
 
   /**
-   * The prompt one agent sees: the job instruction, what the agents it waited for said
-   * last (Amendment 37), for an agent in a stack how to ask (Amendment 100), and its own
-   * brief — last, so "the work described above" and "the root cause the debugger
-   * identified" both have something above them.
+   * The prompt one agent sees: the job instruction, which is first and outside any cap,
+   * what the agents it waited for did and said (Amendments 37, 101), for an agent in a
+   * stack how to ask (Amendment 100), and its own brief — last, so "the work described
+   * above" and "the root cause the debugger identified" both have something above them.
    */
   #promptFor(agentId: string): string {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return '';
     const job = getJob(this.#db, agent.jobId);
     const brief = getAgentBrief(this.#db, agentId);
-    const upstream = [
+    // Each one's whole conversation as text (Amendment 101), not only its last reply.
+    const heard = (id: string, role: string): Upstream => ({
+      role,
+      reply: eventLog().lastText(id),
+      turns: turnsFromEvents(eventLog().conversation(id), job?.prompt ?? ''),
+    });
+    const upstream: Upstream[] = [
       ...agent.dependsOn.flatMap((id) => {
         const dep = getAgent(this.#db, id);
-        return dep ? [{ role: dep.role, reply: eventLog().lastText(id) }] : [];
+        return dep ? [heard(id, dep.role)] : [];
       }),
       // Ones you started it without (Amendment 88): what they said, marked stopped.
-      ...getWentWithout(this.#db, agentId).map((w) => ({ role: w.role, reply: eventLog().lastText(w.id), status: 'stopped' })),
+      ...getWentWithout(this.#db, agentId).map((w) => ({ ...heard(w.id, w.role), status: 'stopped' })),
     ];
-    const handoff = handoffSection(upstream);
+    // About a quarter of this agent's model's window, shared by those it waited for.
+    const handoff = handoffSection(upstream, handoffCap(agent.model));
     // In a stack, it asks with the question tool, which holds it in Needs You (Amendment 100).
     const ask = stackLine(inStack(agentId, agentsForJob(this.#db, agent.jobId), getWentWithout(this.#db, agentId).length));
     const parts = [job?.prompt ?? ''];
