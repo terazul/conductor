@@ -36,7 +36,17 @@ import type {
   RerunResponse,
   Snapshot,
 } from '@conductor/shared';
-import { createsCycle, isStuck, readOnlyRefusal, rerunPlan, rewireOnRemoval } from '@conductor/shared';
+import {
+  HANDOFF_BY_USER_NOTE,
+  HANDOFF_HELD_NOTE,
+  HANDOFF_SUMMARY_MAX,
+  createsCycle,
+  isStuck,
+  readOnlyRefusal,
+  rerunPlan,
+  rewireOnRemoval,
+  waitersOf,
+} from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
 import type { Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -46,6 +56,7 @@ import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
 import {
+  handOffLine,
   handoffCap,
   handoffSection,
   helperBrief,
@@ -56,6 +67,7 @@ import {
   turnsFromEvents,
   type Upstream,
 } from './handoff.js';
+import type { ToolAccess } from '../routes/helpers.js';
 import { rerunNote, rerunStatusNote } from './rerun.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
@@ -98,6 +110,8 @@ import {
   unreportedHelpers,
   getWentWithout,
   setWentWithout,
+  getHandoff,
+  setHandoff,
   lastStatusNote,
   type AgentPersona,
 } from './store.js';
@@ -216,6 +230,14 @@ export class BudgetReachedError extends Error {
   constructor(sentence: string) {
     super(sentence);
     this.name = 'BudgetReachedError';
+  }
+}
+
+/** A hand-off that can't be done, with the sentence that says why (Amendment 104). The route answers 409. */
+export class HandOffRefusedError extends Error {
+  constructor(sentence: string) {
+    super(sentence);
+    this.name = 'HandOffRefusedError';
   }
 }
 
@@ -774,6 +796,8 @@ export class Supervisor implements AgentControl {
       // how, rather than waiting for it forever (Amendment 51).
       const ended = dep.parentId === agent.id && (dep.status === 'failed' || dep.status === 'stopped');
       if (dep.status !== 'done' && !ended) return false;
+      // Done, but it ended its turn without handing off: they wait for a person to (Amendment 104).
+      if (dep.status === 'done' && getHandoff(this.#db, dep.id).held) return false;
     }
     return true;
   }
@@ -834,9 +858,11 @@ export class Supervisor implements AgentControl {
 
   /**
    * The prompt one agent sees: the job instruction, which is first and outside any cap,
-   * what the agents it waited for did and said (Amendments 37, 101), for an agent in a
-   * stack how to ask (Amendment 100), and its own brief — last, so "the work described
-   * above" and "the root cause the debugger identified" both have something above them.
+   * what the agents it waited for did and said (Amendments 37, 101) with the summary each
+   * handed off with on top (Amendment 104), for an agent in a stack how to ask (Amendment
+   * 100) and, if agents wait for it, to hand off (Amendment 104), and its own brief — last,
+   * so "the work described above" and "the root cause the debugger identified" both have
+   * something above them.
    */
   #promptFor(agentId: string): string {
     const agent = getAgent(this.#db, agentId);
@@ -848,6 +874,8 @@ export class Supervisor implements AgentControl {
       role,
       reply: eventLog().lastText(id),
       turns: turnsFromEvents(eventLog().conversation(id), job?.prompt ?? ''),
+      // What it said about its own work when it handed off, on top of the conversation (Amendment 104).
+      ...this.#summaryOf(id),
     });
     const upstream: Upstream[] = [
       ...agent.dependsOn.flatMap((id) => {
@@ -861,9 +889,12 @@ export class Supervisor implements AgentControl {
     const handoff = handoffSection(upstream, handoffCap(agent.model));
     // In a stack, it asks with the question tool, which holds it in Needs You (Amendment 100).
     const ask = stackLine(inStack(agentId, agentsForJob(this.#db, agent.jobId), getWentWithout(this.#db, agentId).length));
+    // And one that others wait for is told to hand off, since they do not start until it does (Amendment 104).
+    const hand = handOffLine(this.#hasWaiters(agent));
     const parts = [job?.prompt ?? ''];
     if (handoff) parts.push(`\n${handoff}`);
     if (ask) parts.push(`\n${ask}`);
+    if (hand) parts.push(`\n${hand}`);
     if (brief?.trim()) parts.push(`\nYour role is ${agent.role}. ${brief.trim()}`);
     if (agent.helperCap) parts.push(`\n${orchestratorSection(agent.role, agent.helperCap)}`);
     return parts.join('\n').trim();
@@ -884,6 +915,7 @@ export class Supervisor implements AgentControl {
 
     this.#active.add(agentId);
     this.#pushSlots();
+    this.#openRun(agent);
     setAgentStatus(this.#db, agentId, 'working');
     // Queued, or settled while this one waited for you (Amendment 88): it is working now.
     if (job.status !== 'working') setJobStatus(this.#db, job.id, 'working');
@@ -902,6 +934,7 @@ export class Supervisor implements AgentControl {
       worktreePath: job.worktreePath,
       extraDirs: this.#reachable(agent.projectId, job.worktreePath),
       helperCap: agent.helperCap ?? 0,
+      handOff: this.#hasWaiters(agent),
       model: agent.model,
       autonomy: this.#autonomyFor(agentId),
       spentUsd: agent.costUsd,
@@ -1062,14 +1095,124 @@ export class Supervisor implements AgentControl {
       // Ended its turn with helpers it hasn't heard back from: it waits for them, queued,
       // and pump() starts it again — with their replies — once they have all ended.
     } else {
+      /*
+       * Done — and, when agents are waiting for it and it never said it was ready, held
+       * (Amendment 104): still `done`, so nothing about its status changes, but they stay
+       * queued and it goes to Needs You as "stopped without handing off". The hold is
+       * written before the status event so the alert it raises is there when the event is.
+       */
+      const held = this.#holdsHandoff(agent);
       setAgentStatus(this.#db, agentId, 'done');
+      setHandoff(this.#db, agentId, { summary: getHandoff(this.#db, agentId).summary, held });
       eventLog().emit(
         { projectId: agent.projectId, jobId: agent.jobId, agentId },
-        { kind: 'status', status: 'done' },
+        { kind: 'status', status: 'done', ...(held ? { error: HANDOFF_HELD_NOTE } : {}) },
       );
     }
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.#rollUpJob(agent.jobId);
+  }
+
+  // ── handing off (Amendment 104) ───────────────────────────────────────────
+
+  /** The agents that wait for this one: those its `hand_off` is for (not its orchestrator). */
+  #waiters(agent: Agent): Agent[] {
+    return waitersOf(agent.id, agentsForJob(this.#db, agent.jobId));
+  }
+
+  /** Whether agents wait for it, which is what gives it the `hand_off` tool. */
+  #hasWaiters(agent: Agent): boolean {
+    return this.#waiters(agent).length > 0;
+  }
+
+  /** What an agent is given: asked by the MCP endpoint, which answers `tools/list` for one agent. */
+  toolAccess(agentId: string): ToolAccess {
+    const agent = getAgent(this.#db, agentId);
+    return agent ? { helperCap: agent.helperCap ?? 0, handOff: this.#hasWaiters(agent) } : {};
+  }
+
+  /** `{ summary }` for an `Upstream`, or nothing when it has not handed off. */
+  #summaryOf(agentId: string): { summary?: string } {
+    const summary = getHandoff(this.#db, agentId).summary;
+    return summary ? { summary } : {};
+  }
+
+  /**
+   * A run begins. An agent that finished and is run again (you wrote to it, or `rerunFrom`)
+   * starts without the summary of its last run, which was about work it is now changing, and
+   * without the hold: it is working, not waiting to be handed off. One that was only paused,
+   * parked or woken keeps its summary: it is the same run carrying on.
+   */
+  #openRun(agent: Agent): void {
+    if (agent.status === 'done') setHandoff(this.#db, agent.id, { summary: null, held: false });
+  }
+
+  /**
+   * Whether this agent, whose turn just ended, is held rather than handed on: agents are
+   * waiting for it that have not run, and it did not call `hand_off` in this run. A chat
+   * with an agent whose followers have all run holds nothing, and neither does the last
+   * agent in a chain. Held, the agents after it, queued or paused before they began, wait.
+   */
+  #holdsHandoff(agent: Agent): boolean {
+    if (getHandoff(this.#db, agent.id).summary !== null) return false;
+    return this.#waiters(agent).some(
+      (w) => w.status === 'queued' || (w.status === 'paused' && w.sdkSessionId === null),
+    );
+  }
+
+  /**
+   * The `hand_off` tool (routes/helpers.ts): the agent's summary for the agents after it.
+   * It is kept, and what the next agents are told first is this; they start when the turn
+   * ends, not now. Returns their roles. Throws a sentence the agent reads.
+   */
+  handOff(agentId: string, summary: string): string[] {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) throw new Error('no such agent');
+    const waiters = this.#waiters(agent);
+    if (waiters.length === 0) {
+      throw new Error('No agent waits for you, so there is no one to hand off to. Just finish.');
+    }
+    const text = summary.trim();
+    if (!text) throw new Error('hand_off needs a summary: what the agents after you need from your work, said in full.');
+    if (text.length > HANDOFF_SUMMARY_MAX) {
+      throw new Error(
+        `That summary is ${text.length.toLocaleString('en')} characters; the most a hand-off takes is ${HANDOFF_SUMMARY_MAX.toLocaleString('en')}. ` +
+          'Shorten it to what they need, and call hand_off again.',
+      );
+    }
+    setHandoff(this.#db, agentId, { summary: text, held: false });
+    return waiters.map((w) => w.role);
+  }
+
+  /**
+   * The person's hand-off for an agent that was held (Amendment 104): the summary they
+   * edited, sent from Needs You. It releases the agents after it, which `pump` starts.
+   * Refused, with a sentence and no change, when the agent is not held.
+   */
+  handOffByUser(agentId: string, summary: string): Agent {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) throw new Error('no such agent');
+    if (agent.status !== 'done' || !getHandoff(this.#db, agentId).held) {
+      throw new HandOffRefusedError(
+        `${agent.role} is not waiting to be handed off: it ${agent.status === 'done' ? 'handed off already' : `is ${agent.status}, not stopped`}.`,
+      );
+    }
+    const text = summary.trim();
+    if (!text) throw new HandOffRefusedError('A hand-off needs a summary: what the agents after it need from its work.');
+    if (text.length > HANDOFF_SUMMARY_MAX) {
+      throw new HandOffRefusedError(
+        `That summary is ${text.length.toLocaleString('en')} characters; the most a hand-off takes is ${HANDOFF_SUMMARY_MAX.toLocaleString('en')}.`,
+      );
+    }
+    // Cleared before the event, so the card is gone by the time the tabs hear of it.
+    setHandoff(this.#db, agentId, { summary: text, held: false });
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId },
+      { kind: 'status', status: 'done', error: HANDOFF_BY_USER_NOTE },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    this.pump();
+    return getAgent(this.#db, agentId)!;
   }
 
   // ── orchestrators and helpers (Amendment 51) ──────────────────────────────
@@ -1314,6 +1457,13 @@ export class Supervisor implements AgentControl {
     if (this.#rerunning.has(jobId)) {
       throw new RerunRefusedError('The agents after it are still being stopped for a re-run. Wait a moment.');
     }
+    // Held for not handing off (Amendment 104): none of the agents after it has started, so
+    // there is nothing to run again. The way on is to hand off, from Needs You.
+    if (root.status === 'done' && getHandoff(this.#db, agentId).held) {
+      throw new RerunRefusedError(
+        `${root.role} stopped without handing off, so the agents after it haven't started. Hand it off in Needs You first.`,
+      );
+    }
     const plan = rerunPlan(agentsForJob(this.#db, jobId), agentId, { hasReply: eventLog().lastText(agentId) !== null });
     if (plan.refusal) throw new RerunRefusedError(plan.refusal);
 
@@ -1344,6 +1494,8 @@ export class Supervisor implements AgentControl {
       for (const s of going) {
         const a = getAgent(this.#db, s.agentId);
         if (!a) continue;
+        // Its input changed, so its last summary was about work it is about to change (Amendment 104).
+        setHandoff(this.#db, a.id, { summary: null, held: false });
         // Only one with a session is resumed. One that failed before it had one starts
         // from its prompt, which carries the new reply already.
         if (s.action === 'resume') {
@@ -1399,10 +1551,10 @@ export class Supervisor implements AgentControl {
     const upstream: Upstream[] = agent.dependsOn.flatMap((id) => {
       const dep = getAgent(this.#db, id);
       return dep && dep.parentId !== agentId
-        ? [{ role: dep.role, reply: eventLog().lastText(id), turns: turnsFromEvents(eventLog().conversation(id), jobPrompt) }]
+        ? [{ role: dep.role, reply: eventLog().lastText(id), turns: turnsFromEvents(eventLog().conversation(id), jobPrompt), ...this.#summaryOf(id) }]
         : [];
     });
-    return [rerunNote(changed, upstream, handoffCap(agent.model)), this.#takeHelperReport(agentId)]
+    return [rerunNote(changed, upstream, handoffCap(agent.model), this.#hasWaiters(agent)), this.#takeHelperReport(agentId)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -1422,6 +1574,8 @@ export class Supervisor implements AgentControl {
     // Continuing a failed agent makes its job live again (Amendment 88): a job settled
     // `failed` behind it would otherwise keep its queued agents from ever starting.
     this.#reopenJob(agent.jobId);
+    // Told something after it finished: that is a new run, and its last summary was the last run's.
+    this.#openRun(agent);
     setAgentStatus(this.#db, agentId, 'working');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
@@ -1437,6 +1591,7 @@ export class Supervisor implements AgentControl {
       worktreePath: job.worktreePath,
       extraDirs: this.#reachable(agent.projectId, job.worktreePath),
       helperCap: agent.helperCap ?? 0,
+      handOff: this.#hasWaiters(agent),
       model: agent.model,
       autonomy: this.#autonomyFor(agentId),
       spentUsd: agent.costUsd,

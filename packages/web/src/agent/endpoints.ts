@@ -20,6 +20,7 @@ import { api } from '../lib/feed.js';
 import { explain, type Notice } from '../lib/errors.js';
 import type {
   Agent,
+  HandOffRequest,
   RemoveAgentResponse,
   RerunResponse,
   SendMessageRequest,
@@ -60,6 +61,15 @@ export function resumeAgent(agentId: string): Promise<unknown> {
  */
 export function rerunAfter(agentId: string): Promise<RerunResponse> {
   return api(agentPath(agentId, 'rerun'), { method: 'POST', body: {} });
+}
+
+/**
+ * Hand off for an agent that ended its turn without calling `hand_off` (Amendment 104): the
+ * summary the agents after it are told first, as the person edited it. It releases them. The
+ * daemon refuses with the reason (a 409) when the agent is not waiting to be handed off.
+ */
+export function handOffAgent(agentId: string, body: HandOffRequest): Promise<{ agent: Agent }> {
+  return api(agentPath(agentId, 'hand-off'), { method: 'POST', body });
 }
 
 /**

@@ -44,6 +44,7 @@ import { DEFAULT_PORT } from '@conductor/shared';
 import { arbiter } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
 import { eventLog } from '../../eventlog.js';
+import type { ToolAccess } from '../../routes/helpers.js';
 import { classifyRetry, modelAnswered } from '../alerts.js';
 import { budgetLeft, lifetimeCost } from '../budget.js';
 import { costChanged } from '../../daily.js';
@@ -122,10 +123,16 @@ class MessageStream implements AsyncIterable<SDKUserMessage> {
  * serves over HTTP, on its own port, at a path naming the agent. HTTP rather than the
  * SDK's in-process server because that one needs zod, which the daemon doesn't depend
  * on (CONTRACT §3).
+ *
+ * An agent that others wait for gets `hand_off` from the same server (Amendment 104).
  */
 export const HELPER_TOOLS = ['mcp__conductor__start_helper', 'mcp__conductor__list_helpers'];
+export const HAND_OFF_TOOLS = ['mcp__conductor__hand_off'];
 
-export function helperTools(agentId: string): { servers: NonNullable<Options['mcpServers']>; allowed: string[] } {
+export function helperTools(
+  agentId: string,
+  access: ToolAccess = { helperCap: 1 },
+): { servers: NonNullable<Options['mcpServers']>; allowed: string[] } {
   const port = Number(process.env['CONDUCTOR_PORT'] ?? DEFAULT_PORT);
   const token = process.env['CONDUCTOR_TOKEN'];
   return {
@@ -136,7 +143,7 @@ export function helperTools(agentId: string): { servers: NonNullable<Options['mc
         ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
       },
     },
-    allowed: HELPER_TOOLS,
+    allowed: [...((access.helperCap ?? 0) > 0 ? HELPER_TOOLS : []), ...(access.handOff ? HAND_OFF_TOOLS : [])],
   };
 }
 
@@ -189,9 +196,9 @@ export class ClaudeBackend implements AgentBackend {
   // ── options ───────────────────────────────────────────────────────────────
 
   #buildOptions(resume: string | null): Options {
-    const { autonomy, worktreePath, model, spentUsd, extraDirs, helperCap, systemPrompt, skills } = this.#scope;
+    const { autonomy, worktreePath, model, spentUsd, extraDirs, helperCap, handOff, systemPrompt, skills } = this.#scope;
     const left = budgetLeft(autonomy.budgetUsd, spentUsd);
-    const tools = helperCap ? helperTools(this.#scope.agentId) : null;
+    const tools = helperCap || handOff ? helperTools(this.#scope.agentId, { helperCap, handOff }) : null;
 
     return {
       cwd: worktreePath,

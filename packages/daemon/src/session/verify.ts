@@ -34,6 +34,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelInfo, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -56,12 +57,13 @@ import type {
 import { allowedUnattended, arbiter, fallbackSuggestions, ruleCovers, toolRuleFor } from '../arbiter/index.js';
 import type { PermissionRequest, PermissionRequestResult, SessionConfig, SessionEvent } from '@github/copilot-sdk';
 import { build } from '../index.js';
+import { MCP_TOOLS, callTool, toolsFor } from '../routes/helpers.js';
 import { openDb, row, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { preview } from '../preview/index.js';
 import { workspace } from '../workspace/service.js';
 import type { WorkspaceRecord } from '../workspace/store.js';
-import { ALERT_AFTER_MS, alerts, classifyRetry, initAlerts, retryNeedsYou } from './alerts.js';
+import { ALERT_AFTER_MS, Alerts, alerts, classifyRetry, initAlerts, retryNeedsYou } from './alerts.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, budgetStop, jobCap, tokens } from './budget.js';
 import { backendFor, providerRefusal, registerBackend } from './backends/index.js';
 import {
@@ -89,6 +91,7 @@ import {
   getAgentBrief,
   getAgentProvider,
   getAgentPersona,
+  getHandoff,
   setAgentAutonomy,
   setAgentStatus,
   localDay,
@@ -102,6 +105,7 @@ import { copilotSdk, excludedFor, gateCall, type CopilotClientLike } from './bac
 import { CopilotEvents, askFromPermission } from './backends/copilot-events.js';
 import { forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
 import {
+  HAND_OFF_LINE,
   STACK_ASK_LINE,
   contextWindow,
   fitTurns,
@@ -118,7 +122,7 @@ import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, t
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
 import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
-import { createsCycle, isStuck, rewireOnRemoval, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
+import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
 
@@ -321,6 +325,18 @@ async function until(cond: () => boolean, timeoutMs = 3_000): Promise<boolean> {
 }
 
 const near = (a: number | undefined, b: number): boolean => a !== undefined && Math.abs(a - b) < 1e-9;
+
+/**
+ * The `hand_off` tool, called the way an agent's run would call it: through the same
+ * `callTool` the MCP endpoint and the in-process tools both serve (Amendment 104). Throws
+ * the sentence the agent would have read if it was refused.
+ */
+function handOffAs(agentId: string, summary = 'Done: it is all in the folder.'): string {
+  const r = callTool(agentId, 'hand_off', { summary });
+  const said = r.content.map((c) => c.text).join('\n');
+  if ('isError' in r && r.isError) throw new Error(`hand_off refused: ${said}`);
+  return said;
+}
 
 /**
  * One session of the fake Copilot client (Amendment 76): what the backend configured it
@@ -2283,10 +2299,11 @@ async function main(): Promise<void> {
   sup.pump();
   await until(() => (runs[leadRun]?.prompts.length ?? 0) > 0);
   check(
-    'an agent that others wait for is told how to ask too, though it waited for nobody (Amendment 100)',
-    runs[leadRun]?.prompts[0] === `the job_handoff prompt\n\n${STACK_ASK_LINE}`,
+    'an agent that others wait for is told how to ask too, though it waited for nobody (Amendment 100), and to hand off (Amendment 104)',
+    runs[leadRun]?.prompts[0] === `the job_handoff prompt\n\n${STACK_ASK_LINE}\n\n${HAND_OFF_LINE}`,
     JSON.stringify(runs[leadRun]?.prompts),
   );
+  handOffAs('agt_lead');
   runs[leadRun]?.finish({ cost: 0, reason: 'completed' });
   await until(() => (runs[leadRun + 1]?.prompts.length ?? 0) > 0);
   runs[leadRun + 1]?.finish({ cost: 0, reason: 'completed' });
@@ -3226,6 +3243,40 @@ async function main(): Promise<void> {
     s6?.emit('session.idle', {});
     await until(() => getAgent(db, 'agt_cp6')?.status === 'done');
 
+    // hand_off, in-process, for an agent others wait for (Amendment 104).
+    job('job_cp_hand', null);
+    fixture('agt_cp_lead', 'job_cp_hand', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    fixture('agt_cp_next', 'job_cp_hand', { status: 'queued', dependsOn: ['agt_cp_lead'], autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    sup.pump();
+    const sLead = await sessionOf('agt_cp_lead');
+    type InProcessTool = { name: string; skipPermission?: boolean; handler?: (a: unknown, i: unknown) => unknown };
+    const leadTools = (sLead?.config.tools ?? []) as InProcessTool[];
+    check('a Copilot agent others wait for is given hand_off, needing no permission (Amendment 104)', leadTools.map((t) => t.name).join() === 'hand_off' && leadTools.every((t) => t.skipPermission === true), JSON.stringify(leadTools.map((t) => t.name)));
+    const refusedBlank = (await leadTools[0]?.handler?.({ summary: '  ' }, {})) as { resultType?: string; error?: string } | undefined;
+    check('a blank summary is a failure the model reads, not a hand-off', refusedBlank?.resultType === 'failure' && /needs a summary/.test(refusedBlank.error ?? '') && getHandoff(db, 'agt_cp_lead').summary === null, JSON.stringify(refusedBlank));
+    sLead?.emit('session.idle', {});
+    await until(() => getAgent(db, 'agt_cp_lead')?.status === 'done');
+    await settle(150);
+    check(
+      'its turn ends without hand_off: held, and the next agent has not started',
+      getHandoff(db, 'agt_cp_lead').held && !copilotSessions.some((x) => x.id === 'agt_cp_next') && getAgent(db, 'agt_cp_next')?.status === 'queued' &&
+        alerts().list().some((a) => a.kind === 'handoff_held' && a.agentIds[0] === 'agt_cp_lead'),
+    );
+    await send('POST', '/api/agents/agt_cp_lead/message', { text: 'say what you did' });
+    const sLead2 = await sessionOf('agt_cp_lead', 2);
+    const leadTools2 = (sLead2?.config.tools ?? []) as InProcessTool[];
+    check('the resume is given the tool again', sLead2?.resumed === true && leadTools2.map((t) => t.name).join() === 'hand_off');
+    const handed = await leadTools2[0]?.handler?.({ summary: 'The lead is done: see notes.md.' }, {});
+    check('hand_off through the in-process tool is the same call Claude makes over the endpoint', typeof handed === 'string' && /^Handed off\./.test(handed) && getHandoff(db, 'agt_cp_lead').summary === 'The lead is done: see notes.md.', String(handed));
+    sLead2?.emit('session.idle', {});
+    await until(() => getAgent(db, 'agt_cp_lead')?.status === 'done');
+    const sNext = await sessionOf('agt_cp_next');
+    check('then its turn ends, and the next agent starts with the summary', /Its summary of its work:\nThe lead is done: see notes\.md\./.test(sNext?.prompts[0]?.prompt ?? '') && !getHandoff(db, 'agt_cp_lead').held, sNext?.prompts[0]?.prompt);
+    check('the last agent in the chain is given no tools, and cannot hand off', (sNext?.config.tools ?? []).length === 0 && callTool('agt_cp_next', 'hand_off', { summary: 'x' }).isError === true);
+    sNext?.emit('session.idle', {});
+    await until(() => getAgent(db, 'agt_cp_next')?.status === 'done');
+    check('and it finishes done, as it did', getAgent(db, 'agt_cp_next')?.status === 'done' && !getHandoff(db, 'agt_cp_next').held);
+
     // A restart finds a request held by an engine that can't defer: expired, not left hanging.
     for (const [id, provider] of [['agt_cp_orphan', 'copilot'], ['agt_claude_orphan', 'claude']] as const) {
       job(`job_${id}`, null);
@@ -3285,6 +3336,23 @@ async function main(): Promise<void> {
     check('and your answer is its answer (Amendment 100)', JSON.stringify(await orAsk) === JSON.stringify({ answer: 'sqlite', wasFreeform: false }));
     sOr?.emit('session.idle', {});
     await until(() => getAgent(db, orId)?.status === 'done');
+    // hand_off reaches OpenRouter agents the same way (Amendment 104): one backend, two ways in.
+    const orStack = await send<{ agents?: Agent[] }>('POST', '/api/jobs', {
+      projectId: pid, prompt: 'p104', isolation: 'in_place',
+      agents: [{ ...spec, role: 'planner' }, { ...spec, role: 'worker', dependsOnRoles: ['planner'] }],
+    });
+    const [orPlan, orWork] = orStack.body.agents ?? [];
+    const sPlan = await sessionOf(orPlan?.id ?? '');
+    const planTools = (sPlan?.config.tools ?? []) as { name: string; skipPermission?: boolean; handler?: (a: unknown, i: unknown) => unknown }[];
+    check('an OpenRouter agent others wait for is given hand_off', orStack.status === 201 && sPlan?.config.provider?.baseUrl === 'https://openrouter.ai/api/v1' && planTools.map((t) => t.name).join() === 'hand_off' && planTools[0]?.skipPermission === true, JSON.stringify({ status: orStack.status, tools: planTools.map((t) => t.name) }));
+    const orHanded = await planTools[0]?.handler?.({ summary: 'Plan: three steps, in plan.md.' }, {});
+    check('and the call is taken', typeof orHanded === 'string' && /^Handed off\. worker will start/.test(orHanded), String(orHanded));
+    sPlan?.emit('session.idle', {});
+    await until(() => getAgent(db, orPlan?.id ?? '')?.status === 'done');
+    const sWork = await sessionOf(orWork?.id ?? '');
+    check('the worker starts with the planner’s summary', /Its summary of its work:\nPlan: three steps, in plan\.md\./.test(sWork?.prompts[0]?.prompt ?? '') && (sWork?.config.tools ?? []).length === 0, sWork?.prompts[0]?.prompt);
+    sWork?.emit('session.idle', {});
+    await until(() => getAgent(db, orWork?.id ?? '')?.status === 'done');
     const everywhere = [
       JSON.stringify((await get('/api/settings')).body),
       JSON.stringify((await get('/api/snapshot')).body),
@@ -3611,6 +3679,7 @@ async function main(): Promise<void> {
     );
     check('the job is open again', getJob(db, 'job_strand')?.status === 'working');
     check('and the alert has cleared', !alerts().list().some((a) => a.kind === 'blocked_dep' && a.agentIds[0] === p('dev')));
+    handOffAs(p('dev'));
     devRun?.finish({ cost: 0, reason: 'completed' });
     check('once it is done, the rest of the pipeline goes on', await until(() => runs.length === start + 3) && getAgent(db, p('val'))?.status === 'working');
     await send('POST', '/api/jobs/job_strand/terminate', {});
@@ -3688,6 +3757,7 @@ async function main(): Promise<void> {
     check('and the job settles failed, rather than saying working for good', getJob(db, 'job_fail88')?.status === 'failed', getJob(db, 'job_fail88')?.status);
     await send('POST', '/api/agents/agt_f_dev/message', { text: 'try again' });
     check('continuing the failed one opens the job again', await until(() => runs.length === atF + 2) && getJob(db, 'job_fail88')?.status === 'working');
+    handOffAs('agt_f_dev');
     runs[atF + 1]?.finish({ cost: 0, reason: 'completed' });
     check('and once it is done the one waiting starts', await until(() => getAgent(db, 'agt_f_rev')?.status === 'working'));
     runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
@@ -3761,6 +3831,7 @@ async function main(): Promise<void> {
     check('once the developer is done, the added validator starts', await until(() => runOf('validator') !== undefined && (runOf('validator')?.prompts.length ?? 0) > 0));
     check('and hears the developer', (runOf('validator')?.prompts[0] ?? '').includes('[developer]\nAgent: Built it in src/thing.ts.'), runOf('validator')?.prompts[0]);
     check('the scribe it feeds still waits for it', getAgent(db, 'agt_add_scr')?.status === 'queued');
+    handOffAs(vid);
     runOf('validator')?.finish({ cost: 0, reason: 'completed' });
     check('then the scribe and the reviewer start', await until(() => getAgent(db, 'agt_add_scr')?.status === 'working' && getAgent(db, reader.body.agent?.id ?? '')?.status === 'working'));
     for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
@@ -4123,6 +4194,8 @@ async function main(): Promise<void> {
     check('the session ids are the ones they had', getAgent(db, 'rr_dev')?.sdkSessionId === 'sess_rr_dev' && getAgent(db, 'rr_val')?.sdkSessionId === 'sess_rr_val');
 
     say('job_rerun', 'rr_dev', 'Fixed it against plan v2.');
+    // The note told it to hand off again (Amendment 104); the validator and the scribe wait for that.
+    handOffAs('rr_dev', 'Fixed against plan v2; the tests are in tests/auth.test.ts.');
     runs[base + 1]?.finish({ cost: 0, reason: 'completed' });
     check('once the developer is done, the validator resumes in its own session', (await until(() => runs.length === base + 3)) && runs[base + 2]?.options.resume === 'sess_rr_val', String(runs[base + 2]?.options.resume));
     await until(() => (runs[base + 2]?.prompts.length ?? 0) > 0);
@@ -4130,6 +4203,7 @@ async function main(): Promise<void> {
     check('told the developer’s NEW reply, which it did not have when you pressed the button', valPrompt.includes('developer has said something new') && valPrompt.includes('Agent: Fixed it against plan v2.'), valPrompt);
     check('and the scribe still waits', statusOf('rr_scr') === 'queued' && runs.length === base + 3);
     say('job_rerun', 'rr_val', 'Checked again: green.');
+    handOffAs('rr_val');
     runs[base + 2]?.finish({ cost: 0, reason: 'completed' });
     check('then the scribe, which never ran, starts as it would have: from its prompt', (await until(() => runs.length === base + 4)) && !runs[base + 3]?.options.resume);
     await until(() => (runs[base + 3]?.prompts.length ?? 0) > 0);
@@ -4191,6 +4265,7 @@ async function main(): Promise<void> {
     check('and it resumes with the note, where a parked call would have been re-offered with nothing', (await until(() => runs.length === refusedAt + 1)) && runs[refusedAt]?.options.resume === 'sess_rc_dev');
     await until(() => (runs[refusedAt]?.prompts.length ?? 0) > 0);
     check('told its input changed', (runs[refusedAt]?.prompts[0] ?? '').includes('Agent: The plan, revised.'), runs[refusedAt]?.prompts[0]);
+    handOffAs('rc_dev');
     runs[refusedAt]?.finish({ cost: 0, reason: 'completed' });
     check('and the validator follows it', (await until(() => runs.length === refusedAt + 2)) && runs[refusedAt + 1]?.options.resume === 'sess_rc_val');
     runs[refusedAt + 1]?.finish({ cost: 0, reason: 'completed' });
@@ -4224,6 +4299,219 @@ async function main(): Promise<void> {
     check('from its prompt, not a resume, and with the new reply', (await until(() => runs.length === atFail + 1)) && !runs[atFail]?.options.resume && (await until(() => (runs[atFail]?.prompts.length ?? 0) > 0)) && (runs[atFail]?.prompts[0] ?? '').includes('Agent: The plan, third time.'), runs[atFail]?.prompts[0]);
     runs[atFail]?.finish({ cost: 0, reason: 'completed' });
     await until(() => getJob(db, 'job_rerun_fail')?.status === 'done');
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n20 · an agent hands off only by saying so: the hand_off tool (Amendment 104)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // The project the earlier sections used is gone (section 18), and 19's is the same folder.
+    const hpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'handoff' })).body.project.id;
+    const hjobRow = (id: string): void => {
+      insertJob(db, { id, projectId: hpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const hfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: hpid, ...a });
+
+    // The pure rules: who has agents waiting for it, and so who is given the tool.
+    const shape = [
+      { id: 'o', dependsOn: ['h'], parentId: null },
+      { id: 'h', dependsOn: [] as string[], parentId: 'o' },
+      { id: 'n', dependsOn: ['o'], parentId: null },
+    ];
+    check('the agents that wait for one are the ones its hand_off is for', waitersOf('o', shape).map((a) => a.id).join() === 'n');
+    check('an orchestrator is not one: it waits for its helpers by another road (Amendment 51)', waitersOf('h', shape).length === 0);
+    check('and an agent nobody waits for has none', waitersOf('n', shape).length === 0);
+    const names = (a: Parameters<typeof toolsFor>[0]): string => toolsFor(a).map((t) => t.name).join();
+    check(
+      'start_helper and list_helpers go to an orchestrator, hand_off to an agent others wait for, both to one that is both, and none to the last agent',
+      names({ helperCap: 2 }) === 'start_helper,list_helpers' && names({ handOff: true }) === 'hand_off' &&
+        names({ helperCap: 2, handOff: true }) === 'start_helper,list_helpers,hand_off' && names({}) === '' && names({ helperCap: 0, handOff: false }) === '',
+    );
+    const schema = MCP_TOOLS.find((t) => t.name === 'hand_off')?.inputSchema as { required?: string[]; properties?: Record<string, unknown> } | undefined;
+    check('hand_off takes a summary, and requires it', JSON.stringify(schema?.required) === '["summary"]' && 'summary' in (schema?.properties ?? {}));
+    check('the columns are there, and an agent starts with neither', (() => {
+      const cols = (db.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((c) => c.name);
+      return cols.includes('handoff_summary') && cols.includes('handoff_held');
+    })());
+
+    // A stack: architect → developer → validator, run by the real supervisor on the fake SDK.
+    const hjob = 'job_handoff104';
+    hjobRow(hjob);
+    hfix('h_arch', hjob, { role: 'architect', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    hfix('h_dev', hjob, { role: 'developer', status: 'queued', dependsOn: ['h_arch'], autonomy: DEFAULT_AUTONOMY });
+    hfix('h_val', hjob, { role: 'validator', status: 'queued', dependsOn: ['h_dev'], autonomy: DEFAULT_AUTONOMY });
+    const start = runs.length;
+    const sayH = (agentId: string, text: string) => eventLog().emit({ projectId: hpid, jobId: hjob, agentId }, { kind: 'text', text });
+    const held = () => alerts().list().filter((a) => a.kind === 'handoff_held');
+    const mcp = (agentId: string, method: string, params: Record<string, unknown> = {}) =>
+      send<{ result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string }[] } }>('POST', `/mcp/agents/${agentId}`, { jsonrpc: '2.0', id: 1, method, params });
+    const handOffOver = async (agentId: string, summary: string) => {
+      const r = (await mcp(agentId, 'tools/call', { name: 'hand_off', arguments: { summary } })).body.result;
+      return { text: r?.content?.[0]?.text ?? '', isError: r?.isError === true };
+    };
+    const handOffRoute = (agentId: string, body: unknown) => send<{ agent?: Agent; error?: string; detail?: string }>('POST', `/api/agents/${agentId}/hand-off`, body);
+
+    sup.pump();
+    check('the architect starts, and only it', (await until(() => runs.length === start + 1)) && getAgent(db, 'h_dev')?.status === 'queued');
+    const archRun = runs[start]!;
+    await until(() => archRun.prompts.length > 0);
+    const server = (archRun.options.mcpServers as Record<string, { type: string; url: string }> | undefined)?.['conductor'];
+    check('an agent others wait for is given the Conductor tools at a URL naming it', server?.type === 'http' && /\/mcp\/agents\/h_arch$/.test(server.url), JSON.stringify(server));
+    check(
+      'hand_off is allowed outright, and start_helper is not: it is no orchestrator',
+      JSON.stringify((archRun.options.allowedTools ?? []).filter((t) => t.startsWith('mcp__conductor__'))) === '["mcp__conductor__hand_off"]',
+      JSON.stringify(archRun.options.allowedTools),
+    );
+    check('it is told to hand off, after how to ask and before its brief', archRun.prompts[0] === `the ${hjob} prompt\n\n${STACK_ASK_LINE}\n\n${HAND_OFF_LINE}`, archRun.prompts[0]);
+    check('tools/list over the endpoint is that agent’s own: hand_off for the architect', JSON.stringify((await mcp('h_arch', 'tools/list')).body.result?.tools?.map((t) => t.name)) === '["hand_off"]');
+    check('and none for the validator, which nobody waits for', JSON.stringify((await mcp('h_val', 'tools/list')).body.result?.tools) === '[]');
+    const nobody = await handOffOver('h_val', 'x');
+    check('the last agent cannot hand off: there is no one to', nobody.isError && /No agent waits for you/.test(nobody.text), nobody.text);
+    const blank = await handOffOver('h_arch', '   ');
+    check('a hand-off needs a summary', blank.isError && /needs a summary/.test(blank.text), blank.text);
+    const huge = await handOffOver('h_arch', 'x'.repeat(20_001));
+    check('and not a huge one, which the next prompt would pay for', huge.isError && /20,000/.test(huge.text) && getHandoff(db, 'h_arch').summary === null, huge.text);
+
+    // A turn that ends without hand_off holds. The agent is `done`; the others stay queued.
+    sayH('h_arch', 'Plan: use JWT.');
+    archRun.finish({ cost: 0, reason: 'completed' });
+    check('ending its turn without hand_off: it is done, not a new status', await until(() => getAgent(db, 'h_arch')?.status === 'done'));
+    await settle(150);
+    check('and the developer stays queued: nothing started', getAgent(db, 'h_dev')?.status === 'queued' && runs.length === start + 1 && sup.slots.used === 0);
+    check('with the hold on the agent', getHandoff(db, 'h_arch').held && getHandoff(db, 'h_arch').summary === null);
+    const note1 = lastStatus('h_arch');
+    check('its status event says why, for the transcript', note1?.kind === 'status' && note1.status === 'done' && note1.error === 'stopped without handing off', JSON.stringify(note1));
+    const alert1 = held();
+    check(
+      'Needs You has it: "stopped without handing off", on the architect',
+      alert1.length === 1 && alert1[0]?.agentIds.join() === 'h_arch' && alert1[0].cause === 'stopped without handing off' && alert1[0].jobId === hjob,
+      JSON.stringify(alert1),
+    );
+    check('a page that loads now is given it', (await get<Snapshot>('/api/snapshot')).body.alerts.some((a) => a.kind === 'handoff_held' && a.agentIds[0] === 'h_arch'));
+    check('it is the only alert: the developer is not "blocked", the architect did not fail', alerts().list().filter((a) => a.agentIds.some((i) => i.startsWith('h_'))).length === 1);
+    check('the job is still working: it is not done while someone is waiting to be handed to', getJob(db, hjob)?.status === 'working', getJob(db, hjob)?.status);
+
+    // It survives a restart: the alert is built from what is stored, and nothing starts by itself.
+    initAlerts(db);
+    sup.pump();
+    await settle(150);
+    check('a restart keeps the hold: the alert is still there', held().length === 1 && held()[0]?.id === alert1[0]?.id, JSON.stringify(held()));
+    check('and the developer still waits', getAgent(db, 'h_dev')?.status === 'queued' && runs.length === start + 1);
+    // A second connection to the same file is what a daemon that has restarted opens.
+    const reopened = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    const reborn = new Alerts(reopened).list().filter((a) => a.kind === 'handoff_held');
+    check(
+      'a daemon that opens the file afresh finds the same hold, built from nothing but what is stored',
+      reborn.length === 1 && reborn[0]?.id === alert1[0]?.id && getHandoff(reopened, 'h_arch').held,
+      JSON.stringify(reborn),
+    );
+    reopened.close();
+
+    // Replying to it is the other way out: it works again, and is held again if it still doesn't say.
+    const reply = await send<{ delivery: string }>('POST', '/api/agents/h_arch/message', { text: 'also cover the refresh tokens' });
+    check('a reply resumes it', reply.body.delivery === 'resumed' && (await until(() => runs.length === start + 2)) && runs[start + 1]?.options.resume === getAgent(db, 'h_arch')?.sdkSessionId);
+    check('while it works there is no hold and no alert', !getHandoff(db, 'h_arch').held && held().length === 0 && getAgent(db, 'h_arch')?.status === 'working');
+    sayH('h_arch', 'Refresh tokens covered.');
+    runs[start + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('still no hand_off: held again, and the developer still waits', (await until(() => held().length === 1)) && getAgent(db, 'h_dev')?.status === 'queued' && runs.length === start + 2);
+    const alert2 = held()[0]!;
+    check('a new hold is a new alert, so putting the first away would not hide it', alert2.id !== alert1[0]?.id);
+
+    // The person hands off, with their own words.
+    check('a summary that is not text → 400', (await handOffRoute('h_arch', {})).status === 400);
+    check('an agent that is not there → 404', (await handOffRoute('h_nobody', { summary: 'x' })).status === 404);
+    const empty = await handOffRoute('h_arch', { summary: '   ' });
+    check('an empty one → 409, and it is still held', empty.status === 409 && /needs a summary/.test(empty.body.detail ?? '') && getHandoff(db, 'h_arch').held, JSON.stringify(empty.body));
+    check('a huge one → 409', (await handOffRoute('h_arch', { summary: 'x'.repeat(20_001) })).status === 409);
+    check('an agent that is not held cannot be handed off → 409', (await handOffRoute('h_dev', { summary: 'x' })).status === 409);
+    const sent = await handOffRoute('h_arch', { summary: '  Use JWT, and refresh tokens too (edited).  ' });
+    check('handing off with an edited summary → 200', sent.status === 200 && sent.body.agent?.status === 'done', JSON.stringify(sent.body));
+    check('the hold and the alert are gone', !getHandoff(db, 'h_arch').held && held().length === 0);
+    const note2 = lastStatus('h_arch');
+    check('the transcript says a person did it', note2?.kind === 'status' && note2.error === 'handed off by you', JSON.stringify(note2));
+    check('the developer starts', await until(() => runs.length === start + 3) && getAgent(db, 'h_dev')?.status === 'working');
+    const devRun = runs[start + 2]!;
+    await until(() => devRun.prompts.length > 0);
+    const devPrompt = devRun.prompts[0] ?? '';
+    check('with the summary the person edited, trimmed — not the architect’s last reply as it was', devPrompt.includes('Its summary of its work:\nUse JWT, and refresh tokens too (edited).'), devPrompt);
+    check(
+      'printed first, above the conversation, which is still there',
+      devPrompt.indexOf('Its summary of its work:') < devPrompt.indexOf('Agent: Plan: use JWT.') && devPrompt.includes('Agent: Refresh tokens covered.'),
+      devPrompt,
+    );
+    check('and the developer is told to hand off too, since the validator waits for it', devPrompt.includes(HAND_OFF_LINE));
+    check('handing off twice is refused: it already has', (await handOffRoute('h_arch', { summary: 'again' })).status === 409);
+
+    // The developer hands off itself, by the tool, and its turn ends: the validator starts with the summary.
+    const said = await handOffOver('h_dev', 'Auth is in src/auth.ts; the tests are not written.');
+    check('hand_off over the endpoint is taken, and says who starts', !said.isError && /validator will start once your turn ends/.test(said.text), said.text);
+    check('the summary is kept on the agent', getHandoff(db, 'h_dev').summary === 'Auth is in src/auth.ts; the tests are not written.');
+    check('and the validator does not start before the turn ends', getAgent(db, 'h_val')?.status === 'queued' && runs.length === start + 3);
+    sayH('h_dev', 'Built it.');
+    devRun.finish({ cost: 0, reason: 'completed' });
+    check('the turn ends: the validator starts', await until(() => runs.length === start + 4) && getAgent(db, 'h_val')?.status === 'working');
+    const valRun = runs[start + 3]!;
+    await until(() => valRun.prompts.length > 0);
+    const valPrompt = valRun.prompts[0] ?? '';
+    check('with the developer’s summary first', valPrompt.includes('[developer]\nIts summary of its work:\nAuth is in src/auth.ts; the tests are not written.') && valPrompt.indexOf('Its summary of its work:') < valPrompt.indexOf('Agent: Built it.'), valPrompt);
+    check('and no hold on the developer', !getHandoff(db, 'h_dev').held && held().length === 0);
+    check('the last agent has no tools and is not told to hand off', valRun.options.mcpServers === undefined && !valPrompt.includes(HAND_OFF_LINE) && !(valRun.options.allowedTools ?? []).some((t) => t.includes('hand_off')), JSON.stringify(valRun.options.allowedTools));
+    sayH('h_val', 'All green.');
+    valRun.finish({ cost: 0, reason: 'completed' });
+    check('the last agent finishes done, as it did, and nothing holds it', (await until(() => getAgent(db, 'h_val')?.status === 'done')) && !getHandoff(db, 'h_val').held && held().length === 0);
+    check('and the job finishes', await until(() => getJob(db, hjob)?.status === 'done'), String(getJob(db, hjob)?.status));
+
+    // Re-run from here (Amendment 102). You talk to the architect after it has handed off: that is a new run,
+    // and nothing holds it, since the agents after it have all run.
+    const chat = await send('POST', '/api/agents/h_arch/message', { text: 'actually, sessions instead of JWT' });
+    check('talking to the architect after it handed off is a new run', chat.status === 200 && (await until(() => runs.length === start + 5)));
+    check('its last summary was about its last run: it starts without one', getHandoff(db, 'h_arch').summary === null);
+    sayH('h_arch', 'Plan v3: sessions, not JWT.');
+    runs[start + 4]?.finish({ cost: 0, reason: 'completed' });
+    check('and ends done, not held: the developer and the validator have run', (await until(() => getAgent(db, 'h_arch')?.status === 'done')) && !getHandoff(db, 'h_arch').held && held().length === 0);
+    await until(() => getJob(db, hjob)?.status === 'done');
+    const again = await send<RerunResponse & { detail?: string }>('POST', '/api/agents/h_arch/rerun', {});
+    check('so the architect counts as handed off: re-run from it works', again.status === 200 && again.body.agents.map((a) => a.role).join() === 'developer,validator', JSON.stringify(again.body));
+    check('the developer resumes in its own session', (await until(() => runs.length === start + 6)) && runs[start + 5]?.options.resume === getAgent(db, 'h_dev')?.sdkSessionId);
+    const devAgain = runs[start + 5]!;
+    await until(() => devAgain.prompts.length > 0);
+    const note = devAgain.prompts[0] ?? '';
+    check('told its input changed, with the new reply', note.startsWith('Your input changed.') && note.includes('Agent: Plan v3: sessions, not JWT.'), note);
+    check('not the summary from before, which was about the old plan', !note.includes('edited') && getHandoff(db, 'h_dev').summary === null, note);
+    check('and told to hand off again, since the validator waits for it', note.includes(HAND_OFF_LINE) && note.includes('Call it again'), note);
+    sayH('h_dev', 'Switched to sessions.');
+    devAgain.finish({ cost: 0, reason: 'completed' });
+    check('the developer ends without hand_off: held, and the validator waits', (await until(() => held().length === 1)) && held()[0]?.agentIds[0] === 'h_dev' && getAgent(db, 'h_val')?.status === 'queued' && runs.length === start + 6);
+    const refusedRerun = await send<{ detail?: string }>('POST', '/api/agents/h_dev/rerun', {});
+    check('a re-run from the held one is refused, saying to hand off first', refusedRerun.status === 409 && /stopped without handing off.*Hand it off in Needs You/.test(refusedRerun.body.detail ?? ''), JSON.stringify(refusedRerun.body));
+    check('the person hands off for it', (await handOffRoute('h_dev', { summary: 'Sessions are in src/session.ts.' })).status === 200);
+    check('the validator resumes in its own session', (await until(() => runs.length === start + 7)) && runs[start + 6]?.options.resume === getAgent(db, 'h_val')?.sdkSessionId);
+    const valAgain = runs[start + 6]!;
+    await until(() => valAgain.prompts.length > 0);
+    check(
+      'and its re-run note carries that summary, first',
+      valAgain.prompts[0]?.startsWith('Your input changed.') === true && (valAgain.prompts[0] ?? '').includes('[developer]\nIts summary of its work:\nSessions are in src/session.ts.'),
+      valAgain.prompts[0],
+    );
+    valAgain.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes', await until(() => getJob(db, hjob)?.status === 'done'), String(getJob(db, hjob)?.status));
+
+    // A failed agent is not held: it failed, and Needs You already says so.
+    hjobRow('job_handoff104_fail');
+    hfix('hf_a', 'job_handoff104_fail', { role: 'architect', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    hfix('hf_b', 'job_handoff104_fail', { role: 'developer', status: 'queued', dependsOn: ['hf_a'], autonomy: DEFAULT_AUTONOMY });
+    const atFail = runs.length;
+    sup.pump();
+    await until(() => runs.length === atFail + 1);
+    runs[atFail]?.finish({ cost: 0, isError: true, reason: 'error' });
+    await until(() => getAgent(db, 'hf_a')?.status === 'failed');
+    check('an agent that failed is failed, not held', !getHandoff(db, 'hf_a').held && held().length === 0 && alerts().list().some((a) => a.kind === 'failed' && a.agentIds[0] === 'hf_a'));
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);

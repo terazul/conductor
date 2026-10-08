@@ -309,8 +309,8 @@ to** it in the plan, to put it back. An agent can only wait for one above it.
   rows can share a persona.
 - Optionally give it a brief of its own, on top of the job prompt; empty uses the
   persona's. Its model can be changed in the plan preview, for this launch only.
-- Tick which agents above it it **waits for**. It's handed their final replies, like any
-  agent that waits. A new row waits for the one above it. Move a row with **↑ ↓** or by
+- Tick which agents above it it **waits for**. It's handed their conversations and the
+  summary each handed off with, like any agent that waits. A new row waits for the one above it. Move a row with **↑ ↓** or by
   dragging its **⋮⋮**, as in the plan above; its ticks follow the same rule.
 
 **Personas** (Settings → **Personas**) are what each role is. Each one holds a name, a
@@ -528,6 +528,32 @@ wait for an agent that waits for it), feeding an agent that has already started,
 Adding to a finished job opens it again. The agent starts as soon as what it waits for is done
 and a slot is free.
 
+### Handing off to the next agent
+
+An agent that others wait for hands off by saying so. It is given a `hand_off` tool (Claude over
+Conductor's tool endpoint, Copilot and OpenRouter in-process, like `start_helper`) and told to
+call it when it is done, with a **summary** of what the next agents need. The agents after it
+start once its turn ends, and are told that summary first, above the whole conversation they
+are given. The last agent in a chain has nobody to hand off to: it has no tool, and finishes
+**done** as before.
+
+If its turn ends **without** calling it, nothing after it starts. It stays **done**, and Needs
+You shows **Not handed off**: *architect stopped without handing off, so the agents after it
+have not started*, with the agents waiting listed.
+
+- **hand off** opens the summary for editing, filled in with the agent's last reply. Change it
+  to say what the next agents need, and **hand off with this** sends exactly that text; they
+  start. Putting it away (**dismiss**) leaves them waiting.
+- **Reply to it instead**, in the box on the card: the agent works again, and hands off when
+  it is done.
+- The hold is kept if the daemon restarts. The job stays working while one is held.
+
+An agent you write to after it has finished is a new run. If the agents after it have all run
+already, nothing is held, and **↻ re-run after this** (below) works as before. Re-run asks each
+agent that has agents after it to hand off again, since its old summary was about the old plan;
+if it doesn't, it is held the same way. A re-run from an agent that is held is refused: hand it
+off first.
+
 ### Run the agents after one again
 
 You can talk to an agent after it has finished: ask the architect to change the plan, and it
@@ -606,6 +632,7 @@ below the requests, one card each, and each card's first button is the one that 
 | **Dev server down** | A dev server an agent started has stopped answering. | Open its preview, or dismiss. |
 | **Daily budget** | Today's spend reached the daily budget set in Settings. | A warning only: nothing is stopped. Change the budget in Settings. |
 | **Note due** | One of your project notes is due or late. | **✓ mark done**, open the project, or dismiss it for the day. |
+| **Not handed off** | An agent that others wait for ended its turn without calling `hand_off` (see "Handing off to the next agent"). It is done; the agents after it stay queued. | **hand off**, which opens the summary to edit before it goes; a reply box, so the agent works again; open it, or dismiss. |
 | **Waiting** | An agent waits on one that failed or was stopped. Behind a failed one, such as the reviewer after a failed developer, it stays queued and starts once that one is done. Behind a stopped one it is paused (see "Stopping an agent", §7). | Behind a failed one: **continue** it (when its session can be resumed), open it, or dismiss. Behind a stopped one: **resume** the waiting agent to run without it, open the stopped one, or dismiss. |
 
 An alert stays until the daemon says the problem is gone, or until you dismiss it.

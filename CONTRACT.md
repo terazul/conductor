@@ -196,6 +196,95 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 104 — post-merge, applied. **An agent hands off only by saying so: a `hand_off` tool.**
+
+Shared (`wire.ts`, `stack.ts`), daemon (`routes/helpers.ts`, `routes/session.ts`, `session/supervisor.ts`,
+`session/store.ts`, `session/alerts.ts`, `session/handoff.ts`, `session/rerun.ts`, `session/backend.ts`,
+`session/backends/claude.ts`, `session/backends/copilot.ts`, `session/verify.ts`, migration
+`130_handoff.sql`) and web (`attention/alerts.ts`, `attention/AlertCard.tsx`, `attention/HandOff.tsx`
+new, `attention/attention.css`, `attention/verify.ts`, `shell/describe.ts`, `agent/endpoints.ts`,
+`agent/transcript.tsx`, `lib/verify.ts`), and `docs/MANUAL.md`. A TODO.md item (asked 7 Oct, decided
+8 Oct): "an agent hands off only by saying so". It uses the seam Amendment 101 left, `Upstream.summary`.
+- **The tool.** `hand_off({ summary })`, in `MCP_TOOLS` beside `start_helper`. It is given to every agent
+  that has an agent waiting for it (`waitersOf`, now in shared `stack.ts`: the agents whose `dependsOn`
+  holds it, not its own orchestrator, which waits for its helpers by another road, Amendment 51). The
+  last agent in a chain has none, and finishes `done` as before. Claude gets it from the per-agent MCP
+  endpoint, allowed outright (`mcp__conductor__hand_off`); Copilot and OpenRouter in-process, beside
+  `start_helper`, `skipPermission`, served by the same `callTool`. Both capability rows already had
+  `helperTools: true`. A new `RunnerScope.handOff` says whether an agent gets it; `helperCap` is
+  unchanged. Today's rule "tools go only to orchestrators" is now "to orchestrators, and to agents others
+  wait for", and `tools/list` answers with that agent's own tools (`toolsFor`, `Supervisor.toolAccess`).
+  An agent that is both gets all three. Refused with a sentence the model reads: nobody waits for you, a
+  blank summary, one over 20,000 characters (`HANDOFF_SUMMARY_MAX`).
+- **It is told to.** An agent others wait for has one more line in its first prompt, after the line about
+  asking (Amendment 100): when you are done call `hand_off`; they start only once you have; without it you
+  wait in Needs You. The line is taken out of the conversation the next agent is given
+  (`turnsFromEvents`), as the line about asking is.
+- **The hold, in `#settle`.** Before `done` is written: if no summary was given in this run and an agent
+  that waits for it is still `queued` (or `paused` and never started), the agent is *held*. It is `done`,
+  not a new status. `#depsSatisfied` does not count a held agent, so what waits stays queued, and the job
+  stays `working`. Its `done` status event carries the note `stopped without handing off`
+  (`HANDOFF_HELD_NOTE`), so the transcript says so and the alert has an id. A chat with an agent whose
+  followers have all run holds nothing, and neither does a failed agent (it is `failed`, with its own alert).
+- **Kept across a restart.** Migration `130_handoff.sql` adds two columns to `agents`, off the wire like
+  the persona: `handoff_summary` (what it said, or what a person sent for it) and `handoff_held`. The
+  alert is derived from them, as the other agent alerts are; a daemon that restarts finds the hold and
+  starts nothing. The TODO suggested the alerts table, but that table holds only dismissals (Amendment
+  28), and the alerts themselves are derived, so the state lives with the agent. *One summary belongs to
+  one run:* it is cleared when a finished agent works again (you wrote to it, or `rerunFrom` re-runs it),
+  not when a run is only resumed after a pause, a parked question or a restart.
+- **The alert.** `AlertKind` gains `handoff_held`: `agentIds` is the held agent, `cause` is
+  `stopped without handing off`. Derived by `Alerts.#heldHandoffs` for an agent that is `done`, held, and
+  has an agent still waiting; the id carries its last status event, so a dismissal lasts until it is held
+  again. It clears when it hands off, is handed off for, works again, or nothing waits for it any more.
+- **The card.** *Not handed off*, amber (`--need`): "architect stopped without handing off, so the agents
+  after it have not started", a **waiting** line (who, by role), then **hand off** (primary), **open
+  agent** and dismiss, and a **reply** box. **hand off** opens the summary for editing, prefilled with the
+  agent's last reply (and filling in if its history arrives late, until you type over it); **hand off with
+  this** sends exactly that text, trimmed, and cannot be pressed when the daemon would refuse it. **send
+  reply** is an ordinary message: the agent works again and hands off when it is done. A send that was
+  accepted does not remove the card; the daemon clears the alert, so a refusal stays on screen with its
+  reason. Tokens only (`atn-ta`, `--ink3`, `--fail`, `--need`), both themes. Its Fleet/navigator line reads
+  *stopped without handing off* in amber, and the transcript's note reads *finished — stopped without
+  handing off*. (The TODO named `attention/describe.ts`; the alert sentences are in `shell/describe.ts`,
+  and `attention/describe.ts` is the permission-card reader, which is unchanged.)
+- **`POST /api/agents/:id/hand-off`** `{ summary }` → `{ agent }`. 400 if `summary` is not text; 404; **409**
+  with the sentence in `detail` when the agent is not held, or the summary is empty or over the limit. It
+  records the summary, clears the hold, writes a `done` status event with the note `handed off by you`,
+  and `pump()` starts what waited.
+- **The handoff.** `#promptFor` gives each upstream its `summary` (printed first, whole, outside the cap —
+  `Upstream.summary`, as Amendment 101 built it) above the whole conversation. `rerunNote` carries the same
+  section, so a re-run agent hears the summary of the agent before it too.
+- **Re-run from here (Amendment 102) still works.** The source agent has handed off, or has nobody
+  waiting, so talking to it holds nothing: its `done` stands, its summary from before is dropped (it was
+  about the old plan), and **↻ re-run after this** runs as before. The agents it re-runs get a summary
+  reset and are asked, in the note, to hand off again; one that doesn't is held, and the agents behind it
+  wait for you. A re-run from an agent that is held is refused (409): "stopped without handing off … Hand
+  it off in Needs You first", since none of the agents after it has started.
+- **Checked**: `session/verify.ts` §20 (who is given the tool, the tool list per agent, the refusals; the
+  turn that ends without `hand_off` holds with the dependant still queued, the alert, the status note, a
+  snapshot that carries it, the job still working; a second connection to the file finds the hold; a
+  reply works the agent again and holds it again with a new alert id; the person's edited summary is what
+  the developer is told, trimmed and above the conversation, with the refusals; `hand_off` over the
+  endpoint then the end of the turn starts the validator with the summary; the last agent has no tools and
+  finishes `done`; talking to a handed-off architect holds nothing and its re-run works; a re-run developer
+  that doesn't hand off is held, a re-run from it is refused, and the validator then resumes with the
+  summary), §17l (Copilot and OpenRouter: the in-process tool, a blank summary as a failure the model
+  reads, held, handed off, the next agent starts with the summary), `attention/verify.ts` §6 (the actions,
+  title, notification, top-bar word, who waits, the draft, what can be sent, the wiring of the button,
+  the edit box and the reply box, tokens only) and `lib/verify.ts` (the lane line). The existing stack
+  tests in §17, §17o, §17p and §19 now call `hand_off` where an agent in the middle used to simply finish.
+- **Not done**: the Agent screen's **re-run** button does not know a held agent (the hold is not on the
+  wire), so it is enabled and the daemon's 409 explains. No hand-off from the Fleet card or the Project
+  lane; Needs You and the reply box are the way. A hand-off made before a daemon restart that interrupted
+  the same run is kept (the run is resumed, not restarted), but one made in a run that had already ended
+  and was then run again is dropped by design. The wording of Amendment 100's line ("a question in your
+  reply … the agents after you start without the answer") is now stale for an agent with agents waiting:
+  they are held, not started. It is left as it was. Orchestrated stacks (a separate TODO item) are not
+  built; whether an orchestrator's helpers also get `hand_off` is still its own open question (they do
+  not: a helper's `waitersOf` is empty). Not run by this lane: `make test`, the daemon smoke test, and the
+  workspace/preview suites.
+
 ### Amendment 103 — post-merge, applied. **Open pages are told when the day changes, so the status bar's "today" reads zero at midnight.**
 
 Daemon (`daily.ts`, `session/alerts.ts`, `session/store.ts`, `session/verify.ts`). The status-bar half of a

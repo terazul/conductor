@@ -350,6 +350,45 @@
   line-height: 1.5;
 }
 
+/* ── the hand-off boxes (Amendment 104) ────────────────────────────────────
+ * Tokens only, so both themes read: the labels and hints are the dim ink, the
+ * problem is the failure colour, the boxes sit on the card's own surface. */
+
+.atn-handoff {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.atn-handoff-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.atn-handoff-lab {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.atn-handoff-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.atn-handoff-problem {
+  font-size: var(--fs-md);
+  color: var(--fail);
+}
+.atn-handoff-hint {
+  font-size: var(--fs-md);
+  color: var(--ink3);
+  line-height: 1.5;
+}
+
 .atn-ta {
   width: 100%;
   font-family: var(--mono);

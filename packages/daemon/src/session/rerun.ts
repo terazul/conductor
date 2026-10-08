@@ -12,7 +12,7 @@
  * reshaped, this call is the only line here that changes.
  */
 
-import { handoffSection, type Upstream } from './handoff.js';
+import { handOffLine, handoffSection, type Upstream } from './handoff.js';
 
 /** Replaces "You started after …": a re-run agent has already started. */
 const RERUN_OPENING = 'Here is what the agents before you said, as it stands now.';
@@ -33,7 +33,13 @@ export function rerunStatusNote(from: string): string {
  * worktree is not touched, and the note says so, because "start again" can be read as "start
  * over" and an agent that thinks it must redo everything will.
  */
-export function rerunNote(changed: readonly string[], upstream: readonly Upstream[], cap: number): string {
+export function rerunNote(
+  changed: readonly string[],
+  upstream: readonly Upstream[],
+  cap: number,
+  /** Agents wait for this one, so it hands off again when it is done (Amendment 104). */
+  waited = false,
+): string {
   const who = changed.length === 0 ? 'An agent before you' : changed.join(', ');
   const verb = changed.length > 1 ? 'have' : 'has';
   return [
@@ -42,6 +48,8 @@ export function rerunNote(changed: readonly string[], upstream: readonly Upstrea
       'Look at what is here, compare it with their new reply, and fix whatever no longer fits. ' +
       'Leave alone what still does.',
     handoffSection(upstream, cap, RERUN_OPENING),
+    // Its last summary was about the work before this; the agents after it hear a new one (Amendment 104).
+    waited ? `${handOffLine(true)} Call it again when you are done: your earlier summary was for your earlier work.` : '',
   ]
     .filter(Boolean)
     .join('\n\n');

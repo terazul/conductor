@@ -21,6 +21,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { HANDOFF_BY_USER_NOTE, HANDOFF_HELD_NOTE } from '@conductor/shared';
 import type {
   BlockMode,
   DecisionSummary,
@@ -241,7 +242,13 @@ function statusNote(
   }
   // Interrupted by a restart and queued to resume on its own (Amendment 53).
   if (status === 'queued' && error) return { kind: 'note', text: error, tone: 'idle' };
-  if (status === 'done') return { kind: 'note', text: 'finished', tone: 'done' };
+  if (status === 'done') {
+    // Done, but it never said it was ready, so the agents after it wait (Amendment 104); or a
+    // person said it for it.
+    if (error === HANDOFF_HELD_NOTE) return { kind: 'note', text: `finished — ${HANDOFF_HELD_NOTE}`, tone: 'need' };
+    if (error === HANDOFF_BY_USER_NOTE) return { kind: 'note', text: 'finished — handed off by you', tone: 'done' };
+    return { kind: 'note', text: 'finished', tone: 'done' };
+  }
   if (status === 'working' && prev === 'blocked') {
     return { kind: 'note', text: 'resumed', tone: 'live' };
   }

@@ -12,6 +12,7 @@
  *   connection   the model API can't be reached or refuses the login, or the retries ran out
  *   server_down  a dev server stopped answering and nobody asked it to stop
  *   blocked_dep  an agent waits on one that failed or was stopped (Amendments 85, 88)
+ *   handoff_held an agent others wait for ended its turn without calling `hand_off` (Amendment 104)
  *
  * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -23,14 +24,14 @@
  * reaches the log as ordinary `text` and can't be told apart there.
  */
 
-import type { Alert, Event, RetryCause, StatusPayload } from '@conductor/shared';
+import { HANDOFF_HELD_NOTE, waitersOf, type Alert, type Event, type RetryCause, type StatusPayload } from '@conductor/shared';
 import { row, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { budgetStop } from './budget.js';
-import { costToday, dueNotes, getAgent, listAgents, localDay } from './store.js';
+import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
 
@@ -137,8 +138,8 @@ export class Alerts {
 
   /** Every open alert, connection alerts first, the rest oldest first. */
   list(now = Date.now()): Alert[] {
-    const derived = [...this.#agentAlerts(), ...this.#blockedDeps(), ...this.#serversDown()].sort((a, b) =>
-      a.since.localeCompare(b.since),
+    const derived = [...this.#agentAlerts(), ...this.#blockedDeps(), ...this.#heldHandoffs(), ...this.#serversDown()].sort(
+      (a, b) => a.since.localeCompare(b.since),
     );
     return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...derived].filter((a) => !this.#dismissed(a.id));
   }
@@ -440,6 +441,40 @@ export class Alerts {
           blockedBy: dep.id,
         });
       }
+    }
+    return out;
+  }
+
+  /**
+   * Agents that ended their turn without handing off, with agents waiting for them
+   * (Amendment 104). They are `done`, so the other alerts say nothing; the agents after them
+   * are queued and would wait for good. One alert per held agent. It is derived from the
+   * `handoff_held` column, so a daemon restart keeps it, and its id carries the agent's last
+   * status event: a dismissal lasts until the agent is held again. It clears itself when the
+   * agent hands off, is handed off for, or works again, and while no agent is left waiting
+   * for it (the job was stopped, or they were removed) there is nothing to hand off to.
+   */
+  #heldHandoffs(): Alert[] {
+    const out: Alert[] = [];
+    const held = heldHandoffs(this.#db);
+    if (held.length === 0) return out;
+    const all = listAgents(this.#db);
+    for (const id of held) {
+      const agent = all.find((a) => a.id === id);
+      if (agent?.status !== 'done') continue;
+      if (!waitersOf(id, all).some((w) => w.status === 'queued' || w.status === 'paused')) continue;
+      const last = row<{ seq: number; ts: string }>(
+        this.#db.prepare(`SELECT seq, ts FROM events WHERE agent_id = ? AND kind = 'status' ORDER BY seq DESC LIMIT 1`).get(id),
+      );
+      out.push({
+        id: `handoff_held:${id}:${last?.seq ?? 0}`,
+        kind: 'handoff_held',
+        cause: HANDOFF_HELD_NOTE,
+        projectId: agent.projectId,
+        jobId: agent.jobId,
+        agentIds: [id],
+        since: last?.ts ?? agent.endedAt ?? agent.startedAt ?? '',
+      });
     }
     return out;
   }

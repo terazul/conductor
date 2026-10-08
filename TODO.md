@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 104.
+  green `make test` (decided 30 Sep). The next amendment is 105.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -35,38 +35,8 @@ order. Not chosen: guessing from the reply whether it waits (wrong in both direc
 automatic re-runs on every reply (cost and overwritten work), and a per-job "hand off
 automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 *Built (8 Oct): the question-tool line (Amendment 100), choosing who each agent waits for
-(99), passing the whole conversation as text (101) and re-run from here (102). `hand_off` is
-next; it puts its `summary` on top of the conversation through `Upstream.summary`
-(`session/handoff.ts`).*
-
-- [ ] **An agent hands off only by saying so: a `hand_off` tool.** Asked for (7 Oct). An
-  agent that other agents wait on hands off by calling `hand_off`, with a `summary` of what
-  the next agents need. Ending its turn without calling it doesn't start them. Instead the
-  agent goes to Needs You as "stopped without handing off", with **hand off** and the reply
-  box. Your stack above would have stopped there after the architect.
-  - **The tool.** Add it to `MCP_TOOLS` in `packages/daemon/src/routes/helpers.ts`, beside
-    `start_helper`. Claude gets it over the per-agent MCP endpoint
-    (`session/backends/claude.ts:128`), and Copilot and OpenRouter in-process
-    (`backends/copilot.ts:387-413`). Both capability rows already have `helperTools: true`
-    (`backends/index.ts:28`, `:41`). Today the tools go only to orchestrators (`helperCap ?`
-    at `claude.ts:194` and `copilot.ts:387`). Give `hand_off` to every agent with an agent
-    waiting on it. The last agent in a chain doesn't get it, and finishes as it does now.
-  - **The hold.** In `#settle`, before `done` (`supervisor.ts:1018`): if an agent waits on
-    this one and `hand_off` wasn't called this run, hold it instead. Keep the hold across a
-    daemon restart. The alerts table (`db/migrations/040_alerts.sql`) is the likely home, with
-    a new `AlertKind` (`packages/shared/src/wire.ts`), as Amendment 85 added one.
-  - **The handoff.** The next agents get the `summary`, on top of the whole context from the
-    item above.
-  - **Needs You.** The new alert and its **hand off** button: `attention/alerts.ts`,
-    `AlertCard.tsx`, `attention/describe.ts`.
-  Decide:
-  - whether the hold is an agent status (for example `ready`) or only an alert beside `done`.
-  - whether the button lets you edit the summary before it goes.
-  Tests in `session/verify.ts`: a turn that ends without `hand_off` holds, and its dependants
-  stay queued; `hand_off` then the end of the turn starts them with the summary; the last
-  agent still finishes `done`; the hold survives a restart.
-  *Decided (8 Oct): build it as described. The hold is an alert beside `done`, not a new
-  status, and you can edit the summary before it goes.*
+(99), passing the whole conversation as text (101), re-run from here (102) and the
+`hand_off` tool (104).*
 
 - [ ] **Orchestrated stacks: one agent runs the others.** Asked for (8 Oct), as a design
   question. A new kind of stack you pick in Spawn, beside the fixed ones. An orchestrator

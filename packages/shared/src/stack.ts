@@ -142,3 +142,18 @@ export function readOnlyRefusal(role: AgentRole, autonomy: Pick<Autonomy, 'mode'
   }
   return null;
 }
+
+/**
+ * The agents that wait for `agentId`: the ones its `hand_off` is for. Its orchestrator is
+ * not one of them (it waits for its helpers by a different road, Amendment 51), and a
+ * helper hands its reply to the agent that started it, not to a stack. Pure and shared, so
+ * the daemon (which gives the agent the tool) and Needs You (which says who is waiting) agree.
+ */
+export function waitersOf<T extends { id: string; dependsOn: readonly string[] }>(
+  agentId: string,
+  jobAgents: readonly (T & { parentId?: string | null })[],
+): T[] {
+  const me = jobAgents.find((a) => a.id === agentId);
+  return jobAgents.filter((a) => a.dependsOn.includes(agentId) && me?.parentId !== a.id);
+}
+

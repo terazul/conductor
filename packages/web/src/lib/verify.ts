@@ -637,6 +637,19 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
     failed.head === '' && failed.subject === 'ran out of turns' && failed.tone === 'fail',
     `${failed.head} ${failed.subject} (${failed.tone})`,
   );
+  // Amendment 104: done, but it never said it was ready, so the agents after it wait.
+  const heldLine = line([at({ kind: 'status', status: 'done', error: 'stopped without handing off' }, T)], who({ status: 'done' }));
+  check(
+    'a finished agent that stopped without handing off says so, in amber (Amendment 104)',
+    heldLine.head === 'stopped' && heldLine.subject === 'without handing off' && heldLine.tone === 'need',
+    `${heldLine.head} ${heldLine.subject} (${heldLine.tone})`,
+  );
+  const handed = line(
+    [at({ kind: 'status', status: 'done', error: 'stopped without handing off' }, T), at({ kind: 'status', status: 'done', error: 'handed off by you' }, T + 1)],
+    who({ status: 'done' }),
+  );
+  check('and once a person has handed off for it, it is only finished (Amendment 104)', handed.tone === 'done' && handed.head !== 'stopped', `${handed.head} (${handed.tone})`);
+  check('a working agent is not marked by an old hold (Amendment 104)', line([at({ kind: 'status', status: 'done', error: 'stopped without handing off' }, T)], who({ status: 'working' })).head !== 'stopped');
 
   const alert = (over: Partial<Alert>): Alert => ({
     id: 'al_1',

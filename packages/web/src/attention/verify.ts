@@ -13,7 +13,9 @@
  * fails closed without one — nothing unsanitised can reach innerHTML by that route.
  */
 
-import type { Agent, Alert, PendingRequest, PermissionSuggestion, Project, Question } from '@conductor/shared';
+import { readFileSync } from 'node:fs';
+import { HANDOFF_BY_USER_NOTE, HANDOFF_HELD_NOTE, HANDOFF_SUMMARY_MAX } from '@conductor/shared';
+import type { Agent, Alert, Event, PendingRequest, PermissionSuggestion, Project, Question } from '@conductor/shared';
 import {
   AGE_FULL_MS,
   ageGradientSize,
@@ -46,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, resumable, type AlertAction } from './alerts.js';
+import { alertActions, alertNotice, alertProject, handOffDraft, handOffProblem, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -358,6 +360,98 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   const net = alertNotice(outage, both, projects);
   check("an outage has no project, so the title is what's wrong", net.title === "can't reach the model API", net.title);
   check('an unknown project is none, not a guess', alertProject({ projectId: 'p_gone' }, projects) === null);
+}
+
+// Amendment 104. An agent that others wait for ended its turn without calling hand_off: it is
+// `done`, and the card offers to hand off for it, with the summary edited first, or to reply.
+console.log('\n6 · an agent that stopped without handing off (Amendment 104)');
+{
+  const agent = (over: Partial<Agent> = {}): Agent => ({
+    id: 'a1',
+    jobId: 'j1',
+    projectId: 'p1',
+    role: 'architect',
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status: 'done',
+    blockMode: null,
+    costUsd: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const held: Alert = {
+    id: 'handoff_held:a1:12',
+    kind: 'handoff_held',
+    cause: HANDOFF_HELD_NOTE,
+    projectId: 'p1',
+    jobId: 'j1',
+    agentIds: ['a1'],
+    since: '2026-10-08T12:00:00Z',
+  };
+  const architect = agent();
+  const developer = agent({ id: 'a2', role: 'developer', status: 'queued', sdkSessionId: null, dependsOn: ['a1'] });
+  const scribe = agent({ id: 'a3', role: 'scribe', status: 'queued', sdkSessionId: null, dependsOn: ['a1', 'a2'] });
+  const ids = (xs: AlertAction[]) => xs.map((a) => a.id).join(' ');
+
+  const acts = alertActions(held, [architect, developer]);
+  check('the card offers hand off first, then looking, then putting it away', ids(acts) === 'hand_off open dismiss', ids(acts));
+  check('hand off is about the stopped agent, not the ones waiting', acts[0]?.id === 'hand_off' && acts[0].agentId === 'a1', JSON.stringify(acts[0]));
+  check('a card for an agent this tab has not heard of can only be put away', ids(alertActions(held, [])) === 'dismiss');
+  const told = alertTitle(held, [architect, developer]);
+  check('it says who stopped, and that the others have not started', told.head === 'architect' && /stopped without handing off/.test(told.subject) && /have not started/.test(told.subject), `${told.head} ${told.subject}`);
+  check('the top bar has a word for it', alertWord(held) === 'stopped without handing off');
+  check(
+    'the notification says it needs you',
+    alertNotice(held, [architect], [{ id: 'p1', name: 'demo' } as Project]).title === 'demo · architect needs you',
+  );
+  check('it chimes at once: nothing else will answer it', dueForChime([], [held], Date.parse(held.since), new Set()).join() === 'alert:handoff_held:a1:12');
+
+  // Who is waiting, as the card lists them: the daemon's rule, shared.
+  check('the card lists who waits for it, by role', waitingRoles('a1', [architect, developer, scribe]).join() === 'developer,scribe');
+  check('not one that has started', waitingRoles('a1', [architect, { ...developer, status: 'working' }, scribe]).join() === 'scribe');
+  check('and not its own orchestrator, which waits for it as a helper (Amendment 51)', waitingRoles('a1', [{ ...architect, parentId: 'a2' }, developer]).length === 0);
+
+  // The box starts as the agent's last reply, so nobody types out what it already said.
+  const at = (seq: number, payload: Event['payload']): Event => ({ seq, ts: '2026-10-08T12:00:00Z', projectId: 'p1', jobId: 'j1', agentId: 'a1', payload }) as Event;
+  const log: Event[] = [
+    at(1, { kind: 'text', text: 'Plan v1.' }),
+    at(2, { kind: 'tool_start', toolUseId: 't', tool: 'Read', input: {}, label: 'Read x' }),
+    at(3, { kind: 'text', text: '  Plan v2: JWT, with refresh tokens.\n' }),
+    at(4, { kind: 'text', text: '   ' }),
+    at(5, { kind: 'status', status: 'done', error: HANDOFF_HELD_NOTE }),
+  ];
+  check('the last reply, trimmed — not an earlier one, a tool call, a blank, or a status', handOffDraft(log) === 'Plan v2: JWT, with refresh tokens.', handOffDraft(log));
+  check('an agent that wrote nothing starts an empty box', handOffDraft([at(1, { kind: 'status', status: 'done' })]) === '' && handOffDraft([]) === '');
+
+  // What can be sent. The daemon says the same in its 409.
+  check('an empty summary cannot be sent, and says what to do', /Say what/.test(handOffProblem('') ?? '') && handOffProblem('  \n ') !== null);
+  check('nor one over the limit, which is named', /20,000/.test(handOffProblem('x'.repeat(HANDOFF_SUMMARY_MAX + 1)) ?? '') && handOffProblem('x'.repeat(HANDOFF_SUMMARY_MAX)) === null);
+  check('anything else can', handOffProblem('Use JWT.') === null && handOffProblem(' Use JWT. ') === null);
+
+  // The wiring: the button opens the edit box, the box sends exactly what is in it, and the
+  // reply box is beside it. These are source checks: the card is not rendered in Node.
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  const box = readFileSync(new URL('./HandOff.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
+  const ep = readFileSync(new URL('../agent/endpoints.ts', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./attention.css', import.meta.url), 'utf8');
+  check('the card has a label and a tone for the kind', /handoff_held: \{ label: 'Not handed off', tone: 'var\(--need\)' \}/.test(card));
+  check('the hand off button toggles the edit box; the box is the card’s HandOffPanel', /case 'hand_off':\s*setHandingOff\(\(open\) => !open\)/.test(card) && /<HandOffPanel agent=\{first\} editing=\{handingOff\}/.test(card));
+  check('hand off is the fix, so it is the primary button', /a\.id === 'hand_off'/.test(card.slice(card.indexOf('function isFix'))));
+  check('the box starts as the last reply and shows what was typed over it', /const summary = edited \?\? suggested;/.test(box) && /handOffDraft\(events\)/.test(box) && /onChange=\{\(e\) => setEdited\(e\.target\.value\)\}/.test(box));
+  check('it cannot send what the daemon would refuse', /disabled=\{busy \|\| problem !== null\}/.test(box) && /if \(problem !== null\) return;/.test(box));
+  check('it sends the text in the box, trimmed, to the hand-off call', /handOff\(agent, summary\)/.test(box) && /summary: summary\.trim\(\)/.test(api) && /agentPath\(agentId, 'hand-off'\)/.test(ep));
+  check('the reply box sends an ordinary message to the agent', /sendMessage\(agent\.id, \{ text \}\)/.test(box) && /placeholder="It works again/.test(box));
+  check('a refusal stays on the card, with its reason: the box goes through useCommand and nothing removes the card', /cmd\.run\('Handing off'/.test(box) && !/dismissAlert/.test(box));
+  check('both themes read: the boxes use the card’s own textarea and tokens, and no colour of their own', !/#[0-9a-fA-F]{3,8}\b|style=|rgb\(/.test(box) && /className="atn-ta"/.test(box));
+  const rules = css.slice(css.indexOf('.atn-handoff {'), css.indexOf('.atn-ta {'));
+  check('and its CSS is tokens only', rules.length > 100 && !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(rules) && /var\(--ink3\)/.test(rules) && /var\(--fail\)/.test(rules));
+  check('the transcript names both ends of it', HANDOFF_BY_USER_NOTE === 'handed off by you' && /HANDOFF_HELD_NOTE/.test(readFileSync(new URL('../agent/transcript.tsx', import.meta.url), 'utf8')));
 }
 
 console.log(

@@ -76,6 +76,12 @@ export interface RunnerScope {
   extraDirs?: string[];
   /** Amendment 51: an orchestrator's helper cap, which gives it the Conductor tools. */
   helperCap?: number;
+  /**
+   * Amendment 104: agents wait for this one, so it is given `hand_off` (over the same
+   * endpoint for Claude, in-process for Copilot and OpenRouter). Nobody waiting for it: it
+   * has no one to hand off to and finishes `done` as it always did.
+   */
+  handOff?: boolean;
   model: string;
   autonomy: Autonomy;
   /**

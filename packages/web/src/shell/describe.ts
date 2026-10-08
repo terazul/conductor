@@ -11,6 +11,7 @@
  * have never seen); a card must degrade to a plainer sentence, never throw.
  */
 
+import { HANDOFF_HELD_NOTE } from '@conductor/shared';
 import type {
   Agent,
   Alert,
@@ -193,6 +194,14 @@ export function currentAction(
     // with the role, and the sentence is written to follow it.
     const st = lastOf(events, 'status');
     return { head: '', subject: failureSentence(st?.error, agent), tone: 'fail' };
+  }
+
+  // Done, and held for not handing off (Amendment 104): the line says so, in amber, as Needs You does.
+  if (agent.status === 'done') {
+    const last = lastOf(events, 'status');
+    if (last?.status === 'done' && last.error === HANDOFF_HELD_NOTE) {
+      return { head: 'stopped', subject: 'without handing off', tone: 'need' };
+    }
   }
 
   if (agent.status === 'paused') {
@@ -384,6 +393,9 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
         subject: `is waiting on ${by}, which ${alert.cause === 'stopped' ? 'was stopped' : 'failed'}`,
       };
     }
+    case 'handoff_held':
+      // Done, and the agents after it are waiting for it to say it is ready (Amendment 104).
+      return { head: who[0] ?? 'an agent', subject: 'stopped without handing off, so the agents after it have not started' };
     case 'budget':
     case 'failed':
       return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one) };
@@ -405,6 +417,8 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
       return alert.late ? 'note late' : 'note due';
     case 'blocked_dep':
       return alert.cause === 'stopped' ? 'waiting on a stopped agent' : 'waiting on a failed agent';
+    case 'handoff_held':
+      return 'stopped without handing off';
     case 'connection':
       if (alert.gaveUp) return 'model API gave up';
       return alert.cause === 'auth' ? 'model API login' : 'no model API';

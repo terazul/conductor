@@ -20,6 +20,7 @@ import type {
   DecideRequest,
   Decision,
   EffortLevel,
+  HandOffRequest,
   Isolation,
   PendingRequest,
   Project,
@@ -53,6 +54,7 @@ import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, 
 import { describeRule } from '../session/rules.js';
 import {
   BudgetReachedError,
+  HandOffRefusedError,
   initSupervisor,
   ProjectBusyError,
   RerunRefusedError,
@@ -669,6 +671,24 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     } catch (err) {
       if (err instanceof RerunRefusedError) return fail(reply, 409, 'could not re-run', err.message);
       return fail(reply, 500, 'could not re-run the agents', String(err));
+    }
+  });
+
+  /*
+   * Hand off for an agent that ended its turn without calling `hand_off` (Amendment 104).
+   * The body is the summary the agents after it are told, as the person edited it in Needs You.
+   * It releases them. 400 for a summary that is not text; 409, with the sentence in `detail`,
+   * when the agent is not waiting to be handed off or the summary is empty or too long.
+   */
+  app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/hand-off', async (req, reply) => {
+    const body = (req.body ?? {}) as Partial<HandOffRequest>;
+    if (typeof body.summary !== 'string') return fail(reply, 400, 'summary is required');
+    if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+    try {
+      return reply.send({ agent: sup.handOffByUser(req.params.agentId, body.summary) });
+    } catch (err) {
+      if (err instanceof HandOffRefusedError) return fail(reply, 409, 'could not hand off', err.message);
+      return fail(reply, 500, 'could not hand off', String(err));
     }
   });
 

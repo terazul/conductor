@@ -1,11 +1,15 @@
 /**
- * The Conductor tools an orchestrator calls — an MCP server over HTTP. (Amendment 51)
+ * The Conductor tools an agent calls — an MCP server over HTTP. (Amendments 51, 104)
  *
  * One endpoint per agent, `/mcp/agents/:agentId`, so the call names who is asking and
  * no tool argument can claim to be someone else. It speaks the few JSON-RPC methods a
  * client needs for tools — `initialize`, `tools/list`, `tools/call`, plus notifications,
  * answered with 202 — and replies with plain JSON, which the streamable-HTTP transport
  * allows. No streams, no sessions: every call is answered at once.
+ *
+ * An orchestrator gets `start_helper` and `list_helpers`; an agent that others wait for gets
+ * `hand_off` (Amendment 104); one agent can be both. `toolsFor` says which, and `tools/list`
+ * answers with that agent's own.
  *
  * Bound like everything else here: the daemon's localhost guard runs first, and a
  * CONDUCTOR_TOKEN, when set, is sent by the runner as a header.
@@ -20,6 +24,8 @@ interface RpcRequest {
   method?: string;
   params?: Record<string, unknown>;
 }
+
+export const HAND_OFF = 'hand_off';
 
 export const MCP_TOOLS = [
   {
@@ -42,7 +48,35 @@ export const MCP_TOOLS = [
     description: "Your helpers: each one's role and status, and its last reply once it has ended.",
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: HAND_OFF,
+    description:
+      'Hand your work on to the agents that wait for you. Call it when you are done, with a summary of what they need: ' +
+      'what you did, what you decided and why, what is left, and the files to look at. They start after your turn ends, ' +
+      'and are told this summary first, then your conversation. If your turn ends without calling it they do not start: ' +
+      'you wait for the user to hand off for you.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'What the next agents need from your work, said in full.' },
+      },
+      required: ['summary'],
+    },
+  },
 ];
+
+/** What an agent is given of these: set when its run is built, and again by `tools/list`. */
+export interface ToolAccess {
+  /** An orchestrator's helper cap: any above 0 gives it `start_helper` and `list_helpers`. */
+  helperCap?: number;
+  /** Agents wait for it: it gets `hand_off`. */
+  handOff?: boolean;
+}
+
+/** The tools this agent is given, in the order of `MCP_TOOLS`. */
+export function toolsFor(access: ToolAccess): typeof MCP_TOOLS {
+  return MCP_TOOLS.filter((t) => (t.name === HAND_OFF ? access.handOff === true : (access.helperCap ?? 0) > 0));
+}
 
 const text = (t: string, isError = false) => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
 
@@ -58,6 +92,14 @@ export function callTool(agentId: string, name: string, args: Record<string, unk
       const list = supervisor().listHelpers(agentId);
       if (list.length === 0) return text('No helpers started yet.');
       return text(list.map((h) => `${h.role}: ${h.status}${h.reply ? `\n${h.reply}` : ''}`).join('\n\n'));
+    }
+    if (name === HAND_OFF) {
+      const summary = typeof args['summary'] === 'string' ? args['summary'] : '';
+      const waiting = supervisor().handOff(agentId, summary);
+      return text(
+        `Handed off. ${waiting.join(' and ')} will start once your turn ends, and will be told your summary first. ` +
+          'End your turn now if you have nothing else to do.',
+      );
     }
     return text(`No tool called ${name}.`, true);
   } catch (err) {
@@ -88,7 +130,7 @@ export default async function helperRoutes(app: FastifyInstance): Promise<void> 
       case 'ping':
         return answer(reply, body.id, {});
       case 'tools/list':
-        return answer(reply, body.id, { tools: MCP_TOOLS });
+        return answer(reply, body.id, { tools: toolsFor(supervisor().toolAccess(agentId)) });
       case 'tools/call': {
         const name = typeof body.params?.['name'] === 'string' ? body.params['name'] : '';
         const args = (body.params?.['arguments'] ?? {}) as Record<string, unknown>;

@@ -8,9 +8,9 @@
  * when someone clicks it, which is the worst moment to find out.
  */
 
-import type { Agent, Alert, Project } from '@conductor/shared';
+import { HANDOFF_SUMMARY_MAX, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
 import { api } from '../lib/feed.js';
-import { resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
+import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES } from '../shell/autonomy.js';
 import { alertTitle } from '../shell/describe.js';
 
@@ -24,6 +24,11 @@ export type AlertAction =
   /** Raise the cap to `to`, then continue. */
   | { id: 'raise'; agentId: string; by: number; to: number }
   | { id: 'open'; agentId: string; role?: string }
+  /**
+   * Hand off for an agent that stopped without doing it (Amendment 104). Opens the summary
+   * for editing, prefilled with its last reply; sending that is what hands off.
+   */
+  | { id: 'hand_off'; agentId: string; role?: string }
   | { id: 'preview'; jobId: string }
   /** A due note (Amendment 63): tick it done, or go to its project. */
   | { id: 'note_done'; projectId: string; noteId: string }
@@ -102,6 +107,12 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       ];
     }
 
+    case 'handoff_held':
+      // The agent is done and the ones after it wait (Amendment 104). Handing off, with the
+      // summary edited first, is the fix; replying to it, in the box on the card, is the other
+      // way. A card whose agent this tab has not heard of can only be put away.
+      return [...(first ? [{ id: 'hand_off', agentId: first.id } as const] : []), ...open, dismiss];
+
     case 'server_down':
       return [...(alert.jobId ? [{ id: 'preview', jobId: alert.jobId } as const] : []), dismiss];
 
@@ -133,10 +144,47 @@ export function alertNotice(
   const project = alertProject(alert, projects);
   const within = (t: string) => (project ? `${project} · ${t}` : t);
   // Worded like a request's notification, "demo · builder needs you", with the why below.
-  if (alert.kind === 'budget' || alert.kind === 'failed' || alert.kind === 'blocked_dep') {
+  if (alert.kind === 'budget' || alert.kind === 'failed' || alert.kind === 'blocked_dep' || alert.kind === 'handoff_held') {
     return { title: within(`${head} needs you`), body: `${head} ${subject}` };
   }
   return { title: within(head), body: subject };
+}
+
+/**
+ * What the hand-off box starts with: the agent's last reply, which is what the agents after it
+ * would have been told. '' for an agent that wrote none, and the box is then empty.
+ */
+export function handOffDraft(events: readonly Event[]): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const p = events[i]!.payload;
+    if (p.kind === 'text' && p.text.trim() !== '') return p.text.trim();
+  }
+  return '';
+}
+
+/** Why this summary can't be sent yet, in a sentence, or null when it can. */
+export function handOffProblem(summary: string): string | null {
+  const n = summary.trim().length;
+  if (n === 0) return 'Say what the agents after it need to know.';
+  if (n > HANDOFF_SUMMARY_MAX) {
+    return `${n.toLocaleString('en')} characters; the most a hand-off takes is ${HANDOFF_SUMMARY_MAX.toLocaleString('en')}.`;
+  }
+  return null;
+}
+
+/**
+ * Who the hand-off is for, by role: the agents that wait for the held one and have not
+ * started. The daemon's own rule (`waitersOf`), so the card names who the tool would have.
+ */
+export function waitingRoles(heldId: string, agents: readonly Agent[]): string[] {
+  return waitersOf(heldId, agents)
+    .filter((a) => a.status === 'queued' || a.status === 'paused')
+    .map((a) => a.role);
+}
+
+/** Send the summary: it is what the agents after it are told first. */
+export async function handOff(agent: Pick<Agent, 'id'>, summary: string): Promise<void> {
+  await handOffAgent(agent.id, { summary: summary.trim() });
 }
 
 /** The same call the composer or the resume button would make, whichever fits. */

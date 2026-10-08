@@ -441,6 +441,37 @@ export function setWentWithout(db: Db, id: string, without: WentWithout[]): void
   db.prepare('UPDATE agents SET went_without = ? WHERE id = ?').run(without.length ? JSON.stringify(without) : null, id);
 }
 
+// ── handing off (Amendment 104) ─────────────────────────────────────────────
+
+/** What an agent said to the agents after it, and whether it is being held for not saying it. */
+export interface Handoff {
+  /** From its `hand_off` call or a person's edit; null when it has not handed off this run. */
+  summary: string | null;
+  /** Ended its turn without handing off, so the agents after it wait. */
+  held: boolean;
+}
+
+export function getHandoff(db: Db, id: string): Handoff {
+  const r = row<{ handoff_summary: string | null; handoff_held: number }>(
+    db.prepare('SELECT handoff_summary, handoff_held FROM agents WHERE id = ?').get(id),
+  );
+  return { summary: r?.handoff_summary ?? null, held: r?.handoff_held === 1 };
+}
+
+/** Both columns at once: `held` can only be true when it has not handed off. */
+export function setHandoff(db: Db, id: string, h: Handoff): void {
+  db.prepare('UPDATE agents SET handoff_summary = ?, handoff_held = ? WHERE id = ?').run(
+    h.summary,
+    h.held && h.summary === null ? 1 : 0,
+    id,
+  );
+}
+
+/** Agents held for not handing off, by id. Derived into Needs You as `handoff_held`. */
+export function heldHandoffs(db: Db): string[] {
+  return rows<{ id: string }>(db.prepare('SELECT id FROM agents WHERE handoff_held = 1').all()).map((r) => r.id);
+}
+
 /** The note on an agent's last status event, if it had one: why it is paused, failed, … */
 export function lastStatusNote(db: Db, agentId: string): string | null {
   const r = row<{ payload: string }>(

@@ -12,7 +12,7 @@
  * on screen instead of vanishing on the strength of a 200.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Agent, Alert, AlertKind, Project } from '@conductor/shared';
 import { useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
@@ -20,12 +20,14 @@ import { alertTitle, retryHint } from '../shell/describe.js';
 import { fmtMoney } from '../shell/ui.js';
 import { editNote } from '../fleet/endpoints.js';
 import { Kv } from './bits.jsx';
+import { HandOffPanel } from './HandOff.jsx';
 import {
   alertActions,
   alertProject,
   continueAgent,
   dismissAlert,
   raiseAndContinue,
+  waitingRoles,
   type AlertAction,
 } from './alerts.js';
 
@@ -37,6 +39,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   daily_budget: { label: 'Daily budget', tone: 'var(--fail)' },
   note_due: { label: 'Note due', tone: 'var(--need)' },
   blocked_dep: { label: 'Waiting', tone: 'var(--need)' },
+  handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -52,6 +55,8 @@ export interface AlertCardProps {
 export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) {
   const cmd = useCommand();
   const ref = useRef<HTMLDivElement | null>(null);
+  // The hand-off summary box (Amendment 104). A new hold is a new alert, so it closes with it.
+  const [handingOff, setHandingOff] = useState(false);
   const kind = KIND[alert.kind];
   const { head, subject } = alertTitle(alert, agents);
   const project = alertProject(alert, projects);
@@ -83,6 +88,9 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
       }
       case 'open':
         navigate('agent', { agentId: a.agentId });
+        return;
+      case 'hand_off':
+        setHandingOff((open) => !open);
         return;
       case 'preview':
         navigate('preview', { jobId: a.jobId });
@@ -132,6 +140,9 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
         )}
         {alert.kind === 'failed' && <Kv k="reason" v={alert.cause} />}
         {alert.kind === 'blocked_dep' && blocker && <Kv k="waiting on" v={`${blocker.role} · ${alert.cause}`} />}
+        {alert.kind === 'handoff_held' && first && waitingRoles(first.id, agents).length > 0 && (
+          <Kv k="waiting" v={waitingRoles(first.id, agents).join(' · ')} />
+        )}
         {alert.detail !== undefined && <Kv k="sdk said" v={alert.detail} />}
         {alert.endpoint !== undefined && <Kv k="endpoint" v={alert.endpoint} />}
         {alert.port !== undefined && <Kv k="port" v={String(alert.port)} />}
@@ -157,6 +168,15 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
           ))}
         </div>
 
+        {alert.kind === 'handoff_held' && first && (
+          <>
+            <HandOffPanel agent={first} editing={handingOff} onClose={() => setHandingOff(false)} cmd={cmd} />
+            <div className="atn-note">
+              It ended its turn without calling hand_off, so the agents after it have not started. Hand off to start them
+              with a summary you can edit first, or reply and it works again.
+            </div>
+          </>
+        )}
         {alert.kind === 'connection' && (
           <div className="atn-note">
             <b>{retryHint(alert.cause, alert.gaveUp === true)}</b>
@@ -208,7 +228,7 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
 
 /** Something that makes the problem go away, as opposed to looking at it. */
 function isFix(a: AlertAction): boolean {
-  return a.id === 'continue' || a.id === 'raise' || a.id === 'note_done';
+  return a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off';
 }
 
 function labelOf(a: AlertAction): string {
@@ -220,6 +240,8 @@ function labelOf(a: AlertAction): string {
       return `+$${a.by} and continue`;
     case 'open':
       return a.role !== undefined ? `open ${a.role}` : 'open agent';
+    case 'hand_off':
+      return 'hand off';
     case 'preview':
       return 'open preview';
     case 'note_done':
@@ -235,6 +257,8 @@ function titleOf(a: AlertAction): string | undefined {
   switch (a.id) {
     case 'raise':
       return `Raise the cap to ${fmtMoney(a.to)}, then continue`;
+    case 'hand_off':
+      return 'Edit the summary the agents after it are told, then send it';
     case 'dismiss':
       return 'Put it away. It comes back only if this happens again.';
     default:

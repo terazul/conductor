@@ -1,5 +1,5 @@
 /**
- * What an agent is told about the agents it waited for.  TRACK A.  (Amendments 37, 101)
+ * What an agent is told about the agents it waited for.  TRACK A.  (Amendments 37, 101, 104)
  *
  * `dependsOn` used to be timing only: a reviewer started once the builder was done,
  * with the same job prompt and its own brief, and found the builder's work only because
@@ -12,6 +12,10 @@
  * the user told it, what it replied, and one line for each tool call. What the tools
  * returned is left out. It comes from the event log, so it is the same for Claude, Copilot
  * and OpenRouter, and for an agent that waited for several.
+ *
+ * On top of that comes what the agent said about its own work when it handed off, with its
+ * `hand_off` tool (Amendment 104), or what a person sent for it from Needs You: the summary,
+ * printed first, whole, outside the cap.
  *
  * It is capped at about a quarter of the next model's context window (`handoffCap`),
  * shared between the agents it waited for. Over the cap the OLDEST goes first and the last
@@ -85,8 +89,8 @@ const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
  * The turns of one agent from its log events (`eventLog().conversation`), oldest first.
  *
  *  - Its launch prompt — the first message — keeps the job instruction out, when it begins
- *    with it: every agent in the job has it, and the next agent has it at the top. The line
- *    about asking (Amendment 100) goes too. What follows stays, which is that agent's own
+ *    with it: every agent in the job has it, and the next agent has it at the top. The lines
+ *    about asking (Amendment 100) and handing off (Amendment 104) go too. What follows stays, which is that agent's own
  *    handoff and its role brief.
  *  - A message Conductor wrote (a resume nudge, "switched to opus") is not the user's, and
  *    is left out.
@@ -107,9 +111,10 @@ export function turnsFromEvents(events: readonly LogEvent[], jobPrompt: string):
         let text = p.text.trim();
         if (!launched) {
           launched = true;
-          // Neither the job instruction nor the line about asking (Amendment 100) is repeated:
-          // the next agent has the first at the top and is given the second for itself.
-          text = text.replace(STACK_ASK_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
+          // Neither the job instruction nor the lines about asking (Amendment 100) and handing
+          // off (Amendment 104) are repeated: the next agent has the first at the top and is
+          // given the others for itself.
+          text = text.replace(STACK_ASK_LINE, '').replace(HAND_OFF_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
           if (job && text.startsWith(job)) {
             const rest = text.slice(job.length).trim();
             text = rest ? `${JOB_PLACEHOLDER}\n\n${rest}` : '';
@@ -207,7 +212,8 @@ export interface Upstream {
   turns?: readonly Turn[];
   /**
    * What the agent said about its own work when it handed off, printed before its text,
-   * whole and outside the cap. The seam for the `hand_off` tool, which nothing sets yet.
+   * whole and outside the cap. From its `hand_off` call, or from a person's edit of it in
+   * Needs You (Amendment 104).
    */
   summary?: string;
 }
@@ -304,6 +310,27 @@ export const STACK_ASK_LINE =
 /** The line for a first prompt, or '' for an agent that is on its own. */
 export function stackLine(stacked: boolean): string {
   return stacked ? STACK_ASK_LINE : '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Handing off (Amendment 104)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The line an agent that others wait for is told about handing off. Without the call the
+ * agents after it do not start, and it waits in Needs You for a person to hand off for it,
+ * so it is told that too: an agent that knows what happens if it forgets does not forget.
+ * It does not replace ending a turn: the call is made, then the turn ends as usual.
+ */
+export const HAND_OFF_LINE =
+  'Other agents wait for you to finish. When you have, call the hand_off tool with a summary for them: what you ' +
+  'did, what you decided and why, what is left, and the files they should look at. They start only once you ' +
+  'have, and they are told your summary first. If your turn ends without it they do not start, and you wait in ' +
+  'Needs You for the user to hand off for you.';
+
+/** The line for a prompt, or '' for an agent nobody waits for. */
+export function handOffLine(waited: boolean): string {
+  return waited ? HAND_OFF_LINE : '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -266,6 +266,26 @@ export interface SendMessageRequest {
   synthetic?: boolean;
 }
 
+/**
+ * Hand off for an agent that ended its turn without calling `hand_off` (Amendment 104):
+ * the summary the agents after it are told, edited by the person.
+ */
+export interface HandOffRequest {
+  summary: string;
+}
+
+/** The longest summary an agent or a person can hand off with, in characters. */
+export const HANDOFF_SUMMARY_MAX = 20_000;
+
+/**
+ * The note on the `done` status event of an agent that ended its turn without handing off
+ * (Amendment 104). The transcript reads it, so the two sides say it the same way.
+ */
+export const HANDOFF_HELD_NOTE = 'stopped without handing off';
+
+/** The note on the `done` status event written when a person handed off for it. */
+export const HANDOFF_BY_USER_NOTE = 'handed off by you';
+
 export interface DecideRequest {
   decision: Decision;
 }
@@ -505,6 +525,10 @@ export interface SendConsoleToAgentResponse {
  *                   (Amendment 85). `agentIds` is the waiting agent, `blockedBy` the one
  *                   it waits on, and `cause` that one's status. It stays queued, so it
  *                   still starts if the other is continued and finishes.
+ *  - 'handoff_held': an agent that others wait for ended its turn without calling
+ *                   `hand_off` (Amendment 104). It is `done` and the agents after it stay
+ *                   queued until you hand off for it or it hands off itself. `agentIds` is
+ *                   the held agent.
  */
 export type AlertKind =
   | 'failed'
@@ -513,7 +537,8 @@ export type AlertKind =
   | 'server_down'
   | 'daily_budget'
   | 'note_due'
-  | 'blocked_dep';
+  | 'blocked_dep'
+  | 'handoff_held';
 
 /**
  * Not a PendingRequest: a pending request is a tool call waiting for approve or deny,

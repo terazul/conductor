@@ -54,7 +54,7 @@ import type { AgentBackend, PermissionDecision, ProviderModel, RunOpts, RunOutco
 import { arbiter, toolRuleFor } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
 import { eventLog } from '../../eventlog.js';
-import { MCP_TOOLS, callTool } from '../../routes/helpers.js';
+import { callTool, toolsFor } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
 import { budgetRefusal } from '../budget.js';
 import { openRouterKey } from '../secrets.js';
@@ -376,7 +376,7 @@ export class CopilotBackend implements AgentBackend {
 
   /** Everything a session is given, on create and on every resume alike. */
   #config(): Omit<SessionConfig, 'sessionId'> {
-    const { autonomy, worktreePath, model, extraDirs, helperCap, systemPrompt } = this.#scope;
+    const { autonomy, worktreePath, model, extraDirs, helperCap, handOff, systemPrompt } = this.#scope;
     let provider: SessionConfig['provider'];
     if (this.#provider === 'openrouter') {
       const apiKey = openRouterKey();
@@ -384,7 +384,7 @@ export class CopilotBackend implements AgentBackend {
       if (!model) throw new Error('an OpenRouter agent needs a model id, like anthropic/claude-sonnet-4.5');
       provider = { type: 'openai', baseUrl: OPENROUTER_BASE_URL, apiKey };
     }
-    const tools = helperCap ? this.#helperTools() : [];
+    const tools = helperCap || handOff ? this.#helperTools({ helperCap, handOff }) : [];
     const excluded = excludedFor(autonomy.disallowedTools);
     return {
       clientName: 'conductor',
@@ -404,13 +404,14 @@ export class CopilotBackend implements AgentBackend {
   }
 
   /**
-   * An orchestrator's start_helper and list_helpers (Amendment 51), in-process (Q8)
-   * rather than over the MCP endpoint Claude uses, and served by the same code. Allowed
-   * outright, as for Claude: asking whether it may start the helpers it was launched to
-   * start would ask the question twice.
+   * An orchestrator's start_helper and list_helpers (Amendment 51), and hand_off for an
+   * agent others wait for (Amendment 104), in-process (Q8) rather than over the MCP
+   * endpoint Claude uses, and served by the same code. Allowed outright, as for Claude:
+   * asking whether it may start the helpers it was launched to start would ask the
+   * question twice.
    */
-  #helperTools(): Tool[] {
-    return MCP_TOOLS.map((t) =>
+  #helperTools(access: { helperCap?: number; handOff?: boolean }): Tool[] {
+    return toolsFor(access).map((t) =>
       defineTool(t.name, {
         description: t.description,
         parameters: t.inputSchema,
