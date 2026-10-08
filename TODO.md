@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 97.
+  green `make test` (decided 30 Sep). The next amendment is 98.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -125,11 +125,10 @@ five items below run in this order.*
 ## Seeing what's happening
 
 - [ ] **Project and Agent, beyond the label.** Asked for (7 Oct). The label at the top has its
-  own backdrop now (Amendment 91). Still open:
+  own backdrop now (Amendment 97), and the top bar's **Project** and **Agent** tabs read
+  louder (Amendment 95). Still open:
   - one backdrop colour per screen, so you can tell Project from Agent at a glance. Today
     both use `--here` (`packages/shared/src/tokens.css`).
-  - the **Project** and **Agent** tabs in the top bar. They're plain text in `--ink3`, with a
-    2px underline when open (`packages/web/src/shell/shell.css:221-262`).
 
 ## Agents
 

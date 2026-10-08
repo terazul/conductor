@@ -434,6 +434,9 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
       if (r < 4.5) low.push(`--bg on --${f} ${r.toFixed(2)}`);
     }
     check(`${name}: every text token ≥ 4.5:1 on every surface, and --bg on every fill`, low.length === 0, low.join('; '));
+    // The project / agent label's backdrop (Amendment 97): its text, and the "/" between.
+    const onHere = ['ink', 'ink2', 'ink3'].filter((t) => ratio(theme.get(t)!, theme.get('here')!) < 4.5);
+    check(`${name}: the project / agent label is ≥ 4.5:1 on its backdrop`, theme.has('here') && onHere.length === 0, onHere.join(', '));
   }
 
   // The filled `live`/`done` tags (Amendment 93): named on their own so a

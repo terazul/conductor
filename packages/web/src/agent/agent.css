@@ -896,13 +896,14 @@ a.ag-tool-subj:focus-visible {
 
 /* ── crumb as a button ─────────────────────────────────────────────────────── */
 
+/* A button back to the project, drawn as the label (.fl-crumb): its backdrop, border and size. */
 .ag-crumb {
-  background: none;
-  border: 0;
   cursor: pointer;
-  padding: 0;
   font-family: var(--mono);
-  font-size: var(--fs-base);
+}
+
+.ag-crumb:hover {
+  border-color: var(--ink3);
 }
 
 .ag-crumb:hover b {

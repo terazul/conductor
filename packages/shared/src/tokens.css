@@ -56,6 +56,11 @@
   --shadow: rgb(0 0 0 / 55%);
   --paper: #ece7de;
 
+  /* Where you are: the backdrop of the project / agent label at the top of the Project and
+     Agent screens (Amendment 97). Not a status colour, so it never reads as one. --ink3 on
+     it is 4.9:1. */
+  --here: #1f3047;
+
   /* Native scrollbars, form controls and the default canvas follow this. */
   color-scheme: dark;
 
@@ -133,6 +138,8 @@
 
   --shadow: rgb(60 45 30 / 16%);
   --paper: #ffffff;
+
+  --here: #d6e0f0;
 
   color-scheme: light;
 }

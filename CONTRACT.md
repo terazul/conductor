@@ -196,6 +196,21 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 97 — post-merge, applied. **The project / agent label at the top has its own backdrop.**
+
+Shared (`tokens.css`) and web (`fleet/fleet.css`, `agent/agent.css`, `lib/verify.ts`). A TODO.md
+item (7 Oct, and again on 8 Oct: "it is still not very visible").
+- **`--here`**, a new colour token for both themes: `#1f3047` dark, `#d6e0f0` light. It's
+  not a status colour (§5.1), so it never reads as one.
+- **`.fl-crumb`** sits on it, with a border mixed from `--here` and `--ink3`, 5px corners,
+  `3px 10px` padding, and `--fs-md` instead of `--fs-base`. That's the label on the Project
+  screen (`project / ⑂ branch`), the Agent screen (`project / role`, still a button back to
+  the project; its border lights on hover) and the Fleet header.
+- **Checked**: `lib/verify.ts` fails unless `--ink`, `--ink2` and `--ink3` are at least 4.5:1
+  on `--here` in both themes. They are 10.9, 6.6 and 4.9 in dark, and 13.2, 7.3 and 4.9 in light.
+- **Not done**: a different colour per screen, which is still open in TODO.md. The top bar's
+  **Project** and **Agent** tabs are Amendment 95.
+
 ### Amendment 96 — post-merge, applied. **The agent's settings under the message box fold away.**
 
 Web only (`agent/settingsfold.ts`, new; `agent/composer.tsx`, `agent/agent.css`,
