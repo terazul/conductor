@@ -528,6 +528,36 @@ wait for an agent that waits for it), feeding an agent that has already started,
 Adding to a finished job opens it again. The agent starts as soon as what it waits for is done
 and a slot is free.
 
+### Run the agents after one again
+
+You can talk to an agent after it has finished: ask the architect to change the plan, and it
+answers. The agents after it were given the old plan. **↻ re-run after this**, in the Agent
+screen's header, starts them again with the new one. It is there only when the agent has
+agents after it, and it is manual on purpose, so a conversation with the architect doesn't
+re-run the whole stack on every message.
+
+The first press says what it will do, in a banner under the header, and a second commits:
+
+- **Who.** Everything after it, however far down: the agents that wait for it, and the ones
+  that wait for those. They go in order. An agent starts again only once the agents it waits
+  for are done again, and it hears their new replies.
+- **In their own conversations.** Each agent goes back into the session it had, told that its
+  input changed and what the agents before it said last. It isn't a fresh start.
+- **Running ones are stopped first.** An agent after it that is still working has an out of
+  date input, so it is stopped (its conversation is kept), then resumed like the rest. A
+  question it was waiting on you for is cancelled, and a helper it has working is stopped
+  too.
+- **The folder is left alone.** Nothing is reset or cleaned up. The agents see what is
+  there and fix what no longer fits.
+- **An agent that hasn't started yet** is left alone, and reads the new reply when it does.
+
+The button is greyed out, with the reason as its hover text, when the agent is still
+working or waiting for you (re-run once it has finished its reply), is paused or failed, or
+has written nothing, or when an agent after it was stopped (remove it from the stack first)
+or is only just starting. If an agent after it has reached its budget, or the job has, the
+daemon refuses when you press it and says so (raise the cap first). The sentence shows in
+the same place. Nothing is stopped or started on a refusal.
+
 ---
 
 ## 3. The core loop: when an agent needs you

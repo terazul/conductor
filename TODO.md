@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 102.
+  green `make test` (decided 30 Sep). The next amendment is 103.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -67,21 +67,6 @@ the order above.*
   agent still finishes `done`; the hold survives a restart.
   *Decided (8 Oct): build it as described. The hold is an alert beside `done`, not a new
   status, and you can edit the summary before it goes.*
-
-- [ ] **Re-run from here.** Asked for (7 Oct). A button on an agent in a stack: start the
-  agents after it again with its latest reply, once you've changed what it said. It's
-  manual on purpose, so a conversation with the architect doesn't re-run the whole stack on
-  every message. Start at `sendMessage` (`supervisor.ts:1209-1235`) and `pump`
-  (`supervisor.ts:708-731`).
-  Decide:
-  - whether the agents re-run fresh, or resume their own sessions with a note that the input
-    changed.
-  - what happens to work they already did in the worktree.
-  - what happens to an agent after it that is still running: stop it, or wait for it.
-  *Decided (8 Oct): build it. The agents resume their own sessions with a note that their
-  input changed. Work already done in the worktree is left alone, so the agent sees it and
-  fixes it. An agent after it that is still running is stopped first, since its input is now
-  stale.*
 
 - [ ] **Orchestrated stacks: one agent runs the others.** Asked for (8 Oct), as a design
   question. A new kind of stack you pick in Spawn, beside the fixed ones. An orchestrator

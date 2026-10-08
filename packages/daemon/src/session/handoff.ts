@@ -247,7 +247,11 @@ function upstreamBody(u: Upstream, allowance: number): string {
  * `cap` is for all the conversations together, in characters (`handoffCap`); the agents
  * share it, and an agent that needs less than its share gives the rest to the others.
  */
-export function handoffSection(upstream: readonly Upstream[], cap: number): string {
+/**
+ * `opening` replaces the first sentence ("You started after the agent before you
+ * finished."), for a caller whose reader did not just start: a re-run (Amendment 102).
+ */
+export function handoffSection(upstream: readonly Upstream[], cap: number, opening?: string): string {
   if (upstream.length === 0) return '';
   const who = upstream.length === 1 ? 'the agent' : 'the agents';
   const all = upstream.every((u) => !u.status || u.status === 'done');
@@ -256,9 +260,10 @@ export function handoffSection(upstream: readonly Upstream[], cap: number): stri
     upstream.map((u) => turnsOf(u).reduce((n, t) => n + costOf(t), 0)),
   );
   return [
-    (all
-      ? `You started after ${who} before you finished.`
-      : `You were started without waiting for every agent before you to finish.`) +
+    (opening ??
+      (all
+        ? `You started after ${who} before you finished.`
+        : `You were started without waiting for every agent before you to finish.`)) +
       ` They worked in this same folder, so what they changed is already here. What each was told and said, in ` +
       `order, with a line for each tool it called (what the tools returned is left out):`,
     ...upstream.map((u, i) => `\n${head(u)}\n${upstreamBody(u, allowance[i]!)}`),

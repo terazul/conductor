@@ -46,6 +46,7 @@ import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib
 import { readFileSync } from 'node:fs';
 import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 import { sleepControl } from './sleep.js';
+import { rerunControl, rerunDone, rerunSentence, roleList } from './rerun.js';
 import { ALL_ON, NONE, capabilitiesOf, controlsFor, offersMode, parseTokens, providerModelProblem, tokenWords } from '../lib/providers.js';
 
 let failures = 0;
@@ -607,6 +608,73 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
   check('folded hides interaction, effort, model and budget', /\{open && \(\s*<>\s*\{\/\*[\s\S]*?\*\/\}\s*<div className="ag-modes">\s*<span className="ui-lab">interaction/.test(comp));
   check('send stays, and the button says whether it is open', /aria-expanded=\{open\}/.test(comp) && /settings \{open \? '▾' : '▸'\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
   check('a reached budget or an unsafe mode stays in sight while folded', /const summaryAlarm = spend\?\.over === true \|\| current\?\.danger === true;/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
+}
+
+console.log('\n10 · re-run the agents after this one (Amendment 102)');
+{
+  const ag = (id: string, role: string, o: Partial<Agent> = {}): Agent => ({ ...agentAt(0, null), id, role, status: 'done', sdkSessionId: `s_${id}`, ...o });
+  const stack = (o: Record<string, Partial<Agent>> = {}): Agent[] => [
+    ag('arch', 'architect', o['arch']),
+    ag('dev', 'developer', { dependsOn: ['arch'], ...o['dev'] }),
+    ag('val', 'validator', { dependsOn: ['dev'], ...o['val'] }),
+  ];
+
+  check('the last agent in a stack has nothing after it, so no button', rerunControl(stack(), 'val', true) === null);
+  check('a lone agent has none either', rerunControl([ag('solo', 'builder')], 'solo', true) === null);
+  check('and an agent that is not there has none', rerunControl(stack(), 'nobody', true) === null);
+  check('a helper is not part of the stack', rerunControl([...stack(), ag('h', 'developer-helper-1', { parentId: 'dev' })], 'h', true) === null);
+
+  const c = rerunControl(stack(), 'arch', true);
+  check('an agent with agents after it gets one, ready to press', c !== null && c.blocked === null && c.label === '↻ re-run after this', JSON.stringify(c?.blocked));
+  check('"after" is everything downstream, in order: the developer, then the validator behind it', JSON.stringify(c?.going) === '["developer","validator"]', JSON.stringify(c?.going));
+  check('even when the job lists them the other way round', JSON.stringify(rerunControl([stack()[2]!, stack()[1]!, stack()[0]!], 'arch', true)?.going) === '["developer","validator"]');
+  check('the middle agent re-runs only what is after it', JSON.stringify(rerunControl(stack(), 'dev', true)?.going) === '["validator"]');
+  check('an agent that waits on another branch is not after this one', JSON.stringify(rerunControl([...stack(), ag('doc', 'scribe')], 'arch', true)?.going) === '["developer","validator"]');
+
+  const says = c?.explain ?? '';
+  check('before it acts it says who goes again, in their own conversations, and why', says.includes('developer and validator will go again') && says.includes('own conversation') && says.includes('architect changed what it said'), says);
+  check('that the one behind starts only once the one before is done again', says.includes('validator starts once developer is done again'), says);
+  check('that nothing in the folder is reset', says.includes('Nothing in the folder is reset'), says);
+  check('and nothing is said about stopping when nobody is running', !/stopped first/.test(says), says);
+  check('the question and the commit button name the count', c?.question === 'Re-run 2 agents after architect?' && c?.confirm === '↻ re-run 2 agents', `${c?.question} / ${c?.confirm}`);
+  check('one agent is named, not counted', rerunControl(stack(), 'dev', true)?.question === 'Re-run validator after developer?');
+
+  const live = rerunControl(stack({ dev: { status: 'working' } }), 'arch', true);
+  check('a running one is said to be stopped first, because its input is out of date', (live?.explain ?? '').includes('developer is working now, so it is stopped first') && live?.blocked === null, live?.explain);
+  check('two running ones are both named', (rerunControl(stack({ dev: { status: 'working' }, val: { status: 'blocked' } }), 'arch', true)?.explain ?? '').includes('developer and validator are working now, so they are stopped first'));
+  check('a helper still working is stopped with it', (rerunControl([...stack({ dev: { status: 'working' } }), ag('h', 'developer-helper-1', { parentId: 'dev', status: 'working' })], 'arch', true)?.explain ?? '').includes('Helpers still working (developer-helper-1) are stopped too'));
+
+  const fresh = rerunControl([ag('arch', 'architect'), ag('dev', 'developer', { dependsOn: ['arch'] }), ag('val', 'validator', { dependsOn: ['dev'], status: 'queued', sdkSessionId: null })], 'arch', true);
+  check('one that has not started is left alone, and will read the new reply when it does', (fresh?.explain ?? '').includes("validator hasn't started, so it is left alone and will read the new reply when it does") && JSON.stringify(fresh?.going) === '["developer"]', fresh?.explain);
+  const allFresh = rerunControl([ag('arch', 'architect'), ag('dev', 'developer', { dependsOn: ['arch'], status: 'queued', sdkSessionId: null })], 'arch', true);
+  check('if none of them has started there is nothing to re-run, and it says so', allFresh !== null && /None of the agents after architect has started/.test(allFresh.blocked ?? ''), allFresh?.blocked ?? 'no reason');
+
+  // In the way: still there, and says why.
+  const why = (o: Record<string, Partial<Agent>>, hasReply = true) => rerunControl(stack(o), 'arch', hasReply)?.blocked ?? null;
+  check('still working: the button is there but cannot be pressed, and says to wait', /architect is still working\. Re-run once it has finished/.test(why({ arch: { status: 'working' } }) ?? ''), why({ arch: { status: 'working' } }) ?? 'null');
+  check('waiting for you is not finished either', /waiting for you/.test(why({ arch: { status: 'blocked' } }) ?? ''));
+  check('paused says to resume it', /paused\. Resume it/.test(why({ arch: { status: 'paused' } }) ?? ''));
+  check('failed says its reply may be unfinished', /failed, so its last reply may be unfinished/.test(why({ arch: { status: 'failed' } }) ?? ''));
+  check('no reply yet says so', /has not written a reply/.test(why({}, false) ?? ''));
+  check('an agent after it that was stopped says to remove it first, since the ones behind would wait for good', /developer was stopped.*Remove it from the stack first/.test(why({ dev: { status: 'stopped' } }) ?? ''));
+  check('one just starting says to try again', /developer is only just starting/.test(why({ dev: { status: 'working', sdkSessionId: null } }) ?? ''));
+  check('and when blocked the explanation IS the reason', rerunControl(stack({ arch: { status: 'working' } }), 'arch', true)?.explain === why({ arch: { status: 'working' } }));
+
+  check('lists read as people say them', roleList([]) === '' && roleList(['a']) === 'a' && roleList(['a', 'b']) === 'a and b' && roleList(['a', 'b', 'c']) === 'a, b and c');
+  const plan = rerunControl(stack({ dev: { status: 'working' } }), 'arch', true)!.plan;
+  check('the sentence is a function of the plan', rerunSentence(plan) === live?.explain);
+  check('what it did is said afterwards, with who was stopped', rerunDone({ from: 'architect', agents: [{ agentId: 'dev', role: 'developer', action: 'resume', stopped: true }, { agentId: 'val', role: 'validator', action: 'resume', stopped: false }] }) === 'Re-running after architect: developer and validator go again, developer stopped first.');
+
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  const block = screen.slice(screen.indexOf('function RerunControl'), screen.indexOf('/** Composer height limits'));
+  check('the screen asks the control, so the button is there only when agents follow', /const control = rerunControl\(siblings, agent\.id, hasReply\);/.test(block) && /if \(control === null \|\| \(hidden && !open\)\) return null;/.test(block));
+  check('the first press arms and says what it will do; the second commits', /setArmed\(true\)/.test(block) && /onAsk\(explain\)/.test(block) && /cmd\s*\.run\('Re-running', \(\) => rerunAfter\(agent\.id\), rerunDone\)/.test(block));
+  check('a refusal from the daemon is shown as it said it: 409s pass through useCommand', /status === 409\) return \{ tone: 'warn', text: said/.test(readFileSync(new URL('../lib/errors.ts', import.meta.url), 'utf8')));
+  check('a button that cannot be pressed keeps its reason as its hover text', /title=\{control\.blocked \?\? control\.title\}/.test(block) && /disabled=\{cmd\.busy \|\| control\.blocked !== null\}/.test(block));
+  check('it takes the header while armed: the other controls give way, and the banner shows the explanation', /\{ask === null && rerunAsk === null &&/.test(screen) && /\{rerunAsk === null && <StopControls/.test(screen) && /\(ask \?\? rerunAsk\) && <div className="ag-notice is-banner t-warn"/.test(screen));
+  check('both themes read: the control uses the buttons and tokens every other header control uses, and no colour of its own', !/#[0-9a-fA-F]{3,8}\b|style=|rgb\(/.test(block) && /fl-btn is-ghost/.test(block) && /fl-btn is-primary/.test(block) && /ag-confirm-q/.test(block));
+  const ep = readFileSync(new URL('./endpoints.ts', import.meta.url), 'utf8');
+  check('the call is POST /api/agents/:id/rerun', /export function rerunAfter\(agentId: string\): Promise<RerunResponse> \{\s*return api\(agentPath\(agentId, 'rerun'\), \{ method: 'POST', body: \{\} \}\);/.test(ep));
 }
 
 console.log(

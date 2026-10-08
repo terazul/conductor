@@ -118,6 +118,8 @@ import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js'
 import { costChanged } from '../daily.js';
 import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
+import { rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
+import { rerunNote, rerunStatusNote } from './rerun.js';
 
 /*
  * Nothing here may ask the real model API or start a real Claude Code: §12 answers for
@@ -3947,6 +3949,203 @@ async function main(): Promise<void> {
   check('removing the project forgets them with it', dirRows() === 0 && existsSync(PKG) && existsSync(HOME));
   rmSync(OTHER, { recursive: true, force: true });
   rmSync(HOME, { recursive: true, force: true });
+
+  console.log('\n19 · re-run the agents after one, from here (Amendment 102)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // Section 18 removed the project the earlier sections used, so this one has its own.
+    const rpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'rerun' })).body.project.id;
+    const rjob = (id: string): void => {
+      insertJob(db, { id, projectId: rpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const rfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: rpid, ...a });
+    const say = (jobId: string, agentId: string, text: string): void => {
+      eventLog().emit({ projectId: rpid, jobId, agentId }, { kind: 'text', text });
+    };
+    type Rerun = RerunResponse & { error?: string; detail?: string };
+    const rerun = (id: string) => send<Rerun>('POST', `/api/agents/${id}/rerun`, {});
+    const statusOf = (id: string) => getAgent(db, id)?.status;
+    const noteOf = (id: string) => {
+      const p = lastStatus(id);
+      return p?.kind === 'status' ? (p.error ?? null) : null;
+    };
+
+    // The pure rules first: what is after an agent, and in what order.
+    const nd = (id: string, role: string, dependsOn: string[], o: Partial<RerunNode> = {}): RerunNode => ({ id, role, dependsOn, status: 'done', sdkSessionId: `s_${id}`, ...o });
+    const listed = rerunPlan([nd('c', 'scribe', ['b']), nd('b', 'validator', ['a']), nd('a', 'architect', []), nd('x', 'analyst', [])], 'a', { hasReply: true });
+    check('everything after it is listed in dependency order, however the job lists it, and nothing else', JSON.stringify(listed.steps.map((s) => s.role)) === '["validator","scribe"]' && listed.refusal === null, JSON.stringify(listed));
+    const diamond = rerunPlan([nd('a', 'architect', []), nd('b', 'developer', ['a']), nd('c', 'reviewer', ['a']), nd('d', 'scribe', ['b', 'c'])], 'a', { hasReply: true });
+    check('an agent comes after every agent it waits for', JSON.stringify(diamond.steps.map((s) => s.role)) === '["developer","reviewer","scribe"]' && JSON.stringify(diamond.steps[2]?.after) === '["developer","reviewer"]', JSON.stringify(diamond.steps));
+    check('an agent with nothing after it is refused with a reason', /No agent comes after scribe/.test(rerunPlan([nd('a', 'scribe', [])], 'a', { hasReply: true }).refusal ?? ''));
+    check('a running one is marked to be stopped; one that has not started is left alone', JSON.stringify(rerunPlan([nd('a', 'architect', []), nd('b', 'developer', ['a'], { status: 'working' }), nd('c', 'scribe', ['b'], { status: 'queued', sdkSessionId: null })], 'a', { hasReply: true }).steps.map((s) => [s.action, s.stops])) === '[["resume",true],["wait",false]]');
+    const noteText = rerunNote(['architect'], [{ role: 'architect', reply: 'Plan v2.' }], 100_000);
+    check('the note says the input changed, that nothing was reset, and carries the reply as a first prompt would', noteText.startsWith('Your input changed. architect has said something new') && noteText.includes('Nothing was reset') && noteText.includes('[architect]\nAgent: Plan v2.') && !noteText.includes('You started after'), noteText);
+    check('and says it of several', rerunNote(['a', 'b'], [], 100_000).includes('a, b have said something new') && !rerunNote([], [], 100_000).includes('What each said last'));
+    check('it asks for the same section a first prompt does, in one place', noteText.includes(handoffSection([{ role: 'architect', reply: 'Plan v2.' }], 100_000, 'Here is what the agents before you said, as it stands now.')));
+
+    // One job: architect → developer → validator, and a scribe that waits for both. The
+    // developer is running, as it is when you have been talking to it.
+    rjob('job_rerun');
+    rfix('rr_arch', 'job_rerun', { role: 'architect', status: 'done', sdkSessionId: 'sess_rr_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('rr_dev', 'job_rerun', { role: 'developer', status: 'done', sdkSessionId: 'sess_rr_dev', dependsOn: ['rr_arch'], autonomy: DEFAULT_AUTONOMY });
+    rfix('rr_val', 'job_rerun', { role: 'validator', status: 'done', sdkSessionId: 'sess_rr_val', dependsOn: ['rr_dev'], autonomy: DEFAULT_AUTONOMY });
+    rfix('rr_doc', 'job_rerun', { role: 'analyst', status: 'done', sdkSessionId: 'sess_rr_doc', autonomy: DEFAULT_AUTONOMY });
+    const base = runs.length;
+
+    const silent = await rerun('rr_arch');
+    check('an agent that has written nothing yet → 409, and says so', silent.status === 409 && /has not written a reply/.test(silent.body.detail ?? ''), JSON.stringify(silent.body));
+    check('an agent that is not there → 404', (await rerun('rr_nobody')).status === 404);
+
+    say('job_rerun', 'rr_arch', 'Plan v1.');
+    say('job_rerun', 'rr_arch', 'Plan v2: the tokens expire after an hour.');
+    const talk = await send('POST', '/api/agents/rr_dev/message', { text: 'start on the plan' });
+    check('the developer is working', talk.status === 200 && (await until(() => runs.length === base + 1)) && statusOf('rr_dev') === 'working');
+    const devOld = runs[base]!;
+    // Not before the developer is running: with it done, the scribe would start at once.
+    rfix('rr_scr', 'job_rerun', { role: 'scribe', status: 'queued', dependsOn: ['rr_dev', 'rr_val'], autonomy: DEFAULT_AUTONOMY });
+    const nothing = await rerun('rr_scr');
+    check('the last agent has nothing after it → 409, and the reason', nothing.status === 409 && /No agent comes after scribe/.test(nothing.body.detail ?? ''), JSON.stringify(nothing.body));
+    check('and so has one on its own branch', (await rerun('rr_doc')).status === 409);
+
+
+    const sentinel = join(ROOT, 'rerun-sentinel.txt');
+    writeFileSync(sentinel, 'built by the developer\n');
+    const gitBefore = `${git(['status', '--porcelain'])}\n${git(['rev-parse', 'HEAD'])}`;
+
+    const pressed = await rerun('rr_arch');
+    check('re-running from the architect → 200', pressed.status === 200 && pressed.body.from === 'architect', JSON.stringify(pressed.body));
+    check(
+      'it lists who: the developer (stopped first), the validator, and the scribe, which is left alone, in that order',
+      JSON.stringify(pressed.body.agents?.map((a) => [a.role, a.action, a.stopped])) === '[["developer","resume",true],["validator","resume",false],["scribe","wait",false]]',
+      JSON.stringify(pressed.body.agents),
+    );
+    check('the running developer was stopped', devOld.finished);
+    check('and a second run took its place, in its own session', (await until(() => runs.length === base + 2)) && runs[base + 1]?.options.resume === 'sess_rr_dev', String(runs[base + 1]?.options.resume));
+    await until(() => (runs[base + 1]?.prompts.length ?? 0) > 0);
+    const devPrompt = runs[base + 1]?.prompts[0] ?? '';
+    check('told its input changed', devPrompt.startsWith('Your input changed. architect has said something new'), devPrompt);
+    check('with the architect’s LATEST reply, after the one before it (the whole conversation, Amendment 101)', devPrompt.includes('Agent: Plan v2: the tokens expire after an hour.') && devPrompt.lastIndexOf('Agent: Plan v2') > devPrompt.lastIndexOf('Agent: Plan v1.'), devPrompt);
+    check('and that nothing was reset', devPrompt.includes('Nothing was reset'));
+    check('it holds one slot: the stopped run gave its own back', sup.slots.used === 1, String(sup.slots.used));
+    check('the validator waits until the developer is done again: queued, not started', statusOf('rr_val') === 'queued' && runs.length === base + 2);
+    check('and says why it is queued', noteOf('rr_val') === rerunStatusNote('architect') && noteOf('rr_val') === 're-running after architect, whose reply changed', String(noteOf('rr_val')));
+    check('the scribe, which had not started, is untouched', statusOf('rr_scr') === 'queued' && getAgent(db, 'rr_scr')?.sdkSessionId === null);
+    check('the agent on its own branch is untouched', statusOf('rr_doc') === 'done');
+    check(
+      'nothing in the worktree was touched: the files, the index and the commit are as they were',
+      readFileSync(sentinel, 'utf8') === 'built by the developer\n' && `${git(['status', '--porcelain'])}\n${git(['rev-parse', 'HEAD'])}` === gitBefore,
+    );
+    check('the session ids are the ones they had', getAgent(db, 'rr_dev')?.sdkSessionId === 'sess_rr_dev' && getAgent(db, 'rr_val')?.sdkSessionId === 'sess_rr_val');
+
+    say('job_rerun', 'rr_dev', 'Fixed it against plan v2.');
+    runs[base + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('once the developer is done, the validator resumes in its own session', (await until(() => runs.length === base + 3)) && runs[base + 2]?.options.resume === 'sess_rr_val', String(runs[base + 2]?.options.resume));
+    await until(() => (runs[base + 2]?.prompts.length ?? 0) > 0);
+    const valPrompt = runs[base + 2]?.prompts[0] ?? '';
+    check('told the developer’s NEW reply, which it did not have when you pressed the button', valPrompt.includes('developer has said something new') && valPrompt.includes('Agent: Fixed it against plan v2.'), valPrompt);
+    check('and the scribe still waits', statusOf('rr_scr') === 'queued' && runs.length === base + 3);
+    say('job_rerun', 'rr_val', 'Checked again: green.');
+    runs[base + 2]?.finish({ cost: 0, reason: 'completed' });
+    check('then the scribe, which never ran, starts as it would have: from its prompt', (await until(() => runs.length === base + 4)) && !runs[base + 3]?.options.resume);
+    await until(() => (runs[base + 3]?.prompts.length ?? 0) > 0);
+    const scrPrompt = runs[base + 3]?.prompts[0] ?? '';
+    check('with what the developer and the validator said last', scrPrompt.includes('[developer]') && scrPrompt.includes('Agent: Fixed it against plan v2.') && scrPrompt.includes('[validator]') && scrPrompt.includes('Agent: Checked again: green.') && !scrPrompt.includes('Your input changed'), scrPrompt);
+    runs[base + 3]?.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes', await until(() => getJob(db, 'job_rerun')?.status === 'done'), String(getJob(db, 'job_rerun')?.status));
+    rmSync(sentinel, { force: true });
+
+    // Refused: nothing is stopped, queued or started.
+    const refusedAt = runs.length;
+    rjob('job_rerun_no');
+    rfix('rn_arch', 'job_rerun_no', { role: 'architect', status: 'working', sdkSessionId: 'sess_rn_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('rn_dev', 'job_rerun_no', { role: 'developer', status: 'done', sdkSessionId: 'sess_rn_dev', dependsOn: ['rn_arch'], autonomy: DEFAULT_AUTONOMY });
+    say('job_rerun_no', 'rn_arch', 'A draft.');
+    const early = await rerun('rn_arch');
+    check('while the agent is still working → 409, to wait for its reply', early.status === 409 && /architect is still working\. Re-run once it has finished/.test(early.body.detail ?? ''), JSON.stringify(early.body));
+
+    rjob('job_rerun_stop');
+    rfix('rs_arch', 'job_rerun_stop', { role: 'architect', status: 'done', sdkSessionId: 'sess_rs_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('rs_dev', 'job_rerun_stop', { role: 'developer', status: 'stopped', sdkSessionId: 'sess_rs_dev', dependsOn: ['rs_arch'], autonomy: DEFAULT_AUTONOMY });
+    rfix('rs_val', 'job_rerun_stop', { role: 'validator', status: 'done', sdkSessionId: 'sess_rs_val', dependsOn: ['rs_dev'], autonomy: DEFAULT_AUTONOMY });
+    say('job_rerun_stop', 'rs_arch', 'The plan.');
+    const stoppedOne = await rerun('rs_arch');
+    check('an agent after it that was stopped → 409, to remove it first', stoppedOne.status === 409 && /developer was stopped.*Remove it from the stack first/.test(stoppedOne.body.detail ?? ''), JSON.stringify(stoppedOne.body));
+    check('and the validator behind it was not queued', statusOf('rs_val') === 'done');
+
+    // Two after it, one of them at its budget: refused whole, with the other still running.
+    rjob('job_rerun_cap');
+    rfix('rc_arch', 'job_rerun_cap', { role: 'architect', status: 'done', sdkSessionId: 'sess_rc_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('rc_dev', 'job_rerun_cap', { role: 'developer', status: 'blocked', blockMode: 'parked', sdkSessionId: 'sess_rc_dev', dependsOn: ['rc_arch'], autonomy: DEFAULT_AUTONOMY });
+    rfix('rc_val', 'job_rerun_cap', { role: 'validator', status: 'done', sdkSessionId: 'sess_rc_val', dependsOn: ['rc_dev'], costUsd: 30 });
+    const ASKED = { id: 'toolu_rc', name: 'Bash', input: { command: 'make soak' } };
+    finishRun(db, startRun(db, 'rc_dev', 'sess_rc_dev'), { terminalReason: 'tool_deferred', deferredTool: ASKED });
+    insertRequest(db, {
+      id: 'req_rc',
+      agentId: 'rc_dev',
+      jobId: 'job_rerun_cap',
+      projectId: rpid,
+      kind: 'permission',
+      blockMode: 'parked',
+      toolName: 'Bash',
+      toolUseId: 'toolu_rc',
+      input: { command: 'make soak' },
+      label: 'run make soak',
+      createdAt: nowIso(),
+    });
+    say('job_rerun_cap', 'rc_arch', 'The plan, revised.');
+    const capped2 = await rerun('rc_arch');
+    check('one of them at its budget → 409, and the sentence says to raise it', capped2.status === 409 && /validator can't go again\. The Validator has spent \$30 of its \$25 budget — raise it to continue/.test(capped2.body.detail ?? ''), JSON.stringify(capped2.body));
+    check('all or nothing: the parked developer still has its question and was not queued', statusOf('rc_dev') === 'blocked' && openRequestsForAgent(db, 'rc_dev').length === 1 && statusOf('rc_val') === 'done');
+    await settle(100);
+    check('and nothing started', runs.length === refusedAt);
+
+    setAgentAutonomy(db, 'rc_val', { ...DEFAULT_AUTONOMY, budgetUsd: 50 });
+    const raised = await rerun('rc_arch');
+    check('with its budget raised → 200', raised.status === 200 && raised.body.agents?.length === 2, JSON.stringify(raised.body));
+    check('the question the parked developer was asked about the old input is cancelled', openRequestsForAgent(db, 'rc_dev').length === 0);
+    check('and it resumes with the note, where a parked call would have been re-offered with nothing', (await until(() => runs.length === refusedAt + 1)) && runs[refusedAt]?.options.resume === 'sess_rc_dev');
+    await until(() => (runs[refusedAt]?.prompts.length ?? 0) > 0);
+    check('told its input changed', (runs[refusedAt]?.prompts[0] ?? '').includes('Agent: The plan, revised.'), runs[refusedAt]?.prompts[0]);
+    runs[refusedAt]?.finish({ cost: 0, reason: 'completed' });
+    check('and the validator follows it', (await until(() => runs.length === refusedAt + 2)) && runs[refusedAt + 1]?.options.resume === 'sess_rc_val');
+    runs[refusedAt + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes', await until(() => getJob(db, 'job_rerun_cap')?.status === 'done'), String(getJob(db, 'job_rerun_cap')?.status));
+
+    // An orchestrator after it, with a helper still working on the old input.
+    const atOrch = runs.length;
+    rjob('job_rerun_orch');
+    rfix('ro_arch', 'job_rerun_orch', { role: 'architect', status: 'done', sdkSessionId: 'sess_ro_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('ro_orch', 'job_rerun_orch', { role: 'developer', status: 'queued', sdkSessionId: 'sess_ro_orch', helperCap: 1, dependsOn: ['ro_arch', 'ro_helper'], autonomy: DEFAULT_AUTONOMY });
+    rfix('ro_helper', 'job_rerun_orch', { role: 'developer-helper-1', status: 'working', sdkSessionId: 'sess_ro_helper', parentId: 'ro_orch', autonomy: DEFAULT_AUTONOMY });
+    say('job_rerun_orch', 'ro_arch', 'The plan, again.');
+    say('job_rerun_orch', 'ro_helper', 'Half of the tokens work.');
+    const orch = await rerun('ro_arch');
+    check('an orchestrator is re-run, and its working helper is stopped with it', orch.status === 200 && statusOf('ro_helper') === 'stopped', JSON.stringify(orch.body));
+    check('the orchestrator resumes in its own session', (await until(() => runs.length === atOrch + 1)) && runs[atOrch]?.options.resume === 'sess_ro_orch');
+    await until(() => (runs[atOrch]?.prompts.length ?? 0) > 0);
+    const orchPrompt = runs[atOrch]?.prompts[0] ?? '';
+    check('told its input changed, and that the helper was stopped, with what it had said', orchPrompt.includes('Your input changed') && orchPrompt.includes('[developer-helper-1 — stopped, so it may not have finished its part]\nHalf of the tokens work.'), orchPrompt);
+    runs[atOrch]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getJob(db, 'job_rerun_orch')?.status === 'done');
+
+    // One that failed before it had a session starts from its prompt, which carries the new reply.
+    const atFail = runs.length;
+    rjob('job_rerun_fail');
+    rfix('rf_arch', 'job_rerun_fail', { role: 'architect', status: 'done', sdkSessionId: 'sess_rf_arch', autonomy: DEFAULT_AUTONOMY });
+    rfix('rf_dev', 'job_rerun_fail', { role: 'developer', status: 'failed', sdkSessionId: null, dependsOn: ['rf_arch'], autonomy: DEFAULT_AUTONOMY });
+    say('job_rerun_fail', 'rf_arch', 'The plan, third time.');
+    const failed = await rerun('rf_arch');
+    check('one that failed before it had a session is started again', failed.status === 200 && failed.body.agents?.[0]?.action === 'start', JSON.stringify(failed.body));
+    check('from its prompt, not a resume, and with the new reply', (await until(() => runs.length === atFail + 1)) && !runs[atFail]?.options.resume && (await until(() => (runs[atFail]?.prompts.length ?? 0) > 0)) && (runs[atFail]?.prompts[0] ?? '').includes('Agent: The plan, third time.'), runs[atFail]?.prompts[0]);
+    runs[atFail]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getJob(db, 'job_rerun_fail')?.status === 'done');
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));

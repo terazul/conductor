@@ -21,6 +21,7 @@ import { explain, type Notice } from '../lib/errors.js';
 import type {
   Agent,
   RemoveAgentResponse,
+  RerunResponse,
   SendMessageRequest,
   SetAutonomyRequest,
   SetModelRequest,
@@ -50,6 +51,15 @@ export function pauseAgent(agentId: string): Promise<unknown> {
 
 export function resumeAgent(agentId: string): Promise<unknown> {
   return api(agentPath(agentId, 'resume'), { method: 'POST', body: {} });
+}
+
+/**
+ * Start the agents after this one again, each in its own session, told that its reply changed
+ * (Amendment 102). Running ones are stopped first; nothing in the folder is touched. The
+ * daemon refuses with the reason (a 409), which `useCommand` shows as it was said.
+ */
+export function rerunAfter(agentId: string): Promise<RerunResponse> {
+  return api(agentPath(agentId, 'rerun'), { method: 'POST', body: {} });
 }
 
 /**

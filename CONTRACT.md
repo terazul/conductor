@@ -196,6 +196,57 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 102 — post-merge, applied. **Re-run from here: start the agents after one again, with its latest reply.**
+
+Shared (`rerun.ts`, new; `index.ts`), daemon (`session/rerun.ts`, new; `session/supervisor.ts`, `routes/session.ts`, `session/verify.ts`) and web (`agent/rerun.ts`, new; `agent/agent.tsx`, `agent/endpoints.ts`, `agent/verify.ts`). A TODO.md item (7 Oct, decided 8 Oct): "re-run from here".
+- **`↻ re-run after this`**, in the Agent screen's header, is there only when the agent has agents
+  after it. The first press arms it: the header asks `Re-run 2 agents after architect?`, a banner under
+  it says what will happen (who goes again, who is stopped first, that the folder is left alone), and
+  **↻ re-run 2 agents** commits. Stop controls, fold, export and interrupt give way while it is armed.
+  It is manual on purpose: a conversation with the architect must not re-run the whole stack on every
+  message. It has no colour of its own (`fl-btn is-ghost`, `is-primary`, `ag-confirm-q`, the `t-warn`
+  banner), so it reads in both themes.
+- **`POST /api/agents/:id/rerun`** → `RerunResponse` (`{ from, agents: [{ agentId, role, action,
+  stopped }] }`). 404 for an unknown agent; **409** with the reason in `detail` when it can't be done:
+  nothing comes after it, it is still working / waiting for you / paused / failed, it has written no
+  reply, an agent after it was stopped or is only just starting, an agent after it (or the job) is at
+  its budget. A refusal changes nothing: everything refusable is checked before the first agent is
+  stopped. The web's `explain` already passes a 409's sentence through.
+- **`rerunPlan(agents, rootId, { hasReply })`** (`shared/src/rerun.ts`) is the one copy of the rules,
+  as `stack.ts` is for removal: the daemon applies it and the button reads it, so what the banner
+  says is what the daemon does. "After it" is everything downstream through `dependsOn`, however far,
+  not through helpers. Steps come in dependency order (the job's own order where that doesn't
+  matter). Each is `resume` (it has a session), `start` (failed before it had one: starts from its
+  prompt, which now carries the new reply) or `wait` (hasn't started: left alone, reads the new reply
+  when it does). `stops` marks one that is working or blocked.
+- **`Supervisor.rerunFrom`** (`session/supervisor.ts`) does it. A running agent after it is stopped
+  first (its input is stale) the way `pauseAgent` stops one, its session kept; a question it was
+  parked on is cancelled, since it was asked about input that changed; its working helpers are
+  terminated and the orchestrator hears them as stopped (Amendment 51). Then every agent that goes
+  again is set `queued`, with the status note `re-running after architect, whose reply changed`, and
+  `pump()` starts them. **Order is `pump`'s**: an agent starts only when every agent it waits for is
+  `done`, so the ones that waited for the changed agent go first and the ones behind them wait until
+  those are done again. The job is held out of `pump` (`#halting`) while the stops happen, so no
+  sibling starts on the old reply. A second press in the same job during that is refused.
+- **They resume their own sessions** (`sdkSessionId`, through `pump` → `#launch`, as any queued agent
+  with a session does), with `rerunNote` (`session/rerun.ts`) as the resume prompt. The note is built
+  when the agent starts, not when you pressed, so a later agent hears the NEW reply of the one before
+  it. It says: your input changed; nothing was reset; look at what is here and fix what no longer
+  fits; then the same section a first prompt carries for what the agents before it said last. It
+  outranks a parked call's silent re-offer in `#resumePrompt`, and carries the report of any helpers
+  that have ended.
+- **Nothing in the worktree is touched.** No reset, no cleanup, no file read or written. The test
+  checks a file, `git status` and `HEAD` before and after.
+- **Checked**: `session/verify.ts` §19 (the order, a diamond, refusals with their reasons, a running
+  developer stopped before its resume and its slot given back, the note and the latest reply, the
+  later agent hearing the new reply, an unstarted scribe left alone and started as usual, a parked
+  question cancelled, a budget refusal changing nothing, an orchestrator and its helper, a failed
+  agent with no session) and `agent/verify.ts` §10 (the button only when agents follow, what it says
+  it will do, why it can't be pressed, the wiring and no colours of its own).
+- **Not done**: the Fleet card and the Project lane have no button (Agent screen only). A restart
+  between the press and an agent's start loses the note (it is held in memory, like the restart
+  nudge), and the agent resumes with the usual wake nudge instead.
+
 ### Amendment 101 — post-merge, applied. **The next agent gets the whole conversation of the agent before it, as text.**
 
 Daemon (`session/handoff.ts`, `eventlog.ts`, `session/supervisor.ts`'s `#promptFor`,

@@ -34,10 +34,12 @@ import { Inspector } from './inspector.js';
 import { fileLinks, filesIn } from './links.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
 import { sleepControl } from './sleep.js';
+import { rerunControl, rerunDone } from './rerun.js';
 import {
   interruptAgent,
   pauseAgent,
   removeAgent,
+  rerunAfter,
   resumeAgent,
   terminateAgent,
   useCommand,
@@ -252,6 +254,103 @@ function StopControls({
   );
 }
 
+/**
+ * Re-run from here (Amendment 102): start the agents AFTER this one again, now that you have
+ * changed what it said. Manual, so a chat with the architect doesn't re-run the whole stack
+ * on every message.
+ *
+ * Only on an agent that has agents after it. Armed first, like terminate: the first press
+ * says what it will do, in the banner under the header (who goes again, that running ones
+ * are stopped first, that the folder is left as it is), and the second commits. When
+ * something is in the way (it is still working, an agent after it was stopped) the button is
+ * there, disabled, and its hover text is the reason; a refusal from the daemon is shown the
+ * same way, as it said it.
+ *
+ * Armed, it takes the header: stop controls give way, as they do for each other.
+ */
+function RerunControl({
+  agent,
+  events,
+  cmd,
+  hidden,
+  onAsk,
+}: {
+  agent: Agent;
+  events: readonly Event[];
+  cmd: CommandHandle;
+  /** Another confirm is showing; this one waits its turn. */
+  hidden: boolean;
+  /** What pressing it will do, for the banner under the header; null when not armed. */
+  onAsk: (explain: string | null) => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  const siblings = useAgents(agent.jobId);
+  const hasReply = events.some((e) => e.payload.kind === 'text');
+  const control = rerunControl(siblings, agent.id, hasReply);
+
+  // It stopped being possible while armed (the agent started again, another tab removed one).
+  const open = armed && control !== null && control.blocked === null;
+  const explain = open ? control.explain : null;
+  useEffect(() => {
+    onAsk(explain);
+    return () => onAsk(null);
+  }, [explain, onAsk]);
+  useEffect(() => {
+    if (armed && !open) setArmed(false);
+  }, [armed, open]);
+
+  if (control === null || (hidden && !open)) return null;
+
+  if (open) {
+    return (
+      <>
+        <span className="ag-confirm-q" title={control.question}>
+          {control.question}
+        </span>
+        <button
+          type="button"
+          className="fl-btn is-primary"
+          disabled={cmd.busy}
+          onClick={() =>
+            void cmd
+              .run('Re-running', () => rerunAfter(agent.id), rerunDone)
+              .then(() => setArmed(false))
+          }
+        >
+          {cmd.busy ? 'working…' : control.confirm}
+        </button>
+        <button
+          type="button"
+          className="fl-btn is-ghost"
+          disabled={cmd.busy}
+          onClick={() => {
+            cmd.dismiss();
+            setArmed(false);
+          }}
+        >
+          cancel
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="fl-btn is-ghost"
+      disabled={cmd.busy || control.blocked !== null}
+      title={control.blocked ?? control.title}
+      aria-label={control.blocked ? `${control.label} — unavailable: ${control.blocked}` : control.label}
+      onClick={() => {
+        cmd.dismiss();
+        setArmed(true);
+      }}
+    >
+      {control.label}
+    </button>
+  );
+}
+
 /** Composer height limits, in px. Below MIN the textarea is unusable; above MAX
  *  the transcript stops being readable, which defeats the point of the screen. */
 const COMPOSER_MIN = 150;
@@ -346,6 +445,8 @@ export function AgentScreen() {
   const control = useCommand();
   // What removing it would do to its job, while that confirm is armed (Amendment 89).
   const [ask, setAsk] = useState<string | null>(null);
+  // What re-running the agents after it will do, while that confirm is armed (Amendment 102).
+  const [rerunAsk, setRerunAsk] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const elapsedMs = useElapsedMs(
     agent ? startedMs(agent, events) : null,
@@ -546,7 +647,7 @@ export function AgentScreen() {
              * While terminate or remove is armed, the header is the decision: its confirm
              * needs the room, and these can wait (Amendment 89).
              */}
-            {ask === null && replies.length > 0 && (
+            {ask === null && rerunAsk === null && replies.length > 0 && (
               <button
                 type="button"
                 className="fl-btn is-ghost"
@@ -560,7 +661,7 @@ export function AgentScreen() {
                 {anyOpen ? '⌃ fold all' : '⌄ unfold all'}
               </button>
             )}
-            {ask === null && (
+            {ask === null && rerunAsk === null && (
               <>
                 <button type="button" className="fl-btn is-ghost" onClick={exportTranscript}>
                   ⤓ export
@@ -575,11 +676,12 @@ export function AgentScreen() {
                 </button>
               </>
             )}
-            <StopControls agent={agent} cmd={control} onAsk={setAsk} />
+            <RerunControl agent={agent} events={events} cmd={control} hidden={ask !== null} onAsk={setRerunAsk} />
+            {rerunAsk === null && <StopControls agent={agent} cmd={control} onAsk={setAsk} />}
           </div>
         </div>
 
-        {ask && <div className="ag-notice is-banner t-warn" role="status">{ask}</div>}
+        {(ask ?? rerunAsk) && <div className="ag-notice is-banner t-warn" role="status">{ask ?? rerunAsk}</div>}
         {control.notice && (
           <div className={`ag-notice is-banner t-${control.notice.tone}`} onClick={control.dismiss}>
             {control.notice.text}

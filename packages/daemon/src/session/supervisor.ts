@@ -33,9 +33,10 @@ import type {
   Job,
   Project,
   Rewired,
+  RerunResponse,
   Snapshot,
 } from '@conductor/shared';
-import { createsCycle, isStuck, readOnlyRefusal, rewireOnRemoval } from '@conductor/shared';
+import { createsCycle, isStuck, readOnlyRefusal, rerunPlan, rewireOnRemoval } from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
 import type { Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -55,6 +56,7 @@ import {
   turnsFromEvents,
   type Upstream,
 } from './handoff.js';
+import { rerunNote, rerunStatusNote } from './rerun.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
 import {
@@ -217,6 +219,17 @@ export class BudgetReachedError extends Error {
   }
 }
 
+/**
+ * A re-run that can't be done, with the sentence that says why (Amendment 102). The route
+ * answers 409 with it, so the person reads the reason and not a status code.
+ */
+export class RerunRefusedError extends Error {
+  constructor(why: string) {
+    super(why);
+    this.name = 'RerunRefusedError';
+  }
+}
+
 export class ProjectBusyError extends Error {
   readonly roles: string[];
 
@@ -235,6 +248,14 @@ export class Supervisor implements AgentControl {
   #runners = new Map<string, AgentBackend>();
   /** Agents a restart interrupted, resumed with RESTART_NUDGE on their next run. */
   #restarted = new Set<string>();
+  /**
+   * Agents `rerunFrom` queued, with the roles whose reply changed, resumed with `rerunNote`
+   * on their next run (Amendment 102). In memory, like `#restarted`: a restart between the
+   * press and the run resumes the agent without the note.
+   */
+  #rerunPending = new Map<string, string[]>();
+  /** Jobs part-way through `rerunFrom`, which a second press must not interleave with. */
+  #rerunning = new Set<string>();
   /** Agents whose run() is in flight, whether working or held. */
   #active = new Set<string>();
   /**
@@ -938,6 +959,11 @@ export class Supervisor implements AgentControl {
    * has no reason to believe retrying is wanted.
    */
   #resumePrompt(agentId: string): string {
+    // Re-run from here (Amendment 102). First: its input changed, and that outranks a
+    // question it was parked on, which `rerunFrom` has already cancelled.
+    const rerun = this.#takeRerunNote(agentId);
+    if (rerun) return rerun;
+
     if (lastDeferredTool(this.#db, agentId)) return '';
 
     // An orchestrator woken because its helpers finished: what they said (Amendment 51).
@@ -1254,6 +1280,133 @@ export class Supervisor implements AgentControl {
     return 'resumed';
   }
 
+  // ── re-run from here (Amendment 102) ──────────────────────────────────────
+
+  /**
+   * Start the agents after one agent again, once you have changed what it said.
+   *
+   * Each goes back into its OWN session (`sdkSessionId`, as `pump` resumes any queued agent
+   * that has one), told by `rerunNote` that its input changed and what the agents before it
+   * said last. Nothing in the worktree is reset: they see what is there and fix it.
+   *
+   * ORDER. They are all queued at once, and `pump` does the ordering: an agent starts only
+   * when every agent it waits for is `done`, so the ones that wait for the changed agent go
+   * first and the ones behind them wait until those are done again. The note is built when
+   * an agent starts, not when you pressed, so a later agent hears the NEW reply of the one
+   * before it.
+   *
+   * RUNNING ONES ARE STOPPED FIRST. Their input is stale. Stopped the way `pauseAgent` stops
+   * one (the session is kept), but a question it was parked on is cancelled, since it was
+   * asked about input that has changed. A running agent's helpers are terminated with it;
+   * the orchestrator hears them as stopped (Amendment 51).
+   *
+   * ALL OR NOTHING. Everything that can be refused is checked before the first agent is
+   * stopped: the plan (`rerunPlan`), each agent's budget and the job's. A refusal carries
+   * its reason and changes nothing.
+   *
+   * Not here: an agent that hasn't started (it reads the new reply when it does), one that
+   * was stopped (refused: the ones behind it would wait for good), and the files.
+   */
+  async rerunFrom(agentId: string): Promise<RerunResponse> {
+    const root = getAgent(this.#db, agentId);
+    if (!root) throw new Error(`no such agent ${agentId}`);
+    const jobId = root.jobId;
+    if (this.#rerunning.has(jobId)) {
+      throw new RerunRefusedError('The agents after it are still being stopped for a re-run. Wait a moment.');
+    }
+    const plan = rerunPlan(agentsForJob(this.#db, jobId), agentId, { hasReply: eventLog().lastText(agentId) !== null });
+    if (plan.refusal) throw new RerunRefusedError(plan.refusal);
+
+    const going = plan.steps.filter((s) => s.action !== 'wait');
+    for (const s of going) {
+      const sentence = budgetRefusal(getAgent(this.#db, s.agentId)!);
+      if (sentence) throw new RerunRefusedError(`${s.role} can't go again. ${sentence}`);
+    }
+    const job = getJob(this.#db, jobId);
+    if (job && this.#overBudget(job)) {
+      throw new RerunRefusedError("The job has reached its budget, so the agents can't go again. Raise a cap first.");
+    }
+
+    this.#rerunning.add(jobId);
+    // Held out of `pump` while they stop: each stop frees a slot and pumps, and a sibling
+    // not yet requeued would start on the old reply.
+    const holding = !this.#halting.has(jobId);
+    if (holding) this.#halting.add(jobId);
+    try {
+      for (const s of going) {
+        for (const h of helpersOf(this.#db, s.agentId)) {
+          if (!ENDED.includes(h.status)) await this.terminateAgent(h.id);
+        }
+        if (s.stops) await this.#stopForRerun(s.agentId);
+      }
+      const again = new Set(going.map((s) => s.agentId));
+      const changedBy = new Set([agentId, ...again]);
+      for (const s of going) {
+        const a = getAgent(this.#db, s.agentId);
+        if (!a) continue;
+        // Only one with a session is resumed. One that failed before it had one starts
+        // from its prompt, which carries the new reply already.
+        if (s.action === 'resume') {
+          const changed = a.dependsOn
+            .filter((id) => changedBy.has(id))
+            .flatMap((id) => (getAgent(this.#db, id) ? [getAgent(this.#db, id)!.role] : []));
+          this.#rerunPending.set(a.id, changed);
+        }
+        if (a.status !== 'queued') {
+          setAgentStatus(this.#db, a.id, 'queued');
+          eventLog().emit(
+            { projectId: a.projectId, jobId, agentId: a.id },
+            { kind: 'status', status: 'queued', error: rerunStatusNote(root.role) },
+          );
+        }
+      }
+      this.#reopenJob(jobId);
+      this.#pushEntities({ agents: going.flatMap((s) => getAgent(this.#db, s.agentId) ?? []) });
+    } finally {
+      this.#rerunning.delete(jobId);
+      if (holding) this.#halting.delete(jobId);
+    }
+    this.pump();
+    return {
+      from: root.role,
+      agents: plan.steps.map((s) => ({ agentId: s.agentId, role: s.role, action: s.action, stopped: s.stops })),
+    };
+  }
+
+  /** Stop a run whose input has changed: its session kept, its questions cancelled. */
+  async #stopForRerun(agentId: string): Promise<void> {
+    this.#resumeWanted.delete(agentId);
+    arbiter().cancelForAgent(agentId, 'its input changed, so it is being re-run');
+    const runner = this.#runners.get(agentId);
+    if (runner) {
+      this.#userStopped.add(agentId);
+      await runner.stop();
+    }
+  }
+
+  /**
+   * The prompt a re-run agent resumes with, once. '' when it was not queued by `rerunFrom`.
+   * Built now, from what the agents before it have said by now, plus the report of any
+   * helpers that have ended (Amendment 51), which would otherwise be lost to this note.
+   */
+  #takeRerunNote(agentId: string): string {
+    const changed = this.#rerunPending.get(agentId);
+    if (!changed) return '';
+    this.#rerunPending.delete(agentId);
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) return '';
+    const jobPrompt = getJob(this.#db, agent.jobId)?.prompt ?? '';
+    const upstream: Upstream[] = agent.dependsOn.flatMap((id) => {
+      const dep = getAgent(this.#db, id);
+      return dep && dep.parentId !== agentId
+        ? [{ role: dep.role, reply: eventLog().lastText(id), turns: turnsFromEvents(eventLog().conversation(id), jobPrompt) }]
+        : [];
+    });
+    return [rerunNote(changed, upstream, handoffCap(agent.model)), this.#takeHelperReport(agentId)]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
   async #launchWithPrompt(
     agentId: string,
     resume: string,
@@ -1460,6 +1613,7 @@ export class Supervisor implements AgentControl {
     if (ENDED_STATUSES.has(agent.status)) return agent;
 
     this.#resumeWanted.delete(agentId);
+    this.#rerunPending.delete(agentId);
     arbiter().cancelForAgent(agentId, 'the agent was terminated');
 
     const runner = this.#runners.get(agentId);

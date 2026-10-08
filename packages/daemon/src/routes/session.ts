@@ -24,6 +24,7 @@ import type {
   PendingRequest,
   Project,
   RemoveAgentResponse,
+  RerunResponse,
   SendMessageRequest,
   SetAutonomyRequest,
   SetModelRequest,
@@ -54,6 +55,7 @@ import {
   BudgetReachedError,
   initSupervisor,
   ProjectBusyError,
+  RerunRefusedError,
   supervisor,
 } from '../session/supervisor.js';
 
@@ -648,6 +650,26 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       throw err;
     }
     return reply.send({ ok: true });
+  });
+
+  /*
+   * Re-run from here (Amendment 102). Start the agents after this one again, each in its own
+   * session, told that this one's reply changed. Running ones are stopped first; nothing in
+   * the worktree is touched. A body is not needed: the plan is whatever the job looks like now.
+   *
+   * 409 when it can't be done, with the reason in `detail` (the agent has nothing after it, is
+   * still working, an agent after it was stopped or is at its budget): the state is in the way,
+   * not the request.
+   */
+  app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/rerun', async (req, reply) => {
+    if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+    try {
+      const done: RerunResponse = await sup.rerunFrom(req.params.agentId);
+      return reply.send(done);
+    } catch (err) {
+      if (err instanceof RerunRefusedError) return fail(reply, 409, 'could not re-run', err.message);
+      return fail(reply, 500, 'could not re-run the agents', String(err));
+    }
   });
 
   /*
