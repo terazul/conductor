@@ -34,10 +34,10 @@ first prompt (`#promptFor`, `supervisor.ts:809-828`; `handoff.ts:8-18`).
 order. Not chosen: guessing from the reply whether it waits (wrong in both directions),
 automatic re-runs on every reply (cost and overwritten work), and a per-job "hand off
 automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
-*Decided (8 Oct): first, choose who each agent waits for, and pass the whole context. The
-five items below run in this order.*
-*Decided (8 Oct, later): the question-tool item is one line, so it goes first. The rest keep
-the order above.*
+*Built (8 Oct): the question-tool line (Amendment 100), choosing who each agent waits for
+(99), passing the whole conversation as text (101) and re-run from here (102). `hand_off` is
+next; it puts its `summary` on top of the conversation through `Upstream.summary`
+(`session/handoff.ts`).*
 
 - [ ] **An agent hands off only by saying so: a `hand_off` tool.** Asked for (7 Oct). An
   agent that other agents wait on hands off by calling `hand_off`, with a `summary` of what
