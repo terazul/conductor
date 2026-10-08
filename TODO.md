@@ -269,6 +269,53 @@ the order above.*
   Tests in `session/verify.ts`, with a fake clock: spend on day 1, move the clock past
   midnight, and a `cost` frame carries 0 and a standing daily alert clears.
 
+- [ ] **A Metrics tab: model usage, calls, time and errors.** Asked for (8 Oct). A new tab
+  that reports, in total and per model: input and output tokens, the number of calls to the
+  model, how long a call takes (model performance), and the error rate. Nothing shows these
+  together today; Diagnostics (key `0`) has counts and today's cost only.
+  - **Recorded today:**
+    - Tokens and cost, on each agent row (`input_tokens`, `output_tokens`, `cost_usd`) and in
+      one `usage` event per finished run (`session/backends/claude.ts:588-621`). Copilot and
+      OpenRouter add up per call and report no dollars (`copilot.ts:519-527`; `costUsd:
+      false`, `backends/index.ts:41`).
+    - Errors: `api_retry` events with the cause and HTTP status (`claude.ts:549-558`), failed
+      agents with a reason, and each run's `terminal_reason` (`agent_runs`,
+      `db/migrations/010_session.sql`).
+    - Time: an agent's start and end, each run's start and end, and each tool call's duration.
+      Not the time a model call takes.
+  - **Not recorded:**
+    - **Calls and their time.** The SDK's result carries `num_turns` (model round-trips),
+      `duration_ms` (the whole run) and `modelUsage` (tokens and cost per model); Conductor
+      stores none of them. Copilot's `assistant.usage` is one event per call but is only summed
+      (`copilot-events.ts:36`, `:128`). Check whether either engine reports a time per call.
+    - **The model on a usage.** The `usage` event doesn't name one, and `agents.model` is
+      overwritten when the model is switched (`setAgentModel`, `session/store.ts:588`), so a
+      per-model total built from agent rows credits everything to the last model.
+    - **A denominator for the error rate** (calls, or runs).
+  - **History is lost on removal.** Removing a job or agent deletes its `agents` and
+    `agent_runs` rows; `events` and `cost_daily` stay (`session/store.ts:226-249`). Build the
+    tab from events, or from a table of its own keyed by day and model as `cost_daily` is, not
+    from agent rows.
+  - **Check first:** `setAgentUsage` overwrites a Claude agent's tokens with the latest
+    result's (`claude.ts:611`) while its cost is lifetime. Find out whether a resumed agent's
+    row holds only its last run before any total is taken from rows.
+  - **Start:** add `model`, `calls` and `durationMs` to the `usage` event (additive, so an
+    amendment), fed from `modelUsage`, `num_turns` and `duration_ms`. Then a daemon route that
+    adds them up by model and day, and a screen beside Diagnostics (`SCREEN`,
+    `web/src/shell/nav.ts:36-45`).
+  Decide:
+  - the range: today, 7 days or all, and whether it splits by day.
+  - "performance": time per model call, tokens per second, or time per run. Per run is the
+    only one both engines can give without new data.
+  - "error rate": failed runs over runs, retried calls over calls, or both. And whether your
+    own stop and a budget stop count as errors (suggested: no).
+  - whether runs from before this ships appear (agent rows give totals, with no per-call data)
+    or the tab starts empty.
+  - which key opens it. `9` is Settings and `0` is Diagnostics.
+  Tests in `session/verify.ts`: the `usage` event carries model, calls and time, a model switch
+  splits the totals, and removing an agent keeps its history. A web check for the tab and its
+  per-model rows.
+
 ## Agents
 
 - [ ] **When the model can't be reached, try again after 5 s, 15 s, 30 s, 60 s and 5 min,
