@@ -58,7 +58,7 @@ the order above.*
     one does, `spawn/route.tsx:586-594`), or changes it for this launch only.
   *Decided (8 Oct): an agent's place in the stack sets what it can wait for. You move rows
   around in Spawn to change who waits for whom.*
-  *Recommended (8 Oct), not yet confirmed: each row waits for the one directly above it by
+  *Decided (8 Oct): each row waits for the one directly above it by
   default, and the **waits for** ticks stay for waiting on several rows above (the reviewer
   waits on three today, `presets.ts:85`). Moving a row re-checks its ticks. A change to a
   preset row applies to this launch only.*
