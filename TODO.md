@@ -193,6 +193,47 @@ the order above.*
   are shown (Spawn, its Fleet lane, the agent tabs). It appears only when the stack has two
   or more agents; one agent needs no orchestrator.*
 
+## Files
+
+- [ ] **Create a new file while browsing directories.** Asked for (8 Oct). From the file tree,
+  make a new file, such as a `.md` or `.txt`, in the folder you're looking at, and start
+  writing in it.
+  - **The daemon can already do it.** `PUT /api/jobs/:jobId/file` and
+    `PUT /api/projects/:projectId/dir/file?dir=…` (`routes/workspace.ts:161`, `:244`) take
+    `{ path, content }`, make any missing folders and write atomically (`writeOf`,
+    `workspace/service.ts`). So a path that doesn't exist becomes a file. The path gate still
+    applies: no `..`, no absolute path, nothing under `.git` (`workspace/paths.ts`). No new
+    route is needed for the plain case.
+  - **But it overwrites.** Typing the name of a file that exists replaces it with an empty
+    one. `WriteFileRequest` (`shared/src/wire.ts:404`) has no "only if new". Either the web
+    checks the tree first, which races with an agent writing the same name, or an optional
+    field such as `createOnly` makes the daemon answer 409. That is an additive wire change,
+    so it needs an amendment.
+  - **The web has the call but not the control.** `writeFile` (`files/useWorkspace.ts:376`)
+    already reaches either route from a root key, a job or a project folder. `FileTree.tsx` has
+    nothing that creates. A **+** on a folder row, and on the root, would ask for a name with
+    the folder already filled in. The tree is drawn at `files/route.tsx:614`.
+  - **A project folder's tree won't refresh by itself.** It is never watched, so a write there
+    emits no `file_edit`, and the screen re-reads only what it saved (`writeOf`'s comment). Call
+    `refreshRoot(root)` (`useWorkspace.ts:43`) after the write. In a job's worktree the watcher
+    does it, and the file belongs to no agent, as with any human edit.
+  - **Then open it, ready to type.** Open the new file in a tab and start the editor on it
+    (`putEdit`, `files/useTabs.ts`). An empty file has to open; check that an empty `raw`
+    renders.
+  Decide:
+  - where: the Files tree only, or the navigator's folders too (Amendment 92;
+    `shell/Navigator.tsx:277` uses the same tree hook).
+  - the name: any name, a default `.md` when none is typed, or only `.md` and `.txt`. And
+    whether a name with new folders in it, such as `docs/notes/x.md`, is allowed. The daemon
+    would make them.
+  - when the name is taken: refuse with `createOnly`, or ask to replace.
+  - whether it works in an agent's running worktree. The file lands beside what the agent is
+    writing.
+  Not asked for, and separate items if wanted: new folders, rename and delete.
+  Tests: `files/verify.ts` for the control, the name checks and the refresh after a write;
+  `workspace/verify.ts` for a PUT that makes a new file and its folders, `..` and `.git`
+  refused, and, with `createOnly`, a 409 on a name that exists.
+
 ## Seeing what's happening
 
 - [ ] **Project and Agent, beyond the label.** Asked for (7 Oct). The label at the top has its
@@ -258,3 +299,41 @@ the order above.*
     simply resumes it, as it does now.
   Tests in `session/verify.ts`, with a fake clock: each delay in turn, a reply resets the
   count, `auth` doesn't retry, and the sixth failure is `failed`.
+
+- [ ] **Better instructions for the built-in roles.** Asked for (8 Oct). The new text for all
+  seven is already written, as option B of [docs/plans/role-definitions.md](docs/plans/role-definitions.md).
+  This item is building it.
+  - **Today:** only the architect has a system prompt (`spawn/personas.ts:63`). The developer,
+    validator, reviewer, scribe, debugger and analyst have a one-sentence brief
+    (`personas.ts:87-92`). A preset keeps its own brief and takes only the persona's system
+    prompt, skills and tool rules, so the system prompt is the one field that reaches every
+    stack. It is appended to Claude Code's own (`session/backends/claude.ts:231`) or sent as
+    Copilot's system message (`backends/copilot.ts:398`). The brief goes into the prompt after
+    "Your role is …" (`#promptFor`, `session/supervisor.ts`).
+  - **What changes:** `description`, `brief` and `systemPrompt` for six roles, and one rule
+    added to the architect's, in `personas.ts`. Each system prompt ends with a fixed set of
+    headings for its last reply ("End with: …"), since that reply is what the next agent reads.
+    Three preset briefs in `spawn/presets.ts` are aligned with them: the full stack's
+    validator and reviewer, and the bug fix's developer. Tools and models stay as they are.
+  - **No migration.** Only edits that differ from a built-in are stored, so someone who never
+    edited one gets the new text at once, and someone who did keeps their edit. **Reset**
+    gives them the new text.
+  - **The proposal needs a refresh first.** It numbers itself Amendment 96, which the merge
+    used (the next is 99), and its `presets.ts` line numbers predate that merge.
+  Decide:
+  - whether to settle the `hand_off` and whole-context items first. The closing headings are
+    what the next agent reads, and `hand_off`'s `summary` changes that. Should the `summary`
+    be the closing block? Also check `HANDOFF_CAP` (8,000 characters, `session/handoff.ts:18`):
+    a reviewer's ranked findings could be cut.
+  - whether jobs expect agents to commit in their worktrees. The developer prompt says not to
+    commit, push or rewrite history unless the job says to. Not checked yet.
+  - the proposal's own open questions: should every built-in say `push: false`, or leave it to
+    the launch (its default)? May the validator fix the code (it says no)? Should anything
+    gate on the reviewer's verdict (nothing does)? Do the model tiers stay?
+  - all seven at once, or the developer, validator, reviewer and debugger first. The scribe and
+    analyst already have workable preset briefs.
+  Tests in `spawn/verify.ts`: every built-in has a non-empty `systemPrompt` ending in an
+  "End with:" line, and any check that quotes an old brief or description is updated (grep
+  first). There is no evidence yet that the new text does better. Before keeping it, run the
+  bug fix and full stacks on one known bug with the old prompts and the new, and compare the
+  hand-offs.
