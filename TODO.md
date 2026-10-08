@@ -36,6 +36,8 @@ automatic re-runs on every reply (cost and overwritten work), and a per-job "han
 automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 *Decided (8 Oct): first, choose who each agent waits for, and pass the whole context. The
 five items below run in this order.*
+*Decided (8 Oct, later): the question-tool item is one line, so it goes first. The rest keep
+the order above.*
 
 - [ ] **Choose who each agent waits for, in any stack.** Asked for (8 Oct). For example:
   the developer waits for the architect. An agent can only wait for agents above it in the
@@ -54,6 +56,12 @@ five items below run in this order.*
   Decide:
   - whether changing a preset row turns it into an unsaved Custom setup (as loading a saved
     one does, `spawn/route.tsx:586-594`), or changes it for this launch only.
+  *Decided (8 Oct): an agent's place in the stack sets what it can wait for. You move rows
+  around in Spawn to change who waits for whom.*
+  *Recommended (8 Oct), not yet confirmed: each row waits for the one directly above it by
+  default, and the **waits for** ticks stay for waiting on several rows above (the reviewer
+  waits on three today, `presets.ts:85`). Moving a row re-checks its ticks. A change to a
+  preset row applies to this launch only.*
 
 - [ ] **Pass the whole context of the agent before, not its last reply.** Asked for (8 Oct).
   The next agent should get everything the agent before it knew, so it knows what to do.
@@ -75,6 +83,11 @@ five items below run in this order.*
     after it pays for those tokens. Decide the limit (the next model's window, less room to
     work), and what goes first when over (oldest first, keeping the last reply whole).
   With the `hand_off` item, the agent's summary goes on top of the context.
+  *Decided (8 Oct): as text, not a forked session. Your messages, the agent's replies and one
+  line per tool call, with tool output left out. The `hand_off` summary goes on top. The cap
+  is about a quarter of the next model's window; when over, drop the oldest first and keep
+  the last reply whole. The job instruction stays at the top of the prompt and is not part of
+  the cap (`#promptFor` already puts it first).*
 
 - [ ] **An agent hands off only by saying so: a `hand_off` tool.** Asked for (7 Oct). An
   agent that other agents wait on hands off by calling `hand_off`, with a `summary` of what
@@ -102,6 +115,8 @@ five items below run in this order.*
   Tests in `session/verify.ts`: a turn that ends without `hand_off` holds, and its dependants
   stay queued; `hand_off` then the end of the turn starts them with the summary; the last
   agent still finishes `done`; the hold survives a restart.
+  *Decided (8 Oct): build it as described. The hold is an alert beside `done`, not a new
+  status, and you can edit the summary before it goes.*
 
 - [ ] **Tell stack agents to ask with the question tool, not in prose.** Asked for (7 Oct).
   One line in the prompt Conductor builds (`#promptFor`, `supervisor.ts:809-828`), for
@@ -110,6 +125,8 @@ five items below run in this order.*
   at `supervisor.ts:975-985`). The architect above asked in prose. Check that OpenRouter
   models get the question tool too: Copilot handles it (`backends/copilot.ts`), and OpenRouter
   runs on the same backend (`backends/index.ts:51-56`).
+  *Decided (8 Oct): yes. It doesn't replace `hand_off`: an agent can still end with "I'll
+  wait".*
 
 - [ ] **Re-run from here.** Asked for (7 Oct). A button on an agent in a stack: start the
   agents after it again with its latest reply, once you've changed what it said. It's
@@ -121,6 +138,10 @@ five items below run in this order.*
     changed.
   - what happens to work they already did in the worktree.
   - what happens to an agent after it that is still running: stop it, or wait for it.
+  *Decided (8 Oct): build it. The agents resume their own sessions with a note that their
+  input changed. Work already done in the worktree is left alone, so the agent sees it and
+  fixes it. An agent after it that is still running is stopped first, since its input is now
+  stale.*
 
 - [ ] **Orchestrated stacks: one agent runs the others.** Asked for (8 Oct), as a design
   question. A new kind of stack you pick in Spawn, beside the fixed ones. An orchestrator
@@ -168,6 +189,9 @@ five items below run in this order.*
     on which models), or leaves them all to the orchestrator.
   - how many times it may send work back before it asks you.
   - whether its helpers also get `hand_off`, or its own judgement replaces it.
+  *Decided (8 Oct): the orchestrator row looks different from the others wherever agents
+  are shown (Spawn, its Fleet lane, the agent tabs). It appears only when the stack has two
+  or more agents; one agent needs no orchestrator.*
 
 ## Seeing what's happening
 
