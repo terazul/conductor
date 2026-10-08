@@ -36,7 +36,8 @@ import {
 import { scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.js';
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, pillsWith, resetPersona, withPersona, withoutPersona } from './personas.js';
-import { FIRST_ROLE, KNOWN_ROLES, customProblems, nextRole, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, toPreset, withSetup, withoutSetup, type CustomRole } from './custom.js';
+import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, toPreset, withSetup, withoutSetup, type CustomRole } from './custom.js';
+import { chain, moveRow, onDefault, recheckWaits, rolesAbove, sameStack, toggleWait } from './order.js';
 import { readFileSync } from 'node:fs';
 import { ALL_ON, CLAUDE, NONE, capabilitiesOf, type Capabilities } from '../lib/providers.js';
 import { DEFAULT_BUDGET_TOKENS, autonomyOn, jobBudgetUsd, modeOn, specsOn } from './engine.js';
@@ -827,8 +828,162 @@ console.log('\n17 · one more agent in a running job, and removing one from its 
   check('the shared list says which roles read, for Spawn and the daemon alike', isReadOnlyRole('reviewer') && !isReadOnlyRole('scribe'));
 }
 
+console.log('\n18 · move rows in Spawn to set who each agent waits for (Amendment 99)');
+{
+  type Row = { role: string; dependsOnRoles?: string[] };
+  const show = (rows: readonly Row[]): string => rows.map((r) => `${r.role}[${(r.dependsOnRoles ?? []).join('+')}]`).join(' ');
+  const rows = (...specs: string[]): Row[] =>
+    specs.map((x) => {
+      const [role, deps = ''] = x.split(':');
+      return { role: role!, dependsOnRoles: deps ? deps.split('+') : [] };
+    });
+  const full = presetById('full');
+  const before = JSON.stringify(PRESETS);
+  const fullShown = 'architect[] developer[architect] validator[developer] reviewer[architect+developer+validator] scribe[architect+reviewer]';
+
+  check('the full pipeline, as shipped, reads as expected', show(full.roles) === fullShown, show(full.roles));
+  check('by default every row waits for the one directly above it, and the first for none', show(chain(full.roles)) === 'architect[] developer[architect] validator[developer] reviewer[validator] scribe[reviewer]', show(chain(full.roles)));
+  check(
+    'the architect, developer and validator are on that default; the reviewer and the scribe, waiting on several, are not',
+    [0, 1, 2].every((i) => onDefault(full.roles, i)) && !onDefault(full.roles, 3) && !onDefault(full.roles, 4),
+  );
+  check('a row may wait only for the rows above it', rolesAbove(full.roles, 3).join() === 'architect,developer,validator' && rolesAbove(full.roles, 0).length === 0);
+
+  // Moving a row.
+  const down = moveRow(full.roles, 3, 4);
+  check(
+    "moved within bounds, the reviewer keeps all three ticks; the scribe loses the one that now points below it",
+    show(down) === 'architect[] developer[architect] validator[developer] scribe[architect] reviewer[architect+developer+validator]',
+    show(down),
+  );
+  const up = moveRow(full.roles, 3, 1);
+  check(
+    'moved up to the second place, the reviewer keeps the tick still above it and drops the two now below; the rows it passed follow the chain',
+    show(up) === 'architect[] reviewer[architect] developer[reviewer] validator[developer] scribe[architect+reviewer]',
+    show(up),
+  );
+  const top = moveRow(full.roles, 3, 0);
+  check(
+    'moved to the top, every tick of the reviewer points below it and goes; the architect then waits for it',
+    show(top) === 'reviewer[] architect[reviewer] developer[architect] validator[developer] scribe[architect+reviewer]',
+    show(top),
+  );
+  const swap = moveRow(full.roles, 0, 1);
+  check(
+    'the architect moved below the developer: the developer starts, the architect waits for it, the validator waits for the row above it now',
+    show(swap) === 'developer[] architect[developer] validator[architect] reviewer[architect+developer+validator] scribe[architect+reviewer]',
+    show(swap),
+  );
+  check('moving a row away and back puts the preset as it was', sameStack(moveRow(swap, 1, 0), full.roles), show(moveRow(swap, 1, 0)));
+  check("but a tick that was dropped isn't remembered: the scribe's wait for the reviewer stays gone", !sameStack(moveRow(down, 4, 3), full.roles) && show(moveRow(down, 4, 3)).endsWith('scribe[architect]'), show(moveRow(down, 4, 3)));
+  check('the bug fix: the developer moved above the debugger starts, and the debugger waits for it', show(moveRow(presetById('bugfix').roles, 1, 0)) === 'developer[] debugger[developer]', show(moveRow(presetById('bugfix').roles, 1, 0)));
+
+  const loose = rows('a', 'b:a', 'c:b', 'x:b');
+  check('a row that waits on its own pick, not the one above, keeps it', !onDefault(loose, 3));
+  check('left with nothing above that it waited for, it waits for the one directly above it', show(moveRow(loose, 3, 1)) === 'a[] x[a] b[x] c[b]', show(moveRow(loose, 3, 1)));
+  check('a row set to wait for no one stays parallel when others move', show(moveRow(rows('a', 'b', 'c:b'), 2, 0)) === 'c[] a[c] b[]', show(moveRow(rows('a', 'b', 'c:b'), 2, 0)));
+  check('no move, or one out of range, changes nothing', show(moveRow(full.roles, 2, 2)) === fullShown && show(moveRow(full.roles, 0, 9)) === fullShown && show(moveRow(full.roles, -1, 1)) === fullShown);
+  check('recheckWaits drops a tick at a row below, at itself or at no row', show(recheckWaits(rows('a:b', 'b:b+a+zzz', 'c:b'))) === 'a[] b[a] c[b]', show(recheckWaits(rows('a:b', 'b:b+a+zzz', 'c:b'))));
+
+  // Ticking.
+  check('ticking a row above adds a wait, kept in the stack order, not the click order', show(toggleWait(rows('a', 'b:a', 'c'), 2, 'b')) === 'a[] b[a] c[b]' && show(toggleWait(toggleWait(rows('a', 'b', 'c'), 2, 'b'), 2, 'a')) === 'a[] b[] c[a+b]');
+  check('unticking removes one', show(toggleWait(full.roles, 3, 'architect')) === show(full.roles).replace('reviewer[architect+developer+validator]', 'reviewer[developer+validator]'));
+  check("a row below, or the row itself, can't be ticked", show(toggleWait(full.roles, 1, 'validator')) === fullShown && show(toggleWait(full.roles, 1, 'developer')) === fullShown);
+
+  // Whichever way a row is moved, what comes out is a launch the daemon takes (Amendment 98).
+  let broke = '';
+  const everyMove: Array<{ id: string; roles: Row[] }> = [
+    ...PRESETS.map((p) => ({ id: p.id, roles: p.roles as Row[] })),
+    { id: 'loose', roles: loose },
+  ];
+  for (const { id, roles } of everyMove) {
+    for (let from = 0; from < roles.length; from += 1) {
+      for (let to = 0; to < roles.length; to += 1) {
+        const moved = moveRow(roles, from, to);
+        const named = moved.map((r) => r.role).sort().join();
+        if (named !== roles.map((r) => r.role).sort().join()) broke ||= `${id} ${from}→${to}: roles changed`;
+        moved.forEach((r, i) => {
+          const above = moved.slice(0, i).map((x) => x.role);
+          if ((r.dependsOnRoles ?? []).some((d) => !above.includes(d))) broke ||= `${id} ${from}→${to}: ${r.role} waits for one not above it`;
+          const was = roles.find((x) => x.role === r.role)?.dependsOnRoles ?? [];
+          if (i > 0 && was.length > 0 && (r.dependsOnRoles ?? []).length === 0) broke ||= `${id} ${from}→${to}: ${r.role} was waiting and now waits for no one`;
+        });
+      }
+    }
+  }
+  check('after any move of any preset, every row waits only for rows above it, none is lost, and none that waited is left waiting for no one', broke === '', broke);
+
+  // For this launch only.
+  const arranged = { ...full, roles: swap as typeof full.roles };
+  const specs = toAgentSpecs(arranged, defaultPills(), 5, undefined, {}, { opus: 'o', sonnet: 's', haiku: 'h' });
+  check(
+    'the launch is sent in the new order with the new waits',
+    specs.map((a) => a.role).join() === 'developer,architect,validator,reviewer,scribe' &&
+      specs[0]!.dependsOnRoles?.join() === '' && specs[1]!.dependsOnRoles?.join() === 'developer' && specs[2]!.dependsOnRoles?.join() === 'architect',
+    JSON.stringify(specs.map((a) => [a.role, a.dependsOnRoles])),
+  );
+  check('and every agent of it waits only for one listed before it, as the daemon requires', specs.every((a, i) => (a.dependsOnRoles ?? []).every((d) => specs.slice(0, i).some((x) => x.role === d))));
+  check('the preset itself is untouched: same order, same waits, same object', JSON.stringify(PRESETS) === before && presetById('full') === full && show(full.roles) === fullShown);
+  check('and so is a row object a move passed', moveRow(full.roles, 0, 1)[0] !== full.roles[0] && full.roles[1]!.dependsOnRoles?.join() === 'architect');
+  check('a launch with the preset unmoved is what it always was', toAgentSpecs(full, defaultPills(), 5, undefined, {}, { opus: 'o', sonnet: 's', haiku: 'h' }).map((a) => `${a.role}:${a.dependsOnRoles?.join('+')}`).join() === 'architect:,developer:architect,validator:developer,reviewer:architect+developer+validator,scribe:architect+reviewer');
+
+  // A Custom setup moves the same way, and a new row waits for the one above it.
+  const setup: CustomRole[] = [
+    { role: 'architect', brief: '', dependsOnRoles: [] },
+    { role: 'developer', brief: '', dependsOnRoles: ['architect'] },
+    { role: 'validator', brief: '', dependsOnRoles: ['developer'] },
+  ];
+  check('a new Custom row waits for the row above it; the first waits for none', addRow(setup).at(-1)?.dependsOnRoles.join() === 'validator' && addRow([FIRST_ROLE])[1]?.dependsOnRoles.join() === 'developer' && addRow([]).at(-1)?.dependsOnRoles.length === 0);
+  let bad = '';
+  for (let from = 0; from < setup.length; from += 1) {
+    for (let to = 0; to < setup.length; to += 1) {
+      const problems = customProblems(moveRow(setup, from, to));
+      if (problems.length > 0) bad ||= `${from}→${to}: ${problems.join(' ')}`;
+    }
+  }
+  check('a Custom setup moved any way still has no problems, and the persona and brief go with each row', bad === '' && moveRow([{ ...setup[0]!, brief: 'Plan it.', persona: 'architect' }, setup[1]!], 0, 1)[1]?.brief === 'Plan it.' && moveRow([{ ...setup[0]!, persona: 'architect' }, setup[1]!], 0, 1)[1]?.persona === 'architect', bad);
+  check('its preview keeps the moved order', toPreset('custom', 'c', moveRow(setup, 2, 0)).roles.map((r) => r.role).join() === 'validator,architect,developer');
+
+  // The screen: the pieces are wired, and nothing is stored.
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const custom = readFileSync(new URL('./CustomSetup.tsx', import.meta.url), 'utf8');
+  const grip = readFileSync(new URL('./reorder.tsx', import.meta.url), 'utf8');
+  const roleRow = readFileSync(new URL('./RoleRow.tsx', import.meta.url), 'utf8');
+  check(
+    "a change to a preset's rows is held in the screen's state only: it isn't written to a setting, and it doesn't make the preset Custom",
+    /const arrange = \(roles: PresetRole\[\]\): void =>\s*setArranged\(sameStack\(roles, base\.roles\) \? null : \{ presetId, roles \}\);/.test(route) &&
+      !/writeSetting\([^)]*arranged/.test(route) && !/setCustom\([^)]*arranged/.test(route),
+  );
+  check('choosing a preset puts its own rows back, and so does the button in the plan', /setPresetId\(id\);\s*setArranged\(null\);/.test(route) && /onClick=\{\(\) => setArranged\(null\)\}/.test(route));
+  check('the Custom editor saves its own rows, not the plan', /withSetup\(saved, \{ name, roles: custom, models: ownPicks \}\)/.test(route));
+  check(
+    "the preset's plan rows show their waits for, with the same ticks a Custom row has",
+    /<WaitsFor\s+who=\{r\.role\}\s+options=\{rolesAbove\(preset\.roles, i\)\}\s+waits=\{r\.dependsOnRoles \?\? \[\]\}\s+onToggle=\{\(on\) => arrange\(toggleWait\(preset\.roles, i, on\)\)\}/.test(route) &&
+      /export function WaitsFor/.test(roleRow) && /<WaitsFor who=\{label\}/.test(roleRow),
+  );
+  check(
+    'a Custom row has the buttons too, and a one-row setup or preset has none',
+    /useReorder\(\(from, to\) => onChange\(moveRow\(roles, from, to\)\), roles\.length\)/.test(custom) && /roles\.length > 1 \? reorder\.handle/.test(custom) && /const movable = !isCustom && preset\.roles\.length > 1;/.test(route),
+  );
+  check(
+    'a move works from the keyboard: two real buttons, named for the row, that follow it; the drag is native, from a grip',
+    /<button\s+type="button"\s+className="sp-mvb"\s+data-move="up"/.test(grip) && /<button\s+type="button"\s+className="sp-mvb"\s+data-move="down"/.test(grip) && /aria-label=\{`Move \$\{name\} up`\}/.test(grip) && /aria-label=\{`Move \$\{name\} down`\}/.test(grip) &&
+      /refocus\.current = \{ row:/.test(grip) && /draggable/.test(grip) && /e\.dataTransfer\.setData\(/.test(grip) && /disabled=\{i === 0\}/.test(grip),
+  );
+  const web = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { dependencies: Record<string, string> };
+  check('no drag library: React, shared, mermaid, as before', Object.keys(web.dependencies).sort().join() === '@conductor/shared,mermaid,react,react-dom');
+
+  // Both themes: the new rules use the measured tokens, and no colour of their own.
+  const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');
+  const mine = css.slice(css.indexOf('moving a row up or down the stack (Amendment 99)'));
+  const vars = [...mine.matchAll(/var\(--([a-z0-9-]+)\)/g)].map((m) => m[1]!);
+  const MEASURED = ['ink', 'ink2', 'ink3', 'line', 'line2', 'fs-sm', 'sans'];
+  check('the move buttons, grip and drop mark use only tokens lib/verify.ts measures, and no hex', mine.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(mine) && vars.every((v) => MEASURED.includes(v)), [...new Set(vars)].join());
+  check('the grip and the note read as --ink3, which clears 4.5:1 in both themes', /\.sp-grip \{[^}]*color: var\(--ink3\)/.test(css) && /\.sp-plan-note \{[^}]*color: var\(--ink3\)/.test(css));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

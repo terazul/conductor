@@ -290,6 +290,16 @@ about — `git init` the folder and re-add it if you want them.
 | **one agent** | a single developer, no structure. |
 | **custom…** | the agents you add yourself. |
 
+**Who waits for whom.** The plan under the presets lists the agents in the order they run, and
+each row waits for the one above it. Move a row with its **↑ ↓** buttons (they work from the
+keyboard) or by dragging its **⋮⋮** grip onto another row, and it waits for whatever is above
+it in its new place. Under every row but the first, **waits for** has a box for each row above
+it: tick several to wait for more than one (the reviewer in the full pipeline waits for three).
+Moving a row keeps the ticks that still point above it and drops the rest, and a row that
+waited only for the one above it keeps doing that. This is for this launch only. It isn't
+saved, and it doesn't turn the preset into a Custom setup. Click the preset again, or **↺ back
+to** it in the plan, to put it back. An agent can only wait for one above it.
+
 **custom…** opens an editor with one row per agent:
 - Pick a **persona** for the row: it fills in the role name, brief and model, and brings
   its system prompt, tool rules and skills. A row named like a persona, such as the first
@@ -300,7 +310,8 @@ about — `git init` the folder and re-add it if you want them.
 - Optionally give it a brief of its own, on top of the job prompt; empty uses the
   persona's. Its model can be changed in the plan preview, for this launch only.
 - Tick which agents above it it **waits for**. It's handed their final replies, like any
-  agent that waits.
+  agent that waits. A new row waits for the one above it. Move a row with **↑ ↓** or by
+  dragging its **⋮⋮**, as in the plan above; its ticks follow the same rule.
 
 **Personas** (Settings → **Personas**) are what each role is. Each one holds a name, a
 description, a brief, a **system prompt** (added to Claude Code's own, not replacing it),

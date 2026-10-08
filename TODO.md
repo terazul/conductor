@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 99.
+  green `make test` (decided 30 Sep). The next amendment is 100.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
@@ -38,30 +38,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 five items below run in this order.*
 *Decided (8 Oct, later): the question-tool item is one line, so it goes first. The rest keep
 the order above.*
-
-- [ ] **Choose who each agent waits for, in any stack.** Asked for (8 Oct). For example:
-  the developer waits for the architect. An agent can only wait for agents above it in the
-  stack.
-  - **Presets can't be changed today.** Each preset's dependencies are fixed in code
-    (`dependsOnRoles` in `packages/web/src/spawn/presets.ts:67-92`, copied as-is at
-    `presets.ts:317`).
-  - **Custom setups already do this.** Each row has **waits for** (`spawn/RoleRow.tsx:25`,
-    toggled at `spawn/CustomSetup.tsx:66`), and a dependency must be above it
-    (`spawn/custom.ts:67-68`). Adding an agent to a running stack checks for loops
-    (`spawn/stack.ts:180-191`).
-  - **The daemon enforces "above you"** since Amendment 98 (`parseAgentSpecs`,
-    `packages/daemon/src/routes/session.ts`). What's left is the web.
-  - **Show it on preset rows.** Each preset row shows its **waits for** and lets it be
-    changed. Reuse `RoleRow` (`spawn/RoleRow.tsx:48`: no roles given, no **waits for** shown).
-  Decide:
-  - whether changing a preset row turns it into an unsaved Custom setup (as loading a saved
-    one does, `spawn/route.tsx:586-594`), or changes it for this launch only.
-  *Decided (8 Oct): an agent's place in the stack sets what it can wait for. You move rows
-  around in Spawn to change who waits for whom.*
-  *Decided (8 Oct): each row waits for the one directly above it by
-  default, and the **waits for** ticks stay for waiting on several rows above (the reviewer
-  waits on three today, `presets.ts:85`). Moving a row re-checks its ticks. A change to a
-  preset row applies to this launch only.*
 
 - [ ] **Pass the whole context of the agent before, not its last reply.** Asked for (8 Oct).
   The next agent should get everything the agent before it knew, so it knows what to do.

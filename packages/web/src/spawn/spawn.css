@@ -509,10 +509,27 @@
   padding: 7px 13px;
   border-bottom: 1px solid var(--line);
   background: var(--surf2);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
 }
 
 .sp-plan-head .sp-lab {
   margin-bottom: 0;
+}
+
+/* What the plan lets you do to its rows (Amendment 99), and the way back. */
+.sp-plan-note {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.sp-plan-reset {
+  padding: 2px 9px;
+  font-size: var(--fs-sm);
 }
 
 .sp-plan-body {
@@ -892,4 +909,82 @@
   width: 36ch;
   padding: 3px 8px;
   font-size: var(--fs-sm);
+}
+
+/* ── moving a row up or down the stack (Amendment 99) ───────────────────────── */
+
+/* ↑ ↓ for the keyboard, and the grip to drag by. Plan rows and Custom rows share them. */
+.sp-mv {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.sp-arow .sp-mv {
+  align-self: center;
+}
+
+.sp-grip {
+  width: 16px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  letter-spacing: -2px;
+  color: var(--ink3);
+  cursor: grab;
+  user-select: none;
+}
+
+.sp-grip:hover {
+  color: var(--ink);
+}
+
+.sp-mvb {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  color: var(--ink2);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.sp-mvb:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.sp-mvb:focus-visible {
+  outline: 1px solid var(--ink2);
+  outline-offset: 1px;
+}
+
+.sp-mvb:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The row being dragged fades; the row under the pointer shows where it would land. */
+.sp-reorder.is-dragging {
+  opacity: 0.45;
+}
+
+.sp-reorder.is-drop-before {
+  box-shadow: 0 -2px 0 var(--ink);
+}
+
+.sp-reorder.is-drop-after {
+  box-shadow: 0 2px 0 var(--ink);
+}
+
+/* A plan row's ticks, under its line and in line with its role. */
+.sp-awaits {
+  padding: 3px 0 0 90px;
 }

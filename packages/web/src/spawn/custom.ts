@@ -55,6 +55,15 @@ export function nextRole(roles: CustomRole[]): AgentRole {
   return KNOWN_ROLES.find((r) => !taken.has(r)) ?? `agent-${roles.length + 1}`;
 }
 
+/**
+ * The setup with a new row at the end. It waits for the row above it, which is where a
+ * row waits by default; untick it for one that starts with the first (Amendment 99).
+ */
+export function addRow(roles: CustomRole[]): CustomRole[] {
+  const last = roles.at(-1);
+  return [...roles, { role: nextRole(roles), brief: '', dependsOnRoles: last ? [last.role] : [] }];
+}
+
 /** What's wrong with a setup, one sentence each; empty when it can launch. */
 export function customProblems(roles: CustomRole[]): string[] {
   const out: string[] = [];

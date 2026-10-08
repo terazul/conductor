@@ -196,6 +196,56 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 99 — post-merge, applied. **Move rows in Spawn to set who each agent waits for.**
+
+Web only (`spawn/order.ts` and `spawn/reorder.tsx`, new; `spawn/route.tsx`, `spawn/CustomSetup.tsx`,
+`spawn/RoleRow.tsx`, `spawn/custom.ts`, `spawn/spawn.css`, `spawn/verify.ts`; `docs/MANUAL.md`). The
+second half of a TODO.md item (8 Oct): "an agent's place in the stack sets what it can wait for".
+The daemon half is Amendment 98, so `packages/daemon` and `packages/shared` are not touched.
+- **Move a row.** Each row of the plan under the presets, and each row of a Custom setup, has
+  **↑ ↓** buttons and a **⋮⋮** grip. The buttons are real buttons, named for the row ("Move
+  reviewer up"), so they work from the keyboard, and focus follows the row to its new place so the
+  next press moves the same row. The grip is native HTML5 drag and drop (as Fleet's cards use,
+  Amendment 54): drop on another row to put it there, with a line showing where it lands. No
+  drag library. A one-row preset or setup has no buttons.
+- **The default is a chain.** Each row waits for the one directly above it. A new Custom row
+  waits for the one above it (`addRow`); it was empty before. The presets keep the waits they
+  have in code; three of the full pipeline's five are the chain, and the reviewer (three
+  ticks) and the scribe (two) are not.
+- **The ticks stay.** Every row but the first shows **waits for**, one box per row above it
+  (`WaitsFor`, taken out of `RoleRow` so the plan's rows and Custom's rows and a job's "+ agent"
+  share it). The plan's rows show them for the presets; they are kept in the stack's order.
+- **Moving re-checks the ticks** (`moveRow`, `spawn/order.ts`). A tick that now points at the row
+  itself or at a row below it is dropped; one that still points above is kept, so the full
+  pipeline's reviewer keeps its three when moved down one place. A row that waited for exactly
+  the row above it (the chain) waits for whichever row is above it now, so a chain stays a chain
+  when one row is moved out of it. A row left with no ticks that had some waits for the row
+  above it. A row set to wait for no one (not the first) stays that way. The first row waits
+  for no one. A dropped tick is not remembered: moving the reviewer below the scribe and back
+  does not bring the scribe's wait for it back.
+- **For this launch only.** A change to a preset's rows is held in the Spawn screen's state
+  (`arranged`) and nowhere else: it isn't written to a setting, and the preset doesn't become a
+  Custom setup or a saved one. Choosing a preset (the same one again too) puts its own rows
+  back, as does **↺ back to …** in the plan's header, which shows only while rows are changed.
+  Moving a row back to where it was clears the change. The job's `preset` label is still the
+  preset's own name.
+- **Both themes.** The new rules use only tokens `lib/verify.ts` already measures (`--ink`,
+  `--ink2`, `--ink3`, `--line`, `--line2`); the grip and the note read as `--ink3`. No new
+  colour, so `lib/verify.ts` is unchanged.
+- **Checked** (`spawn/verify.ts` §18): the default chain; which rows are on it; a move within
+  bounds keeping the reviewer's three ticks; ticks dropped when they now point below; the chain
+  re-forming around a moved row; a row left with nothing; a parallel row staying parallel;
+  ticking in stack order and refusing a row below or itself; for every move of every preset,
+  every row waits only for rows above it (what the daemon requires), none is lost, and none
+  that waited ends up waiting for no one; the launch is sent in the new order; `PRESETS` is
+  byte-identical afterwards; the change is never written to a setting; a Custom setup moved any
+  way has no problems; the buttons, their names and the native drag are in the source; no drag
+  library; the CSS has no colour of its own.
+- **Not done**: removing a Custom row doesn't re-chain the rows that waited for it (they wait
+  for no one, as before). Moving rows in a running job's stack, and the job's "+ agent", are
+  unchanged (it still picks what it waits for from the job's agents). Not looked at in a
+  browser: the drag, the drop line and the look in both themes need the user's eye.
+
 ### Amendment 98 — post-merge, applied. **A launched agent can only wait for one listed before it.**
 
 Daemon (`routes/session.ts`, `session/verify.ts`). The first half of a TODO.md item (8 Oct):

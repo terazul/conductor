@@ -85,6 +85,9 @@ import {
   type CustomRole,
 } from './custom.js';
 import { CustomSetup } from './CustomSetup.js';
+import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
+import { useReorder } from './reorder.js';
+import { WaitsFor } from './RoleRow.js';
 import { PERSONAS_KEY, personasFrom } from './personas.js';
 import { useDraft } from '../lib/drafts.js';
 import {
@@ -316,7 +319,24 @@ function Spawn() {
   const personasRaw = useSetting(PERSONAS_KEY);
   const personas = useMemo(() => personasFrom(personasRaw), [personasRaw]);
   const isCustom = presetId === CUSTOM_ID;
-  const preset = isCustom ? toPreset(CUSTOM_ID, customName.trim() || 'custom', custom, personas) : presetById(presetId);
+  /*
+   * This launch's changes to a preset's rows (Amendment 99): the order and who waits for
+   * whom. Held here and nowhere else, so it is not stored and does not turn the preset into
+   * a Custom setup; choosing a preset again, or the button in the plan, puts it back.
+   */
+  const [arranged, setArranged] = useState<{ presetId: string; roles: PresetRole[] } | null>(null);
+  const base = presetById(presetId);
+  const preset = isCustom
+    ? toPreset(CUSTOM_ID, customName.trim() || 'custom', custom, personas)
+    : arranged?.presetId === presetId
+      ? { ...base, roles: arranged.roles }
+      : base;
+  /** Change a preset row's place or ticks for this launch; back to the preset's own is no change. */
+  const arrange = (roles: PresetRole[]): void =>
+    setArranged(sameStack(roles, base.roles) ? null : { presetId, roles });
+  /** A preset's rows can be moved and ticked here; a Custom setup's are edited above, and one agent has no order. */
+  const movable = !isCustom && preset.roles.length > 1;
+  const reorder = useReorder((from, to) => arrange(moveRow(preset.roles, from, to)), preset.roles.length);
   /*
    * What each row is sent: your own pick, over the exact id a Custom row's persona names
    * (Amendment 68). A preset's row keeps its tier, so only a Custom setup has any.
@@ -405,6 +425,7 @@ function Spawn() {
   const choosePreset = useCallback(
     (id: string) => {
       setPresetId(id);
+      setArranged(null);
       setHelpers({});
       const next = id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : presetById(id);
       setPicks(every ? pickAll(next, every) : {});
@@ -769,79 +790,116 @@ function Spawn() {
             <span className="sp-lab">
               Will launch {preset.roles.length} agent{preset.roles.length === 1 ? '' : 's'}
             </span>
+            {/*
+             * A preset's rows move and take ticks for this launch (Amendment 99); a Custom
+             * setup's are edited above, where they are saved. Either way, a row's place sets
+             * what it may wait for: only rows above it.
+             */}
+            {movable && (
+              <span className="sp-plan-note">
+                move a row (⋮⋮ or ↑ ↓) or tick what it waits for — for this launch only
+              </span>
+            )}
+            {movable && arranged?.presetId === presetId && (
+              <button
+                type="button"
+                className="sp-ghost sp-plan-reset"
+                title={`Put ${base.label} back as it is: its order, and who waits for whom`}
+                onClick={() => setArranged(null)}
+              >
+                ↺ back to {base.label}
+              </button>
+            )}
           </div>
-          <div className="sp-plan-body">
-            {preset.roles.map((r) => {
+          <div className="sp-plan-body" ref={reorder.rootRef} {...reorder.rootProps}>
+            {preset.roles.map((r, i) => {
               const persona = personaOf(r, personas);
               return (
-              <div className="sp-arow" key={r.role}>
-                <i className="sp-dot" />
-                <span className="sp-role">{r.role}</span>
-                {/* A row named apart from its persona says which it is (Amendment 68). */}
-                {persona && persona.name !== r.role && (
-                  <span className="sp-persona" title={persona.description || undefined}>
-                    {persona.name}
-                  </span>
-                )}
-                <span className="sp-does">{r.does}</span>
-                {/*
-                 * The id this row will be sent, and the place to change it. Unpicked, it
-                 * shows what the preset's tier means now; a tier with nothing served
-                 * shows as an empty choice, which is what blocks the launch.
-                 */}
-                <span className="sp-model">
-                  {!claude ? (
-                    <span title={`Every agent of this launch runs on ${providerLabel(provider)}`}>
-                      {launchOn.model || 'pick a model above'}
+              <div
+                className={`sp-areorder${movable ? ` sp-reorder${reorder.markOf(i)}` : ''}`}
+                key={r.role}
+                {...(movable ? reorder.rowProps(i) : {})}
+              >
+                <div className="sp-arow">
+                  {movable && reorder.handle(i, r.role)}
+                  <i className="sp-dot" />
+                  <span className="sp-role">{r.role}</span>
+                  {/* A row named apart from its persona says which it is (Amendment 68). */}
+                  {persona && persona.name !== r.role && (
+                    <span className="sp-persona" title={persona.description || undefined}>
+                      {persona.name}
                     </span>
-                  ) : (
-                  <ModelSelect
-                    catalog={models.catalog}
-                    value={modelFor(r, picks, tiers) ?? ''}
-                    {...(modelFor(r, picks, tiers)
-                      ? {}
-                      : { none: models.catalog ? `${r.model} · not served` : `${r.model} · reading…` })}
-                    onChange={(id) => setPicks((p) => pickRow(p, r, id))}
-                    disabled={!models.catalog}
-                    title={
-                      ownPicks[r.role]
-                        ? `Picked for ${r.role}. Its preset gives it ${r.model} — ${TIER_HINTS[r.model]}`
-                        : picks[r.role]
-                          ? `${persona?.name ?? r.role}'s model. Pick another for this launch.`
-                          : `The preset's ${r.model} tier — ${TIER_HINTS[r.model]}`
-                    }
-                  />
                   )}
-                </span>
-                {/*
-                 * The pills below describe the job; a reading role overrides them
-                 * and is denied the write tools outright. Saying so here is the
-                 * point of this screen — the resolved-options block at the bottom
-                 * shows the job's autonomy, which for this row is not what gets
-                 * sent.
-                 */}
-                {readsOnly(r, personas) && <span className="sp-ro">read-only</span>}
-                {/*
-                 * Several agents on this role (Amendment 51): this one orchestrates — splits
-                 * the work, starts helpers with its own model and permissions, and hears
-                 * what they report. Each helper takes a slot and a per-agent budget.
-                 */}
-                {has.helpers && (
-                <select
-                  className="ui-select sp-helpers"
-                  value={helpers[r.role] ?? 0}
-                  title="Put several agents on this role: this one splits the work, starts up to this many helpers, and hears what they report. Each helper takes a slot and its own budget."
-                  onChange={(e) => setHelpers((h) => ({ ...h, [r.role]: Number(e.target.value) }))}
-                >
-                  <option value={0}>1 agent</option>
-                  {Array.from({ length: HELPERS_MAX }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      + up to {n} helper{n === 1 ? '' : 's'}
-                    </option>
-                  ))}
-                </select>
+                  <span className="sp-does">{r.does}</span>
+                  {/*
+                   * The id this row will be sent, and the place to change it. Unpicked, it
+                   * shows what the preset's tier means now; a tier with nothing served
+                   * shows as an empty choice, which is what blocks the launch.
+                   */}
+                  <span className="sp-model">
+                    {!claude ? (
+                      <span title={`Every agent of this launch runs on ${providerLabel(provider)}`}>
+                        {launchOn.model || 'pick a model above'}
+                      </span>
+                    ) : (
+                    <ModelSelect
+                      catalog={models.catalog}
+                      value={modelFor(r, picks, tiers) ?? ''}
+                      {...(modelFor(r, picks, tiers)
+                        ? {}
+                        : { none: models.catalog ? `${r.model} · not served` : `${r.model} · reading…` })}
+                      onChange={(id) => setPicks((p) => pickRow(p, r, id))}
+                      disabled={!models.catalog}
+                      title={
+                        ownPicks[r.role]
+                          ? `Picked for ${r.role}. Its preset gives it ${r.model} — ${TIER_HINTS[r.model]}`
+                          : picks[r.role]
+                            ? `${persona?.name ?? r.role}'s model. Pick another for this launch.`
+                            : `The preset's ${r.model} tier — ${TIER_HINTS[r.model]}`
+                      }
+                    />
+                    )}
+                  </span>
+                  {/*
+                   * The pills below describe the job; a reading role overrides them
+                   * and is denied the write tools outright. Saying so here is the
+                   * point of this screen — the resolved-options block at the bottom
+                   * shows the job's autonomy, which for this row is not what gets
+                   * sent.
+                   */}
+                  {readsOnly(r, personas) && <span className="sp-ro">read-only</span>}
+                  {/*
+                   * Several agents on this role (Amendment 51): this one orchestrates — splits
+                   * the work, starts helpers with its own model and permissions, and hears
+                   * what they report. Each helper takes a slot and a per-agent budget.
+                   */}
+                  {has.helpers && (
+                  <select
+                    className="ui-select sp-helpers"
+                    value={helpers[r.role] ?? 0}
+                    title="Put several agents on this role: this one splits the work, starts up to this many helpers, and hears what they report. Each helper takes a slot and its own budget."
+                    onChange={(e) => setHelpers((h) => ({ ...h, [r.role]: Number(e.target.value) }))}
+                  >
+                    <option value={0}>1 agent</option>
+                    {Array.from({ length: HELPERS_MAX }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        + up to {n} helper{n === 1 ? '' : 's'}
+                      </option>
+                    ))}
+                  </select>
+                  )}
+                  <span className="sp-when">{startsWhen(r)}</span>
+                </div>
+                {movable && i > 0 && (
+                  <div className="sp-awaits">
+                    <WaitsFor
+                      who={r.role}
+                      options={rolesAbove(preset.roles, i)}
+                      waits={r.dependsOnRoles ?? []}
+                      onToggle={(on) => arrange(toggleWait(preset.roles, i, on))}
+                    />
+                  </div>
                 )}
-                <span className="sp-when">{startsWhen(r)}</span>
               </div>
               );
             })}

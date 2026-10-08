@@ -7,6 +7,10 @@
  *
  * Each row is a `RoleRow`, the same one a job's "+ agent" uses (Amendment 89).
  *
+ * A row moves with its ↑ ↓ buttons or by dragging its grip (Amendment 99). Its place sets
+ * which rows it may wait for, and a new row waits for the one above it. Moving a row keeps
+ * the ticks that still point above it and drops the rest (`moveRow`).
+ *
  * Each row can pick a persona (Amendment 68). Picking one names the row after it, unless
  * the row was already named something of its own, and its brief shows as the row's
  * placeholder: typing one overrides it for this launch. A persona's model reaches the row's
@@ -14,9 +18,10 @@
  */
 
 import { useState } from 'react';
-import type { AgentRole } from '@conductor/shared';
-import { KNOWN_ROLES, customProblems, nextRole, removeRole, renameRole, roleFromName, rowPersona, untouchedRole, type CustomRole } from './custom.js';
+import { KNOWN_ROLES, addRow, customProblems, removeRole, renameRole, roleFromName, rowPersona, untouchedRole, type CustomRole } from './custom.js';
+import { moveRow, toggleWait } from './order.js';
 import { personaFor, type Persona } from './personas.js';
+import { useReorder } from './reorder.js';
 import { RoleRow } from './RoleRow.js';
 
 export function CustomSetup({
@@ -60,44 +65,41 @@ export function CustomSetup({
       }),
     );
   };
-  const toggleWait = (i: number, on: AgentRole): void => {
-    const r = roles[i]!;
-    set(i, {
-      dependsOnRoles: r.dependsOnRoles.includes(on) ? r.dependsOnRoles.filter((d) => d !== on) : [...r.dependsOnRoles, on],
-    });
-  };
+  const reorder = useReorder((from, to) => onChange(moveRow(roles, from, to)), roles.length);
 
   return (
-    <div className="sp-custom">
+    <div className="sp-custom" ref={reorder.rootRef} {...reorder.rootProps}>
       <datalist id="sp-known-roles">
         {KNOWN_ROLES.map((r) => (
           <option key={r} value={r} />
         ))}
       </datalist>
       {roles.map((r, i) => (
-        <RoleRow
-          key={i}
-          label={`Agent ${i + 1}`}
-          role={r.role}
-          persona={r.persona}
-          shownPersona={rowPersona(r, personas)}
-          brief={r.brief}
-          personas={personas}
-          rolesList="sp-known-roles"
-          waitOptions={roles.slice(0, i).map((above) => above.role)}
-          waits={r.dependsOnRoles}
-          onRole={(name) => onChange(renameRole(roles, i, name))}
-          onPersona={(id) => pickPersona(i, id)}
-          onToggleWait={(on) => toggleWait(i, on)}
-          onBrief={(brief) => set(i, { brief })}
-          onRemove={() => onChange(removeRole(roles, i))}
-          removeDisabled={roles.length === 1}
-        />
+        <div key={i} className={`sp-reorder${reorder.markOf(i)}`} {...reorder.rowProps(i)}>
+          <RoleRow
+            label={`Agent ${i + 1}`}
+            lead={roles.length > 1 ? reorder.handle(i, r.role || `agent ${i + 1}`) : undefined}
+            role={r.role}
+            persona={r.persona}
+            shownPersona={rowPersona(r, personas)}
+            brief={r.brief}
+            personas={personas}
+            rolesList="sp-known-roles"
+            waitOptions={roles.slice(0, i).map((above) => above.role)}
+            waits={r.dependsOnRoles}
+            onRole={(name) => onChange(renameRole(roles, i, name))}
+            onPersona={(id) => pickPersona(i, id)}
+            onToggleWait={(on) => onChange(toggleWait(roles, i, on))}
+            onBrief={(brief) => set(i, { brief })}
+            onRemove={() => onChange(removeRole(roles, i))}
+            removeDisabled={roles.length === 1}
+          />
+        </div>
       ))}
       <button
         type="button"
         className="sp-addproj"
-        onClick={() => onChange([...roles, { role: nextRole(roles), brief: '', dependsOnRoles: [] }])}
+        onClick={() => onChange(addRow(roles))}
       >
         + add an agent
       </button>

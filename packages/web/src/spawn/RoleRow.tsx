@@ -14,6 +14,41 @@ import { personaFor, type Persona } from './personas.js';
 
 const BRIEF_HINT = 'What this agent does, on top of the prompt above. Optional.';
 
+/**
+ * The "waits for" ticks: one box per row above, ticked for those it waits for. A Custom
+ * row has them (Amendment 50), a job's "+ agent" has them (Amendment 89), and so does a
+ * preset's row in Spawn's plan (Amendment 99), which is why they are a part of their own.
+ * None above: nothing is shown.
+ */
+export function WaitsFor({
+  who,
+  label = 'waits for',
+  options,
+  waits,
+  onToggle,
+}: {
+  /** Whose ticks these are, for the screen reader's name of the group. */
+  who: string;
+  label?: string;
+  /** The roles it may wait for. None: nothing is shown. */
+  options: readonly AgentRole[];
+  waits: readonly AgentRole[];
+  onToggle: (role: AgentRole) => void;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <span className="sp-cwaits" role="group" aria-label={`${who} ${label}`}>
+      {label}
+      {options.map((above) => (
+        <label key={above} className="sp-cwait">
+          <input type="checkbox" checked={waits.includes(above)} onChange={() => onToggle(above)} />
+          {above}
+        </label>
+      ))}
+    </span>
+  );
+}
+
 export function RoleRow({
   label,
   role,
@@ -31,6 +66,7 @@ export function RoleRow({
   onBrief,
   onRemove,
   removeDisabled = false,
+  lead,
   children,
 }: {
   /** "Agent 2", for the screen reader's names of its fields. */
@@ -55,6 +91,8 @@ export function RoleRow({
   /** Absent: no ✕ on the row. */
   onRemove?: () => void;
   removeDisabled?: boolean;
+  /** Before the role: Spawn's Custom setup puts the buttons that move the row here (Amendment 99). */
+  lead?: ReactNode;
   /** More of the row, under the brief: a job's "+ agent" adds its feeds, model and cap. */
   children?: ReactNode;
 }) {
@@ -62,6 +100,7 @@ export function RoleRow({
   return (
     <div className="sp-crow">
       <div className="sp-crow-head">
+        {lead}
         <input
           className="sp-input sp-crole"
           value={role}
@@ -86,17 +125,7 @@ export function RoleRow({
           {/* Deleted since the setup was saved: said so, rather than shown as none. */}
           {persona && !p && <option value={persona}>{persona} · deleted</option>}
         </select>
-        {waitOptions.length > 0 && (
-          <span className="sp-cwaits">
-            {waitLabel}
-            {waitOptions.map((above) => (
-              <label key={above} className="sp-cwait">
-                <input type="checkbox" checked={waits.includes(above)} onChange={() => onToggleWait(above)} />
-                {above}
-              </label>
-            ))}
-          </span>
-        )}
+        <WaitsFor who={label} label={waitLabel} options={waitOptions} waits={waits} onToggle={onToggleWait} />
         {onRemove && (
           <button type="button" className="sp-ghost" aria-label={`Remove ${role}`} disabled={removeDisabled} onClick={onRemove}>
             ✕
