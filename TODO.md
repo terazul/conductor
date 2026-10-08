@@ -201,6 +201,33 @@ the order above.*
   - one backdrop colour per screen, so you can tell Project from Agent at a glance. Today
     both use `--here` (`packages/shared/src/tokens.css`).
 
+- [ ] **Today's spend doesn't go back to zero at midnight.** Asked for (8 Oct). When the day
+  restarts, the budget should read zero again, at midnight in your time zone.
+  Read from the code, not yet reproduced. Two different budgets could be meant:
+  - **The daily budget** (Amendment 59), the status bar's "$N today" and the Settings meter
+    (`shell/shell.tsx:194`, `settings/route.tsx:213`). The daemon counts it right: one
+    `cost_daily` row per local day (`localDay`, `session/store.ts:617`; `costToday`, `:630`).
+    What's missing is telling the page. The status bar only learns the number when a tab
+    connects (the hello snapshot) and from a `cost` frame, which is sent only when a Claude
+    run's spend grows (`session/backends/claude.ts:604`; `case 'cost'` at
+    `web/src/lib/store.ts:170`). A tab left open past midnight keeps yesterday's total until
+    the next spend or a reload. The "daily budget reached" alert is fine: it has its own
+    midnight timer (`#atMidnight`, `session/alerts.ts:147`) and its id carries the date.
+  - **An agent's or job's own cap**, the composer's "$4.10 of $25" (`budgetUsd`,
+    `budgetTokens`). These are lifetime caps by design (Amendment 77), so they never reset.
+  The fix for the first: at the day's end the daemon sends a `cost` frame with the new day's
+  total, so every open status bar reads zero. Reuse the midnight timer in `alerts.ts`, or put
+  one in `daily.ts` beside `costChanged`. One long timer can fire late if the machine sleeps
+  through midnight, so check the day on a short interval, or when a tab becomes visible.
+  The day is the daemon's own time zone (`localDay` uses local `Date` parts, and nothing sets
+  `TZ`), so it is your machine's zone unless the daemon is started under another.
+  Decide:
+  - which budget you saw not resetting: the status bar's "today", or an agent's cap.
+  - if it's an agent's cap: whether it should become a per-day cap (spend since midnight),
+    which changes what "budget reached" means for a long-running agent, or stay a lifetime cap.
+  Tests in `session/verify.ts`, with a fake clock: spend on day 1, move the clock past
+  midnight, and a `cost` frame carries 0 and a standing daily alert clears.
+
 ## Agents
 
 - [ ] **When the model can't be reached, try again after 5 s, 15 s, 30 s, 60 s and 5 min,
