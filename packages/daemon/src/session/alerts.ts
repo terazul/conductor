@@ -31,7 +31,7 @@ import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { budgetStop } from './budget.js';
 import { costToday, dueNotes, getAgent, listAgents, localDay } from './store.js';
-import { DAILY_KEY, dailyBudget, onCostChanged } from '../daily.js';
+import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
 
 /** Causes a person has to fix: the network or the login is broken, not busy. */
@@ -121,6 +121,8 @@ export class Alerts {
     this.#off.push(onSettingsChanged((changed) => changed.includes(DAILY_KEY) && this.refresh()));
     // A note due tomorrow is due today after midnight, with nothing else changing.
     this.#atMidnight();
+    // And every open page is told the new day's spend, so it reads 0 (Amendment 103).
+    this.#off.push(startDayWatch(this.#db));
     this.#off.push(registerSnapshotContributor(() => ({ alerts: this.list() })));
     this.#sent = JSON.stringify(this.list());
   }

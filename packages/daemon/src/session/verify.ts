@@ -92,6 +92,7 @@ import {
   setAgentAutonomy,
   setAgentStatus,
   localDay,
+  setDayClock,
   helpersOf,
   unreportedHelpers,
 } from './store.js';
@@ -115,7 +116,7 @@ import {
 } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
-import { costChanged } from '../daily.js';
+import { DayWatch, costChanged, dayWatch } from '../daily.js';
 import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
@@ -3779,6 +3780,88 @@ async function main(): Promise<void> {
     check('behind a failed agent it is added, queued, and the job stays settled', stuck.status === 201 && getAgent(db, stuck.body.agent?.id ?? '')?.status === 'queued' && getJob(db, 'job_add_stuck')?.status === 'failed', `${stuck.status} ${getJob(db, 'job_add_stuck')?.status}`);
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
+  console.log("\n17q · today's spend reads zero when the day changes (Amendment 103)");
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const costFrames = (from: number): number[] => eyes.frames.slice(from).flatMap((f) => (f.type === 'cost' ? [f.costToday] : []));
+    const dailyAlerts = async () => (await get<Snapshot>('/api/snapshot')).body.alerts.filter((a) => a.kind === 'daily_budget');
+    const spend = async (id: string, dollars: number): Promise<void> => {
+      job(`job_${id}`, null);
+      fixture(`agt_${id}`, `job_${id}`, { status: 'queued', autonomy: DEFAULT_AUTONOMY });
+      const first = runs.length;
+      sup.pump();
+      await until(() => runs.length === first + 1);
+      runs[first]!.finish({ cost: dollars, reason: 'completed' });
+    };
+
+    // The watch is the one Alerts started. Its timer is ours to drive while the clock is fake.
+    const watch = dayWatch();
+    check('the daemon is watching the day', watch !== null);
+    watch?.stop();
+    let now = new Date(2031, 2, 14, 23, 50, 0); // 14 Mar 2031, ten minutes before midnight
+    setDayClock(() => now);
+    watch?.check(); // it has seen day 1
+    check('the fake clock sets today: it is day 1', localDay() === '2031-03-14', localDay());
+    await send('PATCH', '/api/settings', { settings: { 'conductor.dailyBudget': '5' } });
+
+    await spend('midnight_1', 6);
+    check('spend on day 1 is told to every tab', await until(() => costFrames(0).some((c) => near(c, 6))), JSON.stringify(costFrames(0)));
+    const standing = await dailyAlerts();
+    check('it passes the daily budget: the alert stands, with day 1 in its id', standing.length === 1 && standing[0]!.id === 'daily:2031-03-14', JSON.stringify(standing));
+
+    const mark = eyes.frames.length;
+    now = new Date(2031, 2, 15, 0, 0, 20); // twenty seconds past midnight
+    watch?.start(25);
+    check('past midnight, a cost frame carrying 0 goes to every tab', await until(() => costFrames(mark).includes(0)), JSON.stringify(costFrames(mark)));
+    await settle(250); // ten more looks
+    check('and only once, not on every look', costFrames(mark).length === 1, JSON.stringify(costFrames(mark)));
+    check('the standing daily-budget alert clears', (await dailyAlerts()).length === 0);
+    check('and every tab hears that', eyes.frames.slice(mark).some((f) => f.type === 'alerts' && !f.alerts.some((a) => a.kind === 'daily_budget')));
+    check('a look on the same day sends nothing', watch?.check() === false && costFrames(mark).length === 1);
+    check('and a tab that connects now reads 0', (await get<Snapshot>('/api/snapshot')).body.costToday === 0);
+
+    const mark2 = eyes.frames.length;
+    await spend('midnight_2', 2);
+    check("spend on day 2 shows day 2's total", await until(() => costFrames(mark2).some((c) => near(c, 2))), JSON.stringify(costFrames(mark2)));
+    check("and not yesterday's with it", !costFrames(mark2).some((c) => near(c, 8)) && near(costToday(db), 2), `${costToday(db)}`);
+    check('under the budget again, so no alert', (await dailyAlerts()).length === 0);
+    check("yesterday's total is kept", near(row<{ cost_usd: number }>(db.prepare('SELECT cost_usd FROM cost_daily WHERE day = ?').get('2031-03-14'))?.cost_usd, 6));
+
+    const mark3 = eyes.frames.length;
+    now = new Date(2031, 2, 18, 9, 0, 0); // the machine slept through three midnights
+    check('a clock that jumps whole days sends a frame', await until(() => costFrames(mark3).length > 0), JSON.stringify(costFrames(mark3)));
+    await settle(250);
+    check('one frame, carrying that day\'s 0', costFrames(mark3).length === 1 && costFrames(mark3)[0] === 0, JSON.stringify(costFrames(mark3)));
+
+    // The watch itself, with a clock of its own.
+    const turns: string[] = [];
+    let when = '2031-01-31';
+    const unit = new DayWatch((day, was) => turns.push(`${was}>${day}`), () => when);
+    check('a first look finds the day it started on', unit.check() === false && turns.length === 0);
+    when = '2031-02-01';
+    check('the next day is a turn, once', unit.check() === true && unit.check() === false && turns.join() === '2031-01-31>2031-02-01', turns.join());
+    when = '2031-02-05';
+    check('and a jump of days is one turn', unit.check() === true && turns.join() === '2031-01-31>2031-02-01,2031-02-01>2031-02-05', turns.join());
+    unit.start(10);
+    when = '2031-02-06';
+    check('started, it looks by itself', await until(() => turns.length === 3));
+    unit.stop();
+    when = '2031-02-07';
+    await settle(60);
+    check('and stopped, it does not', turns.length === 3);
+
+    await send('PATCH', '/api/settings', { settings: { 'conductor.dailyBudget': null } });
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2031-01-01'").run();
+    eyes.close();
     sdk.query = realQuery;
   }
 

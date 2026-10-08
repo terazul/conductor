@@ -196,6 +196,52 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 103 — post-merge, applied. **Open pages are told when the day changes, so the status bar's "today" reads zero at midnight.**
+
+Daemon (`daily.ts`, `session/alerts.ts`, `session/store.ts`, `session/verify.ts`). The status-bar half of a
+TODO.md item (8 Oct): "when the day restarts, the budget should go back to zero (at midnight my
+time zone)".
+- **What was wrong.** The daemon already counted the day right: one `cost_daily` row per local
+  day (`localDay`, `costToday`). An open page was told today's total only when it connected (the
+  hello snapshot) and when a Claude run's spend grew (the `cost` frame, `backends/claude.ts`).
+  A tab left open past midnight kept yesterday's figure until the next spend or a reload.
+- **`DayWatch`** (`daily.ts`) looks at the day every `DAY_CHECK_MS` (30 s) and compares
+  `localDay()` with the last day it saw. The first look that finds them different is a turn:
+  it runs once, then the day seen is the new one. The timer is `unref`'d, so it never keeps the
+  daemon alive.
+- **On a turn**, `startDayWatch(db)` broadcasts `{ type: 'cost', costToday: costToday(db) }` to
+  every connected page (0, at midnight) and calls `costChanged()`, so the daily-budget alert
+  is checked against the new day: a standing "daily budget reached" clears, because its id
+  carries the date. The same refresh turns over notes due today. Nothing changes in `wire.ts` or
+  the web: the status bar and the Settings meter already take a `cost` frame.
+- **Why a short interval and not one timer to midnight.** A machine that sleeps through
+  midnight fires a long timer late, and a clock set by hand fires it at the wrong time. A look every 30 s sends the
+  frame within half a minute of the machine waking, whether it slept one night or three, and
+  sends exactly one: a clock that jumps whole days is still a single turn. A look on the
+  same day sends nothing. A clock moved backwards to another day is a turn too.
+- **Wired in `Alerts.start()`**, which already holds the daily budget's refreshes, and stopped
+  with it (`stop()` runs the returned stopper). `Alerts#atMidnight` is unchanged: it still
+  refreshes just after midnight for notes, and now the watch covers the late case it can't.
+- **The time zone is the daemon process's local one.** `localDay` reads local `Date` parts and
+  nothing sets `TZ`, so "midnight" is your machine's, unless the daemon is started under another
+  zone. There is no time-zone setting. A machine that changes zone while the daemon runs turns
+  the day when the date in the new zone differs.
+- **A seam for the tests.** `setDayClock(fn?)` in `session/store.ts` changes the clock that
+  `localDay()` reads when it is given no date, so `costToday`, `addCostToday`, the daily alert
+  and the watch all see the same fake day. With no argument it puts the real clock back.
+  Nothing outside `session/verify.ts` calls it. `DayWatch` also takes its own `today()` for
+  a unit check.
+- **Checked** (`session/verify.ts` §17q), with a fake clock: spend on day 1 passes the budget and
+  its alert stands; the clock moves past midnight and a `cost` frame carrying 0 reaches every
+  tab, once, with the timer looking ten more times; the alert clears and the tabs hear it; a look
+  on the same day sends nothing; a tab that connects reads 0; spend on day 2 shows only day 2's
+  total (2, not 8) and yesterday's 6 is kept in `cost_daily`; a clock that jumps three days
+  sends one frame; and `DayWatch` alone starts, turns once, and stops.
+- **Not done: an agent's own cap.** The composer's "$4.10 of $25" (`budgetUsd`, `budgetTokens`)
+  is still a lifetime cap by design (Amendment 77), so it never resets at midnight. Whether that
+  was the budget meant, and whether it should become a per-day cap, is the TODO.md item's open
+  question. Nothing here touches it.
+
 ### Amendment 102 — post-merge, applied. **Re-run from here: start the agents after one again, with its latest reply.**
 
 Shared (`rerun.ts`, new; `index.ts`), daemon (`session/rerun.ts`, new; `session/supervisor.ts`, `routes/session.ts`, `session/verify.ts`) and web (`agent/rerun.ts`, new; `agent/agent.tsx`, `agent/endpoints.ts`, `agent/verify.ts`). A TODO.md item (7 Oct, decided 8 Oct): "re-run from here".

@@ -607,6 +607,16 @@ export function setAgentUsage(
 // cost rollup
 // ─────────────────────────────────────────────────────────────────────────────
 
+let dayClock = (): Date => new Date();
+
+/**
+ * Where "today" is read from, so a check can move the day without waiting for midnight
+ * (Amendment 103). With no argument, the real clock is put back.
+ */
+export function setDayClock(fn?: () => Date): void {
+  dayClock = fn ?? ((): Date => new Date());
+}
+
 /**
  * The day key for the cost rollup, in LOCAL time.
  *
@@ -614,7 +624,7 @@ export function setAgentUsage(
  * spending $1.25 at 20:00 would watch the status bar reset to $0.00 four hours
  * before their day ended. "Today" in a status bar means the human's today.
  */
-export function localDay(d = new Date()): string {
+export function localDay(d: Date = dayClock()): string {
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
