@@ -33,17 +33,21 @@ import { branchAction, getBranches, previewMerge } from './endpoints.js';
 import { BranchGraph } from './graph.js';
 import { onBranchesChanged } from './live.js';
 import {
+  checkoutConfirm,
+  checkoutReason,
   commitReason,
   defaultInto,
   defaultMessage,
   intoChoices,
   intoReason,
+  makeDefaultReason,
   mergeAllState,
   mergeConfirm,
   mergeable,
   pushConfirm,
   previewLine,
   pushReason,
+  rootLine,
   showCommit,
   showPush,
 } from './rules.js';
@@ -53,7 +57,7 @@ type Outcome =
   | { kind: 'done'; action: BranchAction['action']; res: BranchActionResult }
   | { kind: 'error'; label: string; text: string; tone: 'warn' | 'fail' };
 
-type Confirming = 'merge' | 'merge_all' | 'push' | null;
+type Confirming = 'merge' | 'merge_all' | 'push' | 'checkout' | null;
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -228,6 +232,7 @@ function Branches() {
           {project.name} <i>/</i> <b>branches</b>
         </span>
         {resp && <CompareWith projectId={project.id} resp={resp} />}
+        {resp && <RootLine defaultBranch={project.defaultBranch} rootBranch={resp.rootBranch} />}
         {resp && (
           <span className="br-remote" title={resp.remote ? `the remote pushes go to` : 'this repo has no remote called origin'}>
             {resp.remote ? `⇅ ${resp.remote}` : 'no origin'}
@@ -307,6 +312,8 @@ function Branches() {
         <ActionBar
           resp={resp}
           branch={branch}
+          defaultBranch={project.defaultBranch}
+          path={project.path}
           busy={busy}
           confirming={confirming}
           setConfirming={setConfirming}
@@ -358,6 +365,12 @@ function CompareWith({ projectId, resp }: { projectId: string; resp: BranchesRes
   );
 }
 
+/** The header's line about the default branch and what the project's own folder has checked out (Amendment 117). */
+function RootLine({ defaultBranch, rootBranch }: { defaultBranch: string; rootBranch: string | null | undefined }) {
+  const { text, warn } = rootLine(defaultBranch, rootBranch);
+  return <span className={warn ? 'br-warn' : 'br-quiet'}>{text}</span>;
+}
+
 /** A disabled-able button with its reason beside it, so it never just sits there grey. */
 function Act({
   label,
@@ -391,6 +404,8 @@ function Act({
 function ActionBar({
   resp,
   branch: b,
+  defaultBranch,
+  path,
   busy,
   confirming,
   setConfirming,
@@ -404,6 +419,8 @@ function ActionBar({
 }: {
   resp: BranchesResponse;
   branch: BranchInfo;
+  defaultBranch: string;
+  path: string;
   busy: BranchAction['action'] | null;
   confirming: Confirming;
   setConfirming: (c: Confirming) => void;
@@ -425,6 +442,8 @@ function ActionBar({
   const push = pushReason(resp, b);
   const confirmMerge = mergeConfirm(resp, b, into || resp.target, ahead);
   const commitBlocked = commit ?? (message.trim().length === 0 ? 'write a message first' : null);
+  const makeDefault = makeDefaultReason(defaultBranch, b);
+  const checkout = checkoutReason(resp, defaultBranch, b);
 
   return (
     <div className="br-bar" role="region" aria-label={`actions for ${b.name}`}>
@@ -521,6 +540,19 @@ function ActionBar({
           <Act label={busy === 'push' ? 'Pushing…' : `Push to ${resp.remote ?? 'origin'}`} reason={push} busy={working} onClick={() => setConfirming('push')} />
         )}
 
+        <Act
+          label={busy === 'set_default' ? 'Making default…' : 'Make default'}
+          reason={makeDefault}
+          busy={working}
+          onClick={() => run({ action: 'set_default', branch: b.name, checkout: false }, 'Make default')}
+        />
+        <Act
+          label={busy === 'set_default' ? 'Making default…' : 'Make default and check out'}
+          reason={checkout}
+          busy={working}
+          onClick={() => setConfirming('checkout')}
+        />
+
         {b.isTarget && !showCommit(b) && !showPush(resp, b) && (
           <span className="br-why">nothing to commit or push — {resp.remote ?? 'origin'} has all of {resp.target}</span>
         )}
@@ -546,6 +578,23 @@ function ActionBar({
           <span>{pushConfirm(resp, b)}</span>
           <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'push', branch: b.name }, 'Push')}>
             Push
+          </button>
+          <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {confirming === 'checkout' && checkout === null && (
+        <div className="br-confirm" role="alertdialog" aria-label={`confirm making ${b.name} the default and checking it out`}>
+          <span>{checkoutConfirm(path, b.name)}</span>
+          <button
+            type="button"
+            className="br-btn br-btn-go"
+            disabled={working}
+            onClick={() => run({ action: 'set_default', branch: b.name, checkout: true }, 'Make default and check out')}
+          >
+            Make default and check out
           </button>
           <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
             Cancel
@@ -584,6 +633,7 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
           : `Nothing was merged.`;
   } else if (action === 'commit') text = `Committed${sha}.`;
   else if (action === 'push') text = res.ok ? 'Pushed.' : 'The push did not go through.';
+  else if (action === 'set_default') text = res.ok ? 'Made the default.' : 'That did not go through.';
   else text = res.ok ? 'Fetched.' : 'The fetch did not go through.';
 
   return (

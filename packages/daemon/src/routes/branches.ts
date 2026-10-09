@@ -13,7 +13,9 @@
  *
  * Errors are `{ error, detail? }`: 404 no such project; 400 not a git repo, an unknown
  * branch, a name starting with '-', an empty message; 409 live branch, target not checked
- * out or dirty, nothing to commit or merge, a rejected push; 504 push or fetch timed out;
+ * out or dirty, nothing to commit or merge, a rejected push, or (Amendment 117) a
+ * `set_default` checkout refused because the project folder is dirty, something is working
+ * in it, or the branch is checked out elsewhere; 504 push or fetch timed out;
  * 500 git failed (its stderr in detail).
  */
 
@@ -23,7 +25,7 @@ import { branchTargetKey } from '@conductor/shared';
 import { onSettingsChanged, readSettings } from '../settings.js';
 import { openDb } from '../db/index.js';
 import { hub } from '../hub.js';
-import { agentsForJob, getProject, jobsForProject } from '../session/store.js';
+import { agentsForJob, defaultBranchIsSet, getProject, jobsForProject, setDefaultBranch } from '../session/store.js';
 import { GitError } from '../workspace/git.js';
 import {
   BranchError,
@@ -65,7 +67,17 @@ export default async function branchesRoutes(app: FastifyInstance): Promise<void
     const project = getProject(db, projectId);
     if (!project) return null;
     const chosen = readSettings()[branchTargetKey(project.id)] ?? null;
-    return openRepo(project.id, project.path, project.defaultBranch, lookupFor(project), chosen);
+    const defaultBranchSet = defaultBranchIsSet(db, project.id);
+    const rootLive = jobsForProject(db, project.id).some(
+      (job) =>
+        (job.isolation === 'in_place' || job.isolation === 'branch') &&
+        agentsForJob(db, job.id).some((a) => LIVE.has(a.status)),
+    );
+    const setDefault = (branch: string) => {
+      const updated = setDefaultBranch(db, project.id, branch);
+      if (updated) hub().broadcast({ type: 'entities', projects: [updated] });
+    };
+    return openRepo(project.id, project.path, project.defaultBranch, lookupFor(project), chosen, defaultBranchSet, rootLive, setDefault);
   }
 
   // Choosing what to compare with is a setting (Amendment 113): every open page re-reads.

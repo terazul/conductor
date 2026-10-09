@@ -13,16 +13,20 @@ import type { BranchInfo, BranchMergePreview, BranchesResponse } from '@conducto
 import { G, badges, layout } from './graph.js';
 import { onBranchesChanged, receiveBranches } from './live.js';
 import {
+  checkoutConfirm,
+  checkoutReason,
   commitReason,
   defaultInto,
   defaultMessage,
   intoChoices,
   intoReason,
+  makeDefaultReason,
   mergeAllState,
   mergeConfirm,
   mergeReason,
   previewLine,
   pushConfirm,
+  rootLine,
   targetFromWords,
   pushReason,
   showCommit,
@@ -261,6 +265,35 @@ console.log('\n8 · what everything is drawn against (Amendment 113)');
   check('choosing writes the per-project setting, automatic removes it', /writeSetting\(key, e\.target\.value \|\| null\)/.test(route) && /const key = branchTargetKey\(projectId\);/.test(route));
 }
 
+console.log("\n9 · a project's default branch, and checking it out on it (Amendment 117)");
+{
+  check('already the default: refused, and nothing else is asked', makeDefaultReason('main', main) === 'already the default');
+  check('any other branch: fine to make the default', makeDefaultReason('main', job) === null);
+
+  const clean = { ...resp, rootBranch: 'main', rootClean: true, rootLive: false };
+  check('checkout: fine when the folder is clean, idle, and this isn\'t already the default', checkoutReason(clean, 'main', job) === null);
+  check('checkout: refused for the branch that already is the default', checkoutReason(clean, 'main', main) === 'already the default');
+  const dirtyRoot = { ...resp, rootBranch: 'main', rootClean: false, rootLive: false };
+  check('checkout: refused with uncommitted changes in the project folder', /uncommitted changes/.test(checkoutReason(dirtyRoot, 'main', job) ?? ''));
+  const liveRoot = { ...resp, rootBranch: 'main', rootClean: true, rootLive: true };
+  check('checkout: refused while an agent works in the project folder', /working in the project folder/.test(checkoutReason(liveRoot, 'main', job) ?? ''));
+  check('a dirty folder outranks "already live": the first reason wins either way', checkoutReason({ ...dirtyRoot, rootLive: true }, 'main', job) === checkoutReason(dirtyRoot, 'main', job));
+  check('being the default outranks either folder problem', checkoutReason(dirtyRoot, 'main', main) === 'already the default');
+
+  check('the header, with the folder undetermined (no rootBranch key)', rootLine('main', undefined).text === 'default: main' && rootLine('main', undefined).warn === false);
+  check('the header, folder on the default: no warning', rootLine('main', 'main').text === 'default: main · folder on main' && rootLine('main', 'main').warn === false);
+  check('the header, folder on something else: warns', rootLine('main', 'conductor/job_a').text === 'default: main · folder on conductor/job_a' && rootLine('main', 'conductor/job_a').warn === true);
+  check('the header, folder detached: says so, and warns', rootLine('main', null).text === 'default: main · folder on nothing — detached' && rootLine('main', null).warn === true);
+
+  check('the checkout confirm names the folder and the branch, and warns what runs there', /\/r/.test(checkoutConfirm('/r', 'main')) && /main/.test(checkoutConfirm('/r', 'main')) && /Conductor itself/.test(checkoutConfirm('/r', 'main')));
+
+  const route = src('./route.tsx');
+  check('the bar offers "Make default" and "Make default and check out"', /Make default/.test(route) && /Make default and check out/.test(route));
+  check('the header shows the default/folder line next to "compared with"', /<RootLine defaultBranch=\{project\.defaultBranch\} rootBranch=\{resp\.rootBranch\} \/>/.test(route));
+  check("checking out asks to confirm first", /setConfirming\('checkout'\)/.test(route) && /checkoutConfirm\(path, b\.name\)/.test(route));
+  check("the action sent is set_default, checkout true only once confirmed", /\{ action: 'set_default', branch: b\.name, checkout: false \}/.test(route) && /\{ action: 'set_default', branch: b\.name, checkout: true \}/.test(route));
+}
+
 console.log('\n6 · the status bar and nav.ts');
 {
   check('shell.tsx says 1–7 screens', /<kbd>1<\/kbd>–<kbd>7<\/kbd> screens/.test(src('../shell/shell.tsx')));
@@ -271,7 +304,7 @@ console.log('\n6 · the status bar and nav.ts');
 
 console.log(
   failures === 0
-    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–7; nav.ts opens it.'
+    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–7; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117).'
     : `\nAmendment 109 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

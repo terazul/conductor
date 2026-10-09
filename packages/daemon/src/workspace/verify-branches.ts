@@ -25,7 +25,7 @@ import type {
 } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
-import { DEFAULT_AUTONOMY, insertAgent, insertJob, insertProject } from '../session/store.js';
+import { DEFAULT_AUTONOMY, getProject, insertAgent, insertJob, insertProject, setAgentStatus } from '../session/store.js';
 import { GitError, git } from './git.js';
 import { resolveTarget } from './branches.js';
 import { patchSettings } from '../settings.js';
@@ -76,6 +76,11 @@ const OTHER = join(ROOT, 'other');
 const WT_ONE = join(ROOT, 'wt-one');
 const WT_CLASH = join(ROOT, 'wt-clash');
 const PLAIN = join(ROOT, 'not-a-repo');
+// Amendment 117's own repo, kept apart from REPO above: its `job_live` is permanently
+// live, which would make every checkout refused for the wrong reason.
+const REPO2 = join(ROOT, 'repo2');
+const ORIGIN2 = join(ROOT, 'origin2.git');
+const WT2 = join(ROOT, 'wt2');
 
 /** Commits get one minute apart, so "oldest tip first" never ties on a second. */
 let clock = Date.parse('2026-01-01T09:00:00Z');
@@ -174,6 +179,25 @@ function makeRepos(): Fixture {
   return { base, oneTip };
 }
 
+/**
+ * A second, simpler repo for Amendment 117's `set_default`: `main`, two more local branches
+ * (`alt`, `other`), `other` checked out in its own worktree, and an `origin` whose HEAD is
+ * `main` — so a test that beats origin/HEAD actually has one to beat.
+ */
+function makeRepo2(): void {
+  sh(ROOT, 'init', '-q', '--bare', ORIGIN2);
+  sh(ROOT, 'init', '-q', '-b', 'main', REPO2);
+  sh(REPO2, 'config', 'user.name', 'Verify');
+  sh(REPO2, 'config', 'user.email', 'verify@example.invalid');
+  commitFile(REPO2, 'r.txt', 'one\n', 'start');
+  sh(REPO2, 'remote', 'add', 'origin', ORIGIN2);
+  sh(REPO2, 'push', '-q', '-u', 'origin', 'main');
+  sh(REPO2, 'remote', 'set-head', 'origin', 'main');
+  sh(REPO2, 'branch', 'alt', 'main');
+  sh(REPO2, 'branch', 'other', 'main');
+  sh(REPO2, 'worktree', 'add', '-q', WT2, 'other');
+}
+
 function byName(r: BranchesResponse, name: string): BranchInfo | undefined {
   return r.branches.find((b) => b.name === name);
 }
@@ -215,12 +239,14 @@ async function main(): Promise<void> {
   process.env['LOG_LEVEL'] = 'silent';
 
   const fx = makeRepos();
+  makeRepo2();
 
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
   const db = openDb();
 
   const project = insertProject(db, { path: REPO, name: 'branches-verify', defaultBranch: 'main' });
+  const project2 = insertProject(db, { path: REPO2, name: 'default-branch-verify', defaultBranch: 'main' });
   const plain = insertProject(db, { path: PLAIN, name: 'not-a-repo', defaultBranch: 'main' });
   insertJob(db, {
     id: 'job_live',
@@ -603,13 +629,82 @@ async function main(): Promise<void> {
   check('cleared, it is main again', back.body.target === 'main', back.body.target);
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n12 · a project's default branch, and checking it out (Amendment 117)");
+  const URL2 = `/api/projects/${project2.id}/branches`;
+  const act2 = (body: unknown) => post<BranchActionResult & Err>(URL2, body);
+
+  const start = await get<BranchesResponse>(URL2);
+  check('starts on main, folder clean, nothing live', start.body.rootBranch === 'main' && start.body.rootClean === true && start.body.rootLive === false, JSON.stringify(start.body));
+  check("before it's set, origin/HEAD still decides the target", start.body.target === 'main' && start.body.targetFrom === 'origin', `${start.body.target} ${start.body.targetFrom}`);
+
+  const setAlt = await act2({ action: 'set_default', branch: 'alt', checkout: false });
+  check('set_default (no checkout) → 200, ok', setAlt.status === 200 && setAlt.body.ok === true, JSON.stringify(setAlt.body));
+  check('the folder did not move', setAlt.body.branches.rootBranch === 'main');
+  check('the target follows it, beating origin/HEAD', setAlt.body.branches.target === 'alt' && setAlt.body.branches.targetFrom === 'project', `${setAlt.body.branches.target} ${setAlt.body.branches.targetFrom}`);
+  check("it's written to the project", getProject(db, project2.id)?.defaultBranch === 'alt', getProject(db, project2.id)?.defaultBranch);
+  check(
+    'an entities frame told the pages',
+    ws.frames.some((f) => f.type === 'entities' && f.projects?.some((p) => p.id === project2.id && p.defaultBranch === 'alt')),
+  );
+
+  const checkoutAlt = await act2({ action: 'set_default', branch: 'alt', checkout: true });
+  check('set_default with checkout → 200, ok', checkoutAlt.status === 200 && checkoutAlt.body.ok === true, JSON.stringify(checkoutAlt.body));
+  check('checkout switches the folder', sh(REPO2, 'symbolic-ref', '--quiet', '--short', 'HEAD') === 'alt');
+  check('rootBranch is right', checkoutAlt.body.branches.rootBranch === 'alt', String(checkoutAlt.body.branches.rootBranch));
+
+  writeFileSync(join(REPO2, 'r.txt'), 'dirty\n');
+  const dirtyCheckout = await act2({ action: 'set_default', branch: 'main', checkout: true });
+  check('a dirty folder gives 409', dirtyCheckout.status === 409, `${dirtyCheckout.status} ${JSON.stringify(dirtyCheckout.body)}`);
+  check('and it did not move', sh(REPO2, 'symbolic-ref', '--quiet', '--short', 'HEAD') === 'alt');
+  sh(REPO2, 'checkout', '-q', '--', 'r.txt');
+
+  const job3 = insertJob(db, {
+    id: 'job_root_live',
+    projectId: project2.id,
+    prompt: 'stay busy',
+    isolation: 'in_place',
+    worktreePath: REPO2,
+    branch: 'alt',
+    status: 'working',
+    budgetUsd: null,
+  });
+  const agt3 = insertAgent(db, {
+    id: 'agt_root_live',
+    jobId: job3.id,
+    projectId: project2.id,
+    role: 'builder',
+    model: 'claude-sonnet-5',
+    sdkSessionId: null,
+    status: 'working',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: DEFAULT_AUTONOMY,
+  });
+  const liveCheckout = await act2({ action: 'set_default', branch: 'main', checkout: true });
+  check('a live in_place job gives 409', liveCheckout.status === 409, `${liveCheckout.status} ${JSON.stringify(liveCheckout.body)}`);
+  check('and it still did not move', sh(REPO2, 'symbolic-ref', '--quiet', '--short', 'HEAD') === 'alt');
+  setAgentStatus(db, agt3.id, 'done');
+
+  const elsewhere = await act2({ action: 'set_default', branch: 'other', checkout: true });
+  check('a branch checked out elsewhere gives 409', elsewhere.status === 409, `${elsewhere.status} ${JSON.stringify(elsewhere.body)}`);
+  check('and it still did not move', sh(REPO2, 'symbolic-ref', '--quiet', '--short', 'HEAD') === 'alt');
+
+  const unknownDefault = await act2({ action: 'set_default', branch: 'no/such', checkout: false });
+  check('an unknown branch → 400', unknownDefault.status === 400, `${unknownDefault.status} ${JSON.stringify(unknownDefault.body)}`);
+  const dashDefault = await act2({ action: 'set_default', branch: '--evil', checkout: false });
+  check("a name starting with '-' → 400", dashDefault.status === 400, `${dashDefault.status} ${JSON.stringify(dashDefault.body)}`);
+
+  // ───────────────────────────────────────────────────────────────────────────
   ws.close();
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview.\n`
+      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117).\n`
       : `\nAmendment 109 branches: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
