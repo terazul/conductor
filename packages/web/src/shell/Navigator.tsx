@@ -36,7 +36,7 @@ import type { FileNode } from '@conductor/shared';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
-import { useUnseenJobs } from '../lib/seen.js';
+import { useUnseenAgents, useUnseenJobs } from '../lib/seen.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
 import { useFileTree } from '../files/useWorkspace.js';
 import { SCREEN, openAgent, openProject, recall } from './nav.js';
@@ -133,9 +133,10 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
     >
       <Dot status={a.status} />
       <span className="sh-nav-label">{a.label}</span>
-      {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). */}
+      {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). Finished only until
+          you open the agent, and again when it finishes again (Amendment 105). */}
       {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
-      {a.status === 'done' && <span className="sh-nav-tag is-done">finished</span>}
+      {a.finished && <span className="sh-nav-tag is-done">finished</span>}
       {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
     </button>
   );
@@ -454,6 +455,7 @@ export function Navigator() {
   const jobs = useJobs();
   const unseen = useUnseenJobs();
   const finished = useMemo(() => new Set(unseen.map((j) => j.id)), [unseen]);
+  const unseenAgents = useUnseenAgents();
   const route = useRoute();
   const open = parseOpen(useSetting(NAV_TREE_KEY));
   const panel = usePanel(NAV_PANEL);
@@ -466,8 +468,8 @@ export function Navigator() {
     [projects, rawSort, rawOrder, agents, pending],
   );
   const tree = useMemo(
-    () => navTree(ordered, agents, pending, alerts, jobs, finished),
-    [ordered, agents, pending, alerts, jobs, finished],
+    () => navTree(ordered, agents, pending, alerts, jobs, finished, unseenAgents),
+    [ordered, agents, pending, alerts, jobs, finished, unseenAgents],
   );
 
   const [dragging, setDragging] = useState<string | null>(null);

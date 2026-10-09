@@ -196,6 +196,46 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 106 — post-merge, applied. **What you typed reads in its own colour: `--you`.**
+
+Shared (`tokens.css`) and web (`agent/agent.css`, `agent/transcript.tsx`, `agent/verify.ts`,
+`lib/verify.ts`), and `docs/MANUAL.md`. Asked 9 Oct: "make the 'You' text I type that shows up in the
+output areas a different, more highlight colour."
+- **`--you`**, a new colour token for both themes: `#c4a8ff` dark, `#6236b0` light. Violet, which no
+  status colour is, so your turns stand out without reading as "needs you" (`--need` still means only
+  that, §3). It is in `lib/verify.ts`'s measured text tokens: at least 6.6:1 dark and 5.9:1 light on every
+  surface, and about 5:1 on its own 10% tint.
+- **Your turns** in the transcript (`.ag-msg.is-you`) put the label, the left bar and the text in `--you`,
+  on a `--you` tint at 10% instead of the `--ink` one. A turn Conductor sent for you (`synthetic`,
+  labelled **auto**) gets `is-auto` and keeps the old neutral look: you didn't type it.
+- Nothing else changes colour.
+
+### Amendment 105 — post-merge, applied. **An agent's "finished" clears once you've opened it.**
+
+Web only (`lib/seen.ts`, `attention/always.tsx`, `shell/navtree.ts`, `shell/Navigator.tsx`,
+`agent/agent.tsx`, `lib/verify.ts`, `shell/verify.ts`, `agent/verify.ts`), and `docs/MANUAL.md`. No
+daemon, wire or database change. Reported 9 Oct: "the finished tag is never cleared from the menu bar,
+even after I visit the particular agent." Design: [ADR 0005](docs/adr/0005-finished-agent-seen.md).
+It narrows Amendment 94 for the navigator's agent rows and the Agent screen's tabs.
+- **Seen per agent.** A new setting, `conductor.seenAgents` = `{ since, agents: { <agentId>: <endedAt
+  seen> } }`, beside `conductor.seenJobs` (Amendment 87) and in its pattern: `parseSeenAgents`,
+  `serializeSeenAgents`, `unseenDoneAgents`, `markAgentsSeen` (pure), and `markAgentSeen`,
+  `useUnseenAgents` (live). An agent is unseen when it is `done` (not failed or stopped), has an end time
+  after `since`, and after the one you saw. `setAgentStatus` writes a new `ended_at` on every end, so an
+  agent re-run or continued that finishes again is unseen again. `startSeenOnce` writes its `since` once.
+  A separate key, not a map inside `seenJobs`: `parseSeen`/`serializeSeen` rebuild only `{ since, jobs }`,
+  so a tab on an older bundle would drop the map, and a fresh `since` keeps the upgrade from lighting every
+  old done agent.
+- **Seeing an agent** is having its Agent screen open while the tab is in front. The `Notifier` effect that
+  marks the open agent's job marks the agent too, under the same `if (!visible) return`. Opening its
+  project doesn't.
+- **Where it shows.** `NavAgent` gains `finished` (done and not yet seen); `navTree` takes the unseen agent
+  ids as a new last parameter, default empty. The navigator's `AgentRow` shows **finished** on
+  `a.finished`; the Agent screen's tab on `t.status === 'done' && unseenAgents.has(t.id)`.
+- **Unchanged:** the job group's **finished** and its seen, the Fleet card, the Project screen, the agent
+  lane's `Tag`, the Agent header's status `Tag` (`STATUS_WORD.done` is still `finished`), the tab badge and
+  desktop notifications (jobs only).
+
 ### Amendment 104 — post-merge, applied. **An agent hands off only by saying so: a `hand_off` tool.**
 
 Shared (`wire.ts`, `stack.ts`), daemon (`routes/helpers.ts`, `routes/session.ts`, `session/supervisor.ts`,

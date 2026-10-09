@@ -19,6 +19,13 @@
  *    again has a later end time, so it is unseen again.
  *  - Jobs that no longer exist drop out whenever it is written, so it doesn't grow.
  *
+ * Agents are kept the same way, in their own key (`conductor.seenAgents`, Amendment 105),
+ * as `{ since, agents: { <agentId>: <endedAt seen> } }`. A done agent's **finished** in the
+ * navigator and the Agent screen's tabs stays until you open that agent, and comes back
+ * when it finishes again. Only opening the agent itself sees it, not opening its project.
+ * It is a separate key so a tab still on an older bundle, which rewrites `seenJobs` whole,
+ * can't drop it, and so its own `since` keeps the upgrade from lighting every old agent.
+ *
  * The rules are pure, for lib/verify.ts; the hooks at the bottom read the store.
  */
 
@@ -122,12 +129,90 @@ export function seenOnAgent(
   return jobId && unseen.some((j) => j.id === jobId) ? [jobId] : [];
 }
 
+// ── agents (Amendment 105) ──────────────────────────────────────────────────
+
+export const SEEN_AGENTS_KEY = 'conductor.seenAgents';
+
+export interface SeenAgents {
+  /** ISO time it was first kept; null before then, when nothing is unseen. */
+  since: string | null;
+  /** Each agent seen, with the end time it had when you saw it. */
+  agents: Record<string, string>;
+}
+
+/** The stored value. Missing or broken is "not kept yet": nothing is unseen. */
+export function parseSeenAgents(raw: string | null): SeenAgents {
+  const none: SeenAgents = { since: null, agents: {} };
+  if (!raw) return none;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return none;
+    const o = v as { since?: unknown; agents?: unknown };
+    if (typeof o.since !== 'string' || Number.isNaN(Date.parse(o.since))) return none;
+    const agents: Record<string, string> = {};
+    if (o.agents && typeof o.agents === 'object' && !Array.isArray(o.agents)) {
+      for (const [k, t] of Object.entries(o.agents)) if (typeof t === 'string') agents[k] = t;
+    }
+    return { since: o.since, agents };
+  } catch {
+    return none;
+  }
+}
+
+export function serializeSeenAgents(s: SeenAgents): string {
+  return JSON.stringify({ since: s.since, agents: s.agents });
+}
+
+/**
+ * The done agents you haven't opened since they ended, in the order given. Only `done`:
+ * a failed or stopped agent has no **finished** tag. One that ended before `since` counts
+ * as seen.
+ */
+export function unseenDoneAgents<A extends Pick<Agent, 'id' | 'status' | 'endedAt'>>(
+  agents: readonly A[],
+  seen: SeenAgents,
+): A[] {
+  if (seen.since === null) return [];
+  const since = Date.parse(seen.since);
+  return agents.filter((a) => {
+    if (a.status !== 'done' || a.endedAt === null) return false;
+    const ended = Date.parse(a.endedAt);
+    const saw = seen.agents[a.id];
+    return ended > since && (saw === undefined || ended > Date.parse(saw));
+  });
+}
+
+/**
+ * `ids` marked seen at the end time each has now, and every agent not in `agents` dropped.
+ * Null when nothing would change, so a caller writes only a real change.
+ */
+export function markAgentsSeen(
+  seen: SeenAgents,
+  ids: readonly string[],
+  agents: readonly Pick<Agent, 'id' | 'endedAt'>[],
+): SeenAgents | null {
+  if (seen.since === null) return null;
+  const known = new Set(agents.map((a) => a.id));
+  const next: Record<string, string> = {};
+  for (const [id, t] of Object.entries(seen.agents)) if (known.has(id)) next[id] = t;
+  for (const id of ids) {
+    const ended = agents.find((a) => a.id === id)?.endedAt;
+    if (ended) next[id] = ended;
+  }
+  const out = { since: seen.since, agents: next };
+  return serializeSeenAgents(out) === serializeSeenAgents(seen) ? null : out;
+}
+
 // ── the live state ──────────────────────────────────────────────────────────
 
 /** Write `since` once the daemon's settings arrive, if no browser has yet. */
 export function startSeenOnce(): void {
   whenSettingsLoaded(() => {
-    if (readSetting(SEEN_KEY) === null) writeSetting(SEEN_KEY, serializeSeen(startSeen(new Date().toISOString())));
+    const now = new Date().toISOString();
+    if (readSetting(SEEN_KEY) === null) writeSetting(SEEN_KEY, serializeSeen(startSeen(now)));
+    if (readSetting(SEEN_AGENTS_KEY) === null) {
+      writeSetting(SEEN_AGENTS_KEY, serializeSeenAgents({ since: now, agents: {} }));
+    }
   });
 }
 
@@ -144,6 +229,28 @@ export function useUnseenJobs(): Job[] {
   const agents = useAgents();
   const raw = useSetting(SEEN_KEY);
   return useMemo(() => unseenFinished(jobs, agents, parseSeen(raw)), [jobs, agents, raw]);
+}
+
+/**
+ * Mark the open agent seen if it is a done agent you haven't seen, read from the settings
+ * now so two quick marks both land. Writes only a real change.
+ */
+export function markAgentSeen(
+  id: string | undefined,
+  agents: readonly Pick<Agent, 'id' | 'status' | 'endedAt'>[],
+): void {
+  if (!id) return;
+  const seen = parseSeenAgents(readSetting(SEEN_AGENTS_KEY));
+  if (!unseenDoneAgents(agents, seen).some((a) => a.id === id)) return;
+  const next = markAgentsSeen(seen, [id], agents);
+  if (next) writeSetting(SEEN_AGENTS_KEY, serializeSeenAgents(next));
+}
+
+/** The ids of every done agent you haven't opened since it ended. */
+export function useUnseenAgents(): ReadonlySet<string> {
+  const agents = useAgents();
+  const raw = useSetting(SEEN_AGENTS_KEY);
+  return useMemo(() => new Set(unseenDoneAgents(agents, parseSeenAgents(raw)).map((a) => a.id)), [agents, raw]);
 }
 
 function onVisibility(fn: () => void): () => void {

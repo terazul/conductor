@@ -345,7 +345,7 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
   check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'working' && calm.jobs[1]!.status === 'done', calm.jobs.map((j) => j.status).join());
-  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0 }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0 }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0 }], []);
+  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, finished: false }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, finished: false }], []);
   check('a failure outranks working, by the Fleet\'s SORT_RANK', failed.length === 1 && failed[0]!.status === 'failed' && SORT_RANK.failed < SORT_RANK.working);
   check('a project with one job still gets its group', api.jobs.length === 1 && api.jobs[0]!.agents.length === 1);
   const unknown = navTree(projects, agents, [], [])[0]!;
@@ -354,8 +354,14 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   const marked = navTree(projects, agents, [], [], jobs, new Set(['jOld']))[0]!;
   check('a job that finished and you have not seen says so on its group (Amendment 87)', marked.jobs.find((j) => j.id === 'jOld')!.finished && !marked.jobs.find((j) => j.id === 'jNew')!.finished);
   check('and none does when it is not told of any', calm.jobs.every((j) => !j.finished));
+  // Amendment 105: an agent's own finished is "done and you haven't opened it since".
+  const seenRows = navTree(projects, agents, [], [], jobs, new Set(), new Set(['a1', 'a2']))[0]!;
+  check('a done agent you have not opened since says finished on its row (Amendment 105)', seenRows.agents.find((a) => a.id === 'a1')!.finished);
+  check('an unseen id on an agent that is not done marks nothing', !seenRows.agents.find((a) => a.id === 'a2')!.finished);
+  check('without unseen agents no row says finished, done or not', calm.agents.every((a) => !a.finished) && calm.agents.some((a) => a.status === 'done'));
+  check('the navigator reads the unseen agents', /const unseenAgents = useUnseenAgents\(\)/.test(src('./Navigator.tsx')));
   const navSrc = src('./Navigator.tsx');
-  check('the navigator marks it from the unseen jobs, never in amber', /navTree\(ordered, agents, pending, alerts, jobs, finished\)/.test(navSrc) && /sh-nav-tag is-\$\{job\.status === 'failed' \? 'fail' : 'done'\}/.test(navSrc));
+  check('the navigator marks it from the unseen jobs, never in amber', /navTree\(ordered, agents, pending, alerts, jobs, finished, unseenAgents\)/.test(navSrc) && /sh-nav-tag is-\$\{job\.status === 'failed' \? 'fail' : 'done'\}/.test(navSrc));
 
   const id = navJobId('web', 'jNew');
   check('a group is p:<id>:job:<jobId>', id === 'p:web:job:jNew');
@@ -426,9 +432,10 @@ console.log('\n10 · the carry-through: filled marks and a nested repo\'s branch
   };
 
   check(
-    "an agent row's own tag is filled live while working, filled done once finished",
+    "an agent row's own tag is filled live while working, filled done once finished and not yet opened (Amendment 105)",
     /a\.status === 'working' && <span className="sh-nav-tag is-live">working<\/span>/.test(nav) &&
-      /a\.status === 'done' && <span className="sh-nav-tag is-done">finished<\/span>/.test(nav),
+      /a\.finished && <span className="sh-nav-tag is-done">finished<\/span>/.test(nav) &&
+      !/a\.status === 'done' && <span className="sh-nav-tag is-done">/.test(nav),
   );
   check(
     "a job's group gets the same filled working tag when nothing has finished yet",

@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlwaysOnDef } from '../lib/screens.js';
 import { currentRoute, navigate, onNavigate } from '../lib/nav.js';
-import { markJobsSeen, seenOnAgent, startSeenOnce, useTabVisible, useUnseenJobs } from '../lib/seen.js';
+import { markAgentSeen, markJobsSeen, seenOnAgent, startSeenOnce, useTabVisible, useUnseenJobs } from '../lib/seen.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
 import { openProject, recall, SCREEN as SHELL } from '../shell/nav.js';
 import { jobLine } from '../shell/navtree.js';
@@ -76,10 +76,13 @@ function Notifier() {
   );
 
   // Looking at one of a finished job's agents is seeing it — while the tab is in front.
+  // It also sees the agent itself (Amendment 105): its **finished** in the navigator and
+  // the tabs clears. `agents` changes when it ends, so one you are watching is seen at once.
   const onAgent = route.id === SHELL.agent ? (route.params['agentId'] ?? recall().agentId) : undefined;
   useEffect(() => {
     if (!visible) return;
     markJobsSeen(seenOnAgent(onAgent, agents, unseen), jobs);
+    markAgentSeen(onAgent, agents);
   }, [visible, onAgent, agents, unseen, jobs]);
 
   /**

@@ -9,7 +9,8 @@
  * Every colour resolves to a token. --need appears only where a human is
  * genuinely required: the blocked banner, a live ask, and the `held`/`parked`
  * note. Not on the composer's pills, not on the send button, and not on your own
- * turn's label — all three are lit while nothing is wrong.
+ * turn's label — all three are lit while nothing is wrong. Your own turns have a
+ * colour of their own instead, --you, which is no status (Amendment 106).
  */
 
 /* ── transcript ────────────────────────────────────────────────────────────── */
@@ -52,6 +53,12 @@
   color: var(--ink);
 }
 
+/* What you typed reads in --you (Amendment 106): the label, the bar and the words.
+   A turn Conductor sent for you ("auto") keeps the plain look: you didn't type it. */
+.ag-msg.is-you:not(.is-auto) .ag-who {
+  color: var(--you);
+}
+
 .ag-body {
   flex: 1;
   min-width: 0;
@@ -78,6 +85,12 @@
   color: var(--ink);
   white-space: pre-wrap;
   max-width: 80ch;
+}
+
+.ag-msg.is-you:not(.is-auto) .ag-body {
+  background: color-mix(in srgb, var(--you) 10%, transparent);
+  border-left-color: var(--you);
+  color: var(--you);
 }
 
 /* Inline code sits in a well rather than taking a colour of its own — there is

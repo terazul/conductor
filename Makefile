@@ -170,6 +170,7 @@ test:
 	pnpm --filter @conductor/web exec tsx src/attention/verify.ts
 	pnpm --filter @conductor/web exec tsx src/files/verify.ts
 	pnpm --filter @conductor/web exec tsx src/shell/verify.ts
+	pnpm --filter @conductor/web exec tsx src/lib/verify-seen-agents.ts
 	bash fixtures/make-scratch-repo.sh
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/workspace/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/preview/verify.ts

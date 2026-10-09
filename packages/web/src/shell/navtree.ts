@@ -59,6 +59,8 @@ export interface NavAgent {
   /** Blocked when something waits on you, whatever the agent's own status says. */
   status: AgentStatus;
   needs: number;
+  /** Done, and you haven't opened it since (Amendment 105). */
+  finished: boolean;
 }
 
 /** One job's agents in a project (Amendment 86). */
@@ -131,7 +133,8 @@ export function projectFolders(project: Pick<Project, 'id' | 'path' | 'extraDirs
  * `jobs` orders the agents, newest job first as on the Agent screen's tabs, and heads
  * their groups with its prompt. Without it the agents keep the order they were given in,
  * and each group is headed by its job id. `finished` is the jobs that finished and you
- * haven't seen (lib/seen.ts); their groups say so.
+ * haven't seen (lib/seen.ts); their groups say so. `finishedAgents` is the done agents you
+ * haven't opened since they ended (Amendment 105); their rows say so.
  */
 export function navTree(
   projects: Pick<Project, 'id' | 'name' | 'path' | 'extraDirs'>[],
@@ -140,6 +143,7 @@ export function navTree(
   alerts: Alert[],
   jobs: Pick<Job, 'id' | 'createdAt' | 'prompt'>[] = [],
   finished: ReadonlySet<string> = new Set(),
+  finishedAgents: ReadonlySet<string> = new Set(),
 ): NavProject[] {
   const jobOrder = [...jobs].sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt)).map((j) => j.id);
 
@@ -167,6 +171,7 @@ export function navTree(
       label: t.label,
       status: t.status,
       needs: t.needs,
+      finished: t.status === 'done' && finishedAgents.has(t.id),
     }));
 
     return {

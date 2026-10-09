@@ -61,6 +61,11 @@
      it is 4.9:1. */
   --here: #1f3047;
 
+  /* What you typed: your own turns in an agent's transcript, their label, bar and text
+     (Amendment 106). Not a status colour — violet, which none of them is — so your words
+     stand out without reading as "needs you". 6.6:1 or more on every surface. */
+  --you: #c4a8ff;
+
   /* Native scrollbars, form controls and the default canvas follow this. */
   color-scheme: dark;
 
@@ -140,6 +145,8 @@
   --paper: #ffffff;
 
   --here: #d6e0f0;
+
+  --you: #6236b0;
 
   color-scheme: light;
 }

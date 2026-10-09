@@ -59,6 +59,7 @@ import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, slotsProblem } from '../settings/s
 import { readDraft, writeDraft } from './drafts.js';
 import { copyText } from './clipboard.js';
 import { SEEN_KEY, isFinished, markSeen, parseSeen, seenOnAgent, serializeSeen, startSeen, unseenFinished } from './seen.js';
+import { SEEN_AGENTS_KEY, markAgentsSeen, parseSeenAgents, serializeSeenAgents, unseenDoneAgents } from './seen.js';
 import { REVOKE_NOTE, copyLine, ruleOrigin, ruleTitle } from '../settings/rules.js';
 import { nestHelpers } from '../fleet/nest.js';
 import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortProjects, type SortFacts } from '../fleet/order.js';
@@ -411,7 +412,7 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
     return (hi! + 0.05) / (lo! + 0.05);
   };
 
-  const TEXT = ['ink', 'ink2', 'ink3', 'live', 'need', 'fail', 'done', 'queue', 'idle'];
+  const TEXT = ['ink', 'ink2', 'ink3', 'live', 'need', 'fail', 'done', 'queue', 'idle', 'you'];
   const SURFACES = ['bg', 'bg2', 'surf', 'surf2', 'surf3', 'well'];
   // Buttons and badges that put --bg text on a status fill (.sp-go, .sh-alert-n, …).
   const FILLS = ['live', 'need', 'fail', 'done'];
@@ -1269,9 +1270,45 @@ console.log('\n33 · the top bar\'s tabs read louder, and the open one stands ou
   );
 }
 
+console.log('\n34 · an agent says finished until you have opened it (Amendment 105)');
+{
+  const T = (m: number): string => new Date(Date.UTC(2026, 9, 9, 12, m)).toISOString();
+  const ag = (id: string, status: Agent['status'], endedAt: string | null) => ({ id, status, endedAt });
+  const kept = { since: T(10), agents: {} };
+
+  check('it is kept in Settings under its own key, not inside seenJobs', SEEN_AGENTS_KEY === 'conductor.seenAgents' && SEEN_KEY === 'conductor.seenJobs');
+  check('before it is kept, nothing is unseen: the upgrade does not light every old agent', unseenDoneAgents([ag('a', 'done', T(20))], parseSeenAgents(null)).length === 0);
+  check('a broken value is the same as none', parseSeenAgents('{').since === null && parseSeenAgents('[]').since === null && parseSeenAgents('{"since":"nope"}').since === null);
+  check('it reads back what it wrote', serializeSeenAgents(parseSeenAgents(serializeSeenAgents({ since: T(1), agents: { a: T(2) } }))) === serializeSeenAgents({ since: T(1), agents: { a: T(2) } }));
+  check('and drops what is not an end time', Object.keys(parseSeenAgents(JSON.stringify({ since: T(1), agents: { a: T(2), b: 3 } })).agents).join() === 'a');
+
+  const agents = [ag('old', 'done', T(5)), ag('new', 'done', T(20)), ag('bad', 'failed', T(21)), ag('stop', 'stopped', T(22)), ag('run', 'working', null), ag('wait', 'queued', null), ag('odd', 'done', null)];
+  const unseen = unseenDoneAgents(agents, kept).map((a) => a.id);
+  check('a done agent that ended since it was kept is unseen', unseen.join() === 'new', unseen.join());
+  check('failed, stopped, working and queued agents are not; nor one that ended before, nor one with no end time', !['bad', 'stop', 'run', 'wait', 'old', 'odd'].some((id) => unseen.includes(id)));
+
+  const marked = markAgentsSeen(kept, ['new'], agents)!;
+  check('marking an agent seen keeps the end time it had', marked.agents['new'] === T(20) && marked.since === kept.since);
+  check('and it is no longer unseen', unseenDoneAgents(agents, marked).length === 0);
+  check('marking it again changes nothing, so nothing is written', markAgentsSeen(marked, ['new'], agents) === null);
+  check('nor before it is kept', markAgentsSeen(parseSeenAgents(null), ['new'], agents) === null);
+  const again = agents.map((a) => (a.id === 'new' ? ag('new', 'done', T(40)) : a));
+  check('an agent re-run or continued that finishes again is unseen again', unseenDoneAgents(again, marked).map((a) => a.id).join() === 'new');
+  const gone = markAgentsSeen(marked, ['old'], agents.filter((a) => a.id !== 'new'))!;
+  check('an agent that no longer exists drops out when it is written', !('new' in gone.agents) && gone.agents['old'] === T(5));
+  check('an unknown id marks nothing', markAgentsSeen(kept, ['nobody'], agents) === null);
+
+  const seenSrc = readFileSync(new URL('./seen.ts', import.meta.url), 'utf8');
+  const always = readFileSync(new URL('../attention/always.tsx', import.meta.url), 'utf8');
+  const effect = always.slice(always.indexOf('if (!visible) return;'), always.indexOf('}, [visible, onAgent'));
+  check('the first load writes its since too, once', /readSetting\(SEEN_AGENTS_KEY\) === null/.test(seenSrc));
+  check('the live mark reads the setting when it writes, so two quick marks both land', /parseSeenAgents\(readSetting\(SEEN_AGENTS_KEY\)\)/.test(seenSrc));
+  check('the notifier marks the open agent seen, only while the tab is in front', effect.length > 0 && /markAgentSeen\(onAgent, agents\)/.test(effect));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

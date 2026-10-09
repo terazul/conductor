@@ -553,7 +553,7 @@ export function Transcript({
     <div className="ag-trans">
       {turns.map((t, i) =>
         t.who === 'you' ? (
-          <div key={t.key} className="ag-msg is-you" id={`t-${t.key}`}>
+          <div key={t.key} className={`ag-msg is-you${t.synthetic ? ' is-auto' : ''}`} id={`t-${t.key}`}>
             <span className="ag-who">{t.synthetic ? 'auto' : 'you'}</span>
             <div className="ag-body">{t.text}</div>
           </div>

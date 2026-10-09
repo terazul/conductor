@@ -20,6 +20,7 @@ import {
 import { useNavParams } from '../lib/nav.js';
 import { SCREEN, highlight, openAgent, openAttention, openProject, recall } from '../shell/nav.js';
 import { agentTabs } from './tabs.js';
+import { useUnseenAgents } from '../lib/seen.js';
 import { TerminalPanel } from './Terminal.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
@@ -441,6 +442,7 @@ export function AgentScreen() {
   const job = jobs.find((j) => j.id === agent?.jobId) ?? null;
   const allPending = usePending();
   const allAlerts = useAlerts();
+  const unseenAgents = useUnseenAgents();
   // Shared by interrupt, pause and terminate — see StopControls.
   const control = useCommand();
   // What removing it would do to its job, while that confirm is armed (Amendment 89).
@@ -595,8 +597,9 @@ export function AgentScreen() {
                 <Dot status={t.status} />
                 {t.label}
                 {/* Filled, the same look as the status Tag (Amendment 94); working
-                    already pulses via the Dot above. */}
-                {t.status === 'done' && <span className="ag-tab-tag">finished</span>}
+                    already pulses via the Dot above. Finished only until you open that
+                    agent, and again when it finishes again (Amendment 105). */}
+                {t.status === 'done' && unseenAgents.has(t.id) && <span className="ag-tab-tag">finished</span>}
                 {t.needs > 0 && <span className="ag-tab-need">{t.needs}</span>}
               </button>
             ))}

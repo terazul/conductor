@@ -474,9 +474,28 @@ console.log('\nTabs · one per agent in the project (Amendment 49)');
   const src = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the Agent screen shows them only with more than one', /tabs\.length > 1 &&/.test(src) && /openAgent\(target\)/.test(src));
   check(
-    "a finished agent's own tab says so, filled (Amendment 94); working already pulses via the Dot",
-    /t\.status === 'done' && <span className="ag-tab-tag">finished<\/span>/.test(src),
+    "a finished agent's own tab says so, filled (Amendment 94), until you open it (Amendment 105); working already pulses via the Dot",
+    /t\.status === 'done' && unseenAgents\.has\(t\.id\) && <span className="ag-tab-tag">finished<\/span>/.test(src) &&
+      /const unseenAgents = useUnseenAgents\(\)/.test(src) &&
+      /import \{ useUnseenAgents \} from '\.\.\/lib\/seen\.js'/.test(src),
   );
+}
+
+console.log('\nYour turns · what you typed reads in its own colour (Amendment 106)');
+{
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  const tsx = readFileSync(new URL('./transcript.tsx', import.meta.url), 'utf8');
+  const tokens = readFileSync(new URL('../../../shared/src/tokens.css', import.meta.url), 'utf8');
+  const rule = (sel: string): string => {
+    const i = css.indexOf(`${sel} {`);
+    return i === -1 ? '' : css.slice(i, css.indexOf('}', i));
+  };
+  check('--you is a token in both themes', (tokens.match(/--you: #[0-9a-f]{6};/g) ?? []).length === 2);
+  check('your label is --you', /color: var\(--you\)/.test(rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
+  const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
+  check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
+  check('a turn Conductor sent for you is marked auto and keeps the plain look', /is-you\$\{t\.synthetic \? ' is-auto' : ''\}/.test(tsx));
+  check('no status colour on your turn', !/var\(--(need|live|done|fail|queue|idle)\)/.test(body + rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
 }
 
 console.log('\nTerminal · a command runner in the agent\'s folder (Amendment 58)');
