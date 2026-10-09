@@ -22,6 +22,7 @@ import type {
   BranchCommit,
   BranchesResponse,
   BranchInfo,
+  BranchMergePreview,
 } from '@conductor/shared';
 import { GitError, git, gitBoth, gitOk, isRepo, listWorktrees, repoRoot } from './git.js';
 import { KeyedLock } from './lock.js';
@@ -87,8 +88,14 @@ export function parseBranchAction(raw: unknown): BranchAction {
     return b;
   };
   switch (action) {
-    case 'merge':
-      return { action, branch: branchOf() };
+    case 'merge': {
+      const branch = branchOf();
+      const into = body['into'];
+      if (into === undefined || into === null) return { action, branch };
+      if (typeof into !== 'string' || into.length === 0) throw new BranchError(400, 'into must be a branch name');
+      if (into.startsWith('-')) throw new BranchError(400, 'not a branch name', into);
+      return { action, branch, into };
+    }
     case 'push':
       return { action, branch: branchOf() };
     case 'commit': {
@@ -339,6 +346,122 @@ function mergeCheckout(state: BranchesResponse): string {
   return state.targetCheckout.path;
 }
 
+/**
+ * Where a merge into `into` would run, or the reason it can't (Amendment 110). The target
+ * is `mergeCheckout`. Any other branch merges in the worktree it is checked out in: a
+ * branch checked out nowhere is refused rather than checked out for the occasion, so a
+ * merge never moves anyone's files but the branch's own.
+ */
+async function intoCheckout(state: BranchesResponse, into: BranchInfo): Promise<string> {
+  if (into.isTarget) return mergeCheckout(state);
+  if (!into.worktree) {
+    throw new BranchError(409, `${into.name} isn't checked out`, `a merge lands in a checkout: check ${into.name} out somewhere first`);
+  }
+  refuseLive(into);
+  if (!(await trackedClean(into.worktree.path))) {
+    throw new BranchError(
+      409,
+      `${into.name}'s checkout has changes`,
+      `commit or discard the tracked changes in ${into.worktree.path} first`,
+    );
+  }
+  return into.worktree.path;
+}
+
+/** The branch a merge goes into: `into` when named, else the target. */
+function intoOf(state: BranchesResponse, into: string | undefined): BranchInfo {
+  if (into !== undefined) return known(state, into);
+  const target = state.branches.find((b) => b.isTarget);
+  if (!target) throw new BranchError(409, `${state.target} isn't checked out`, `there is no branch called ${state.target}`);
+  return target;
+}
+
+interface MergePlan {
+  from: BranchInfo;
+  into: BranchInfo;
+  ahead: number;
+  behind: number;
+  related: boolean;
+}
+
+/**
+ * What a merge of `branch` into `into` checks before it needs a checkout, in the order the
+ * refusals are given. The POST and the preview both come here, so the preview's reason is
+ * the sentence the merge would answer with.
+ */
+async function planMerge(
+  root: string,
+  state: BranchesResponse,
+  branch: string,
+  intoName: string | undefined,
+): Promise<MergePlan> {
+  const from = known(state, branch);
+  const into = intoOf(state, intoName);
+  if (from.name === into.name) throw new BranchError(400, `can't merge ${into.name} into itself`);
+  refuseLive(from);
+  // Against the target the listing has counted already; against any other branch, count now.
+  if (into.isTarget) return { from, into, ahead: from.ahead, behind: from.behind, related: from.forkedAt !== null };
+  const [[behind, ahead], base] = await Promise.all([
+    leftRight(root, heads(into.name), heads(from.name)),
+    mergeBase(root, heads(into.name), heads(from.name)),
+  ]);
+  return { from, into, ahead, behind, related: base !== null };
+}
+
+/** The refusals that come after the checkout's: nothing to merge, nothing in common. */
+function refuseEmpty(p: MergePlan): void {
+  if (p.ahead === 0) throw new BranchError(409, 'nothing to merge', `${p.into.name} already has every commit on ${p.from.name}`);
+  if (!p.related) throw new BranchError(409, 'unrelated histories', `${p.from.name} shares no history with ${p.into.name}`);
+}
+
+/**
+ * The files merging `from` into `into` would conflict in, worked out in the object store
+ * with `merge-tree --write-tree` (git 2.38): no checkout, no index, nothing to undo. [] for
+ * a clean merge; null when this git is older and can't say. Only the preview uses it, so
+ * the merge itself still needs nothing newer than 2.30.
+ */
+async function conflictsOf(root: string, into: string, from: string): Promise<string[] | null> {
+  try {
+    await git(root, ['merge-tree', '--write-tree', '--name-only', '--no-messages', heads(into), heads(from)]);
+    return [];
+  } catch (err) {
+    // Exit 1 is "it would conflict": the tree id, then one conflicted path per line.
+    if (err instanceof GitError && err.code === 1 && err.stdout) {
+      const files: string[] = [];
+      for (const line of err.stdout.split('\n').slice(1)) {
+        if (!line) break;
+        if (!files.includes(line)) files.push(line);
+      }
+      return files;
+    }
+    return null;
+  }
+}
+
+/** What merging `branch` into `into` (the target when absent) would do (Amendment 110). Reads only. */
+export async function previewMerge(
+  repo: BranchRepo,
+  branch: string,
+  into: string | undefined,
+): Promise<BranchMergePreview> {
+  if (!branch) throw new BranchError(400, 'branch is required');
+  if (branch.startsWith('-')) throw new BranchError(400, 'not a branch name', branch);
+  if (into !== undefined && into.startsWith('-')) throw new BranchError(400, 'not a branch name', into);
+  const state = await listBranches(repo);
+  const p = await planMerge(repo.root, state, branch, into || undefined);
+  const commits = p.into.isTarget ? p.from.commits : await commitsOn(repo.root, heads(p.into.name), heads(p.from.name));
+  let reason: string | null = null;
+  try {
+    await intoCheckout(state, p.into);
+    refuseEmpty(p);
+  } catch (err) {
+    if (!(err instanceof BranchError)) throw err;
+    reason = err.detail ? `${err.message} — ${err.detail}` : err.message;
+  }
+  const conflicts = p.ahead === 0 ? [] : p.related ? await conflictsOf(repo.root, p.into.name, p.from.name) : null;
+  return { branch: p.from.name, into: p.into.name, ahead: p.ahead, behind: p.behind, commits, conflicts, reason };
+}
+
 type MergeOutcome = { sha: string } | { conflict: string[] };
 
 async function mergeOne(cwd: string, target: string, branch: string): Promise<MergeOutcome> {
@@ -418,15 +541,13 @@ async function act(
 
   switch (action.action) {
     case 'merge': {
-      const b = known(state, action.branch);
-      if (b.isTarget) throw new BranchError(400, `can't merge ${target} into itself`);
-      refuseLive(b);
-      const cwd = mergeCheckout(state);
-      if (b.ahead === 0) throw new BranchError(409, 'nothing to merge', `${target} already has every commit on ${b.name}`);
-      if (b.forkedAt === null) throw new BranchError(409, 'unrelated histories', `${b.name} shares no history with ${target}`);
-      const out = await mergeOne(cwd, target, b.name);
-      if ('conflict' in out) return { ok: false, merged: [], conflict: { branch: b.name, files: out.conflict } };
-      return { ok: true, merged: [b.name], sha: out.sha };
+      const p = await planMerge(root, state, action.branch, action.into);
+      const cwd = await intoCheckout(state, p.into);
+      refuseEmpty(p);
+      const into = p.into.name;
+      const out = await mergeOne(cwd, into, p.from.name);
+      if ('conflict' in out) return { ok: false, merged: [], into, conflict: { branch: p.from.name, files: out.conflict } };
+      return { ok: true, merged: [p.from.name], into, sha: out.sha };
     }
 
     case 'merge_all': {

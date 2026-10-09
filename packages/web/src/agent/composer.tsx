@@ -22,7 +22,7 @@ import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
 import type { Agent, Autonomy, EffortLevel } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget } from '../shell/autonomy.js';
-import { ModelSelect, fmtMoney } from '../shell/ui.js';
+import { Chevron, ModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -451,7 +451,27 @@ export function Composer({ agent }: { agent: Agent }) {
         />
 
         <div className="ag-crow">
-          {open ? (
+          {/*
+           * The fold (Amendment 110): a header like every other one that opens and closes,
+           * the navigator's chevron and a name, rather than a button of its own. Folded,
+           * the header carries the one line of what is set, so it is the summary you click.
+           */}
+          <button
+            type="button"
+            className={`ag-fold${open ? ' is-open' : ''}`}
+            aria-expanded={open}
+            onClick={toggleSettings}
+            title={open ? 'Hide the guardrails, interaction, effort, model and budget' : 'Show the guardrails, interaction, effort, model and budget'}
+          >
+            <Chevron open={open} />
+            <span className="ag-fold-lab">agent</span>
+            {!open && (
+              <span className={`ag-summary${summaryAlarm ? ' is-alarm' : ''}`} title={summary}>
+                {summary}
+              </span>
+            )}
+          </button>
+          {open && (
           <>
           <span className="ui-lab">guardrails</span>
           {PILLS.map((p) => {
@@ -476,22 +496,9 @@ export function Composer({ agent }: { agent: Agent }) {
             );
           })}
           </>
-          ) : (
-            <span className={`ag-summary${summaryAlarm ? ' is-alarm' : ''}`} title={summary}>
-              {summary}
-            </span>
           )}
 
           <div className="ag-crow-r">
-            <button
-              type="button"
-              className="ag-fold"
-              aria-expanded={open}
-              onClick={toggleSettings}
-              title={open ? 'Hide the guardrails, interaction, effort, model and budget' : 'Show the guardrails, interaction, effort, model and budget'}
-            >
-              settings {open ? '▾' : '▸'}
-            </button>
             <span className="ui-lab">⇧⏎ newline</span>
             <button
               type="button"

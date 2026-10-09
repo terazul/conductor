@@ -20,23 +20,26 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BranchAction, BranchActionResult, BranchInfo, BranchesResponse } from '@conductor/shared';
+import type { BranchAction, BranchActionResult, BranchInfo, BranchMergePreview, BranchesResponse } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
 import { ApiError, errorText } from '../lib/errors.js';
 import { useNavParams } from '../lib/nav.js';
 import { useAgents, useJobs, useProjects } from '../lib/store.js';
 import { SCREEN, highlight, openBranches, recall } from '../shell/nav.js';
-import { branchAction, getBranches } from './endpoints.js';
+import { branchAction, getBranches, previewMerge } from './endpoints.js';
 import { BranchGraph } from './graph.js';
 import { onBranchesChanged } from './live.js';
 import {
   commitReason,
+  defaultInto,
   defaultMessage,
+  intoChoices,
+  intoReason,
   mergeAllState,
   mergeConfirm,
-  mergeReason,
   mergeable,
   pushConfirm,
+  previewLine,
   pushReason,
   showCommit,
   showPush,
@@ -127,6 +130,31 @@ function useBranches(projectId: string | null) {
   return { resp, error, loading, load, accept };
 }
 
+/**
+ * What merging the selected branch into `into` would do, asked whenever either changes or
+ * the branches are re-read (Amendment 110). Stale answers are dropped; a failed one is
+ * null, and the merge's own refusal says why.
+ */
+function usePreview(
+  projectId: string | null,
+  branch: string | null,
+  into: string,
+  resp: BranchesResponse | null,
+): BranchMergePreview | null {
+  const [preview, setPreview] = useState<BranchMergePreview | null>(null);
+  const seq = useRef(0);
+  const heads = resp ? resp.branches.map((b) => `${b.name}@${b.head}:${b.worktree?.uncommitted ?? '-'}`).join(',') : '';
+  useEffect(() => {
+    const mine = ++seq.current;
+    setPreview(null);
+    if (!projectId || !branch || !into || branch === into) return;
+    previewMerge(projectId, branch, into)
+      .then((p) => mine === seq.current && setPreview(p))
+      .catch(() => mine === seq.current && setPreview(null));
+  }, [projectId, branch, into, heads]);
+  return preview;
+}
+
 function Branches() {
   const projects = useProjects();
   const jobs = useJobs();
@@ -139,6 +167,8 @@ function Branches() {
   const [busy, setBusy] = useState<BranchAction['action'] | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [message, setMessage] = useState('');
+  // Where "merge into" points (Amendment 110): the target unless you pick another.
+  const [into, setInto] = useState('');
 
   // This is the project you're on now, for the screens that open on "the one you were on".
   useEffect(() => {
@@ -158,7 +188,10 @@ function Branches() {
   useEffect(() => {
     setConfirming((c) => (c === 'merge_all' ? c : null));
     setMessage(branch ? defaultMessage(branch, jobs) : '');
+    setInto(branch && resp ? defaultInto(resp, branch) : '');
   }, [selected]);
+
+  const preview = usePreview(project?.id ?? null, branch?.name ?? null, into, resp);
 
   const run = useCallback(
     async (action: BranchAction, label: string) => {
@@ -251,7 +284,12 @@ function Branches() {
         {error && resp && <div className="br-note fail">Couldn't refresh — {error}. Showing the last read.</div>}
         {resp && (
           <div className="br-scroll">
-            <BranchGraph resp={resp} selected={selected} onSelect={(n) => setSelected((s) => (s === n ? null : n))} />
+            <BranchGraph
+              resp={resp}
+              selected={selected}
+              into={branch && into ? into : null}
+              onSelect={(n) => setSelected((s) => (s === n ? null : n))}
+            />
             {resp.branches.length <= 1 && (
               <div className="br-note">Only {target} so far. Branches appear here as agents start jobs.</div>
             )}
@@ -270,12 +308,15 @@ function Branches() {
           setConfirming={setConfirming}
           message={message}
           setMessage={setMessage}
+          into={into}
+          setInto={setInto}
+          preview={preview}
           run={(a, l) => void run(a, l)}
           onClose={() => setSelected(null)}
         />
       )}
       {resp && !branch && !outcome && (
-        <div className="br-hint">Choose a branch to merge, commit or push it. {loading ? '' : <button type="button" className="br-link" onClick={() => void load()}>re-read</button>}</div>
+        <div className="br-hint">Choose a branch to merge it into another, commit or push it. {loading ? '' : <button type="button" className="br-link" onClick={() => void load()}>re-read</button>}</div>
       )}
     </div>
   );
@@ -319,6 +360,9 @@ function ActionBar({
   setConfirming,
   message,
   setMessage,
+  into,
+  setInto,
+  preview,
   run,
   onClose,
 }: {
@@ -329,14 +373,21 @@ function ActionBar({
   setConfirming: (c: Confirming) => void;
   message: string;
   setMessage: (m: string) => void;
+  into: string;
+  setInto: (b: string) => void;
+  preview: BranchMergePreview | null;
   run: (a: BranchAction, label: string) => void;
   onClose: () => void;
 }) {
   const working = busy !== null;
-  const merge = mergeReason(resp, b);
+  const intoBranch = resp.branches.find((x) => x.name === into) ?? null;
+  const merge = intoReason(resp, b, intoBranch, preview);
+  const current = preview && preview.branch === b.name && preview.into === into ? preview : null;
+  const ahead = current ? current.ahead : intoBranch?.isTarget ? b.ahead : 0;
+  const mergeAction: BranchAction = intoBranch?.isTarget ? { action: 'merge', branch: b.name } : { action: 'merge', branch: b.name, into };
   const commit = showCommit(b) ? commitReason(b) : null;
   const push = pushReason(resp, b);
-  const confirmMerge = mergeConfirm(resp, b);
+  const confirmMerge = mergeConfirm(resp, b, into || resp.target, ahead);
   const commitBlocked = commit ?? (message.trim().length === 0 ? 'write a message first' : null);
 
   return (
@@ -352,10 +403,60 @@ function ActionBar({
         </button>
       </div>
 
+      {into && (
+        <div className={`br-preview${current?.conflicts?.length ? ' warn' : ''}`} aria-live="polite">
+          {current ? (
+            <>
+              <span>{previewLine(current)}</span>
+              {current.commits.length > 0 && (
+                <ol className="br-preview-commits">
+                  {current.commits.slice(0, 5).map((c) => (
+                    <li key={c.sha}>
+                      <code>{c.sha.slice(0, 7)}</code> {c.subject}
+                    </li>
+                  ))}
+                  {current.ahead > 5 && <li className="br-quiet">and {current.ahead - 5} more</li>}
+                </ol>
+              )}
+            </>
+          ) : (
+            <span className="br-quiet">working out what merging {b.name} into {into} would do…</span>
+          )}
+        </div>
+      )}
+
       <div className="br-bar-acts">
-        {!b.isTarget && (
-          <Act label={busy === 'merge' ? 'Merging…' : `Merge into ${resp.target}`} reason={merge} busy={working} go onClick={() => setConfirming('merge')} />
-        )}
+        <span className="br-act br-into">
+          <label className="br-quiet" htmlFor="br-into">
+            merge into
+          </label>
+          <select
+            id="br-into"
+            className="br-select"
+            value={into}
+            onChange={(e) => {
+              setInto(e.target.value);
+              setConfirming(null);
+            }}
+            disabled={working}
+          >
+            {!into && <option value="">choose a branch…</option>}
+            {intoChoices(resp, b).map((x) => (
+              <option key={x.name} value={x.name}>
+                {x.name}
+                {x.isTarget ? ' (target)' : ''}
+                {x.live ? ' — agent working' : ''}
+              </option>
+            ))}
+          </select>
+          <Act
+            label={busy === 'merge' ? 'Merging…' : ahead > 0 ? `Merge ${plural(ahead, 'commit')}` : 'Merge'}
+            reason={merge}
+            busy={working}
+            go
+            onClick={() => setConfirming('merge')}
+          />
+        </span>
 
         {showCommit(b) && (
           <span className="br-act br-commit">
@@ -385,7 +486,7 @@ function ActionBar({
         )}
 
         {b.isTarget && !showCommit(b) && !showPush(resp, b) && (
-          <span className="br-why">nothing to do — {resp.target} has no uncommitted work, and {resp.remote ?? 'origin'} has all of it</span>
+          <span className="br-why">nothing to commit or push — {resp.remote ?? 'origin'} has all of {resp.target}</span>
         )}
       </div>
 
@@ -395,7 +496,7 @@ function ActionBar({
             {confirmMerge.ask}
             {confirmMerge.warn && <span className="br-warn"> {confirmMerge.warn}</span>}
           </span>
-          <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'merge', branch: b.name }, 'Merge')}>
+          <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run(mergeAction, 'Merge')}>
             Merge
           </button>
           <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
@@ -420,7 +521,7 @@ function ActionBar({
 }
 
 /** What an action did, in words, with git's own output where it said anything. */
-function Result({ outcome, target, onClose }: { outcome: Outcome; target: string; onClose: () => void }) {
+function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; target: string; onClose: () => void }) {
   if (outcome.kind === 'error') {
     return (
       <div className={`br-result ${outcome.tone}`} role="status">
@@ -434,6 +535,8 @@ function Result({ outcome, target, onClose }: { outcome: Outcome; target: string
     );
   }
   const { action, res } = outcome;
+  // Where a merge went: the answer says, since it can be any branch now (Amendment 110).
+  const target = res.into ?? fallback;
   const sha = res.sha ? ` (${res.sha.slice(0, 7)})` : '';
   let text: string;
   if (action === 'merge' || action === 'merge_all') {

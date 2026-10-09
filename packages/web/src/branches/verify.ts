@@ -9,15 +9,19 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import type { BranchInfo, BranchesResponse } from '@conductor/shared';
+import type { BranchInfo, BranchMergePreview, BranchesResponse } from '@conductor/shared';
 import { G, badges, layout } from './graph.js';
 import { onBranchesChanged, receiveBranches } from './live.js';
 import {
   commitReason,
+  defaultInto,
   defaultMessage,
+  intoChoices,
+  intoReason,
   mergeAllState,
   mergeConfirm,
   mergeReason,
+  previewLine,
   pushConfirm,
   pushReason,
   showCommit,
@@ -215,6 +219,37 @@ console.log('\n5 · screen 7 is Branches, and nothing else claims 7');
   const liveRules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^}]*var\(--live\)[^}]*\}/g) ?? [];
   check('--live is used only for a live branch', liveUses > 0 && liveRules.every((r) => /live/.test(r.split('{')[0] ?? '')), liveRules.map((r) => r.split('{')[0]?.trim()).join(' / '));
   check('--need is not used on this screen', !/--need/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));
+}
+
+console.log('\n7 · merge into any branch (Amendment 110)');
+{
+  const pv = (p: Partial<BranchMergePreview> = {}): BranchMergePreview => ({
+    branch: 'feature/long', into: 'conductor/job_a', ahead: 7, behind: 1, commits: [], conflicts: [], reason: null, ...p,
+  });
+  check('every other branch is a choice, the target first', intoChoices(resp, job).map((b) => b.name).join() === 'main,conductor/job_b,feature/done,feature/long,gh-pages');
+  check('a branch is never offered itself', intoChoices(resp, main).every((b) => b.name !== 'main'));
+  check('a branch starts pointed at the target, the target at nothing', defaultInto(resp, job) === 'main' && defaultInto(resp, main) === '');
+  check('into the target it is mergeReason, as before', intoReason(resp, job, main, null) === mergeReason(resp, job) && intoReason(resp, live, main, null) === mergeReason(resp, live));
+  check('nothing chosen says to choose', /choose a branch/.test(intoReason(resp, main, null, null) ?? ''));
+  check('the target can go into a job branch, to bring it up to date', intoReason(resp, main, job, pv({ branch: 'main', ahead: 2 })) === null);
+  check('refused into a live branch', /working on conductor\/job_b/.test(intoReason(resp, long, live, null) ?? ''));
+  check("refused into a branch checked out nowhere", /isn't checked out/.test(intoReason(resp, job, long, null) ?? ''));
+  check('fine into a checked-out branch while the preview is on its way', intoReason(resp, long, job, null) === null);
+  check("the preview's own reason is the word", intoReason(resp, long, job, pv({ reason: "conductor/job_a's checkout has changes" })) === "conductor/job_a's checkout has changes");
+  check('a preview of another pair is ignored', intoReason(resp, long, job, pv({ into: 'main', reason: 'x' })) === null);
+  check('known conflicts refuse it, and say how many files', /conflict with conductor\/job_a in 2 files/.test(intoReason(resp, long, job, pv({ conflicts: ['a', 'b'] })) ?? ''));
+  check('a conflict into the target refuses too', /conflict with main/.test(intoReason(resp, job, main, pv({ branch: job.name, into: 'main', conflicts: ['x'] })) ?? ''));
+  check('the preview line: commits, behind, no conflicts', previewLine(pv()) === "7 commits from feature/long · conductor/job_a has 1 commit feature/long doesn't · no conflicts", previewLine(pv()));
+  check('names the conflicted files', /conflicts in a\.txt, b\.txt$/.test(previewLine(pv({ conflicts: ['a.txt', 'b.txt'] }))));
+  check("says when this git can't tell", /conflicts unknown until it runs/.test(previewLine(pv({ conflicts: null }))));
+  check('nothing to merge says so', /^nothing to merge/.test(previewLine(pv({ ahead: 0 }))));
+  check('the confirm names where it goes and the count it was given', /into conductor\/job_a/.test(mergeConfirm(resp, long, 'conductor/job_a', 7).ask) && /\(7 commits\)/.test(mergeConfirm(resp, long, 'conductor/job_a', 7).ask));
+
+  const route = src('./route.tsx');
+  check('the bar has a "merge into" picker and asks for a preview', /<select\s+id="br-into"/.test(route) && /previewMerge\(projectId, branch, into\)/.test(route));
+  check('into the target sends no into, so it is the merge it always was', /intoBranch\?\.isTarget \? \{ action: 'merge', branch: b\.name \} : \{ action: 'merge', branch: b\.name, into \}/.test(route));
+  check('the outcome says where it went', /const target = res\.into \?\? fallback;/.test(route));
+  check('the graph marks the branch it would go into', /into=\{branch && into \? into : null\}/.test(route) && /merges here/.test(src('./graph.tsx')));
 }
 
 console.log('\n6 · the status bar and nav.ts');

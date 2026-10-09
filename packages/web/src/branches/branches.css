@@ -206,6 +206,18 @@
   fill: var(--surf2);
 }
 
+.br-row.into .br-hit {
+  fill: var(--bg2);
+  stroke: var(--ink3);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.br-into-tag {
+  font-size: var(--fs-sm);
+  fill: var(--ink2);
+}
+
 .br-row:focus-visible .br-hit {
   fill: var(--surf2);
   stroke: var(--ink3);
@@ -453,4 +465,47 @@
   color: var(--ink2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Merge into any branch (Amendment 110): the picker, and what the merge would do. */
+.br-into {
+  flex-wrap: wrap;
+}
+
+.br-select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 3px 6px;
+  max-width: 280px;
+}
+
+.br-select:focus {
+  border-color: var(--ink3);
+  outline: none;
+}
+
+.br-preview {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  margin: 2px 0 8px;
+}
+
+.br-preview.warn > span:first-child {
+  color: var(--fail);
+}
+
+.br-preview-commits {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--ink3);
+}
+
+.br-preview-commits code {
+  color: var(--ink2);
 }

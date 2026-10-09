@@ -7,7 +7,7 @@
  * failing after.
  */
 
-import type { BranchInfo, BranchesResponse, Job } from '@conductor/shared';
+import type { BranchInfo, BranchMergePreview, BranchesResponse, Job } from '@conductor/shared';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -47,6 +47,60 @@ export function mergeReason(resp: BranchesResponse, b: BranchInfo): string | nul
   return targetReason(resp);
 }
 
+/**
+ * The branches `b` can be merged into (Amendment 110): every other local branch, the target
+ * first. The daemon answers for the ones that can't take it; these are just the choices.
+ */
+export function intoChoices(resp: BranchesResponse, b: BranchInfo): BranchInfo[] {
+  return resp.branches.filter((x) => x.name !== b.name);
+}
+
+/** The branch "merge into" starts on: the target, or nothing for the target itself. */
+export function defaultInto(resp: BranchesResponse, b: BranchInfo): string {
+  return b.isTarget ? '' : resp.target;
+}
+
+/**
+ * Why `b` can't be merged into `into`, from what the screen knows, or null. Into the target
+ * this is `mergeReason`, as before. Into any other branch the counts aren't in the listing,
+ * so what the preview said decides the rest; while it is on its way, nothing is refused.
+ */
+export function intoReason(
+  resp: BranchesResponse,
+  b: BranchInfo,
+  into: BranchInfo | null,
+  preview: BranchMergePreview | null,
+): string | null {
+  if (!into) return 'choose a branch to merge into';
+  if (into.isTarget) return mergeReason(resp, b) ?? conflictReason(preview, into.name);
+  if (b.live) return 'an agent is working on it — wait for it to finish';
+  if (into.live) return `an agent is working on ${into.name} — wait for it to finish`;
+  if (!into.worktree) return `${into.name} isn't checked out anywhere — check it out first`;
+  if (preview && preview.into === into.name && preview.branch === b.name && preview.reason) return preview.reason;
+  return conflictReason(preview, into.name);
+}
+
+/** Known conflicts refuse the merge: git would stop, and the screen would only undo it. */
+function conflictReason(preview: BranchMergePreview | null, into: string): string | null {
+  if (!preview || preview.into !== into || !preview.conflicts || preview.conflicts.length === 0) return null;
+  const n = preview.conflicts.length;
+  return `it would conflict with ${into} in ${plural(n, 'file')} — merge it by hand in a terminal`;
+}
+
+/** The line under the picker: what the merge would bring, and whether it would conflict. */
+export function previewLine(p: BranchMergePreview): string {
+  if (p.ahead === 0) return `nothing to merge — ${p.into} already has all of ${p.branch}`;
+  const what = `${plural(p.ahead, 'commit')} from ${p.branch}`;
+  const behind = p.behind > 0 ? ` · ${p.into} has ${plural(p.behind, 'commit')} ${p.branch} doesn't` : '';
+  const clash =
+    p.conflicts === null
+      ? ' · conflicts unknown until it runs'
+      : p.conflicts.length === 0
+        ? ' · no conflicts'
+        : ` · conflicts in ${p.conflicts.join(', ')}`;
+  return `${what}${behind}${clash}`;
+}
+
 /** Whether "Commit…" is offered at all: only where there is uncommitted work. */
 export function showCommit(b: BranchInfo): boolean {
   return (b.worktree?.uncommitted ?? 0) > 0;
@@ -74,8 +128,13 @@ export function pushReason(resp: BranchesResponse, b: BranchInfo): string | null
 }
 
 /** The confirm before a merge: the branch, its commits, and what will be left behind. */
-export function mergeConfirm(resp: BranchesResponse, b: BranchInfo): { ask: string; warn: string | null } {
-  const ask = `Merge ${b.name} (${plural(b.ahead, 'commit')}) into ${resp.target}, as one merge commit?`;
+export function mergeConfirm(
+  resp: BranchesResponse,
+  b: BranchInfo,
+  into: string = resp.target,
+  ahead: number = b.ahead,
+): { ask: string; warn: string | null } {
+  const ask = `Merge ${b.name} (${plural(ahead, 'commit')}) into ${into}, as one merge commit?`;
   const n = b.worktree?.uncommitted ?? 0;
   const warn =
     n > 0

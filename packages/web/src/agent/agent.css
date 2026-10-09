@@ -983,22 +983,44 @@ a.ag-tool-subj:focus-visible {
   align-items: center;
 }
 
-/* The settings fold (Amendment 96): the button, and the one line shown while folded. */
+/*
+ * The settings fold (Amendments 96, 110): a header with the navigator's chevron, like every
+ * other fold, not a bordered button. Folded, it carries the one line of what is set.
+ */
 .ag-fold {
   font: inherit;
   font-size: var(--fs-sm);
-  border: 1px solid var(--line2);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 0 1 auto;
+  border: none;
   border-radius: 4px;
-  padding: 2px 8px;
+  padding: 2px 6px 2px 2px;
   color: var(--ink2);
   background: none;
   cursor: pointer;
-  white-space: nowrap;
+  text-align: left;
+}
+
+.ag-fold:not(.is-open) {
+  flex: 1 1 auto;
 }
 
 .ag-fold:hover {
   color: var(--ink);
-  border-color: var(--ink3);
+  background: var(--bg2);
+}
+
+.ag-fold:focus-visible {
+  outline: 1px solid var(--ink3);
+}
+
+.ag-fold-lab {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .ag-summary {

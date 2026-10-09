@@ -15,6 +15,15 @@ import { CLAUDE, providerLabel } from '../lib/providers.js';
 import type { Activity } from './clock.js';
 import './ui.css';
 
+/**
+ * The open/closed triangle every fold uses: it points right when closed and turns down
+ * when open. The navigator's submenus and the composer's agent settings (Amendment 110)
+ * share it, so a fold looks the same wherever it is. Styled by `.sh-nav-chev` (shell.css).
+ */
+export function Chevron({ open }: { open: boolean }) {
+  return <i className={`sh-nav-chev${open ? ' is-open' : ''}`} aria-hidden="true" />;
+}
+
 /** AgentStatus → token family. The single place the mapping is decided. */
 export const STATUS_KEY: Record<AgentStatus, 'live' | 'need' | 'fail' | 'done' | 'queue' | 'idle'> =
   {

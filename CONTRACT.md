@@ -196,6 +196,52 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 110 — post-merge, applied. **Merge any branch into any other, previewed; the composer's settings fold from a chevron header.**
+
+Asked 9 Oct: "collapsing the agent details in the panel for agent input should be like the other areas
+you can open/close and not in a dedicated button called settings", and "the Branches should be more
+graphical, give me options to merge from a branch to another branch (like main)". Chosen from mock-ups:
+the summary row folds; the branch graph with a "merge into" picker.
+
+**Branches.**
+- **Wire.** `BranchAction`'s merge gains `into?: string`; absent is the target, so every existing
+  caller is unchanged. `BranchActionResult.into?` says where a merge went. New `BranchMergePreview
+  { branch, into, ahead, behind, commits, conflicts: string[] | null, reason: string | null }`.
+- **Route.** `GET /api/projects/:projectId/branches/preview?branch=&into=` → `BranchMergePreview`. Reads
+  only, no lock. 400 for a name starting with `-`, an unknown branch, or merging a branch into itself.
+- **Merge into another branch** (`workspace/branches.ts`). `planMerge` does the checks a merge makes
+  before it needs a checkout, in the old order (known, not into itself, not live), counting ahead,
+  behind and a merge base against `into` (the listing's numbers when `into` is the target).
+  `intoCheckout`: the target is `mergeCheckout`, as before; any other branch merges in the worktree it
+  is checked out in, refused with 409 when it is checked out nowhere (it is never checked out for the
+  occasion), when an agent is working on it, or when its checkout has tracked changes. Then 409
+  nothing to merge or unrelated histories, as before. `mergeOne` is unchanged, so the message is
+  `Merge branch '<b>' into <into>` and a conflict is aborted the same way. `merge_all` still goes
+  into the target only.
+- **Preview.** The same `planMerge` and `intoCheckout`, so `reason` is the sentence the POST would
+  answer with (`error — detail`). `conflicts` comes from `merge-tree --write-tree --name-only
+  --no-messages` (git 2.38): no checkout or index is touched. Exit 1 is a conflict, its paths after
+  the tree id; any other failure is `null`, "can't tell", so the merge itself still needs nothing
+  newer than 2.30.
+- **Screen** (`branches/route.tsx`, `rules.ts`, `graph.tsx`, `endpoints.ts`). The action bar gets
+  **merge into** ▾: every other local branch, the target first, starting on the target (the target's
+  own bar starts on none, so main can be merged into a job branch). A preview is asked whenever the
+  branch, the choice or any branch's head or uncommitted count changes; stale answers are dropped. A
+  line under it says the commits that would move, how far the other way, and the conflicts (or that
+  this git can't tell), with the first five subjects. `intoReason`: into the target it is
+  `mergeReason`; otherwise live on either side, `into` not checked out, then the preview's reason;
+  known conflicts refuse in both cases, naming the file count. The button reads **Merge N commits**,
+  the confirm names where it goes, and into the target the POST sends no `into`. The graph outlines
+  the branch it would go into, dashed, with "⇠ <branch> merges here". The result names `res.into`.
+- **Verify:** daemon `workspace/verify-branches.ts` §10 (109 checks in all); web `branches/verify.ts` §7.
+
+**Composer** (`agent/composer.tsx`, `agent/agent.css`, `shell/ui.tsx`, `shell/Navigator.tsx`). The
+**settings ▸/▾** button beside Send is gone. The fold is the first thing in the row: a header button
+with the navigator's chevron and **agent**; folded, the one-line summary sits inside it, so the
+summary is what you click to open. Same setting (`conductor.agentSettings`), same rows hidden, Send
+where it was. `Chevron` moves from Navigator.tsx to `shell/ui.tsx` and both use it. Checked by
+`agent/verify.ts` §9.
+
 ### Amendment 109 — post-merge, applied. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
 
 Daemon (`workspace/branches.ts` new, `routes/branches.ts` new, `workspace/git.ts`,

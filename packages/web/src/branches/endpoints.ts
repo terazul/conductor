@@ -9,7 +9,7 @@
  * timed out, and 500 for git failing.
  */
 
-import type { BranchAction, BranchActionResult, BranchesResponse } from '@conductor/shared';
+import type { BranchAction, BranchActionResult, BranchMergePreview, BranchesResponse } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 const path = (projectId: string): string => `/api/projects/${encodeURIComponent(projectId)}/branches`;
@@ -22,4 +22,10 @@ export function getBranches(projectId: string): Promise<BranchesResponse> {
 /** Merge, merge all, commit, push or fetch. The answer carries the branches as they are after. */
 export function branchAction(projectId: string, action: BranchAction): Promise<BranchActionResult> {
   return api<BranchActionResult>(path(projectId), { method: 'POST', body: action });
+}
+
+/** What merging `branch` into `into` would do: commits, conflicts, and why not (Amendment 110). Reads only. */
+export function previewMerge(projectId: string, branch: string, into: string): Promise<BranchMergePreview> {
+  const q = new URLSearchParams({ branch, into });
+  return api<BranchMergePreview>(`${path(projectId)}/preview?${q.toString()}`);
 }

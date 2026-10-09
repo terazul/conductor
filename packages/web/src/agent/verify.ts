@@ -623,9 +623,16 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('one setting for every agent, read the same way', /const open = settingsShown\(useSetting\(SETTINGS_KEY\)\);/.test(comp) && SETTINGS_KEY === 'conductor.agentSettings');
-  check('folded hides the guardrails pills and shows the line instead', /\{open \? \(\s*<>\s*<span className="ui-lab">guardrails<\/span>/.test(comp) && /<span className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\}/.test(comp));
+  check('folded hides the guardrails pills and shows the line instead', /\{open && \(\s*<>\s*<span className="ui-lab">guardrails<\/span>/.test(comp) && /\{!open && \(\s*<span className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\}/.test(comp));
   check('folded hides interaction, effort, model and budget', /\{open && \(\s*<>\s*\{\/\*[\s\S]*?\*\/\}\s*<div className="ag-modes">\s*<span className="ui-lab">interaction/.test(comp));
-  check('send stays, and the button says whether it is open', /aria-expanded=\{open\}/.test(comp) && /settings \{open \? '▾' : '▸'\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
+  check('send stays, and the fold says whether it is open', /aria-expanded=\{open\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
+  // Amendment 110: a header with the shared chevron, like every other fold, not a "settings" button.
+  check('the fold is a header with the shared chevron, first in the row', /<div className="ag-crow">[\s\S]{0,600}?<button[^>]*?className=\{`ag-fold\$\{open \? ' is-open' : ''\}`\}[\s\S]{0,400}?<Chevron open=\{open\} \/>\s*<span className="ag-fold-lab">agent<\/span>/.test(comp));
+  check('and the folded line is inside it, so the summary is what you click', /<span className="ag-fold-lab">agent<\/span>\s*\{!open && \(\s*<span className=\{`ag-summary/.test(comp));
+  check('no "settings ▸" button is left', !/settings \{open \?/.test(comp) && !/'▸'/.test(comp));
+  const navSrc = readFileSync(new URL('../shell/Navigator.tsx', import.meta.url), 'utf8');
+  const uiSrc = readFileSync(new URL('../shell/ui.tsx', import.meta.url), 'utf8');
+  check('one Chevron, in ui.tsx, used by the navigator too', /export function Chevron\(/.test(uiSrc) && !/function Chevron\(/.test(navSrc) && /import \{ Chevron,/.test(navSrc));
   check('a reached budget or an unsafe mode stays in sight while folded', /const summaryAlarm = spend\?\.over === true \|\| current\?\.danger === true;/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
 }
 

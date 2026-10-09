@@ -3,6 +3,8 @@
  *
  *   GET  /api/projects/:projectId/branches  → BranchesResponse
  *   POST /api/projects/:projectId/branches  ← BranchAction → BranchActionResult
+ *   GET  /api/projects/:projectId/branches/preview?branch=&into=  → BranchMergePreview
+ *        (Amendment 110: what merging `branch` into `into` would do; reads only, no lock)
  *
  * Auto-registered by index.ts like every file here. The git lives in
  * workspace/branches.ts; this file only finds the project, tells the git side which
@@ -27,6 +29,7 @@ import {
   listBranches,
   openRepo,
   parseBranchAction,
+  previewMerge,
   type BranchLookup,
 } from '../workspace/branches.js';
 
@@ -71,6 +74,19 @@ export default async function branchesRoutes(app: FastifyInstance): Promise<void
       return fail(reply, err);
     }
   });
+
+  app.get<{ Params: { projectId: string }; Querystring: { branch?: string; into?: string } }>(
+    '/api/projects/:projectId/branches/preview',
+    async (req, reply) => {
+      try {
+        const repo = await repoFor(req.params.projectId);
+        if (!repo) return reply.code(404).send({ error: 'no such project' });
+        return await previewMerge(repo, req.query.branch ?? '', req.query.into || undefined);
+      } catch (err) {
+        return fail(reply, err);
+      }
+    },
+  );
 
   app.post<{ Params: { projectId: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
     const { projectId } = req.params;

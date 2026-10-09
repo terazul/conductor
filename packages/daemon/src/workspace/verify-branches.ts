@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   BranchActionResult,
+  BranchMergePreview,
   BranchesResponse,
   BranchInfo,
   ServerFrame,
@@ -70,6 +71,7 @@ const REPO = join(ROOT, 'repo');
 const ORIGIN = join(ROOT, 'origin.git');
 const OTHER = join(ROOT, 'other');
 const WT_ONE = join(ROOT, 'wt-one');
+const WT_CLASH = join(ROOT, 'wt-clash');
 const PLAIN = join(ROOT, 'not-a-repo');
 
 /** Commits get one minute apart, so "oldest tip first" never ties on a second. */
@@ -516,13 +518,70 @@ async function main(): Promise<void> {
   check('an ordinary failure is not a timeout', plainFail !== null && !plainFail.timedOut);
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n10 · merge into another branch, and the preview (Amendment 110)');
+  const preview = (branch: string, into?: string) =>
+    get<BranchMergePreview & Err>(
+      `${URL}/preview?branch=${encodeURIComponent(branch)}${into === undefined ? '' : `&into=${encodeURIComponent(into)}`}`,
+    );
+  const mainBefore = sh(REPO, 'rev-parse', 'main');
+  const oneBefore = sh(REPO, 'rev-parse', 'feature/one');
+
+  const pv = await preview('late/after', 'feature/one');
+  check('preview → 200', pv.status === 200, JSON.stringify(pv.body).slice(0, 300));
+  check('it counts against the branch named, not main', pv.body.into === 'feature/one' && pv.body.ahead === 1 && pv.body.behind > 0, JSON.stringify(pv.body));
+  check('with the commits that would move', pv.body.commits.map((c) => c.subject).join('|') === 'late work');
+  check('no conflicts and no reason: it would run', JSON.stringify(pv.body.conflicts) === '[]' && pv.body.reason === null, JSON.stringify(pv.body));
+  check('a preview changes nothing', sh(REPO, 'rev-parse', 'feature/one') === oneBefore && sh(WT_ONE, 'status', '--porcelain') === '');
+
+  const pvMain = await preview('late/after');
+  check('no into is the target, as before', pvMain.status === 200 && pvMain.body.into === 'main', JSON.stringify(pvMain.body).slice(0, 200));
+
+  const pvClash = await preview('clash/b', 'clash/a');
+  check('a conflict is found without a checkout', JSON.stringify(pvClash.body.conflicts) === '["conflict.txt"]', JSON.stringify(pvClash.body));
+  check("and the reason says the branch isn't checked out", /isn't checked out/.test(pvClash.body.reason ?? ''), pvClash.body.reason ?? 'null');
+
+  const pvSelf = await preview('feature/one', 'feature/one');
+  check('preview into itself → 400', pvSelf.status === 400, String(pvSelf.status));
+  const pvBad = await preview('late/after', '--upload-pack=x');
+  check('preview into a name starting with - → 400', pvBad.status === 400, String(pvBad.status));
+  const pvNone = await preview('late/after', 'no/such');
+  check('preview into an unknown branch → 400', pvNone.status === 400 && pvNone.body.error === 'no such branch', JSON.stringify(pvNone.body));
+
+  const badInto = await act({ action: 'merge', branch: 'late/after', into: '-x' });
+  check('merge into a name starting with - → 400', badInto.status === 400, String(badInto.status));
+  const notOut = await act({ action: 'merge', branch: 'clash/b', into: 'clash/a' });
+  check("merge into a branch checked out nowhere → 409", notOut.status === 409 && /isn't checked out/.test(notOut.body.error), JSON.stringify(notOut.body));
+
+  writeFileSync(join(WT_ONE, 'one.txt'), 'dirty, tracked\n');
+  const dirtyInto = await act({ action: 'merge', branch: 'late/after', into: 'feature/one' });
+  check("merge into a branch whose checkout has tracked changes → 409", dirtyInto.status === 409 && /has changes/.test(dirtyInto.body.error), JSON.stringify(dirtyInto.body));
+  sh(WT_ONE, 'checkout', '--', 'one.txt');
+
+  const intoOne = await act({ action: 'merge', branch: 'late/after', into: 'feature/one' });
+  check('merge into feature/one → 200, ok', intoOne.status === 200 && intoOne.body.ok === true, JSON.stringify(intoOne.body).slice(0, 300));
+  check('it says where it went', intoOne.body.into === 'feature/one' && intoOne.body.merged.join(',') === 'late/after');
+  check('the merge commit is on feature/one, in its worktree, with two parents',
+    intoOne.body.sha === sh(WT_ONE, 'rev-parse', 'HEAD') && parents(intoOne.body.sha ?? '').length === 2);
+  check("with the message naming both", sh(WT_ONE, 'log', '-1', '--format=%s') === "Merge branch 'late/after' into feature/one");
+  check('main did not move', sh(REPO, 'rev-parse', 'main') === mainBefore);
+  const twice = await act({ action: 'merge', branch: 'late/after', into: 'feature/one' });
+  check('merging it again → 409 nothing to merge', twice.status === 409 && twice.body.error === 'nothing to merge', JSON.stringify(twice.body));
+
+  sh(REPO, 'worktree', 'add', '-q', WT_CLASH, 'clash/a');
+  const clashBefore = sh(WT_CLASH, 'rev-parse', 'HEAD');
+  const clashed = await act({ action: 'merge', branch: 'clash/b', into: 'clash/a' });
+  check('a conflict merging into another branch → 200, not ok', clashed.status === 200 && clashed.body.ok === false, JSON.stringify(clashed.body).slice(0, 300));
+  check('it names the branch, its files and where it went', clashed.body.conflict?.branch === 'clash/b' && clashed.body.conflict.files.join(',') === 'conflict.txt' && clashed.body.into === 'clash/a');
+  check('and is undone there', !mergeInProgress(WT_CLASH) && sh(WT_CLASH, 'status', '--porcelain') === '' && sh(WT_CLASH, 'rev-parse', 'HEAD') === clashBefore);
+
+  // ───────────────────────────────────────────────────────────────────────────
   ws.close();
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals.\n`
+      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview.\n`
       : `\nAmendment 109 branches: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

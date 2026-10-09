@@ -227,10 +227,13 @@ function Badges({ items, x, y }: { items: Badge[]; x: number; y: number }) {
 export function BranchGraph({
   resp,
   selected,
+  into = null,
   onSelect,
 }: {
   resp: BranchesResponse;
   selected: string | null;
+  /** The branch the selected one would merge into (Amendment 110), marked so you see both ends. */
+  into?: string | null;
   onSelect: (name: string) => void;
 }) {
   const g = layout(resp);
@@ -253,7 +256,7 @@ export function BranchGraph({
     >
       {/* The target: a rail across the top. Selectable, so main can be committed and pushed too. */}
       <g
-        className={`br-row br-target${selected === resp.target ? ' on' : ''}${target?.live ? ' live' : ''}`}
+        className={`br-row br-target${selected === resp.target ? ' on' : ''}${into === resp.target ? ' into' : ''}${target?.live ? ' live' : ''}`}
         role="button"
         tabIndex={target ? 0 : -1}
         aria-pressed={selected === resp.target}
@@ -265,6 +268,11 @@ export function BranchGraph({
         <text x={G.pad} y={g.railY - 16} className="br-name br-name-target">
           {resp.target}
         </text>
+        {into === resp.target && selected && (
+          <text className="br-into-tag" x={g.width - G.pad} y={g.railY - 16} textAnchor="end">
+            ⇠ {selected} merges here
+          </text>
+        )}
         <Badges items={g.targetBadges} x={G.pad + (resp.target.length + 2) * G.ch} y={g.railY - 16} />
         <line className="br-rail" x1={G.pad - 6} y1={g.railY} x2={g.width - G.pad / 2} y2={g.railY} />
         {g.railDots.map((d, i) => (
@@ -288,7 +296,7 @@ export function BranchGraph({
 
       {g.rows.map((r) => {
         const b = r.branch;
-        const cls = ['br-row', r.dimmed ? 'dim' : '', b.live ? 'live' : '', selected === b.name ? 'on' : '']
+        const cls = ['br-row', r.dimmed ? 'dim' : '', b.live ? 'live' : '', selected === b.name ? 'on' : '', into === b.name ? 'into' : '']
           .filter(Boolean)
           .join(' ');
         const lineEnd = r.uncommittedX ?? r.tipX;
@@ -337,6 +345,11 @@ export function BranchGraph({
               <title>{`${short(b.head)} ${b.subject}`}</title>
             </text>
             <Badges items={r.badges} x={r.labelX} y={r.y + 13} />
+            {into === b.name && selected && (
+              <text className="br-into-tag" x={g.width - G.pad} y={r.y - 3} textAnchor="end">
+                ⇠ {selected} merges here
+              </text>
+            )}
           </g>
         );
       })}

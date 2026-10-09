@@ -63,7 +63,7 @@ import {
 } from './navtree.js';
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
-import { Dot, STATUS_WORD, tildePath } from './ui.js';
+import { Chevron, Dot, STATUS_WORD, tildePath } from './ui.js';
 
 /** The screen up now and its params, kept current by every navigation. */
 export function useRoute(): { id: string; params: NavParams } {
@@ -78,10 +78,6 @@ export function useRoute(): { id: string; params: NavParams } {
  */
 function toggle(id: string): void {
   writeSetting(NAV_TREE_KEY, serializeOpen(toggleOpen(parseOpen(readSetting(NAV_TREE_KEY)), id)));
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return <i className={`sh-nav-chev${open ? ' is-open' : ''}`} aria-hidden="true" />;
 }
 
 function Submenu({

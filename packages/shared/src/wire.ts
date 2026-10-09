@@ -659,7 +659,8 @@ export interface BranchesResponse {
 }
 
 export type BranchAction =
-  | { action: 'merge'; branch: string }
+  /** `into` is any local branch; absent, the target (Amendment 110). */
+  | { action: 'merge'; branch: string; into?: string }
   | { action: 'merge_all' }
   | { action: 'commit'; branch: string; message: string }
   | { action: 'push'; branch: string }
@@ -669,6 +670,8 @@ export interface BranchActionResult {
   ok: boolean;
   /** In order, for merge and merge_all. */
   merged: string[];
+  /** The branch a merge went into, for merge: the target unless `into` named another. */
+  into?: string;
   /** The merge stopped here and was aborted cleanly. */
   conflict?: { branch: string; files: string[] };
   /** The new commit, for commit and merge. */
@@ -677,6 +680,24 @@ export interface BranchActionResult {
   output?: string;
   /** The state after, so the screen redraws once. */
   branches: BranchesResponse;
+}
+
+/**
+ * What merging `branch` into `into` would do, worked out without touching any checkout
+ * (Amendment 110): `GET /api/projects/:projectId/branches/preview?branch=&into=`.
+ */
+export interface BranchMergePreview {
+  branch: string;
+  into: string;
+  /** Commits on `branch` that `into` doesn't have, and the other way round. */
+  ahead: number;
+  behind: number;
+  /** into..branch, newest first, at most 20. */
+  commits: BranchCommit[];
+  /** The files the merge would conflict in: [] for none, null when this git can't tell beforehand. */
+  conflicts: string[] | null;
+  /** Why the merge would be refused, in the words the POST would use; null when it would run. */
+  reason: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
