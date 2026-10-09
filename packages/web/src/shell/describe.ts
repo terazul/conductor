@@ -278,6 +278,7 @@ const FAILURES: Record<string, string> = {
   iteration_error: 'lost the SDK mid-run',
   launch_failed: "couldn't be launched",
   resume_failed: 'had no session to resume',
+  folder_gone: 'lost its folder: it was deleted',
   job_budget_reached: "reached its job's budget",
 };
 

@@ -662,7 +662,7 @@ async function act(
       }
     }
     case 'set_default':
-      // Amendment 114 lands with lane D of wave 9 (docs/plans/wave-9.md).
-      throw new BranchError(400, 'not built yet', 'set_default arrives with Amendment 114');
+      // Amendment 117 lands with lane D of wave 9 (docs/plans/wave-9.md).
+      throw new BranchError(400, 'not built yet', 'set_default arrives with Amendment 117');
   }
 }

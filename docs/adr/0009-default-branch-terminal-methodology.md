@@ -1,6 +1,6 @@
 # ADR 0009 — Choose the default branch, a full terminal, a git methodology per launch, "You asked" in --you
 
-- **Status:** accepted (9 Oct 2026). To be built as Amendments 112, 114, 115 and 116. The plan
+- **Status:** accepted (9 Oct 2026). To be built as Amendments 112, 115, 116 and 117. The plan
   is [docs/plans/wave-9.md](../plans/wave-9.md).
 - **Asked for (9 Oct):**
   1. "let me select what branch is the default branch and put conductor on that branch";
@@ -51,7 +51,7 @@ All references are on `main` at `0ed14e8`.
 
 ## Decisions
 
-### 1. Choose the default branch, and check it out (Amendment 114)
+### 1. Choose the default branch, and check it out (Amendment 117)
 
 - **New action** `{ action: 'set_default'; branch: string; checkout: boolean }` in
   `BranchAction`.
@@ -152,7 +152,7 @@ Spawn's isolation pills become three methodology choices:
 
 ## Testing
 
-- **(114)** `workspace/verify-branches.ts`:
+- **(117)** `workspace/verify-branches.ts`:
   - set_default writes the branch, and the target follows it;
   - checkout switches the folder;
   - a dirty folder gives 409;

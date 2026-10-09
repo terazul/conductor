@@ -707,7 +707,7 @@ export interface BranchesResponse {
   targetCheckout: { path: string; clean: boolean } | null;
   /** The target first, then by tip time, newest first. */
   branches: BranchInfo[];
-  /** What the project's own folder has checked out (Amendment 114); null when detached. */
+  /** What the project's own folder has checked out (Amendment 117); null when detached. */
   rootBranch?: string | null;
 }
 
@@ -719,7 +719,7 @@ export type BranchAction =
   | { action: 'push'; branch: string }
   | { action: 'fetch' }
   /**
-   * Make `branch` the project's default (Amendment 114), and with `checkout`, switch the
+   * Make `branch` the project's default (Amendment 117), and with `checkout`, switch the
    * project's own folder to it. Refused while the folder has tracked changes or anything
    * works in it.
    */

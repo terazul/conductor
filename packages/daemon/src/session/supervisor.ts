@@ -17,7 +17,10 @@
  * neither is duplicated here.
  */
 
-import { onSettingsChanged } from '../settings.js';
+import { onSettingsChanged, readSettings } from '../settings.js';
+import { branchTargetKey } from '@conductor/shared';
+import { branchExists, git, repoRoot } from '../workspace/git.js';
+import { resolveTarget } from '../workspace/branches.js';
 import { SLOTS_KEY, slotLimit } from '../slots.js';
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -186,6 +189,24 @@ export function strandNote(role: string | null): string {
  * event log, as `isStrandNote`'s is. One you paused yourself stays paused.
  */
 export const HOLD_NOTE = 'paused with everything until the scheduled time — it carries on by itself then';
+
+/**
+ * Why an agent can't run: the folder its job works in is gone (Amendment 114). Removed by
+ * hand, by `git worktree remove`, or a disk unmounted. Starting Claude Code there fails with
+ * "native binary … failed to launch (ENOENT)", which reads as a broken install, so it is
+ * checked first and said plainly.
+ */
+export const FOLDER_GONE = 'folder_gone';
+
+/** The sentence for it, with what will fix it. */
+export function folderGoneDetail(path: string, restorable: boolean): string {
+  return restorable
+    ? `its folder ${path} is gone — recreate it (Needs You → recreate folder) and continue; its conversation is kept`
+    : `its folder ${path} is gone — put the folder back, or remove this job`;
+}
+
+/** A message refused because the agent's folder is gone; its message is the sentence. */
+export class FolderGoneError extends Error {}
 
 /** Whether a pause note is `strandNote`'s. */
 export const isStrandNote = (note: string | null): boolean =>
@@ -924,6 +945,8 @@ export class Supervisor implements AgentControl {
       this.#pause(agentId, budgetNote(agent));
       return;
     }
+    // Its folder is gone: failed with the reason, rather than a launch error (Amendment 114).
+    if (this.#refuseGone(agentId, job)) return;
 
     this.#active.add(agentId);
     this.#pushSlots();
@@ -1418,6 +1441,10 @@ export class Supervisor implements AgentControl {
     // Refused, not launched: the status stays as it is and the sentence says why.
     const refusal = budgetRefusal(agent);
     if (refusal) throw new BudgetReachedError(refusal);
+    const job = getJob(this.#db, agent.jobId);
+    if (job && !existsSync(job.worktreePath)) {
+      throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
+    }
 
     /*
      * No `user_text` emission here. This used to emit one and then hand the same text
@@ -1580,6 +1607,7 @@ export class Supervisor implements AgentControl {
     const agent = getAgent(this.#db, agentId);
     const job = agent ? getJob(this.#db, agent.jobId) : undefined;
     if (!agent || !job) return;
+    if (this.#refuseGone(agentId, job)) return;
 
     this.#active.add(agentId);
     this.#pushSlots();
@@ -1688,6 +1716,75 @@ export class Supervisor implements AgentControl {
       await runner.stop();
     }
     this.#pause(agentId, note);
+  }
+
+  // ── a job whose folder is gone (Amendment 114) ───────────────────────────
+
+  /**
+   * True, having failed the agent with `folder_gone` and the sentence, when its job's folder
+   * isn't there. Nothing is started, so there is nothing to undo.
+   */
+  #refuseGone(agentId: string, job: Job): boolean {
+    if (existsSync(job.worktreePath)) return false;
+    console.warn(`[supervisor] ${agentId}: its folder ${job.worktreePath} is gone; not starting it`);
+    this.#settle(agentId, {
+      terminalReason: FOLDER_GONE,
+      deferredTool: null,
+      isError: true,
+      errorDetail: folderGoneDetail(job.worktreePath, job.isolation === 'worktree'),
+    });
+    return true;
+  }
+
+  /**
+   * Put a job's worktree back where it was (Amendment 114), so its agents can carry on in
+   * their own sessions: the conversation is kept by Claude Code, not in the folder. On its
+   * own branch when that still exists, with whatever was committed there; otherwise on a new
+   * branch of that name from the branch the Branches screen compares with (usually main).
+   * Uncommitted work that was in the folder is gone with it, and this says so.
+   *
+   * Only a job with its own worktree: one working in the project's folder (branch or in
+   * place isolation) can't be recreated from git, so that is refused with what to do.
+   */
+  async restoreFolder(jobId: string): Promise<{ path: string; branch: string; from: 'branch' | 'base'; base?: string }> {
+    const job = getJob(this.#db, jobId);
+    if (!job) throw new FolderGoneError('no such job');
+    const project = getProject(this.#db, job.projectId);
+    if (existsSync(job.worktreePath)) throw new FolderGoneError(`${job.worktreePath} is there already`);
+    if (job.isolation !== 'worktree') {
+      throw new FolderGoneError(`this job works in ${job.worktreePath} itself, not a worktree of its own — put that folder back`);
+    }
+    if (!project || !existsSync(project.path)) {
+      throw new FolderGoneError(`the project's folder ${project?.path ?? '(unknown)'} is gone too — put it back first`);
+    }
+    const root = await repoRoot(project.path);
+    // A removed worktree's registration can linger, and `worktree add` refuses its path.
+    await git(root, ['worktree', 'prune']);
+    let result: { path: string; branch: string; from: 'branch' | 'base'; base?: string };
+    if (await branchExists(root, job.branch)) {
+      await git(root, ['worktree', 'add', '--', job.worktreePath, job.branch]);
+      result = { path: job.worktreePath, branch: job.branch, from: 'branch' };
+    } else {
+      const { target } = await resolveTarget(root, project.defaultBranch, readSettings()[branchTargetKey(project.id)] ?? null);
+      await git(root, ['worktree', 'add', '-b', job.branch, '--', job.worktreePath, target]);
+      result = { path: job.worktreePath, branch: job.branch, from: 'base', base: target };
+    }
+    console.log(`[supervisor] recreated ${job.worktreePath} on ${job.branch} (${result.from === 'branch' ? 'its branch' : `new, from ${result.base}`})`);
+    // Its agents' transcripts say so, and are told when they next run.
+    for (const a of listAgents(this.#db).filter((x) => x.jobId === jobId)) {
+      eventLog().emit(
+        { projectId: a.projectId, jobId, agentId: a.id },
+        {
+          kind: 'user_text',
+          synthetic: true,
+          text:
+            result.from === 'branch'
+              ? `Your folder ${job.worktreePath} was deleted and has been recreated on ${job.branch}, with what was committed there. Anything that was not committed is gone: check before relying on it.`
+              : `Your folder ${job.worktreePath} was deleted and has been recreated from ${result.base}, on a new ${job.branch}. Your own commits and uncommitted work are not in it: check what is there before relying on it.`,
+        },
+      );
+    }
+    return result;
   }
 
   // ── pause everything until a time (Amendment 111) ─────────────────────────

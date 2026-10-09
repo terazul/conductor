@@ -25,6 +25,7 @@ import {
   alertActions,
   alertProject,
   continueAgent,
+  restoreAndContinue,
   dismissAlert,
   raiseAndContinue,
   waitingRoles,
@@ -103,6 +104,11 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
       case 'preview':
         navigate('preview', { jobId: a.jobId });
         return;
+      case 'restore': {
+        const agent = mine.find((m) => m.id === a.agentId);
+        if (agent) void cmd.run('Recreating the folder', () => restoreAndContinue(a.jobId, agent), SENT);
+        return;
+      }
       case 'note_done':
         void cmd.run('Ticking the note', () => editNote(a.projectId, a.noteId, { done: true }), 'Done.');
         return;
@@ -236,7 +242,7 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
 
 /** Something that makes the problem go away, as opposed to looking at it. */
 function isFix(a: AlertAction): boolean {
-  return a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off';
+  return a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off' || a.id === 'restore';
 }
 
 function labelOf(a: AlertAction): string {
@@ -252,6 +258,8 @@ function labelOf(a: AlertAction): string {
       return 'hand off';
     case 'preview':
       return 'open preview';
+    case 'restore':
+      return 'recreate folder and continue';
     case 'note_done':
       return '✓ mark done';
     case 'project':
@@ -267,6 +275,8 @@ function titleOf(a: AlertAction): string | undefined {
       return `Raise the cap to ${fmtMoney(a.to)}, then continue`;
     case 'hand_off':
       return 'Edit the summary the agents after it are told, then send it';
+    case 'restore':
+      return "Put the job's worktree back on its branch (or from main if the branch is gone), then continue in the same session";
     case 'dismiss':
       return 'Put it away. It comes back only if this happens again.';
     default:

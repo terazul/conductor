@@ -196,6 +196,10 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 117 — in progress. **Choose a project's default branch, and check its folder out on it.**
+
+Placeholder laid out by wave 9; lane D fills it in. ADR 0009 §1.
+
 ### Amendment 116 — post-merge, applied. **"You asked" reads in your colour, `--you`.**
 
 Web only (`agent/agent.css`, `agent/verify.ts`). ADR 0009 §3. The pinned bar at the top of the
@@ -210,13 +214,26 @@ live text), and its **You asked** label and text in `--you`. Hover lights the bo
 
 Placeholder laid out by wave 9 (docs/plans/wave-9.md); lane M fills it in. ADR 0009 §4.
 
-### Amendment 114 — in progress. **Choose a project's default branch, and check its folder out on it.**
+### Amendment 114 — post-merge, applied. **An agent whose job's folder is gone is told so, and the folder can be recreated.**
 
-Placeholder laid out by wave 9; lane D fills it in. ADR 0009 §1.
-
-### Amendment 112 — in progress. **A full terminal on macOS and Ubuntu.**
-
-Placeholder laid out by wave 9; lane T fills it in. ADR 0009 §2; docs/plans/full-terminal.md.
+Reported 9 Oct: a standalone architect "stopped without results". Its job's worktree had been removed
+(in a branch clean-up) while it could still be resumed; every resume handed Claude Code a cwd that
+didn't exist, which failed as "native binary … failed to launch (ENOENT)" and settled as
+`iteration_error`, five times. Asked: "can't you identify if this job folder is gone?"
+- **Supervisor.** `#refuseGone(agentId, job)` before `#launch` and `#launchWithPrompt` start anything:
+  no folder → `#settle` with `terminalReason: 'folder_gone'` and `folderGoneDetail(path, restorable)`,
+  so it is `failed` with the sentence and Needs You shows it. `sendMessage` checks first and throws
+  `FolderGoneError`; the message route answers 409 with that sentence, and nothing changes.
+- **Recreate.** `restoreFolder(jobId)`, `POST /api/jobs/:jobId/folder` → `{ path, branch, from:
+  'branch' | 'base', base? }`: `worktree prune`, then `worktree add -- <path> <branch>` when the job's
+  branch exists, else `worktree add -b <branch> -- <path> <target>` with Amendment 113's target. Each of
+  the job's agents gets a synthetic note in its transcript saying what came back and that uncommitted
+  work is gone. 409 (with the sentence) when the folder is there, the job isn't `worktree` isolation, or
+  the project folder is gone too; 404 no such job.
+- **Web.** `folder_gone` reads "lost its folder: it was deleted". A `failed` alert with that cause offers
+  **recreate folder and continue** (`restore`: POST, then `continueAgent`) in place of continue.
+- **Verify:** daemon `session/verify-folder.ts` (port 7813, 18 checks, real worktrees, fake SDK); web
+  `attention/verify-folder.ts`. Both in `make test`.
 
 ### Amendment 113 — post-merge, applied. **The Branches screen draws against a branch that exists, and you can choose it.**
 
@@ -236,6 +253,10 @@ history with it, ahead 0, and the rail was empty. Other projects had feature bra
 - **Web.** **compared with ▾** in the screen's head: **automatic — <target>** (removes the setting) and
   every local branch; beside it, where an automatic one came from (`targetFromWords`).
 - **Verify:** daemon `verify-branches.ts` §11; web `branches/verify.ts` §8.
+
+### Amendment 112 — in progress. **A full terminal on macOS and Ubuntu.**
+
+Placeholder laid out by wave 9; lane T fills it in. ADR 0009 §2; docs/plans/full-terminal.md.
 
 ### Amendment 111 — post-merge, applied. **Pause everything until a time; send a message to an agent at a time.**
 

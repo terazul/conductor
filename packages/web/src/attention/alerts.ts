@@ -30,6 +30,8 @@ export type AlertAction =
    */
   | { id: 'hand_off'; agentId: string; role?: string }
   | { id: 'preview'; jobId: string }
+  /** Its job's folder was deleted (Amendment 114): recreate it, then continue. */
+  | { id: 'restore'; jobId: string; agentId: string }
   /** A due note (Amendment 63): tick it done, or go to its project. */
   | { id: 'note_done'; projectId: string; noteId: string }
   | { id: 'project'; projectId: string }
@@ -55,6 +57,10 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
 
   switch (alert.kind) {
     case 'failed':
+      // Its folder is gone: continuing alone would fail the same way, so the fix recreates it.
+      if (alert.cause === 'folder_gone' && first) {
+        return [{ id: 'restore', jobId: first.jobId, agentId: first.id }, ...open, dismiss];
+      }
       return [
         ...(first && resumable(first)
           ? [{ id: 'continue', label: 'continue', agentIds: [first.id] } as const]
@@ -191,6 +197,15 @@ export async function handOff(agent: Pick<Agent, 'id'>, summary: string): Promis
 export async function continueAgent(agent: Pick<Agent, 'id' | 'status'>): Promise<void> {
   if (agent.status === 'paused') await resumeAgent(agent.id);
   else await sendMessage(agent.id, { text: CONTINUE_TEXT, synthetic: true });
+}
+
+/**
+ * Recreate a job's deleted folder, then continue the agent in its own session (Amendment
+ * 114). The daemon refuses, with the sentence, when the folder can't be recreated.
+ */
+export async function restoreAndContinue(jobId: string, agent: Pick<Agent, 'id' | 'status'>): Promise<void> {
+  await api(`/api/jobs/${encodeURIComponent(jobId)}/folder`, { method: 'POST', body: {} });
+  await continueAgent(agent);
 }
 
 /** Only the cap; the route merges it into the rest of the agent's autonomy. */

@@ -1,4 +1,4 @@
-# Plan: wave 9, built in parallel (Amendments 112, 114, 115, 116)
+# Plan: wave 9, built in parallel (Amendments 112, 115, 116, 117)
 
 Design: [ADR 0009](../adr/0009-default-branch-terminal-methodology.md).
 
@@ -6,7 +6,7 @@ Design: [ADR 0009](../adr/0009-default-branch-terminal-methodology.md).
 |---|---|---|---|
 | — (step 0) | 116 | "You asked" in `--you` | `agent/agent.css` `.ag-lastask*`, plus its check |
 | T | 112 | Full terminal, macOS and Ubuntu | `daemon/src/terminal/*`, `routes/term.ts`, `web/src/agent/Xterm.tsx`, the Agent terminal tab, package.json and lockfile |
-| D | 114 | Choose the default branch; check it out | `workspace/branches.ts`, `routes/branches.ts`, `session/store.ts` (project update), a new migration, `web/src/branches/*` |
+| D | 117 | Choose the default branch; check it out | `workspace/branches.ts`, `routes/branches.ts`, `session/store.ts` (project update), a new migration, `web/src/branches/*` |
 | M | 115 | Git methodology per launch | `workspace/worktree.ts`, `routes/session.ts` POST /api/jobs, `supervisor.ts` createJob, `web/src/spawn/*`, `settings/route.tsx` isolation pills |
 
 ## Step 0: shared ground, on `conductor/job_07af774e-eb6`
@@ -20,8 +20,8 @@ Design: [ADR 0009](../adr/0009-default-branch-terminal-methodology.md).
    Lane T adds its own terminal types at the end of the file, and nobody else edits it.
    To keep typecheck green until lane D lands, the daemon answers `set_default` with
    400 "not built yet" and returns `rootBranch: null`.
-3. **`CONTRACT.md`:** stubs for 116 (written in full), 115, 114 and 112, above 113.
-4. **`TODO.md`:** the next amendment is 117.
+3. **`CONTRACT.md`:** stubs for 117, 116 (written in full) and 115 above 114, and 112 below 113.
+4. **`TODO.md`:** the next amendment is 118.
 5. **Verify stubs, wired into `make test`:** `packages/daemon/src/terminal/verify.ts` (T) and
    `packages/daemon/src/workspace/verify-methodology.ts` (M). Lane D adds its cases to the
    existing `workspace/verify-branches.ts` and `branches/verify.ts`.

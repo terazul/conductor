@@ -1003,6 +1003,7 @@ started with. Conductor checks for this every minute and turns the tag amber wit
 | Numbers disagree between screens | Worth reporting. Every serious bug found while building this was caught exactly this way. |
 | Can't remove a project | An agent in it is still running. The refusal names it — interrupt it on the Agent screen, then remove. |
 | Can't change a project's path | Either the directory doesn't exist, or another project already points at it. The refusal says which. |
+| An agent says **lost its folder: it was deleted** | Its job's worktree was removed, by `git worktree remove`, a clean-up or by hand, while the agent could still be resumed. Nothing is started there. In Needs You, **recreate folder and continue** puts the worktree back at the same path: on its branch with what was committed there, or, when the branch was deleted too, on a new branch of that name from the branch the Branches screen compares with. Then the agent carries on in its own session, told that uncommitted work is gone. A job working in a folder of its own (branch or in place isolation) can't be recreated: put the folder back. |
 | Removed a project by mistake | The files, worktrees and branches are all still there (§4). Add the folder again; you get a fresh project, and the old transcripts and spend history are gone for good. |
 
 **Stopping an agent**, in increasing order of finality, all on the Agent screen (`3`):

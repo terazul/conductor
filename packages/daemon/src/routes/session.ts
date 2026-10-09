@@ -55,6 +55,7 @@ import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, 
 import { describeRule } from '../session/rules.js';
 import {
   BudgetReachedError,
+  FolderGoneError,
   HandOffRefusedError,
   initSupervisor,
   ProjectBusyError,
@@ -595,6 +596,17 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     }
   });
 
+  // A job whose folder was deleted gets it back, so its agents can continue (Amendment 114).
+  app.post<{ Params: { jobId: string } }>('/api/jobs/:jobId/folder', async (req, reply) => {
+    if (!getJob(db, req.params.jobId)) return fail(reply, 404, 'no such job');
+    try {
+      return reply.send(await sup.restoreFolder(req.params.jobId));
+    } catch (err) {
+      if (err instanceof FolderGoneError) return fail(reply, 409, 'could not recreate the folder', err.message);
+      return fail(reply, 500, 'could not recreate the folder', err instanceof Error ? err.message : String(err));
+    }
+  });
+
   app.post<{ Params: { jobId: string } }>('/api/jobs/:jobId/stop', async (req, reply) => {
     if (!getJob(db, req.params.jobId)) return fail(reply, 404, 'no such job');
     await sup.stopJob(req.params.jobId);
@@ -631,8 +643,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       const result = sup.sendMessage(req.params.agentId, body.text.trim(), body.synthetic === true);
       return reply.send({ ok: true, delivery: result });
     } catch (err) {
-      // A budget refusal's message is the sentence to show, so it goes out bare.
-      const detail = err instanceof BudgetReachedError ? err.message : String(err);
+      // A budget refusal's message is the sentence to show, so it goes out bare; so is a folder that's gone.
+      const detail = err instanceof BudgetReachedError || err instanceof FolderGoneError ? err.message : String(err);
       return fail(reply, 409, 'could not deliver message', detail);
     }
   });
