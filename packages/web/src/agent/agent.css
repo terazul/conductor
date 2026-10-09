@@ -1522,3 +1522,95 @@ a.ag-files-p:focus-visible {
   outline: none;
   border-color: var(--live);
 }
+
+/* Send later, and what waits (Amendment 111). */
+.ag-later-btn {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ag-later-btn:hover,
+.ag-later-btn.is-on {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.ag-later {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.ag-later-at {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.ag-sched {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.ag-sched-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 2px 6px;
+  border-left: 2px solid var(--line2);
+  color: var(--ink2);
+}
+
+.ag-sched-row.is-failed {
+  border-left-color: var(--fail);
+  color: var(--fail);
+}
+
+.ag-sched-when {
+  flex: none;
+  color: var(--ink);
+}
+
+.ag-sched-in {
+  color: var(--ink3);
+}
+
+.ag-sched-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-sched-x {
+  flex: none;
+  font: inherit;
+  color: var(--ink3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.ag-sched-x:hover {
+  color: var(--ink);
+}

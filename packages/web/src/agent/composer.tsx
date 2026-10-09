@@ -39,7 +39,9 @@ import {
   useProviders,
 } from '../lib/providers.js';
 import { DEFAULT_EFFORT, EFFORTS } from '../spawn/autonomy.js';
-import { sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { LaterRow, ScheduledList } from './scheduled.js';
+import { fmtWhen } from '../lib/when.js';
 import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
@@ -264,6 +266,22 @@ export function Composer({ agent }: { agent: Agent }) {
     if (ok) setText('');
   };
 
+  // Send it later (Amendment 111): the same text, at a time you pick, in your local time.
+  const [later, setLater] = useState(false);
+  const schedule = async (at: string) => {
+    const body = text.trim();
+    if (body.length === 0) return;
+    const ok = await send.run(
+      'Scheduling a message',
+      () => scheduleMessage(agent.id, at, body),
+      () => `Scheduled for ${fmtWhen(at)}.`,
+    );
+    if (ok) {
+      setText('');
+      setLater(false);
+    }
+  };
+
   const togglePill = async (pill: PillDef) => {
     const nowOn = pill.on(autonomy);
     const patch = pill.flip(autonomy, !nowOn);
@@ -428,6 +446,7 @@ export function Composer({ agent }: { agent: Agent }) {
 
   return (
     <div className="ag-composer">
+      <ScheduledList agentId={agent.id} />
       <div className="ag-cbox">
         <textarea
           className="ag-input"
@@ -502,6 +521,15 @@ export function Composer({ agent }: { agent: Agent }) {
             <span className="ui-lab">⇧⏎ newline</span>
             <button
               type="button"
+              className={`ag-later-btn${later ? ' is-on' : ''}`}
+              aria-expanded={later}
+              onClick={() => setLater((v) => !v)}
+              title="Send this message at a time you choose"
+            >
+              ⏲ later
+            </button>
+            <button
+              type="button"
               className="fl-btn is-primary"
               onClick={() => void submit()}
               disabled={send.busy || text.trim().length === 0}
@@ -510,6 +538,15 @@ export function Composer({ agent }: { agent: Agent }) {
             </button>
           </div>
         </div>
+
+        {later && (
+          <LaterRow
+            busy={send.busy}
+            hasText={text.trim().length > 0}
+            onSchedule={(at) => void schedule(at)}
+            onClose={() => setLater(false)}
+          />
+        )}
 
         {open && (
         <>

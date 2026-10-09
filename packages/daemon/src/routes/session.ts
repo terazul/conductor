@@ -35,6 +35,7 @@ import { HELPERS_MAX, NOTE_MAX, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
+import { initScheduler } from '../session/schedule.js';
 import { openDb } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { hub } from '../hub.js';
@@ -311,9 +312,14 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   // Then the agents no request covers: ones left `working` by a hard stop. Order matters —
   // see Supervisor.reconcile.
   sup.reconcile();
+  // Pause everything until a time, and messages sent at a time (Amendment 111). Before the
+  // pump: a pause still on holds the supervisor before anything queued can start.
+  const sched = initScheduler(db, sup);
+  await sched.start();
   sup.pump();
 
   app.addHook('onClose', async () => {
+    sched.stop();
     await sup.shutdown();
     alertsNow.stop();
   });

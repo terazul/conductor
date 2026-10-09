@@ -744,3 +744,92 @@
 .sh-spend[data-tone='over'] {
   color: var(--fail);
 }
+
+/* Pause everything until a time (Amendment 111): the bar's control, its panel, and the on state. */
+.sh-pause-btn {
+  font: inherit;
+  color: var(--ink2);
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.sh-pause-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.sh-pause-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sh-pause-btn.is-go {
+  color: var(--ink);
+  border-color: var(--ink2);
+}
+
+.sh-pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sh-pause.is-on {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sh-pause.is-on .sh-pause-btn {
+  font-weight: 400;
+}
+
+/* Fixed, not absolute: the status bar clips what overflows it. */
+.sh-pause-pop {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--statusbar) + 6px);
+  z-index: 50;
+  width: 330px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px var(--shadow);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  white-space: normal;
+}
+
+.sh-pause-head {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sh-pause-at {
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  background: var(--bg2);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.sh-pause-quick,
+.sh-pause-acts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sh-pause-note {
+  margin: 0;
+  color: var(--ink3);
+  line-height: 1.5;
+}

@@ -180,6 +180,13 @@ export function strandNote(role: string | null): string {
     : `waits for ${role}, which was stopped — resume to run without it, or remove it`;
 }
 
+/**
+ * Why an agent is paused while everything is (Amendment 111). Its own sentence, so the end
+ * of the pause wakes exactly the agents it paused, after a restart too: the note is in the
+ * event log, as `isStrandNote`'s is. One you paused yourself stays paused.
+ */
+export const HOLD_NOTE = 'paused with everything until the scheduled time — it carries on by itself then';
+
 /** Whether a pause note is `strandNote`'s. */
 export const isStrandNote = (note: string | null): boolean =>
   note !== null && note.startsWith('waits for ') && note.includes('resume to run without it');
@@ -296,6 +303,9 @@ export class Supervisor implements AgentControl {
    * for something you did on purpose.
    */
   #userStopped = new Set<string>();
+
+  /** Everything is paused until a time (Amendment 111); `hold` and `release` set it. */
+  #hold = false;
 
   constructor(db: Db) {
     this.#db = db;
@@ -759,6 +769,8 @@ export class Supervisor implements AgentControl {
    * state change; cheap enough to be unconditional.
    */
   pump(): void {
+    // Everything is paused until a time (Amendment 111): nothing starts by itself.
+    if (this.#hold) return;
     for (const agent of listAgents(this.#db)) {
       if (agent.status !== 'queued') continue;
       if (this.#active.size >= slotLimit()) return;
@@ -1665,17 +1677,61 @@ export class Supervisor implements AgentControl {
    * question, so one you had not got to yet was lost and a woken agent had to think to
    * ask again.
    */
-  async pauseAgent(agentId: string): Promise<void> {
+  async pauseAgent(agentId: string, note = 'paused by the user'): Promise<void> {
     if (getAgent(this.#db, agentId)?.status === 'blocked' && (await arbiter().parkForAgent(agentId))) {
       return;
     }
-    arbiter().cancelForAgent(agentId, 'paused by the user');
+    arbiter().cancelForAgent(agentId, note);
     const runner = this.#runners.get(agentId);
     if (runner) {
       this.#userStopped.add(agentId);
       await runner.stop();
     }
-    this.#pause(agentId, 'paused by the user');
+    this.#pause(agentId, note);
+  }
+
+  // ── pause everything until a time (Amendment 111) ─────────────────────────
+
+  /** Whether everything is paused until a time: then `pump()` starts nothing. */
+  get held(): boolean {
+    return this.#hold;
+  }
+
+  /**
+   * Pause everything. Nothing starts by itself from now on, and every agent that is
+   * working is paused the way ⏸ pauses it, with `HOLD_NOTE`: its conversation is kept, its
+   * slot freed. Queued agents stay queued; an agent waiting on you keeps its question.
+   * What you do yourself still happens: a message you send reaches its agent.
+   * Idempotent. Returns how many it paused.
+   */
+  async hold(): Promise<number> {
+    this.#hold = true;
+    const working = listAgents(this.#db).filter((a) => a.status === 'working');
+    for (const a of working) await this.pauseAgent(a.id, HOLD_NOTE);
+    if (working.length > 0) console.log(`[supervisor] paused ${working.length} agent(s) until the scheduled time`);
+    return working.length;
+  }
+
+  /**
+   * The pause is over, or was never on (a restart after its time). Every agent `hold`
+   * paused is woken as ▶ resume wakes it, and whatever was queued starts. One at its budget
+   * stays paused, with the budget's reason. Returns how many it woke.
+   */
+  release(): number {
+    this.#hold = false;
+    let woke = 0;
+    for (const a of listAgents(this.#db)) {
+      if (a.status !== 'paused' || lastStatusNote(this.#db, a.id) !== HOLD_NOTE) continue;
+      try {
+        this.resumeAgent(a.id);
+        woke += 1;
+      } catch (err) {
+        if (!(err instanceof BudgetReachedError)) throw err;
+        this.#pause(a.id, budgetNote(a));
+      }
+    }
+    this.pump();
+    return woke;
   }
 
   resumeAgent(agentId: string): void {

@@ -23,6 +23,8 @@ import type {
   HandOffRequest,
   RemoveAgentResponse,
   RerunResponse,
+  ScheduleMessageRequest,
+  ScheduledMessage,
   SendMessageRequest,
   SetAutonomyRequest,
   SetModelRequest,
@@ -159,4 +161,15 @@ export function useCommand(): CommandHandle {
   );
 
   return { busy, notice, run, dismiss: () => setNotice(null) };
+}
+
+/** Send `text` to the agent at `at`, an ISO instant (Amendment 111). */
+export function scheduleMessage(agentId: string, at: string, text: string): Promise<{ message: ScheduledMessage }> {
+  const body: ScheduleMessageRequest = { at, text };
+  return api(agentPath(agentId, 'scheduled'), { method: 'POST', body });
+}
+
+/** Cancel a scheduled message, or clear one that failed. */
+export function cancelScheduled(id: string): Promise<unknown> {
+  return api(`/api/scheduled/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

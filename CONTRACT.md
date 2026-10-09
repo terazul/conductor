@@ -196,6 +196,55 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 111 — post-merge, applied. **Pause everything until a time; send a message to an agent at a time.**
+
+Asked 9 Oct: "add an option to pause all activity until a specified date/time (local time zone)" and
+"add option to submit requests to an agent at a specified date/time (local time zone)".
+
+**Time.** The browser turns a `datetime-local` value (local, no zone) into an ISO instant
+(`web/src/lib/when.ts`), and shows instants back in local time with the zone's short name. The daemon
+compares instants and never reads or sets a zone.
+
+**Pause everything.** The setting `conductor.pauseUntil` (`PAUSE_UNTIL_KEY` in shared/wire.ts), an ISO
+instant, through `PATCH /api/settings` like any other; its rule refuses what isn't a time or is more than
+a year ahead. `session/schedule.ts` watches it.
+- **Supervisor.** `#hold`, read as `held`. `pump()` returns at once while held, so nothing queued starts
+  by itself. `hold()` sets it and pauses every `working` agent through `pauseAgent(id, HOLD_NOTE)`
+  (`pauseAgent` gains the note; ⏸ still sends `'paused by the user'`). `release()` clears it, resumes
+  every `paused` agent whose last status note is `HOLD_NOTE` through `resumeAgent` (one at its budget is
+  re-paused with the budget's note), and pumps. The note is how the end of a pause knows which agents
+  it paused, after a restart too; one you paused yourself stays paused. Blocked agents keep their
+  question; `sendMessage` still launches directly, so a message you send gets through.
+- **The clock** (`Scheduler`). Looks every 5 s (`SCHEDULE_TICK_MS`, an interval, as the day watch does,
+  so sleep and a moved clock don't lose it), on every change to the setting, and once at start. In
+  session.ts it starts after `reconcile()` and before `pump()`, and holds at once if the pause is on, so
+  nothing queued slips out first. A tick: in the future and not held → `hold()`; not in the future →
+  `release()` if held (or on the first tick, so a restart past the time wakes what it paused), and the
+  setting is removed once past. Ticks never overlap.
+- No alert: a hold note isn't a budget note, so Needs You says nothing.
+
+**Scheduled messages.** Migration `140_scheduled.sql`: `scheduled_messages (id, agent_id → agents ON
+DELETE CASCADE, at, text, created_at, error)`. Wire: `ScheduledMessage { id, agentId, at, text,
+createdAt, error }`, `ScheduleMessageRequest { at, text }`, `Snapshot.scheduled?`, and the frame
+`{ type: 'scheduled', scheduled }` (the whole list, soonest first, after every change).
+- **Routes** (`routes/schedule.ts`, new). `GET /api/scheduled`; `POST /api/agents/:agentId/scheduled`
+  → 201 `{ message }`, 404 no such agent, 400 no text or longer than 100,000 characters, or a time that
+  isn't one, passed more than a minute ago, or more than a year ahead (`timeProblem`); `DELETE
+  /api/scheduled/:id` → `{ removed }` or 404. Each broadcasts the list; a POST also ticks.
+- **Sending.** On a tick, not while paused, each row with no error and `at` ≤ now goes through
+  `Supervisor.sendMessage(agentId, text)`, as if you had pressed send: into a live run, or resuming the
+  session. Sent, the row is deleted. "cannot receive messages yet" (no session) leaves it to try again;
+  any other refusal (a budget) sets `error` and it is not tried again.
+- **Web.** The store keeps `scheduled` from the snapshot and the frame (`useScheduled`). The composer
+  gets **⏲ later** beside send, opening `LaterRow` (a local date and time, **in 1 h**, **tomorrow 09:00**,
+  **schedule**), which posts what is typed and clears it on success; `ScheduledList` above the box shows
+  this agent's, each with when, how long from now, its first line and ✕ (`DELETE`); a failed one shows
+  `couldn't send: <reason>` in `--fail`. The status bar gets `PauseAll`: **⏸ pause all…** opens a panel
+  (date and time, quick picks, what it will do, **pause until**), and while on reads **⏸ all paused
+  until <time> · in …** with **▶ resume now** (removes the setting). Tokens only, no `--need`.
+- **Verify:** daemon `session/verify-schedule.ts` (port 7812, 43 checks, fake SDK); web
+  `lib/verify-schedule.ts`. Both in `make test`.
+
 ### Amendment 110 — post-merge, applied. **Merge any branch into any other, previewed; the composer's settings fold from a chevron header.**
 
 Asked 9 Oct: "collapsing the agent details in the panel for agent input should be like the other areas

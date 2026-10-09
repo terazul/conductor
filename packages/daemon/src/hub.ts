@@ -112,6 +112,7 @@ export function buildSnapshot(): Snapshot {
     if (slice.slots !== undefined) snap.slots = slice.slots;
     if (slice.costToday !== undefined) snap.costToday = slice.costToday;
     if (slice.settings !== undefined) snap.settings = slice.settings;
+    if (slice.scheduled !== undefined) snap.scheduled = slice.scheduled;
   }
 
   // Always authoritative — never a contributor's to set.

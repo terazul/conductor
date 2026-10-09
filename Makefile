@@ -174,11 +174,13 @@ test:
 	pnpm --filter @conductor/web exec tsx src/lib/verify-crumb.ts
 	pnpm --filter @conductor/web exec tsx src/attention/verify-needs-panel.ts
 	pnpm --filter @conductor/web exec tsx src/branches/verify.ts
+	pnpm --filter @conductor/web exec tsx src/lib/verify-schedule.ts
 	bash fixtures/make-scratch-repo.sh
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/workspace/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/preview/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/workspace/verify-branches.ts
+	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-schedule.ts
 
 # The database lives in ~/.conductor/ once you allowed it (Amendment 46); CONDUCTOR_DATA
 # moves it. Settings beside it are kept, and so is the database from before the move,

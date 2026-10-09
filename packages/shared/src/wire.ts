@@ -604,6 +604,37 @@ export interface Snapshot {
   costToday: number;
   /** Amendment 46. Optional so a recording made before it still replays. */
   settings?: Record<string, string>;
+  /** Amendment 111: messages waiting for their time. Optional for the same reason. */
+  scheduled?: ScheduledMessage[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduling  (Amendment 111)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The setting that pauses everything until a time: an ISO instant, or absent. Set, and in
+ * the future, nothing starts by itself and every working agent is paused; at the time,
+ * they carry on. The daemon removes it once it has passed.
+ */
+export const PAUSE_UNTIL_KEY = 'conductor.pauseUntil';
+
+/** A message to send an agent at a time. Gone once it is sent: the transcript has it then. */
+export interface ScheduledMessage {
+  id: string;
+  agentId: string;
+  /** When to send it, ISO. Chosen in the browser's local time. */
+  at: string;
+  text: string;
+  createdAt: string;
+  /** Why it could not be sent, once it was due; null while it waits. It is not tried again. */
+  error: string | null;
+}
+
+/** POST /api/agents/:agentId/scheduled. */
+export interface ScheduleMessageRequest {
+  at: string;
+  text: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -731,6 +762,8 @@ export type ServerFrame =
   | { type: 'terminal_out'; agentId: string; runId: string; stream: 'out' | 'err'; text: string }
   /** A project's branches changed through the Branches screen (Amendment 109). */
   | { type: 'branches'; projectId: string }
+  /** Amendment 111: every scheduled message, whenever one is added, sent, fails or is cancelled. */
+  | { type: 'scheduled'; scheduled: ScheduledMessage[] }
   /** The gap was too large to replay — client should refetch the snapshot. */
   | { type: 'resync' }
   | { type: 'pong' };

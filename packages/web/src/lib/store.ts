@@ -27,6 +27,7 @@ import {
   type Job,
   type PendingRequest,
   type Project,
+  type ScheduledMessage,
   type ServerFrame,
   type Snapshot,
 } from '@conductor/shared';
@@ -53,6 +54,8 @@ interface State {
   alerts: Alert[];
   slots: { used: number; total: number };
   costToday: number;
+  /** Messages waiting for their time (Amendment 111), soonest first. */
+  scheduled: ScheduledMessage[];
   eventsByAgent: Map<string, Event[]>;
   eventsByJob: Map<string, Event[]>;
 }
@@ -70,6 +73,7 @@ function initialState(): State {
     alerts: [],
     slots: { used: 0, total: 7 },
     costToday: 0,
+    scheduled: [],
     eventsByAgent: new Map(),
     eventsByJob: new Map(),
   };
@@ -178,6 +182,11 @@ class Store {
         receiveSettings(frame.settings);
         return;
 
+      case 'scheduled':
+        // The whole list each time (Amendment 111): one was added, sent, failed or cancelled.
+        s.scheduled = frame.scheduled;
+        break;
+
       case 'branches':
         // The Branches screen re-reads its own (Amendment 109); nothing here to project.
         receiveBranches(frame.projectId);
@@ -203,6 +212,8 @@ class Store {
     s.alerts = snap.alerts ?? [];
     s.slots = snap.slots;
     s.costToday = snap.costToday;
+    // A daemon from before Amendment 111 sends none.
+    s.scheduled = snap.scheduled ?? [];
     s.seq = snap.seq;
     s.generation += 1;
   }
@@ -428,6 +439,11 @@ export function usePending(): PendingRequest[] {
  * outages first, the rest oldest first. The daemon derives them, so there is nothing
  * to fold here — each `alerts` frame is the whole list.
  */
+/** Every scheduled message (Amendment 111), soonest first. Filter by agent where you show them. */
+export function useScheduled(): ScheduledMessage[] {
+  return useSelect('scheduled', (s) => s.scheduled);
+}
+
 export function useAlerts(): Alert[] {
   return useSelect('alerts', (s) => s.alerts);
 }

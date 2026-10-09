@@ -1021,6 +1021,35 @@ agent is told to check what that call did. If the agent was waiting on your answ
 pausing keeps the question in Needs You, and answering it wakes the agent. If its job
 was paused, waking the agent reopens the job.
 
+**Pausing everything until a time.** **⏸ pause all…** in the status bar, on every screen,
+asks for a date and time in your own time zone, with **1 h** and **tomorrow 09:00** as
+quick picks. From then until that time:
+
+- every working agent is paused, as **⏸ pause** pauses it: its conversation is kept and its
+  slot freed, and its transcript says *paused with everything until the scheduled time*;
+- nothing starts by itself: queued agents, new jobs you start, and agents you **▶ resume**
+  wait in the queue;
+- an agent waiting on your answer keeps its question, and a message you send still goes
+  through, because those are you acting;
+- a message scheduled for that time waits too.
+
+The status bar reads **⏸ all paused until <time> · in 3 h**, and **▶ resume now** ends it
+early. At the time, the agents the pause paused carry on in their own sessions, and the
+queue starts. One you paused yourself stays paused. If the daemon was off when the time
+came, it does this when it starts. The time is kept in `settings.json`, so it survives a
+restart, and is removed once it has passed.
+
+**Sending a message later.** Type the message, then press **⏲ later** beside **send**. Pick
+a date and time (your time zone, with **in 1 h** and **tomorrow 09:00**), and press
+**schedule**. It waits above the message box as **⏲ tomorrow 09:00 EDT · in 13 h** and its
+first line, with ✕ to cancel it. At its time it goes to the agent exactly as if you had
+pressed send then: into a run that is going, or waking an agent that had finished. It is
+then in the transcript, and gone from the list. It goes out at most a few seconds late,
+and if the daemon was off at its time, as soon as it starts. An agent that hasn't started
+yet gets it once it has. One that can't take it (it has reached its budget, say) shows
+**couldn't send** with the reason, in red, until you clear it; it isn't tried again.
+Removing the agent removes its scheduled messages.
+
 A terminated agent reads **stopped** — not "finished", which would claim it had. Its
 transcript and spend stay, and nothing on disk is touched: the worktree, the branch and
 every file it wrote are exactly where they were. To stop a whole job at once, use

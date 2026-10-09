@@ -39,6 +39,7 @@ import { Navigator, useRoute } from './Navigator.js';
 import { DETAILS_KEY, NAV_OPEN_KEY, detailsShown, navShown, rightPanelFor } from './navtree.js';
 import { DAILY_KEY, dailyMeter, parseBudget } from './spend.js';
 import { useNow } from './clock.js';
+import { PauseAll } from './pauseall.js';
 import { fmtAge, fmtMoney } from './ui.js';
 import { chooseTheme, installTheme, nextChoice, useTheme, type ThemeChoice } from './theme.js';
 import { buildTag, buildTitle, getBuild, type Build } from '../diagnostics/build.js';
@@ -224,6 +225,7 @@ function StatusBar() {
         <kbd>0</kbd> diagnostics
       </span>
       <span className="sh-right">
+        <PauseAll />
         <span>seq {seq}</span>
         <span>
           {slots.used}/{slots.total} agent slots
