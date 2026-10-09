@@ -423,6 +423,7 @@ async function act(
       refuseLive(b);
       const cwd = mergeCheckout(state);
       if (b.ahead === 0) throw new BranchError(409, 'nothing to merge', `${target} already has every commit on ${b.name}`);
+      if (b.forkedAt === null) throw new BranchError(409, 'unrelated histories', `${b.name} shares no history with ${target}`);
       const out = await mergeOne(cwd, target, b.name);
       if ('conflict' in out) return { ok: false, merged: [], conflict: { branch: b.name, files: out.conflict } };
       return { ok: true, merged: [b.name], sha: out.sha };
@@ -431,7 +432,7 @@ async function act(
     case 'merge_all': {
       const cwd = mergeCheckout(state);
       const queue = state.branches
-        .filter((b) => !b.isTarget && !b.live && b.ahead > 0)
+        .filter((b) => !b.isTarget && !b.live && b.ahead > 0 && b.forkedAt !== null)
         .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.name.localeCompare(b.name)));
       const merged: string[] = [];
       let sha: string | undefined;
