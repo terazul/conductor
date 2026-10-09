@@ -45,6 +45,15 @@ export const QUEUE_PANEL: Panel = {
   share: 0.4,
 };
 
+/** The Agent screen's Needs you panel (Amendment 108): wider than the details, for the cards. */
+export const AGENT_NEEDS: Panel = {
+  key: 'conductor.agentNeedsW',
+  axis: 'width',
+  fallback: 340,
+  min: 280,
+  share: 0.5,
+};
+
 /** Its fallback is tokens.css's `--projcol`, which stays the width when nothing is kept. */
 export const PROJECT_COLUMN: Panel = {
   key: 'conductor.projectColW',

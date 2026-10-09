@@ -33,6 +33,7 @@ import {
 import { api, Feed, type FeedStatus } from './feed.js';
 import { receiveSettings } from './settings.js';
 import { receiveTerminalOut, receiveTerminalRun } from './terminal.js';
+import { receiveBranches } from '../branches/live.js';
 
 /** Per-agent transcript cap. Older events stay in SQLite, not in the tab. */
 const MAX_EVENTS_PER_AGENT = 2_000;
@@ -175,6 +176,11 @@ class Store {
       case 'settings':
         // Settings keep their own store (lib/settings.ts); nothing here re-renders on them.
         receiveSettings(frame.settings);
+        return;
+
+      case 'branches':
+        // The Branches screen re-reads its own (Amendment 109); nothing here to project.
+        receiveBranches(frame.projectId);
         return;
 
       case 'pong':

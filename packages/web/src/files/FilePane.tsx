@@ -257,7 +257,7 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
   return (
     <div className="c5-pane">
       <div className="c5-panehead">
-        <span className="c5-crumb">
+        <span className="ui-crumb c5-crumb">
           {segments.map((s, i) => (
             <span key={`${i}:${s}`}>
               {s}

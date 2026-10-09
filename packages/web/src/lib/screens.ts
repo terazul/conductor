@@ -30,6 +30,7 @@
  *   40  '4'  Needs you      Track E
  *   50  '5'  Files          Track C
  *   60  '6'  Preview        Track D
+ *   65  '7'  Branches       wave 8    (Amendment 109)
  *   70   —   Spawn          Track A   no tab (Amendment 42)
  *   90  '9'  Settings       W0        (Amendment 47)
  *   99  '0'  Diagnostics    W0

@@ -319,22 +319,13 @@
 }
 
 .c5-crumb {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--ink2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.c5-crumb b {
-  color: var(--ink);
-  font-weight: 600;
+  min-width: 0;
 }
 
 .c5-crumb i {
-  color: var(--ink3);
-  font-style: normal;
   margin: 0 5px;
 }
 

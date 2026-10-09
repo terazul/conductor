@@ -28,6 +28,8 @@ export class GitError extends Error {
   /** Kept because some git commands exit non-zero *and* mean it — see diffUntracked. */
   readonly stdout: string;
   readonly code: number | null;
+  /** Killed for running past `timeoutMs` (Amendment 109): the remote never answered. */
+  readonly timedOut: boolean;
 
   constructor(
     cwd: string,
@@ -35,29 +37,56 @@ export class GitError extends Error {
     stderr: string,
     stdout: string,
     code: number | null,
+    timedOut = false,
   ) {
-    super(`git ${args.join(' ')} failed in ${cwd}: ${stderr.trim() || `exit ${code}`}`);
+    super(
+      `git ${args.join(' ')} failed in ${cwd}: ${timedOut ? 'timed out' : stderr.trim() || `exit ${code}`}`,
+    );
     this.name = 'GitError';
     this.cwd = cwd;
     this.args = args;
     this.stderr = stderr;
     this.stdout = stdout;
     this.code = code;
+    this.timedOut = timedOut;
   }
 }
 
 interface ExecFailure {
   stderr?: string | Buffer;
   stdout?: string | Buffer;
-  code?: number;
+  code?: number | string;
+  killed?: boolean;
+  signal?: string | null;
+}
+
+/** What a call may add: extra environment (merged last) and a time limit. */
+export interface GitOptions {
+  env?: Record<string, string>;
+  /** Kill git after this long; 0 or absent means no limit, as before. */
+  timeoutMs?: number;
 }
 
 /** Run git, return stdout. Throws GitError on non-zero exit. */
-export async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<string> {
+  return (await gitBoth(cwd, args, opts)).stdout;
+}
+
+/**
+ * `git`, keeping stderr too: push and fetch say what they did there, not on stdout
+ * (Amendment 109).
+ */
+export async function gitBoth(
+  cwd: string,
+  args: string[],
+  opts: GitOptions = {},
+): Promise<{ stdout: string; stderr: string }> {
+  const timeout = opts.timeoutMs ?? 0;
   try {
-    const { stdout } = await exec('git', args, {
+    const { stdout, stderr } = await exec('git', args, {
       cwd,
       maxBuffer: MAX_BUFFER,
+      timeout,
       env: {
         ...process.env,
         // Never let a git operation sit waiting for credentials or an editor.
@@ -65,14 +94,16 @@ export async function git(cwd: string, args: string[]): Promise<string> {
         GIT_EDITOR: 'true',
         // Read-only commands shouldn't fight the agent's own git for the index lock.
         GIT_OPTIONAL_LOCKS: '0',
+        ...opts.env,
       },
     });
-    return stdout;
+    return { stdout, stderr };
   } catch (err) {
     const f = err as ExecFailure;
     const stderr = typeof f.stderr === 'string' ? f.stderr : (f.stderr?.toString('utf8') ?? '');
     const stdout = typeof f.stdout === 'string' ? f.stdout : (f.stdout?.toString('utf8') ?? '');
-    throw new GitError(cwd, args, stderr, stdout, f.code ?? null);
+    const timedOut = timeout > 0 && f.killed === true;
+    throw new GitError(cwd, args, stderr, stdout, (f.code as number | undefined) ?? null, timedOut);
   }
 }
 

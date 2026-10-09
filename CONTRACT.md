@@ -196,6 +196,129 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 109 — post-merge, applied. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
+
+Daemon (`workspace/branches.ts` new, `routes/branches.ts` new, `workspace/git.ts`,
+`workspace/verify-branches.ts`). Wire (`BranchInfo`, `BranchesResponse`, `BranchAction`,
+`BranchActionResult`, the `{ type: 'branches', projectId }` frame) as laid out in step 0, unchanged.
+Asked 9 Oct: "show the GitHub branches and give me an option to merge a branch into main, merge all
+branches into main, do a commit and push." Design: [ADR 0008](docs/adr/0008-branches-screen.md). The
+first code in the daemon that writes history or talks to a remote.
+- **Routes.** `GET /api/projects/:projectId/branches` → `BranchesResponse`; `POST` the same path with a
+  `BranchAction` → `BranchActionResult`, which carries the listing after the action. Every POST, refused
+  or not, broadcasts `{ type: 'branches', projectId }`.
+- **Listing.** The local branches of the repo `project.path` is in (`for-each-ref refs/heads`), against
+  the project's `defaultBranch`: ahead/behind (`rev-list --left-right --count`), `merge-base`, `log -n 20
+  target..branch`, the upstream's ahead/behind (null when none is set or it is gone), the worktree it is
+  checked out in (`listWorktrees`, prunable ones skipped) with `status --porcelain` lines as
+  `uncommitted`. `targetCheckout` is the worktree with the target, `clean` when `status --porcelain -uno`
+  is empty: untracked files don't count. `remote` is `'origin'` when `git remote` lists it. `jobId` is the
+  newest of the project's jobs whose `branch` is that name, a live one first; `live` is any agent of such
+  a job `working`, `blocked` or `queued`. Order: the target, then tip time, newest first.
+- **merge** runs `merge --no-ff --no-edit -m "Merge branch '<b>' into <target>" -- refs/heads/<b>` in
+  `targetCheckout.path`. A failure with unmerged files (`diff --name-only --diff-filter=U`) is `merge
+  --abort`ed and answered `200 { ok: false, conflict: { branch, files } }`; any other failure is aborted
+  too and is a 500. **merge_all** does the same, oldest tip first, over every branch that isn't the
+  target, isn't live and is ahead; it re-counts before each (an earlier merge may have taken it), and
+  stops at the first conflict with `merged` so far. **commit** runs `add -A -- . ':(top,exclude).conductor'`
+  then `commit -m` in the branch's worktree: Conductor's own folder of job worktrees is never added.
+  **push** runs `push [-u] -- origin refs/heads/<b>:refs/heads/<b>`, `-u` when it has no upstream;
+  **fetch** runs `fetch --no-prune -- origin`. Both get `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` unless
+  one is already set, and 60 s; `output` is git's stdout and stderr, trimmed.
+- **Safety.** `execFile` only, through `git()`, which gains an optional `{ env, timeoutMs }` and
+  `gitBoth()` (stdout and stderr); `GitError.timedOut` says it was killed. A name starting with `-` is
+  refused before anything else, every name must be in the `for-each-ref` list, and refs go in fully
+  qualified after `--`. Nothing is forced: no `--force`, and the explicit refspec has no `+`, so a
+  configured `remote.origin.push = +…` is never used. Every POST holds `KeyedLock` on
+  `branches:<repoRoot>`.
+- **Errors**, `{ error, detail? }`: **404** no such project. **400** not a git repo, an unknown action,
+  no branch or one starting with `-`, no such branch, merging the target into itself, an empty message.
+  **409** the branch is live (and, for merge and merge_all, the target is: an agent working in place
+  would have the merge land under it), the target isn't checked out, its checkout has tracked changes,
+  nothing to merge (ahead 0), no worktree to commit from, nothing to commit (also after `add`, when only
+  excluded files changed), no origin, a rejected push (git's stderr as detail). **504** push or fetch
+  timed out. **500** git failed, stderr as detail.
+- **Verify:** `workspace/verify-branches.ts` (port 7811), 86 checks against a repo, a bare origin and a
+  second clone in `tmpdir()`, every case in ADR 0008 § Testing.
+
+**Web (lane B2).** `web/src/branches/`, new: `route.tsx` registers screen 7 (`id: 'branches'`, order 65); `graph.tsx`
+draws the SVG from a pure `layout(BranchesResponse)` (the target as a rail whose dots are the distinct fork distances,
+read from each branch's `behind`, with the commits between them counted; a curve, up to 10 commit dots, an uncommitted
+hollow dot, a tip label and badges per branch; ahead 0 dimmed and joined to the rail; `forkedAt: null` starting on its
+own); `rules.ts` holds the pure "why not" sentences for merge, merge all, commit and push, and the confirms;
+`endpoints.ts` has `getBranches` and `branchAction`; `live.ts` takes the `branches` frame, which `lib/store.ts` now
+hands it. The project is the route's `projectId`, else the remembered one; with neither, the screen lists projects.
+It re-reads on arrival, window focus, a `branches` frame for its project, a change in its jobs' or agents' statuses,
+and from each action's own `branches`. Not watched: `worktree` events, because the store has no per-project event
+selector and backfilling every job's history to count them costs more than it buys. The web treats a branch with no
+history in common with the target as not mergeable (git refuses unrelated histories), so it is left out of
+"merge all"'s count. Also `shell/nav.ts` (`SCREEN.branches`, `openBranches`), `shell/shell.tsx` ("1–7 screens"),
+`lib/screens.ts` (the reserved table), and `lib/verify.ts` §15, whose made-up tab-less screen now names hotkey 8.
+Checked by `web/src/branches/verify.ts`.
+
+
+### Amendment 108 — post-merge, applied. **Answer an agent's requests in a side panel on its own Agent screen.**
+
+Web only (`attention/NeedsPanel.tsx`, `attention/needs.ts`, `attention/AlertCard.tsx`, `attention/attention.css`,
+`agent/agent.tsx`, `settings/route.tsx`, `lib/verify.ts`, `attention/verify-needs-panel.ts`). No daemon, wire or
+database change. Asked 9 Oct: "for the Needs You, have it come up as a side panel when I click on it in the Agent
+page — that way I don't have to leave the page to approve it or interact with it." Design:
+[ADR 0007](docs/adr/0007-needs-panel-on-agent.md).
+- **What it shows**, by the user's choice: everything waiting on that agent and only that agent. `needsFor(agentId,
+  pending, alerts)` (pure, in `attention/needs.ts`, re-exported by `NeedsPanel.tsx`) gives its requests, then the
+  alerts whose `agentIds` include it, each oldest first. A request from another agent isn't here; the rail and the
+  navigator still count it.
+- **The cards are the Needs you screen's own.** `PermissionCard` and `QuestionCard` unchanged, each with its own
+  `{ composer, draft, cursor }` in a map keyed by `requestId`; `pruneCards` drops a request's entry once it leaves
+  `pending`. Decisions go through `useDecisions(requests)`, so a card leaves only when the daemon's `resolved` event
+  drops it, as on screen 4. Alerts are `<AlertCard … onAgentScreen />`.
+- **`AlertCard`'s `onAgentScreen?: boolean`** hides the "open" action for the alert's own agents (you're already
+  there). An open for another agent, such as the one a waiting agent waits on, stays. Nothing else changes.
+- **No keys.** The panel adds no `window` listener: screen 4's Enter, Tab, Escape and letters would fight the composer
+  and `i`. The cards' buttons, textareas and Tab order are all there is.
+- **On the Agent screen**, `needsOpen` is local state, never opened by itself:
+  - the blocked banner (`ag-blocked`) opens it, and no longer calls `openAttention`;
+  - a **needs you · N** button in the header, with the need Tag's look, shows when N > 0 (the tab's count) and
+    toggles it;
+  - another tab's amber count opens that agent with the panel; the rest of the tab only switches agent, as before;
+  - while open it takes the Inspector's place. `i` and the details button close it and show the details;
+  - switching to an agent with nothing waiting closes it. Answering the last one doesn't: it stays open and says
+    "Nothing is waiting on <role>.", with a close button.
+- **Its width** is its own setting, `AGENT_NEEDS` (`conductor.agentNeedsW`, 340px, min 280, half the window at most),
+  dragged by a `Splitter grow={-1}` like the details. `.atn-side` draws no edge of its own. It's in `lib/verify.ts`
+  §10b's panel table and Settings' layout reset.
+- **Unchanged:** the Needs you screen, its queue, its keys and the notification ladder; the navigator's Needs you
+  rows and the rail button; `openAttention`; `DETAILS_KEY` and `rightPanelFor`.
+
+### Amendment 107 — post-merge, applied. **One "where you are" label, the same on every screen.**
+
+Web only (`shell/ui.css`, `fleet/fleet.css`, `fleet/fleet.tsx`, `fleet/project.tsx`,
+`agent/agent.tsx`, `agent/agent.css`, `attention/route.tsx`, `attention/attention.css`,
+`preview/route.tsx`, `preview/preview.css`, `files/route.tsx`, `files/FilePane.tsx`,
+`files/files.css`, `lib/verify-crumb.ts`). No behaviour, wire or daemon change. Reported 9
+Oct: "the highlighting of project/agent is not consistent across tabs; for example, it is
+not highlighted when we get to the Needs You tab." Design: [ADR
+0006](docs/adr/0006-one-crumb-everywhere.md). It carries Amendment 97's backdrop — the
+project/agent label sitting on `--here` — from Fleet, Project and Agent to every other
+screen.
+- **One class, not five copies.** `.ui-crumb` (and its `b`/`i` rules) now live in
+  `shell/ui.css`, unchanged from the `.fl-crumb` Amendment 97 added, so every screen that
+  imports `shell/ui.tsx` already has it. `.fl-crumb`, `.atn-crumb` and `.pv-crumb` are gone
+  from `fleet.css`, `attention.css` and `preview.css`.
+- **Twelve sites, one class.** Fleet (`fleet.tsx`), Project (`project.tsx`), Needs You
+  (`attention/route.tsx`, all three headers) and Preview (`preview/route.tsx`, both) use
+  `ui-crumb`. Agent (`agent.tsx`) uses `"ui-crumb ag-crumb"`: `ag-crumb` still carries the
+  button's hover behaviour (`agent.css`), nothing else. Files (`files/route.tsx`,
+  `files/FilePane.tsx`) uses `"ui-crumb c5-crumb"`: `c5-crumb` keeps only what a path needs
+  — `overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0`, and its
+  tighter 5px `i` margin — the backdrop comes from `ui-crumb` alone.
+- **Unchanged:** the label's look (`--fs-md`, the `--here` backdrop, the mixed border), the
+  header rows' height, and the contrast check already in `lib/verify.ts` (the inks on
+  `--here`, ≥ 4.5:1 in both themes). `lib/verify-crumb.ts` adds the checks this amendment
+  needs — the shared class and its backdrop, the four old copies gone, Files' crumb carrying
+  no background of its own, and all twelve sites naming `ui-crumb` — without touching
+  `lib/verify.ts`, which another lane's build also depends on.
+
 ### Amendment 106 — post-merge, applied. **What you typed reads in its own colour: `--you`.**
 
 Shared (`tokens.css`) and web (`agent/agent.css`, `agent/transcript.tsx`, `agent/verify.ts`,

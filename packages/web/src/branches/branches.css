@@ -1,0 +1,456 @@
+/**
+ * Screen 7 — Branches (Amendment 109). Every colour is a token from tokens.css; no hex.
+ *
+ * One colour, one job: --live marks a branch an agent is on, and nothing else here uses
+ * it. Uncommitted work is a hollow dot in ink, not --need: nobody is being summoned.
+ * A merge button is the screen's one emphasis, in --ink on --surf3, not a status colour.
+ */
+
+.br {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── head, like Preview's and Files' ───────────────────────────────────── */
+
+.br-head {
+  height: var(--topbar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.br-head .ui-crumb {
+  font-size: var(--fs-base);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+
+.br-head .ui-crumb b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.br-head .ui-crumb i {
+  color: var(--ink3);
+  font-style: normal;
+  margin: 0 2px;
+}
+
+.br-remote {
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.br-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ── buttons ───────────────────────────────────────────────────────────── */
+
+.br-btn {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: none;
+  border: 1px solid var(--line2);
+  color: var(--ink2);
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.br-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.br-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.br-btn-go {
+  background: var(--surf3);
+  color: var(--ink);
+}
+
+.br-link {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.br-close {
+  margin-left: auto;
+  text-decoration: none;
+  color: var(--ink3);
+}
+
+.br-close:hover {
+  color: var(--ink);
+}
+
+.br-why {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.br-quiet {
+  color: var(--ink3);
+}
+
+.br-warn {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── body ──────────────────────────────────────────────────────────────── */
+
+.br-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.br-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 6px 20px;
+}
+
+.br-note {
+  padding: 18px 20px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.br-note.fail {
+  color: var(--fail);
+}
+
+.br-hint {
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.br-pick {
+  padding: 28px 24px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.br-pick ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.br-pick li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ── the graph ─────────────────────────────────────────────────────────── */
+
+.br-graph {
+  display: block;
+  font-family: var(--mono);
+}
+
+.br-row {
+  cursor: pointer;
+  outline: none;
+}
+
+.br-hit {
+  fill: transparent;
+}
+
+.br-row:hover .br-hit {
+  fill: var(--bg2);
+}
+
+.br-row.on .br-hit {
+  fill: var(--surf2);
+}
+
+.br-row:focus-visible .br-hit {
+  fill: var(--surf2);
+  stroke: var(--ink3);
+  stroke-width: 1;
+}
+
+.br-rail {
+  stroke: var(--ink3);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.br-edge,
+.br-line {
+  fill: none;
+  stroke: var(--ink3);
+  stroke-width: 2;
+}
+
+.br-dot {
+  fill: var(--ink2);
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
+.br-dot-rail {
+  fill: var(--ink);
+}
+
+.br-dot-rail.head {
+  stroke: var(--ink);
+  stroke-width: 2;
+  fill: var(--bg);
+}
+
+.br-dot-dirty {
+  fill: var(--bg);
+  stroke: var(--ink2);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 1.5;
+}
+
+.br-dot-merged {
+  fill: var(--ink3);
+}
+
+.br-root {
+  fill: var(--bg);
+  stroke: var(--ink3);
+  stroke-width: 1.5;
+}
+
+.br-skip {
+  font-size: var(--fs-2xs);
+  fill: var(--ink3);
+}
+
+.br-name {
+  font-size: var(--fs-md);
+  fill: var(--ink);
+}
+
+.br-name-target {
+  font-weight: 600;
+}
+
+.br-badge {
+  font-size: var(--fs-xs);
+  fill: var(--ink3);
+}
+
+.br-badge-dirty {
+  fill: var(--ink2);
+}
+
+.br-badge-live {
+  fill: var(--live);
+  font-weight: 600;
+}
+
+/* Live: its line and dots in the working colour, the only use of it on this screen. */
+.br-row.live .br-edge,
+.br-row.live .br-line {
+  stroke: var(--live);
+}
+
+.br-row.live .br-dot:not(.br-dot-dirty) {
+  fill: var(--live);
+}
+
+/* Merged (ahead 0): everything on it is already on the target. */
+.br-row.dim .br-edge {
+  stroke-dasharray: 3 3;
+}
+
+.br-row.dim .br-edge,
+.br-row.dim .br-name,
+.br-row.dim .br-badge,
+.br-row.dim .br-dot {
+  opacity: 0.5;
+}
+
+/* ── the action bar, confirms and results ──────────────────────────────── */
+
+.br-bar {
+  flex: none;
+  border-top: 1px solid var(--line2);
+  background: var(--bg2);
+  padding: 10px 14px 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  display: grid;
+  gap: 10px;
+}
+
+.br-bar-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.br-bar-head b {
+  color: var(--ink);
+}
+
+.br-bar-head .br-quiet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.br-bar-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+}
+
+.br-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.br-commit {
+  flex: 1 1 360px;
+}
+
+.br-input {
+  flex: 1;
+  min-width: 160px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--surf);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 9px;
+  outline: none;
+}
+
+.br-input:focus {
+  border-color: var(--ink3);
+}
+
+.br-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--surf2);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.br > .br-confirm {
+  margin: 8px 14px 0;
+}
+
+.br-confirm > span {
+  flex: 1 1 320px;
+}
+
+.br-result {
+  flex: none;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 14px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line2);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--surf);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.br-result.ok {
+  border-left-color: var(--done);
+}
+
+.br-result.warn {
+  border-left-color: var(--ink2);
+}
+
+.br-result.fail {
+  border-left-color: var(--fail);
+}
+
+.br-result-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.br-conflict ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.br-conflict code {
+  color: var(--ink);
+}
+
+.br-output {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
