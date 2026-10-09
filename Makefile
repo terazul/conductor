@@ -180,6 +180,8 @@ test:
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/preview/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/workspace/verify-branches.ts
+	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/workspace/verify-methodology.ts
+	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/terminal/verify.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-schedule.ts
 
 # The database lives in ~/.conductor/ once you allowed it (Amendment 46); CONDUCTOR_DATA

@@ -407,24 +407,27 @@
   gap: 10px;
   padding: 6px 10px;
   margin-bottom: 11px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--you) 55%, var(--line));
+  border-left: 3px solid var(--you);
   border-radius: 6px;
-  background: var(--bg2);
+  /* Your words, in your colour (Amendment 116): the same --you as your turns below it. */
+  background: color-mix(in srgb, var(--you) 10%, var(--bg2));
   cursor: pointer;
   transition: 0.14s;
 }
 
 .ag-lastask:hover {
-  border-color: var(--line2);
+  border-color: var(--you);
 }
 
 .ag-lastask .ui-lab {
   flex: none;
+  color: var(--you);
 }
 
 .ag-lastask-t {
   font-size: var(--fs-md);
-  color: var(--ink2);
+  color: var(--you);
   flex: 1;
   min-width: 0;
   overflow: hidden;

@@ -210,6 +210,11 @@ export interface CreateJobRequest {
   preset?: string;
   agents: AgentSpec[];
   budgetUsd?: number | null;
+  /**
+   * Methodology (2), "new branch: <name>" (Amendment 115): the branch the job's worktree is
+   * on. Only with `isolation: 'worktree'`; absent, it is `conductor/<jobId>` as before.
+   */
+  branch?: string;
 }
 
 export interface CreateJobResponse {
@@ -702,6 +707,8 @@ export interface BranchesResponse {
   targetCheckout: { path: string; clean: boolean } | null;
   /** The target first, then by tip time, newest first. */
   branches: BranchInfo[];
+  /** What the project's own folder has checked out (Amendment 114); null when detached. */
+  rootBranch?: string | null;
 }
 
 export type BranchAction =
@@ -710,7 +717,13 @@ export type BranchAction =
   | { action: 'merge_all' }
   | { action: 'commit'; branch: string; message: string }
   | { action: 'push'; branch: string }
-  | { action: 'fetch' };
+  | { action: 'fetch' }
+  /**
+   * Make `branch` the project's default (Amendment 114), and with `checkout`, switch the
+   * project's own folder to it. Refused while the folder has tracked changes or anything
+   * works in it.
+   */
+  | { action: 'set_default'; branch: string; checkout: boolean };
 
 export interface BranchActionResult {
   ok: boolean;

@@ -196,6 +196,28 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 116 — post-merge, applied. **"You asked" reads in your colour, `--you`.**
+
+Web only (`agent/agent.css`, `agent/verify.ts`). ADR 0009 §3. The pinned bar at the top of the
+transcript (`LastAsk`, `.ag-lastask`) is what you last typed, so it now matches your turns
+below it (Amendment 106): a 3px `--you` left edge, a border mixed from `--you` and `--line`,
+`color-mix(in srgb, var(--you) 10%, var(--bg2))` behind it (still opaque, since it scrolls over
+live text), and its **You asked** label and text in `--you`. Hover lights the border to
+`--you`. `--you` is ≥ 6.6:1 on every surface (Amendment 106), and a 10% tint of it keeps that.
+**Verified:** `agent/verify.ts`, "You asked" is `--you`.
+
+### Amendment 115 — in progress. **Pick a git methodology per launch: the default branch in place, a branch you name, or a new branch per launch.**
+
+Placeholder laid out by wave 9 (docs/plans/wave-9.md); lane M fills it in. ADR 0009 §4.
+
+### Amendment 114 — in progress. **Choose a project's default branch, and check its folder out on it.**
+
+Placeholder laid out by wave 9; lane D fills it in. ADR 0009 §1.
+
+### Amendment 112 — in progress. **A full terminal on macOS and Ubuntu.**
+
+Placeholder laid out by wave 9; lane T fills it in. ADR 0009 §2; docs/plans/full-terminal.md.
+
 ### Amendment 113 — post-merge, applied. **The Branches screen draws against a branch that exists, and you can choose it.**
 
 Reported 9 Oct: `git branch` lists seven branches, "why does it not show that on the Branches page".

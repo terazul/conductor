@@ -492,6 +492,12 @@ console.log('\nYour turns · what you typed reads in its own colour (Amendment 1
   };
   check('--you is a token in both themes', (tokens.match(/--you: #[0-9a-f]{6};/g) ?? []).length === 2);
   check('your label is --you', /color: var\(--you\)/.test(rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
+  // Amendment 116: what you last asked, pinned at the top, reads in the same colour.
+  check('"You asked" is --you: its edge, its tint, its label and its words',
+    /border-left: 3px solid var\(--you\)/.test(rule('.ag-lastask')) &&
+      /color-mix\(in srgb, var\(--you\) 10%, var\(--bg2\)\)/.test(rule('.ag-lastask')) &&
+      /color: var\(--you\)/.test(rule('.ag-lastask .ui-lab')) &&
+      /color: var\(--you\)/.test(rule('.ag-lastask-t')));
   const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
   check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
   check('a turn Conductor sent for you is marked auto and keeps the plain look', /is-you\$\{t\.synthetic \? ' is-auto' : ''\}/.test(tsx));
