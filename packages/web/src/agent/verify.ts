@@ -709,6 +709,16 @@ console.log('\n10 · re-run the agents after this one (Amendment 102)');
   check('the call is POST /api/agents/:id/rerun', /export function rerunAfter\(agentId: string\): Promise<RerunResponse> \{\s*return api\(agentPath\(agentId, 'rerun'\), \{ method: 'POST', body: \{\} \}\);/.test(ep));
 }
 
+console.log('\n· a scheduled message opens to its whole text (Amendment 118)');
+{
+  const sched = readFileSync(new URL('./scheduled.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  check('each scheduled line is a button that says whether it is open', /className="ag-sched-open"/.test(sched) && /aria-expanded=\{open\.has\(m\.id\)\}/.test(sched) && /onClick=\{\(\) => toggle\(m\.id\)\}/.test(sched));
+  check('open, it shows the whole message, when it goes and when it was scheduled', /\{open\.has\(m\.id\) && \(/.test(sched) && /<div className="ag-sched-body">\{m\.text\}<\/div>/.test(sched) && /m\.createdAt/.test(sched));
+  check('the whole text keeps its line breaks and scrolls when long', /\.ag-sched-body \{[^}]*white-space: pre-wrap;[^}]*overflow-y: auto;/.test(css));
+  check('cancel stays its own button beside it', /className="ag-sched-x"/.test(sched));
+}
+
 console.log(
   failures === 0
     ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'

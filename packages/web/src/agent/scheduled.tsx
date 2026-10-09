@@ -31,16 +31,35 @@ export function ScheduledList({ agentId }: { agentId: string }) {
   const items = useAgentScheduled(agentId);
   const now = new Date(useNow(30_000));
   const [why, setWhy] = useState<string | null>(null);
+  // Which rows are open to their full text (Amendment 118). A row shows one line until clicked.
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string): void =>
+    setOpen((o) => {
+      const n = new Set(o);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   if (items.length === 0) return null;
   return (
     <div className="ag-sched" aria-label="scheduled messages">
       {items.map((m) => (
-        <div key={m.id} className={`ag-sched-row${m.error ? ' is-failed' : ''}`} title={m.text}>
-          <span className="ag-sched-when">
-            ⏲ {fmtWhen(m.at, now)}
-            {!m.error && <span className="ag-sched-in"> · {fmtIn(m.at, now)}</span>}
-          </span>
-          <span className="ag-sched-text">{m.error ? `couldn't send: ${m.error}` : firstLine(m.text)}</span>
+        <div key={m.id} className="ag-sched-item">
+        <div className={`ag-sched-row${m.error ? ' is-failed' : ''}${open.has(m.id) ? ' is-open' : ''}`}>
+          <button
+            type="button"
+            className="ag-sched-open"
+            aria-expanded={open.has(m.id)}
+            title={open.has(m.id) ? 'Hide the message' : 'Show the whole message'}
+            onClick={() => toggle(m.id)}
+          >
+            <span className="ag-sched-chev" aria-hidden="true">{open.has(m.id) ? '▾' : '▸'}</span>
+            <span className="ag-sched-when">
+              ⏲ {fmtWhen(m.at, now)}
+              {!m.error && <span className="ag-sched-in"> · {fmtIn(m.at, now)}</span>}
+            </span>
+            <span className="ag-sched-text">{m.error ? `couldn't send: ${m.error}` : firstLine(m.text)}</span>
+          </button>
           <button
             type="button"
             className="ag-sched-x"
@@ -53,6 +72,15 @@ export function ScheduledList({ agentId }: { agentId: string }) {
           >
             ✕
           </button>
+        </div>
+        {open.has(m.id) && (
+          <div className="ag-sched-full" role="region" aria-label="the scheduled message">
+            <div className="ag-sched-meta">
+              to be sent {fmtWhen(m.at, now)} · scheduled {fmtWhen(m.createdAt, now)}
+            </div>
+            <div className="ag-sched-body">{m.text}</div>
+          </div>
+        )}
         </div>
       ))}
       {why && <div className="ag-sched-row is-failed">{why}</div>}

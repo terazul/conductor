@@ -1617,3 +1617,55 @@ a.ag-files-p:focus-visible {
 .ag-sched-x:hover {
   color: var(--ink);
 }
+
+/* A scheduled message opens to its whole text when clicked (Amendment 118). */
+.ag-sched-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ag-sched-open:hover .ag-sched-text,
+.ag-sched-row.is-open .ag-sched-text {
+  color: var(--ink);
+}
+
+.ag-sched-chev {
+  flex: none;
+  color: var(--ink3);
+}
+
+.ag-sched-row.is-open {
+  border-left-color: var(--ink3);
+}
+
+.ag-sched-full {
+  margin: 2px 0 6px 2px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--ink3);
+  background: var(--bg2);
+}
+
+.ag-sched-meta {
+  color: var(--ink3);
+  margin-bottom: 4px;
+}
+
+.ag-sched-body {
+  font-family: var(--sans);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 14em;
+  overflow-y: auto;
+}

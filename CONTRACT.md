@@ -196,6 +196,17 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 118 — post-merge, applied. **A scheduled message opens to its whole text.**
+
+Web only (`agent/scheduled.tsx`, `agent/agent.css`, `agent/verify.ts`). Asked for on 9 Oct: "when I
+create a command to be run at a later time, it shows up as a line above the command entry area.
+Allow me to click on the scheduled commands and see what the content is." The line above the
+message box (Amendment 111) showed only the first line, with the rest in a hover title. Each line
+is now a button (`.ag-sched-open`, `aria-expanded`, ▸/▾) that opens the whole message beneath it,
+with its line breaks kept and scrolling past 14em, and says when it will be sent and when it was
+scheduled. ✕ stays its own button, so opening never cancels. More than one can be open. Tokens only.
+**Verified:** `agent/verify.ts`, "a scheduled message opens to its whole text".
+
 ### Amendment 117 — post-merge, applied. **Choose a project's default branch, and check its folder out on it.**
 
 ADR 0009 §1: Amendment 113 let you *draw* against a branch other than the one `createProject`
