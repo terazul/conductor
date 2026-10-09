@@ -492,6 +492,12 @@ console.log('\nYour turns · what you typed reads in its own colour (Amendment 1
   };
   check('--you is a token in both themes', (tokens.match(/--you: #[0-9a-f]{6};/g) ?? []).length === 2);
   check('your label is --you', /color: var\(--you\)/.test(rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
+  // Amendment 116: what you last asked, pinned at the top, reads in the same colour.
+  check('"You asked" is --you: its edge, its tint, its label and its words',
+    /border-left: 3px solid var\(--you\)/.test(rule('.ag-lastask')) &&
+      /color-mix\(in srgb, var\(--you\) 10%, var\(--bg2\)\)/.test(rule('.ag-lastask')) &&
+      /color: var\(--you\)/.test(rule('.ag-lastask .ui-lab')) &&
+      /color: var\(--you\)/.test(rule('.ag-lastask-t')));
   const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
   check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
   check('a turn Conductor sent for you is marked auto and keeps the plain look', /is-you\$\{t\.synthetic \? ' is-auto' : ''\}/.test(tsx));
@@ -701,6 +707,16 @@ console.log('\n10 · re-run the agents after this one (Amendment 102)');
   check('both themes read: the control uses the buttons and tokens every other header control uses, and no colour of its own', !/#[0-9a-fA-F]{3,8}\b|style=|rgb\(/.test(block) && /fl-btn is-ghost/.test(block) && /fl-btn is-primary/.test(block) && /ag-confirm-q/.test(block));
   const ep = readFileSync(new URL('./endpoints.ts', import.meta.url), 'utf8');
   check('the call is POST /api/agents/:id/rerun', /export function rerunAfter\(agentId: string\): Promise<RerunResponse> \{\s*return api\(agentPath\(agentId, 'rerun'\), \{ method: 'POST', body: \{\} \}\);/.test(ep));
+}
+
+console.log('\n· a scheduled message opens to its whole text (Amendment 118)');
+{
+  const sched = readFileSync(new URL('./scheduled.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  check('each scheduled line is a button that says whether it is open', /className="ag-sched-open"/.test(sched) && /aria-expanded=\{open\.has\(m\.id\)\}/.test(sched) && /onClick=\{\(\) => toggle\(m\.id\)\}/.test(sched));
+  check('open, it shows the whole message, when it goes and when it was scheduled', /\{open\.has\(m\.id\) && \(/.test(sched) && /<div className="ag-sched-body">\{m\.text\}<\/div>/.test(sched) && /m\.createdAt/.test(sched));
+  check('the whole text keeps its line breaks and scrolls when long', /\.ag-sched-body \{[^}]*white-space: pre-wrap;[^}]*overflow-y: auto;/.test(css));
+  check('cancel stays its own button beside it', /className="ag-sched-x"/.test(sched));
 }
 
 console.log(

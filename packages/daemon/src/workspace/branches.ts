@@ -56,18 +56,33 @@ export interface BranchRepo {
   projectId: string;
   /** The repo's top level. */
   root: string;
+  /**
+   * The project's own folder — `set_default`'s checkout runs here (Amendment 117). Usually
+   * the same as `root`; kept apart in case the project was added below the repo's top level.
+   */
+  path: string;
   /** The branch everything is drawn against: `resolveTarget`'s answer. */
   target: string;
   /** Where it came from. */
   targetFrom?: BranchTargetSource;
   lookup: BranchLookup;
+  /**
+   * Whether an `in_place` or `branch` job of this project has a live agent right now
+   * (Amendment 117): `set_default`'s checkout is refused while this is true, since both
+   * isolations work directly in `path`.
+   */
+  rootLive: boolean;
+  /** Store `branch` as the project's default, and mark it chosen (Amendment 117). */
+  setDefault: (branch: string) => void;
 }
 
 const locks = new KeyedLock();
 
 /**
  * The repo a project's path is in, or a 400, with the branch to draw against resolved.
- * `recorded` is the project's `defaultBranch`; `chosen` is the one you picked on the screen.
+ * `recorded` is the project's `defaultBranch`; `chosen` is the one you picked on the screen;
+ * `defaultBranchSet`, `rootLive` and `setDefault` are Amendment 117's, from the store and
+ * the project's jobs — this file stays narrow and never touches either itself.
  */
 export async function openRepo(
   projectId: string,
@@ -75,25 +90,29 @@ export async function openRepo(
   recorded: string,
   lookup: BranchLookup,
   chosen: string | null = null,
+  defaultBranchSet = false,
+  rootLive = false,
+  setDefault: (branch: string) => void = () => {},
 ): Promise<BranchRepo> {
   if (!(await isRepo(path))) throw new BranchError(400, 'not a git repo', path);
   const root = await repoRoot(path);
-  const { target, from } = await resolveTarget(root, recorded, chosen);
-  return { projectId, root, target, targetFrom: from, lookup };
+  const { target, from } = await resolveTarget(root, recorded, chosen, defaultBranchSet);
+  return { projectId, root, path, target, targetFrom: from, lookup, rootLive, setDefault };
 }
 
 /**
  * Which branch to draw everything against (Amendment 113). The project's `defaultBranch` is
- * whatever was checked out when it was added, and is never updated: a feature branch, or one
- * deleted since, which drew every other branch as unrelated to a branch that wasn't there.
- * So, the first of these that exists as a local branch:
+ * whatever was checked out when it was added, and is never updated by name — only
+ * `setDefaultBranch` (Amendment 117) changes it, from the screen's "Make default". So, the
+ * first of these that exists as a local branch:
  *
  *   1. the one you chose on the screen (`chosen`);
- *   2. origin's default branch, from `refs/remotes/origin/HEAD` (set by clone, or by
+ *   2. the recorded one, when it was set on purpose (`defaultBranchSet`, Amendment 117);
+ *   3. origin's default branch, from `refs/remotes/origin/HEAD` (set by clone, or by
  *      `git remote set-head origin -a`);
- *   3. the one recorded when the project was added;
- *   4. `main`, then `master`;
- *   5. what the repo's own folder has checked out.
+ *   4. the recorded one anyway — most often just captured at add time;
+ *   5. `main`, then `master`;
+ *   6. what the repo's own folder has checked out.
  *
  * With no local branch at all (a repo with no commits) it is the recorded one, from `project`.
  */
@@ -101,6 +120,7 @@ export async function resolveTarget(
   root: string,
   recorded: string,
   chosen: string | null,
+  defaultBranchSet = false,
 ): Promise<{ target: string; from: BranchTargetSource }> {
   const local = new Set(
     (await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']))
@@ -109,6 +129,7 @@ export async function resolveTarget(
       .filter(Boolean),
   );
   if (chosen && local.has(chosen)) return { target: chosen, from: 'chosen' };
+  if (defaultBranchSet && local.has(recorded)) return { target: recorded, from: 'project' };
   const originHead = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim();
   const fromOrigin = originHead.startsWith('origin/') ? originHead.slice('origin/'.length) : '';
   if (fromOrigin && local.has(fromOrigin)) return { target: fromOrigin, from: 'origin' };
@@ -156,11 +177,19 @@ export function parseBranchAction(raw: unknown): BranchAction {
     case 'merge_all':
     case 'fetch':
       return { action };
+    case 'set_default': {
+      const branch = branchOf();
+      const checkout = body['checkout'];
+      if (checkout !== undefined && typeof checkout !== 'boolean') {
+        throw new BranchError(400, 'checkout must be a boolean');
+      }
+      return { action, branch, checkout: checkout === true };
+    }
     default:
       throw new BranchError(
         400,
         'unknown action',
-        'one of merge, merge_all, commit, push, fetch',
+        'one of merge, merge_all, commit, push, fetch, set_default',
       );
   }
 }
@@ -279,12 +308,19 @@ async function checkouts(root: string): Promise<Map<string, string>> {
   return map;
 }
 
+/** What `path` has checked out right now (Amendment 117); null when detached. */
+async function rootBranchOf(path: string): Promise<string | null> {
+  return (await git(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim() || null;
+}
+
 export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> {
   const { root, target } = repo;
-  const [refs, where, remotes] = await Promise.all([
+  const [refs, where, remotes, rootBranch, rootClean] = await Promise.all([
     readRefs(root),
     checkouts(root),
     git(root, ['remote']),
+    rootBranchOf(repo.path),
+    trackedClean(repo.path).catch(() => undefined),
   ]);
   const hasTarget = refs.some((r) => r.name === target);
   const targetRef = heads(target);
@@ -356,6 +392,9 @@ export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> 
     remote: remotes.split('\n').some((l) => l.trim() === 'origin') ? 'origin' : null,
     targetCheckout,
     branches,
+    rootBranch,
+    ...(rootClean !== undefined ? { rootClean } : {}),
+    rootLive: repo.rootLive,
   };
 }
 
@@ -660,6 +699,33 @@ async function act(
       } catch (err) {
         remoteFailure(err, 'fetch');
       }
+    }
+    case 'set_default': {
+      const b = known(state, action.branch);
+      if (action.checkout) {
+        if (!(await trackedClean(repo.path))) {
+          throw new BranchError(409, `${repo.path} has uncommitted changes`, 'commit or discard the tracked changes there first');
+        }
+        if (repo.rootLive) {
+          throw new BranchError(409, 'an agent is working in the project folder', 'wait for it to finish or stop it, then try again');
+        }
+        if (b.worktree && b.worktree.path !== repo.path) {
+          throw new BranchError(409, `${b.name} is checked out elsewhere`, b.worktree.path);
+        }
+      }
+      // Store it first: even if the checkout below somehow still failed, the pick stands.
+      repo.setDefault(b.name);
+      // resolveTarget would now put it ahead of origin/HEAD too — ahead of everything but a
+      // chosen branch, which still wins. Say so now, so the state right after this answer
+      // (returned below, and in the `branches` frame) already draws against it.
+      if (repo.targetFrom !== 'chosen') {
+        repo.target = b.name;
+        repo.targetFrom = 'project';
+      }
+      if (action.checkout) {
+        await git(repo.path, ['switch', '--', b.name]);
+      }
+      return { ok: true, merged: [] };
     }
   }
 }
