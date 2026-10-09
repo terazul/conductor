@@ -18,7 +18,7 @@ import {
   useProjects,
 } from '../lib/store.js';
 import { useNavParams } from '../lib/nav.js';
-import { SCREEN, highlight, openAgent, openAttention, openProject, recall } from '../shell/nav.js';
+import { SCREEN, highlight, openAgent, openProject, recall } from '../shell/nav.js';
 import { agentTabs } from './tabs.js';
 import { useUnseenAgents } from '../lib/seen.js';
 import { TerminalPanel } from './Terminal.js';
@@ -32,6 +32,7 @@ import { foldAll, unfoldAll, updateFolds, useFolds } from './folds.js';
 import { Transcript, buildTranscript, replyKeys } from './transcript.js';
 import { Composer } from './composer.js';
 import { Inspector } from './inspector.js';
+import { NeedsPanel } from '../attention/NeedsPanel.js';
 import { fileLinks, filesIn } from './links.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
 import { sleepControl } from './sleep.js';
@@ -408,6 +409,26 @@ export function AgentScreen() {
     writeSetting(DETAILS_KEY, v ? 'shown' : 'hidden');
   };
 
+  /*
+   * The Needs you panel (Amendment 108), in the details' place while it's open. Opened only
+   * by a click: the blocked banner, the header's "needs you" button, or a tab's amber count.
+   * Not a setting: it's about what's waiting now, and kept across an agent change because
+   * this screen stays mounted. The ref is for the `i` key's listener, which outlives renders.
+   */
+  const [needsOpen, setNeedsOpenState] = useState(false);
+  const needsRef = useRef(false);
+  const setNeedsOpen = (open: boolean): void => {
+    needsRef.current = open;
+    setNeedsOpenState(open);
+  };
+  // `i` and the details button close it and show the details; otherwise they toggle them.
+  const toggleDetails = (): void => {
+    if (needsRef.current) {
+      setNeedsOpen(false);
+      setDetails(true);
+    } else setDetails((d) => !d);
+  };
+
   // `i`, with the guards the screen keys use (main.tsx): no modifier, and not while
   // typing — an `i` in the composer is a letter, not a command.
   useEffect(() => {
@@ -417,7 +438,7 @@ export function AgentScreen() {
       if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) {
         return;
       }
-      setDetails((d) => !d);
+      toggleDetails();
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
@@ -443,6 +464,16 @@ export function AgentScreen() {
   const allPending = usePending();
   const allAlerts = useAlerts();
   const unseenAgents = useUnseenAgents();
+  // Switching to an agent with nothing waiting closes the panel; answering the last one doesn't.
+  // The same count its tab shows (agent/tabs.ts): its requests, and the alerts that name it.
+  const needsHere =
+    active === null
+      ? 0
+      : allPending.filter((p) => p.agentId === active).length +
+        allAlerts.filter((a) => a.agentIds.includes(active)).length;
+  useEffect(() => {
+    if (needsHere === 0) setNeedsOpen(false);
+  }, [active]);
   // Shared by interrupt, pause and terminate — see StopControls.
   const control = useCommand();
   // What removing it would do to its job, while that confirm is armed (Amendment 89).
@@ -600,7 +631,22 @@ export function AgentScreen() {
                     already pulses via the Dot above. Finished only until you open that
                     agent, and again when it finishes again (Amendment 105). */}
                 {t.status === 'done' && unseenAgents.has(t.id) && <span className="ag-tab-tag">finished</span>}
-                {t.needs > 0 && <span className="ag-tab-need">{t.needs}</span>}
+                {/* The count opens that agent with its Needs you panel (Amendment 108); the
+                    rest of the tab only switches agent. */}
+                {t.needs > 0 && (
+                  <span
+                    className="ag-tab-need"
+                    title="Open what is waiting on you, beside the transcript"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const target = agents.find((a) => a.id === t.id);
+                      if (target && t.id !== agent.id) openAgent(target);
+                      setNeedsOpen(true);
+                    }}
+                  >
+                    {t.needs}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -621,6 +667,17 @@ export function AgentScreen() {
             {elapsed && agent.status !== 'queued' ? ` · ${elapsed}` : ''}
           </Tag>
           {agent.blockMode && <Tag tone="need">{agent.blockMode}</Tag>}
+          {needsHere > 0 && (
+            <button
+              type="button"
+              className="ui-tag t-need atn-needs-btn"
+              aria-pressed={needsOpen}
+              title={needsOpen ? 'Close the needs you panel' : 'Answer it here, beside the transcript'}
+              onClick={() => setNeedsOpen(!needsOpen)}
+            >
+              needs you · {needsHere}
+            </button>
+          )}
           {atBudget && <Tag tone="need">budget reached</Tag>}
           <span className="ag-model" title={agent.model}>
             {agent.model.replace(/^claude-/, '')}
@@ -631,12 +688,12 @@ export function AgentScreen() {
             <button
               type="button"
               className="fl-btn is-ghost"
-              aria-pressed={details}
-              title={details ? 'Hide the details panel (i)' : 'Show the details panel (i)'}
-              onClick={() => setDetails((d) => !d)}
+              aria-pressed={details && !needsOpen}
+              title={details && !needsOpen ? 'Hide the details panel (i)' : 'Show the details panel (i)'}
+              onClick={toggleDetails}
             >
               {/* Names the panel, and the arrow says which way it will go. */}
-              {details ? (
+              {details && !needsOpen ? (
                 <>
                   details <span aria-hidden="true">⇥</span>
                 </>
@@ -695,7 +752,7 @@ export function AgentScreen() {
           <button
             type="button"
             className="ag-blocked"
-            onClick={openAttention}
+            onClick={() => setNeedsOpen(true)}
           >
             <span className="ui-lab">Waiting on you</span>
             <span className="ag-blocked-act">
@@ -757,8 +814,11 @@ export function AgentScreen() {
         </div>
       </div>
 
-      {details && (
-        <Inspector agent={agent} job={job} events={events} elapsedMs={elapsedMs} links={links} />
+      {/* The Needs you panel takes the details' place while it's open (Amendment 108). */}
+      {needsOpen ? (
+        <NeedsPanel agent={agent} onClose={() => setNeedsOpen(false)} />
+      ) : (
+        details && <Inspector agent={agent} job={job} events={events} elapsedMs={elapsedMs} links={links} />
       )}
     </div>
   );
