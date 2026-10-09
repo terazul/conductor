@@ -204,9 +204,34 @@ Placeholder laid out by wave 8 (docs/plans/wave-8-needs-panel-branches.md); lane
 
 Placeholder laid out by wave 8; lane A fills it in. ADR 0007.
 
-### Amendment 107 — in progress. **One "where you are" label, the same on every screen.**
+### Amendment 107 — post-merge, applied. **One "where you are" label, the same on every screen.**
 
-Placeholder laid out by wave 8; lane C fills it in. ADR 0006.
+Web only (`shell/ui.css`, `fleet/fleet.css`, `fleet/fleet.tsx`, `fleet/project.tsx`,
+`agent/agent.tsx`, `agent/agent.css`, `attention/route.tsx`, `attention/attention.css`,
+`preview/route.tsx`, `preview/preview.css`, `files/route.tsx`, `files/FilePane.tsx`,
+`files/files.css`, `lib/verify-crumb.ts`). No behaviour, wire or daemon change. Reported 9
+Oct: "the highlighting of project/agent is not consistent across tabs; for example, it is
+not highlighted when we get to the Needs You tab." Design: [ADR
+0006](docs/adr/0006-one-crumb-everywhere.md). It carries Amendment 97's backdrop — the
+project/agent label sitting on `--here` — from Fleet, Project and Agent to every other
+screen.
+- **One class, not five copies.** `.ui-crumb` (and its `b`/`i` rules) now live in
+  `shell/ui.css`, unchanged from the `.fl-crumb` Amendment 97 added, so every screen that
+  imports `shell/ui.tsx` already has it. `.fl-crumb`, `.atn-crumb` and `.pv-crumb` are gone
+  from `fleet.css`, `attention.css` and `preview.css`.
+- **Twelve sites, one class.** Fleet (`fleet.tsx`), Project (`project.tsx`), Needs You
+  (`attention/route.tsx`, all three headers) and Preview (`preview/route.tsx`, both) use
+  `ui-crumb`. Agent (`agent.tsx`) uses `"ui-crumb ag-crumb"`: `ag-crumb` still carries the
+  button's hover behaviour (`agent.css`), nothing else. Files (`files/route.tsx`,
+  `files/FilePane.tsx`) uses `"ui-crumb c5-crumb"`: `c5-crumb` keeps only what a path needs
+  — `overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0`, and its
+  tighter 5px `i` margin — the backdrop comes from `ui-crumb` alone.
+- **Unchanged:** the label's look (`--fs-md`, the `--here` backdrop, the mixed border), the
+  header rows' height, and the contrast check already in `lib/verify.ts` (the inks on
+  `--here`, ≥ 4.5:1 in both themes). `lib/verify-crumb.ts` adds the checks this amendment
+  needs — the shared class and its backdrop, the four old copies gone, Files' crumb carrying
+  no background of its own, and all twelve sites naming `ui-crumb` — without touching
+  `lib/verify.ts`, which another lane's build also depends on.
 
 ### Amendment 106 — post-merge, applied. **What you typed reads in its own colour: `--you`.**
 

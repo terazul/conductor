@@ -315,7 +315,7 @@ function Attention() {
       <div className="atn-screen">
         <div className="atn-pane">
           <div className="atn-head">
-            <span className="atn-crumb">
+            <span className="ui-crumb">
               needs you<i>/</i>
               <b>
                 {alerts.length} {alerts.length === 1 ? 'alert' : 'alerts'}
@@ -337,7 +337,7 @@ function Attention() {
       <div className="atn-screen">
         <div className="atn-pane" data-empty="true">
           <div className="atn-head" data-empty="true">
-            <span className="atn-crumb">
+            <span className="ui-crumb">
               needs you<i>/</i>
               <b>nothing</b>
             </span>
@@ -366,7 +366,7 @@ function Attention() {
     <div className="atn-screen">
       <div className="atn-pane">
         <div className="atn-head">
-          <span className="atn-crumb">
+          <span className="ui-crumb">
             {focused.projectName}
             <i>/</i>
             <b>{focused.agentRole}</b>

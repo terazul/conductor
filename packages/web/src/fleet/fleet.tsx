@@ -83,7 +83,7 @@ export function Fleet() {
     <div className="fl-screen">
       <div className="fl-pane">
         <div className="fl-panehead">
-          <span className="fl-crumb">
+          <span className="ui-crumb">
             <b>Fleet</b>
           </span>
           <Tag tone="idle">
