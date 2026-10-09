@@ -7,7 +7,7 @@
  * failing after.
  */
 
-import type { BranchInfo, BranchMergePreview, BranchesResponse, Job } from '@conductor/shared';
+import type { BranchInfo, BranchMergePreview, BranchTargetSource, BranchesResponse, Job } from '@conductor/shared';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -156,4 +156,20 @@ export function defaultMessage(b: BranchInfo, jobs: Pick<Job, 'id' | 'prompt'>[]
   const prompt = jobs.find((j) => j.id === b.jobId)?.prompt ?? '';
   const first = prompt.split('\n').find((l) => l.trim().length > 0) ?? '';
   return first.trim().slice(0, 120);
+}
+
+/** Why this branch is the one everything is drawn against, beside the picker (Amendment 113). */
+export function targetFromWords(from: BranchTargetSource): string {
+  switch (from) {
+    case 'chosen':
+      return 'chosen by you';
+    case 'origin':
+      return "origin's default branch";
+    case 'project':
+      return 'checked out when the project was added';
+    case 'main':
+      return 'the repo has no origin default; main is used';
+    case 'head':
+      return 'checked out in the project folder';
+  }
 }

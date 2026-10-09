@@ -21,6 +21,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BranchAction, BranchActionResult, BranchInfo, BranchMergePreview, BranchesResponse } from '@conductor/shared';
+import { branchTargetKey } from '@conductor/shared';
+import { useSetting, writeSetting } from '../lib/settings.js';
+import { targetFromWords } from './rules.js';
 import type { ScreenDef } from '../lib/screens.js';
 import { ApiError, errorText } from '../lib/errors.js';
 import { useNavParams } from '../lib/nav.js';
@@ -224,6 +227,7 @@ function Branches() {
         <span className="ui-crumb">
           {project.name} <i>/</i> <b>branches</b>
         </span>
+        {resp && <CompareWith projectId={project.id} resp={resp} />}
         {resp && (
           <span className="br-remote" title={resp.remote ? `the remote pushes go to` : 'this repo has no remote called origin'}>
             {resp.remote ? `⇅ ${resp.remote}` : 'no origin'}
@@ -319,6 +323,38 @@ function Branches() {
         <div className="br-hint">Choose a branch to merge it into another, commit or push it. {loading ? '' : <button type="button" className="br-link" onClick={() => void load()}>re-read</button>}</div>
       )}
     </div>
+  );
+}
+
+/**
+ * What everything is drawn against (Amendment 113): automatic (origin's default branch,
+ * else main) or a branch you pick. Kept per project as a setting, so every tab agrees.
+ */
+function CompareWith({ projectId, resp }: { projectId: string; resp: BranchesResponse }) {
+  const key = branchTargetKey(projectId);
+  const chosen = useSetting(key);
+  const names = resp.branches.map((b) => b.name).sort((a, b) => a.localeCompare(b));
+  return (
+    <span className="br-compare">
+      <label className="br-quiet" htmlFor="br-compare">
+        compared with
+      </label>
+      <select
+        id="br-compare"
+        className="br-select"
+        value={chosen && names.includes(chosen) ? chosen : ''}
+        onChange={(e) => writeSetting(key, e.target.value || null)}
+        title="The branch every other one is drawn against, and what Merge all merges into"
+      >
+        <option value="">automatic — {resp.target}</option>
+        {names.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+      {resp.targetFrom && resp.targetFrom !== 'chosen' && <span className="br-quiet">{targetFromWords(resp.targetFrom)}</span>}
+    </span>
   );
 }
 

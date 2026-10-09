@@ -27,6 +27,9 @@ import { build } from '../index.js';
 import { openDb } from '../db/index.js';
 import { DEFAULT_AUTONOMY, insertAgent, insertJob, insertProject } from '../session/store.js';
 import { GitError, git } from './git.js';
+import { resolveTarget } from './branches.js';
+import { patchSettings } from '../settings.js';
+import { branchTargetKey } from '@conductor/shared';
 
 const PORT = 7811;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -573,6 +576,31 @@ async function main(): Promise<void> {
   check('a conflict merging into another branch → 200, not ok', clashed.status === 200 && clashed.body.ok === false, JSON.stringify(clashed.body).slice(0, 300));
   check('it names the branch, its files and where it went', clashed.body.conflict?.branch === 'clash/b' && clashed.body.conflict.files.join(',') === 'conflict.txt' && clashed.body.into === 'clash/a');
   check('and is undone there', !mergeInProgress(WT_CLASH) && sh(WT_CLASH, 'status', '--porcelain') === '' && sh(WT_CLASH, 'rev-parse', 'HEAD') === clashBefore);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n11 · which branch everything is drawn against (Amendment 113)');
+  const gone = await resolveTarget(REPO, 'cleanup', null);
+  check('a recorded branch that was deleted falls back to main', gone.target === 'main' && gone.from === 'main', JSON.stringify(gone));
+  const kept = await resolveTarget(REPO, 'feature/one', null);
+  check('a recorded branch that exists is used', kept.target === 'feature/one' && kept.from === 'project', JSON.stringify(kept));
+  const picked = await resolveTarget(REPO, 'cleanup', 'feature/two');
+  check('the one you chose wins', picked.target === 'feature/two' && picked.from === 'chosen', JSON.stringify(picked));
+  const stale = await resolveTarget(REPO, 'cleanup', 'deleted/since');
+  check('a chosen branch that is gone is passed over', stale.target === 'main', JSON.stringify(stale));
+  sh(REPO, 'fetch', '-q', 'origin');
+  sh(REPO, 'remote', 'set-head', 'origin', 'main');
+  const fromOrigin = await resolveTarget(REPO, 'feature/one', null);
+  check("origin's default beats the recorded one", fromOrigin.target === 'main' && fromOrigin.from === 'origin', JSON.stringify(fromOrigin));
+
+  // Through the route: the project was recorded on main; choose another, then clear it.
+  patchSettings({ [branchTargetKey(project.id)]: 'feature/one' });
+  const chosenList = await get<BranchesResponse>(URL);
+  check('GET draws against the chosen branch', chosenList.body.target === 'feature/one' && chosenList.body.targetFrom === 'chosen', `${chosenList.body.target} ${chosenList.body.targetFrom}`);
+  check('and counts against it', byName(chosenList.body, 'feature/one')?.isTarget === true && byName(chosenList.body, 'main')?.isTarget === false);
+  check('a branches frame told the pages', ws.frames.some((f) => f.type === 'branches' && f.projectId === project.id));
+  patchSettings({ [branchTargetKey(project.id)]: null });
+  const back = await get<BranchesResponse>(URL);
+  check('cleared, it is main again', back.body.target === 'main', back.body.target);
 
   // ───────────────────────────────────────────────────────────────────────────
   ws.close();

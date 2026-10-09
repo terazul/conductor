@@ -196,6 +196,25 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 113 — post-merge, applied. **The Branches screen draws against a branch that exists, and you can choose it.**
+
+Reported 9 Oct: `git branch` lists seven branches, "why does it not show that on the Branches page".
+Cause: the screen drew everything against the project's `defaultBranch`, which `createProject` takes
+from whatever was checked out when the project was added (`supervisor.ts:428-432`) and never updates.
+For this repo it was `cleanup`, deleted since, so there was no target: every branch read as sharing no
+history with it, ahead 0, and the rail was empty. Other projects had feature branches recorded.
+(112 is held for the terminal plan, `docs/plans/full-terminal.md`.)
+- **Daemon** (`workspace/branches.ts`). `resolveTarget(root, recorded, chosen)`: the first local branch
+  of the chosen one, origin's default (`symbolic-ref refs/remotes/origin/HEAD`), the recorded one,
+  `main`, `master`, the checked-out one, any. `openRepo` takes `chosen` and resolves it; the listing
+  carries `targetFrom`. The project's `defaultBranch` is not changed: it is still what was checked out.
+- **Choosing.** The setting `conductor.branchTarget.<projectId>` (`branchTargetKey` in shared), read by
+  `routes/branches.ts`; a change to any such key broadcasts `{ type: 'branches', projectId }`.
+- **Wire.** `BranchTargetSource`, `BranchesResponse.targetFrom?`.
+- **Web.** **compared with ▾** in the screen's head: **automatic — <target>** (removes the setting) and
+  every local branch; beside it, where an automatic one came from (`targetFromWords`).
+- **Verify:** daemon `verify-branches.ts` §11; web `branches/verify.ts` §8.
+
 ### Amendment 111 — post-merge, applied. **Pause everything until a time; send a message to an agent at a time.**
 
 Asked 9 Oct: "add an option to pause all activity until a specified date/time (local time zone)" and

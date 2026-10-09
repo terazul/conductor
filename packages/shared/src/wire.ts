@@ -677,10 +677,25 @@ export interface BranchInfo {
   upstream: { ref: string; ahead: number; behind: number } | null;
 }
 
+/**
+ * Where the branch everything is drawn against came from (Amendment 113): the one you chose
+ * on the screen, origin's default (`origin/HEAD`), the one recorded when the project was
+ * added, `main` or `master`, or whatever the repo has checked out.
+ */
+export type BranchTargetSource = 'chosen' | 'origin' | 'project' | 'main' | 'head';
+
+/** The setting that holds the branch you chose to compare with, per project (Amendment 113). */
+export const branchTargetKey = (projectId: string): string => `conductor.branchTarget.${projectId}`;
+
 export interface BranchesResponse {
   projectId: string;
-  /** The project's `defaultBranch`. */
+  /**
+   * The branch everything is drawn against, and what "merge all" merges into. Always one
+   * that exists, when the repo has any branch at all (Amendment 113).
+   */
   target: string;
+  /** Where `target` came from. Optional for a daemon from before Amendment 113. */
+  targetFrom?: BranchTargetSource;
   /** 'origin' when the repo has it, else null. */
   remote: string | null;
   /** Where a merge into the target would run, and whether it has no tracked changes. */

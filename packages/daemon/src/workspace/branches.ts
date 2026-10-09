@@ -17,6 +17,7 @@
  */
 
 import type {
+  BranchTargetSource,
   BranchAction,
   BranchActionResult,
   BranchCommit,
@@ -55,22 +56,68 @@ export interface BranchRepo {
   projectId: string;
   /** The repo's top level. */
   root: string;
-  /** The project's `defaultBranch`. */
+  /** The branch everything is drawn against: `resolveTarget`'s answer. */
   target: string;
+  /** Where it came from. */
+  targetFrom?: BranchTargetSource;
   lookup: BranchLookup;
 }
 
 const locks = new KeyedLock();
 
-/** The repo a project's path is in, or a 400. */
+/**
+ * The repo a project's path is in, or a 400, with the branch to draw against resolved.
+ * `recorded` is the project's `defaultBranch`; `chosen` is the one you picked on the screen.
+ */
 export async function openRepo(
   projectId: string,
   path: string,
-  target: string,
+  recorded: string,
   lookup: BranchLookup,
+  chosen: string | null = null,
 ): Promise<BranchRepo> {
   if (!(await isRepo(path))) throw new BranchError(400, 'not a git repo', path);
-  return { projectId, root: await repoRoot(path), target, lookup };
+  const root = await repoRoot(path);
+  const { target, from } = await resolveTarget(root, recorded, chosen);
+  return { projectId, root, target, targetFrom: from, lookup };
+}
+
+/**
+ * Which branch to draw everything against (Amendment 113). The project's `defaultBranch` is
+ * whatever was checked out when it was added, and is never updated: a feature branch, or one
+ * deleted since, which drew every other branch as unrelated to a branch that wasn't there.
+ * So, the first of these that exists as a local branch:
+ *
+ *   1. the one you chose on the screen (`chosen`);
+ *   2. origin's default branch, from `refs/remotes/origin/HEAD` (set by clone, or by
+ *      `git remote set-head origin -a`);
+ *   3. the one recorded when the project was added;
+ *   4. `main`, then `master`;
+ *   5. what the repo's own folder has checked out.
+ *
+ * With no local branch at all (a repo with no commits) it is the recorded one, from `project`.
+ */
+export async function resolveTarget(
+  root: string,
+  recorded: string,
+  chosen: string | null,
+): Promise<{ target: string; from: BranchTargetSource }> {
+  const local = new Set(
+    (await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']))
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+  );
+  if (chosen && local.has(chosen)) return { target: chosen, from: 'chosen' };
+  const originHead = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim();
+  const fromOrigin = originHead.startsWith('origin/') ? originHead.slice('origin/'.length) : '';
+  if (fromOrigin && local.has(fromOrigin)) return { target: fromOrigin, from: 'origin' };
+  if (local.has(recorded)) return { target: recorded, from: 'project' };
+  for (const name of ['main', 'master']) if (local.has(name)) return { target: name, from: 'main' };
+  const head = (await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+  if (head && local.has(head)) return { target: head, from: 'head' };
+  const any = [...local][0];
+  return any ? { target: any, from: 'head' } : { target: recorded, from: 'project' };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +352,7 @@ export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> 
   return {
     projectId: repo.projectId,
     target,
+    ...(repo.targetFrom ? { targetFrom: repo.targetFrom } : {}),
     remote: remotes.split('\n').some((l) => l.trim() === 'origin') ? 'origin' : null,
     targetCheckout,
     branches,

@@ -509,3 +509,11 @@
 .br-preview-commits code {
   color: var(--ink2);
 }
+
+/* What everything is drawn against (Amendment 113). */
+.br-compare {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}

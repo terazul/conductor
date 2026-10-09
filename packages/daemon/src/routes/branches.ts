@@ -19,6 +19,8 @@
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AgentStatus, Project } from '@conductor/shared';
+import { branchTargetKey } from '@conductor/shared';
+import { onSettingsChanged, readSettings } from '../settings.js';
 import { openDb } from '../db/index.js';
 import { hub } from '../hub.js';
 import { agentsForJob, getProject, jobsForProject } from '../session/store.js';
@@ -62,8 +64,18 @@ export default async function branchesRoutes(app: FastifyInstance): Promise<void
   async function repoFor(projectId: string) {
     const project = getProject(db, projectId);
     if (!project) return null;
-    return openRepo(project.id, project.path, project.defaultBranch, lookupFor(project));
+    const chosen = readSettings()[branchTargetKey(project.id)] ?? null;
+    return openRepo(project.id, project.path, project.defaultBranch, lookupFor(project), chosen);
   }
+
+  // Choosing what to compare with is a setting (Amendment 113): every open page re-reads.
+  const PREFIX = branchTargetKey('');
+  const off = onSettingsChanged((changed) => {
+    for (const k of changed) {
+      if (k.startsWith(PREFIX)) hub().broadcast({ type: 'branches', projectId: k.slice(PREFIX.length) });
+    }
+  });
+  app.addHook('onClose', async () => off());
 
   app.get<{ Params: { projectId: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
     try {

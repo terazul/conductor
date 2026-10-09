@@ -23,6 +23,7 @@ import {
   mergeReason,
   previewLine,
   pushConfirm,
+  targetFromWords,
   pushReason,
   showCommit,
   showPush,
@@ -250,6 +251,14 @@ console.log('\n7 · merge into any branch (Amendment 110)');
   check('into the target sends no into, so it is the merge it always was', /intoBranch\?\.isTarget \? \{ action: 'merge', branch: b\.name \} : \{ action: 'merge', branch: b\.name, into \}/.test(route));
   check('the outcome says where it went', /const target = res\.into \?\? fallback;/.test(route));
   check('the graph marks the branch it would go into', /into=\{branch && into \? into : null\}/.test(route) && /merges here/.test(src('./graph.tsx')));
+}
+
+console.log('\n8 · what everything is drawn against (Amendment 113)');
+{
+  check('each source says where it came from', targetFromWords('origin') === "origin's default branch" && /when the project was added/.test(targetFromWords('project')) && targetFromWords('chosen') === 'chosen by you');
+  const route = src('./route.tsx');
+  check('the head has a "compared with" picker, automatic first', /<CompareWith projectId=\{project\.id\} resp=\{resp\} \/>/.test(route) && /<option value="">automatic — \{resp\.target\}<\/option>/.test(route));
+  check('choosing writes the per-project setting, automatic removes it', /writeSetting\(key, e\.target\.value \|\| null\)/.test(route) && /const key = branchTargetKey\(projectId\);/.test(route));
 }
 
 console.log('\n6 · the status bar and nav.ts');
