@@ -47,6 +47,8 @@ interface ProjectRow {
   name: string;
   path: string;
   default_branch: string;
+  /** Set by `setDefaultBranch` (Amendment 117); not on the wire `Project`, nothing outside this file reads it. */
+  default_branch_set: number;
   created_at: string;
 }
 
@@ -202,9 +204,8 @@ export function insertProject(
  * oversight — the caller is expected to say so out loud, which the Fleet card's
  * confirm does.
  *
- * `defaultBranch` is not editable on purpose. It is captured once at
- * registration from whatever branch was checked out, nothing reads it, and a
- * field the UI can set but no code consults is worse than one it cannot.
+ * `defaultBranch` isn't touched here: it has its own setter, `setDefaultBranch`,
+ * reached from the Branches screen's "Make default" (Amendment 117).
  */
 export function updateProject(
   db: Db,
@@ -218,6 +219,29 @@ export function updateProject(
   const path = patch.path?.trim() || current.path;
 
   db.prepare(`UPDATE projects SET name = ?, path = ? WHERE id = ?`).run(name, path, id);
+  return getProject(db, id);
+}
+
+/**
+ * Whether this project's `defaultBranch` was set on purpose, via `setDefaultBranch`
+ * (Amendment 117), rather than merely captured at registration. `resolveTarget`
+ * (`workspace/branches.ts`) uses this to decide where the recorded branch ranks.
+ */
+export function defaultBranchIsSet(db: Db, id: string): boolean {
+  const r = row<{ default_branch_set: number }>(
+    db.prepare('SELECT default_branch_set FROM projects WHERE id = ?').get(id),
+  );
+  return r?.default_branch_set === 1;
+}
+
+/**
+ * Make `branch` the project's default (Amendment 117), from the Branches screen's "Make
+ * default". Unlike `updateProject`, this one field is meant to be set after registration,
+ * so `default_branch_set` is marked too: `resolveTarget` then draws against it ahead of
+ * origin/HEAD, instead of behind it as a mere fallback (Amendment 113).
+ */
+export function setDefaultBranch(db: Db, id: string, branch: string): Project | undefined {
+  db.prepare('UPDATE projects SET default_branch = ?, default_branch_set = 1 WHERE id = ?').run(branch, id);
   return getProject(db, id);
 }
 

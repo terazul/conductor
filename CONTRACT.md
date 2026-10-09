@@ -196,9 +196,39 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
-### Amendment 117 — in progress. **Choose a project's default branch, and check its folder out on it.**
+### Amendment 117 — post-merge, applied. **Choose a project's default branch, and check its folder out on it.**
 
-Placeholder laid out by wave 9; lane D fills it in. ADR 0009 §1.
+ADR 0009 §1: Amendment 113 let you *draw* against a branch other than the one `createProject`
+recorded; this lets you *set* that recorded branch, and optionally move the project's own
+folder onto it — "put Conductor on that branch" without a terminal.
+- **Migration** (`db/migrations`, 150). `projects.default_branch_set INTEGER NOT NULL DEFAULT 0`:
+  whether `defaultBranch` was chosen on this screen, or is still just whatever was checked out
+  when the project was added. `setDefaultBranch(db, projectId, branch)` writes it and flips the
+  flag, returning the updated project; `defaultBranchIsSet(db, projectId)` reads the flag.
+- **Daemon** (`workspace/branches.ts`). `set_default` on `BranchAction`: `{ branch, checkout }`.
+  Validated like every other action — an unknown branch or one starting with `-` is 400. With
+  `checkout`, three refusals before anything moves, each 409: the project's own folder has
+  tracked changes, an agent is `working`/`blocked`/`queued` in a job isolated `in_place` or
+  `branch` there, or the branch is checked out in a worktree that isn't that folder. Clear, it
+  runs `git switch` in the project's own path. Either way the pick is stored first, and
+  `resolveTarget`'s tiers gain one: a user-set recorded branch now beats origin's default and
+  the registration-time fallback, though a branch chosen on the screen (Amendment 113) still
+  wins over it. The in-memory `target`/`targetFrom` are updated right there too, so the POST's
+  own answer — and the `branches` frame broadcast with it — already draws against the new pick,
+  not what was true when the request started.
+- **Routes** (`routes/branches.ts`). `set_default` writes through `setDefaultBranch` and
+  broadcasts `{ type: 'entities', projects: [updated] }`, so every screen holding that project
+  learns its new `defaultBranch` without a re-fetch; `listBranches` also answers `rootBranch`
+  (what the folder has checked out, or `null` detached), `rootClean`, and `rootLive`.
+  (`BranchesResponse.rootBranch?`, `.rootClean?`, `.rootLive?` were added ahead of this
+  amendment as consequences of ADR 0009 §1; nothing else in the wire contract changed.)
+- **Web.** The head gains a line beside **compared with**: **default: `<branch>`** alone, or
+  **default: `<branch>` · folder on `<branch>`** once the folder is known, in warning tone when
+  the two differ. The selected branch's bar gets **Make default** (disabled only when it already
+  is) and **Make default and check out**, which confirms first — the folder may be Conductor's
+  own, and whatever is running from it runs the new branch's code the moment it switches.
+- **Verify:** daemon `verify-branches.ts` §12, a second repo kept apart from §1-11's so its
+  permanently-live fixture job can't block a checkout; web `branches/verify.ts` §9.
 
 ### Amendment 116 — post-merge, applied. **"You asked" reads in your colour, `--you`.**
 

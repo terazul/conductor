@@ -173,3 +173,33 @@ export function targetFromWords(from: BranchTargetSource): string {
       return 'checked out in the project folder';
   }
 }
+
+/** Why `b` can't become the project's default, or null (Amendment 117): only when it already is. */
+export function makeDefaultReason(defaultBranch: string, b: BranchInfo): string | null {
+  return b.name === defaultBranch ? 'already the default' : null;
+}
+
+/**
+ * Why `b`'s checkout can't run, beyond `makeDefaultReason` (Amendment 117): the project's
+ * own folder has tracked changes, or something is already working in it. A branch checked
+ * out in another worktree isn't pre-checked here; the daemon's 409 says so after.
+ */
+export function checkoutReason(resp: BranchesResponse, defaultBranch: string, b: BranchInfo): string | null {
+  return (
+    makeDefaultReason(defaultBranch, b) ??
+    (resp.rootClean === false ? 'the project folder has uncommitted changes — commit or discard them first' : null) ??
+    (resp.rootLive ? 'an agent is working in the project folder — wait for it to finish or stop it' : null)
+  );
+}
+
+/** The header's line about the default branch and what the folder has checked out (Amendment 117). */
+export function rootLine(defaultBranch: string, rootBranch: string | null | undefined): { text: string; warn: boolean } {
+  if (rootBranch === undefined) return { text: `default: ${defaultBranch}`, warn: false };
+  const folder = rootBranch === null ? 'nothing — detached' : rootBranch;
+  return { text: `default: ${defaultBranch} · folder on ${folder}`, warn: rootBranch !== defaultBranch };
+}
+
+/** The confirm before "Make default and check out" (Amendment 117): it moves this folder. */
+export function checkoutConfirm(path: string, branch: string): string {
+  return `This switches ${path} to ${branch}. Anything running from that folder — Conductor itself, if this is its repo — runs the new branch's code.`;
+}

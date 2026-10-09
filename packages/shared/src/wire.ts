@@ -709,6 +709,19 @@ export interface BranchesResponse {
   branches: BranchInfo[];
   /** What the project's own folder has checked out (Amendment 117); null when detached. */
   rootBranch?: string | null;
+  /**
+   * Whether `rootBranch`'s checkout — the project's own folder — has no tracked changes
+   * (Amendment 117, added by lane D beyond `rootBranch` above: the screen's "make default
+   * and check out" needs this and `rootLive` to say why it's disabled before it tries).
+   * Absent when the folder couldn't be read.
+   */
+  rootClean?: boolean;
+  /**
+   * Whether an `in_place` or `branch` job of this project currently has a live agent
+   * (Amendment 117, same addition as `rootClean`): checking out in the folder would be
+   * refused while this is true.
+   */
+  rootLive?: boolean;
 }
 
 export type BranchAction =
