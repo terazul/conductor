@@ -1,6 +1,6 @@
 # ADR 0006 — One "where you are" label, the same on every screen
 
-- **Status:** accepted (9 Oct 2026). To be built as Amendment 107. The plan is
+- **Status:** built as Amendment 107 (9 Oct 2026). The plan is
   [docs/plans/one-crumb-everywhere.md](../plans/one-crumb-everywhere.md).
 - **Reported (9 Oct):** "the highlighting of project/agent is not consistent across tabs; for
   example, it is not highlighted when we get to the Needs You tab."

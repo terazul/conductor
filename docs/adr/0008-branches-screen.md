@@ -1,6 +1,6 @@
 # ADR 0008 — A Branches screen (7): see a project's branches, merge into main, commit, push
 
-- **Status:** accepted (9 Oct 2026). To be built as Amendment 109. The plan is
+- **Status:** built as Amendment 109 (9 Oct 2026). The plan is
   [docs/plans/wave-8-needs-panel-branches.md](../plans/wave-8-needs-panel-branches.md), lanes B1 and B2.
 - **Asked for (9 Oct):** "a new tab number 7 — show the GitHub branches and give me an
   option to merge a branch into main, merge all branches into main, do a commit and push.

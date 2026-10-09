@@ -1,6 +1,6 @@
 # ADR 0007 — Answer an agent's requests in a side panel on its own Agent screen
 
-- **Status:** accepted (9 Oct 2026). To be built as Amendment 108. The plan is
+- **Status:** built as Amendment 108 (9 Oct 2026). The plan is
   [docs/plans/wave-8-needs-panel-branches.md](../plans/wave-8-needs-panel-branches.md), lane A.
 - **Asked for (9 Oct):** "for the Needs You, have it come up as a side panel when I click on
   it in the Agent page — that way I don't have to leave the page to approve it or interact
