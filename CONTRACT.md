@@ -198,7 +198,50 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ### Amendment 109 — in progress. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
 
-Placeholder laid out by wave 8 (docs/plans/wave-8-needs-panel-branches.md); lanes B1 and B2 fill it in. ADR 0008.
+Daemon (`workspace/branches.ts` new, `routes/branches.ts` new, `workspace/git.ts`,
+`workspace/verify-branches.ts`). Wire (`BranchInfo`, `BranchesResponse`, `BranchAction`,
+`BranchActionResult`, the `{ type: 'branches', projectId }` frame) as laid out in step 0, unchanged.
+Asked 9 Oct: "show the GitHub branches and give me an option to merge a branch into main, merge all
+branches into main, do a commit and push." Design: [ADR 0008](docs/adr/0008-branches-screen.md). The
+first code in the daemon that writes history or talks to a remote.
+- **Routes.** `GET /api/projects/:projectId/branches` → `BranchesResponse`; `POST` the same path with a
+  `BranchAction` → `BranchActionResult`, which carries the listing after the action. Every POST, refused
+  or not, broadcasts `{ type: 'branches', projectId }`.
+- **Listing.** The local branches of the repo `project.path` is in (`for-each-ref refs/heads`), against
+  the project's `defaultBranch`: ahead/behind (`rev-list --left-right --count`), `merge-base`, `log -n 20
+  target..branch`, the upstream's ahead/behind (null when none is set or it is gone), the worktree it is
+  checked out in (`listWorktrees`, prunable ones skipped) with `status --porcelain` lines as
+  `uncommitted`. `targetCheckout` is the worktree with the target, `clean` when `status --porcelain -uno`
+  is empty: untracked files don't count. `remote` is `'origin'` when `git remote` lists it. `jobId` is the
+  newest of the project's jobs whose `branch` is that name, a live one first; `live` is any agent of such
+  a job `working`, `blocked` or `queued`. Order: the target, then tip time, newest first.
+- **merge** runs `merge --no-ff --no-edit -m "Merge branch '<b>' into <target>" -- refs/heads/<b>` in
+  `targetCheckout.path`. A failure with unmerged files (`diff --name-only --diff-filter=U`) is `merge
+  --abort`ed and answered `200 { ok: false, conflict: { branch, files } }`; any other failure is aborted
+  too and is a 500. **merge_all** does the same, oldest tip first, over every branch that isn't the
+  target, isn't live and is ahead; it re-counts before each (an earlier merge may have taken it), and
+  stops at the first conflict with `merged` so far. **commit** runs `add -A -- . ':(top,exclude).conductor'`
+  then `commit -m` in the branch's worktree: Conductor's own folder of job worktrees is never added.
+  **push** runs `push [-u] -- origin refs/heads/<b>:refs/heads/<b>`, `-u` when it has no upstream;
+  **fetch** runs `fetch --no-prune -- origin`. Both get `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` unless
+  one is already set, and 60 s; `output` is git's stdout and stderr, trimmed.
+- **Safety.** `execFile` only, through `git()`, which gains an optional `{ env, timeoutMs }` and
+  `gitBoth()` (stdout and stderr); `GitError.timedOut` says it was killed. A name starting with `-` is
+  refused before anything else, every name must be in the `for-each-ref` list, and refs go in fully
+  qualified after `--`. Nothing is forced: no `--force`, and the explicit refspec has no `+`, so a
+  configured `remote.origin.push = +…` is never used. Every POST holds `KeyedLock` on
+  `branches:<repoRoot>`.
+- **Errors**, `{ error, detail? }`: **404** no such project. **400** not a git repo, an unknown action,
+  no branch or one starting with `-`, no such branch, merging the target into itself, an empty message.
+  **409** the branch is live (and, for merge and merge_all, the target is: an agent working in place
+  would have the merge land under it), the target isn't checked out, its checkout has tracked changes,
+  nothing to merge (ahead 0), no worktree to commit from, nothing to commit (also after `add`, when only
+  excluded files changed), no origin, a rejected push (git's stderr as detail). **504** push or fetch
+  timed out. **500** git failed, stderr as detail.
+- **Verify:** `workspace/verify-branches.ts` (port 7811), 86 checks against a repo, a bare origin and a
+  second clone in `tmpdir()`, every case in ADR 0008 § Testing.
+
+Web half: lane B2.
 
 ### Amendment 108 — in progress. **Answer an agent's requests in a side panel on its own Agent screen.**
 
