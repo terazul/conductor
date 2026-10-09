@@ -822,12 +822,13 @@ console.log('\n15 · a screen can be reached without having a tab (Amendment 42)
     { id: 'files', hotkey: '5', order: 50 },
     { id: 'fleet', hotkey: '1', order: 10 },
     { id: 'spawn', tab: false, order: 70 },
-    { id: 'old', hotkey: '7', tab: false, order: 80 },
+    // A made-up screen naming a hotkey no real screen has ('8'), to show tab: false wins over it.
+    { id: 'old', hotkey: '8', tab: false, order: 80 },
   ];
   check('a screen with tab: false gets no nav chip', tabbed(defs).map((d) => d.id).join() === 'fleet,files', tabbed(defs).map((d) => d.id).join());
   check('the tabs come in nav order, whatever order they were found in', tabbed(defs)[0]?.id === 'fleet');
   check('a hotkey still opens its screen', screenForKey(defs, '5')?.id === 'files');
-  check('and a screen without a tab has none, even if it names one', screenForKey(defs, '7') === undefined);
+  check('and a screen without a tab has none, even if it names one', screenForKey(defs, '8') === undefined);
   check('a key no screen has opens nothing', screenForKey(defs, '9') === undefined);
   const spawnSrc = readFileSync(new URL('../spawn/route.tsx', import.meta.url), 'utf8');
   const def = spawnSrc.slice(spawnSrc.indexOf('export const screen'));

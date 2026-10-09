@@ -196,7 +196,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
-### Amendment 109 — in progress. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
+### Amendment 109 — post-merge, applied. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
 
 Daemon (`workspace/branches.ts` new, `routes/branches.ts` new, `workspace/git.ts`,
 `workspace/verify-branches.ts`). Wire (`BranchInfo`, `BranchesResponse`, `BranchAction`,
@@ -241,7 +241,21 @@ first code in the daemon that writes history or talks to a remote.
 - **Verify:** `workspace/verify-branches.ts` (port 7811), 86 checks against a repo, a bare origin and a
   second clone in `tmpdir()`, every case in ADR 0008 § Testing.
 
-Web half: lane B2.
+**Web (lane B2).** `web/src/branches/`, new: `route.tsx` registers screen 7 (`id: 'branches'`, order 65); `graph.tsx`
+draws the SVG from a pure `layout(BranchesResponse)` (the target as a rail whose dots are the distinct fork distances,
+read from each branch's `behind`, with the commits between them counted; a curve, up to 10 commit dots, an uncommitted
+hollow dot, a tip label and badges per branch; ahead 0 dimmed and joined to the rail; `forkedAt: null` starting on its
+own); `rules.ts` holds the pure "why not" sentences for merge, merge all, commit and push, and the confirms;
+`endpoints.ts` has `getBranches` and `branchAction`; `live.ts` takes the `branches` frame, which `lib/store.ts` now
+hands it. The project is the route's `projectId`, else the remembered one; with neither, the screen lists projects.
+It re-reads on arrival, window focus, a `branches` frame for its project, a change in its jobs' or agents' statuses,
+and from each action's own `branches`. Not watched: `worktree` events, because the store has no per-project event
+selector and backfilling every job's history to count them costs more than it buys. The web treats a branch with no
+history in common with the target as not mergeable (git refuses unrelated histories), so it is left out of
+"merge all"'s count. Also `shell/nav.ts` (`SCREEN.branches`, `openBranches`), `shell/shell.tsx` ("1–7 screens"),
+`lib/screens.ts` (the reserved table), and `lib/verify.ts` §15, whose made-up tab-less screen now names hotkey 8.
+Checked by `web/src/branches/verify.ts`.
+
 
 ### Amendment 108 — post-merge, applied. **Answer an agent's requests in a side panel on its own Agent screen.**
 

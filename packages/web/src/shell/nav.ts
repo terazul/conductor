@@ -40,6 +40,7 @@ export const SCREEN = {
   attention: 'attention',
   files: 'files',
   preview: 'preview',
+  branches: 'branches',
   spawn: 'spawn',
   diagnostics: 'diagnostics',
 } as const;
@@ -108,6 +109,15 @@ export function openFiles(job: Job | null, projectId?: string, path?: string): v
 export function openPreview(server: DevServer): void {
   remember({ jobId: server.jobId });
   navigate(SCREEN.preview, { jobId: server.jobId });
+}
+
+/**
+ * The Branches screen (Amendment 109), on one project's branches. Remembered, so pressing
+ * `7` again later comes back to the same project.
+ */
+export function openBranches(projectId: string): void {
+  remember({ projectId });
+  navigate(SCREEN.branches, { projectId });
 }
 
 /** Track E's queue. */
