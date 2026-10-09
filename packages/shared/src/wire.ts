@@ -607,6 +607,79 @@ export interface Snapshot {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Branches  (Amendment 109, ADR 0008)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One commit on a branch that its target doesn't have. */
+export interface BranchCommit {
+  sha: string;
+  subject: string;
+  /** ISO. */
+  at: string;
+}
+
+/** A local branch of a project's repo, as it stands against the project's default branch. */
+export interface BranchInfo {
+  /** 'conductor/job_…', 'main', 'feature/x'. */
+  name: string;
+  /** Its tip's sha. */
+  head: string;
+  /** Its tip commit's subject and time (ISO). */
+  subject: string;
+  at: string;
+  /** The project's `defaultBranch`: what "merge into main" merges into. */
+  isTarget: boolean;
+  /** Commits on it that the target doesn't have, and the other way round. */
+  ahead: number;
+  behind: number;
+  /** The merge-base with the target; null when they share no history. */
+  forkedAt: string | null;
+  /** target..branch, newest first, at most 20. */
+  commits: BranchCommit[];
+  /** Where it is checked out, with the files changed there and not committed (untracked too). */
+  worktree: { path: string; uncommitted: number } | null;
+  /** Set when it is a known job's branch. */
+  jobId: string | null;
+  /** An agent on that job is working, blocked or queued: every action on it is refused. */
+  live: boolean;
+  /** Its upstream, and how far it is ahead of and behind it. Null when it has none. */
+  upstream: { ref: string; ahead: number; behind: number } | null;
+}
+
+export interface BranchesResponse {
+  projectId: string;
+  /** The project's `defaultBranch`. */
+  target: string;
+  /** 'origin' when the repo has it, else null. */
+  remote: string | null;
+  /** Where a merge into the target would run, and whether it has no tracked changes. */
+  targetCheckout: { path: string; clean: boolean } | null;
+  /** The target first, then by tip time, newest first. */
+  branches: BranchInfo[];
+}
+
+export type BranchAction =
+  | { action: 'merge'; branch: string }
+  | { action: 'merge_all' }
+  | { action: 'commit'; branch: string; message: string }
+  | { action: 'push'; branch: string }
+  | { action: 'fetch' };
+
+export interface BranchActionResult {
+  ok: boolean;
+  /** In order, for merge and merge_all. */
+  merged: string[];
+  /** The merge stopped here and was aborted cleanly. */
+  conflict?: { branch: string; files: string[] };
+  /** The new commit, for commit and merge. */
+  sha?: string;
+  /** Git's own words, trimmed, for push and fetch. */
+  output?: string;
+  /** The state after, so the screen redraws once. */
+  branches: BranchesResponse;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // WebSocket frames
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -635,6 +708,8 @@ export type ServerFrame =
   | { type: 'terminal_run'; run: TerminalRun }
   /** Output from a terminal command, batched. */
   | { type: 'terminal_out'; agentId: string; runId: string; stream: 'out' | 'err'; text: string }
+  /** A project's branches changed through the Branches screen (Amendment 109). */
+  | { type: 'branches'; projectId: string }
   /** The gap was too large to replay — client should refetch the snapshot. */
   | { type: 'resync' }
   | { type: 'pong' };

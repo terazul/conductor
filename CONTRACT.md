@@ -196,6 +196,18 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 109 — in progress. **A Branches screen (7): see a project's branches, merge into main, commit, push.**
+
+Placeholder laid out by wave 8 (docs/plans/wave-8-needs-panel-branches.md); lanes B1 and B2 fill it in. ADR 0008.
+
+### Amendment 108 — in progress. **Answer an agent's requests in a side panel on its own Agent screen.**
+
+Placeholder laid out by wave 8; lane A fills it in. ADR 0007.
+
+### Amendment 107 — in progress. **One "where you are" label, the same on every screen.**
+
+Placeholder laid out by wave 8; lane C fills it in. ADR 0006.
+
 ### Amendment 106 — post-merge, applied. **What you typed reads in its own colour: `--you`.**
 
 Shared (`tokens.css`) and web (`agent/agent.css`, `agent/transcript.tsx`, `agent/verify.ts`,

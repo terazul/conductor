@@ -177,6 +177,10 @@ class Store {
         receiveSettings(frame.settings);
         return;
 
+      case 'branches':
+        // The Branches screen re-reads its own (Amendment 109); nothing here to project.
+        return;
+
       case 'pong':
       case 'resync':
         return; // Feed handles resync; nothing to project
