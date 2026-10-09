@@ -50,9 +50,15 @@ export interface AlertCardProps {
   agents: readonly Agent[];
   projects: readonly Project[];
   focused: boolean;
+  /**
+   * Shown on that agent's own Agent screen, in its Needs you panel (Amendment 108): "open"
+   * for the alert's own agent would go where you already are, so it isn't offered. An open
+   * for another agent, such as the one a waiting agent waits on, still is.
+   */
+  onAgentScreen?: boolean;
 }
 
-export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) {
+export function AlertCard({ alert, agents, projects, focused, onAgentScreen = false }: AlertCardProps) {
   const cmd = useCommand();
   const ref = useRef<HTMLDivElement | null>(null);
   // The hand-off summary box (Amendment 104). A new hold is a new alert, so it closes with it.
@@ -62,7 +68,9 @@ export function AlertCard({ alert, agents, projects, focused }: AlertCardProps) 
   const project = alertProject(alert, projects);
   const mine = alert.agentIds.flatMap((id) => agents.filter((a) => a.id === id));
   const first = mine[0];
-  const actions = alertActions(alert, agents);
+  const actions = alertActions(alert, agents).filter(
+    (a) => !(onAgentScreen && a.id === 'open' && alert.agentIds.includes(a.agentId)),
+  );
 
   // Arriving from a notification: the card it was about, in view.
   useEffect(() => {

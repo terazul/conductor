@@ -200,9 +200,38 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 Placeholder laid out by wave 8 (docs/plans/wave-8-needs-panel-branches.md); lanes B1 and B2 fill it in. ADR 0008.
 
-### Amendment 108 — in progress. **Answer an agent's requests in a side panel on its own Agent screen.**
+### Amendment 108 — post-merge, applied. **Answer an agent's requests in a side panel on its own Agent screen.**
 
-Placeholder laid out by wave 8; lane A fills it in. ADR 0007.
+Web only (`attention/NeedsPanel.tsx`, `attention/needs.ts`, `attention/AlertCard.tsx`, `attention/attention.css`,
+`agent/agent.tsx`, `settings/route.tsx`, `lib/verify.ts`, `attention/verify-needs-panel.ts`). No daemon, wire or
+database change. Asked 9 Oct: "for the Needs You, have it come up as a side panel when I click on it in the Agent
+page — that way I don't have to leave the page to approve it or interact with it." Design:
+[ADR 0007](docs/adr/0007-needs-panel-on-agent.md).
+- **What it shows**, by the user's choice: everything waiting on that agent and only that agent. `needsFor(agentId,
+  pending, alerts)` (pure, in `attention/needs.ts`, re-exported by `NeedsPanel.tsx`) gives its requests, then the
+  alerts whose `agentIds` include it, each oldest first. A request from another agent isn't here; the rail and the
+  navigator still count it.
+- **The cards are the Needs you screen's own.** `PermissionCard` and `QuestionCard` unchanged, each with its own
+  `{ composer, draft, cursor }` in a map keyed by `requestId`; `pruneCards` drops a request's entry once it leaves
+  `pending`. Decisions go through `useDecisions(requests)`, so a card leaves only when the daemon's `resolved` event
+  drops it, as on screen 4. Alerts are `<AlertCard … onAgentScreen />`.
+- **`AlertCard`'s `onAgentScreen?: boolean`** hides the "open" action for the alert's own agents (you're already
+  there). An open for another agent, such as the one a waiting agent waits on, stays. Nothing else changes.
+- **No keys.** The panel adds no `window` listener: screen 4's Enter, Tab, Escape and letters would fight the composer
+  and `i`. The cards' buttons, textareas and Tab order are all there is.
+- **On the Agent screen**, `needsOpen` is local state, never opened by itself:
+  - the blocked banner (`ag-blocked`) opens it, and no longer calls `openAttention`;
+  - a **needs you · N** button in the header, with the need Tag's look, shows when N > 0 (the tab's count) and
+    toggles it;
+  - another tab's amber count opens that agent with the panel; the rest of the tab only switches agent, as before;
+  - while open it takes the Inspector's place. `i` and the details button close it and show the details;
+  - switching to an agent with nothing waiting closes it. Answering the last one doesn't: it stays open and says
+    "Nothing is waiting on <role>.", with a close button.
+- **Its width** is its own setting, `AGENT_NEEDS` (`conductor.agentNeedsW`, 340px, min 280, half the window at most),
+  dragged by a `Splitter grow={-1}` like the details. `.atn-side` draws no edge of its own. It's in `lib/verify.ts`
+  §10b's panel table and Settings' layout reset.
+- **Unchanged:** the Needs you screen, its queue, its keys and the notification ladder; the navigator's Needs you
+  rows and the rail button; `openAttention`; `DETAILS_KEY` and `rightPanelFor`.
 
 ### Amendment 107 — in progress. **One "where you are" label, the same on every screen.**
 

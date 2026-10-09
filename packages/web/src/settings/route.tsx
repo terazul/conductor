@@ -19,7 +19,7 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useModels } from '../lib/models.js';
 import { ModelSelect } from '../shell/ui.js';
 import { chooseTheme, useTheme, type ThemeChoice } from '../shell/theme.js';
-import { AGENT_INSPECTOR, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL } from '../shell/panels.js';
+import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL } from '../shell/panels.js';
 import { EFFORTS, MODES, PILLS } from '../spawn/autonomy.js';
 import { PRESETS } from '../spawn/presets.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch, type LaunchDefaults } from '../spawn/defaults.js';
@@ -59,6 +59,7 @@ const ISOLATION_WORDS: Record<Isolation, string> = {
 /** The sizes and folds a reset puts back. Named here so nothing is missed by accident. */
 const LAYOUT_KEYS = [
   AGENT_INSPECTOR.key,
+  AGENT_NEEDS.key,
   QUEUE_PANEL.key,
   PROJECT_COLUMN.key,
   PROJECT_DOCK.key,

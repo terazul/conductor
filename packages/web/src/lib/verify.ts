@@ -28,6 +28,7 @@ import { nextChoice, parseChoice, resolveTheme } from '../shell/theme.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeWidth } from '../files/width.js';
 import {
   AGENT_INSPECTOR,
+  AGENT_NEEDS,
   PREVIEW_DOCK,
   PROJECT_COLUMN,
   PROJECT_DOCK,
@@ -509,6 +510,7 @@ console.log('\n10b · the side panels and docks fit the window too (Amendment 34
   const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
   const panels: [string, Panel, string, string, string, string, 1 | -1][] = [
     ['the Agent inspector', AGENT_INSPECTOR, 'AGENT_INSPECTOR', '../agent/inspector.tsx', '../agent/agent.css', '.ag-insp', -1],
+    ['the Agent screen\'s needs you panel', AGENT_NEEDS, 'AGENT_NEEDS', '../attention/NeedsPanel.tsx', '../attention/attention.css', '.atn-side', -1],
     ['the attention queue', QUEUE_PANEL, 'QUEUE_PANEL', '../attention/QueuePanel.tsx', '../attention/attention.css', '.atn-insp', -1],
     ['the projects column', PROJECT_COLUMN, 'PROJECT_COLUMN', '../fleet/project.tsx', '../fleet/fleet.css', '.pj-col', 1],
     ['the project dock', PROJECT_DOCK, 'PROJECT_DOCK', '../fleet/dock.tsx', '../fleet/fleet.css', '.pj-dock', -1],
