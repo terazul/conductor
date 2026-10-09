@@ -196,6 +196,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 114 — post-merge, applied. **An agent whose job's folder is gone is told so, and the folder can be recreated.**
+
+Reported 9 Oct: a standalone architect "stopped without results". Its job's worktree had been removed
+(in a branch clean-up) while it could still be resumed; every resume handed Claude Code a cwd that
+didn't exist, which failed as "native binary … failed to launch (ENOENT)" and settled as
+`iteration_error`, five times. Asked: "can't you identify if this job folder is gone?"
+- **Supervisor.** `#refuseGone(agentId, job)` before `#launch` and `#launchWithPrompt` start anything:
+  no folder → `#settle` with `terminalReason: 'folder_gone'` and `folderGoneDetail(path, restorable)`,
+  so it is `failed` with the sentence and Needs You shows it. `sendMessage` checks first and throws
+  `FolderGoneError`; the message route answers 409 with that sentence, and nothing changes.
+- **Recreate.** `restoreFolder(jobId)`, `POST /api/jobs/:jobId/folder` → `{ path, branch, from:
+  'branch' | 'base', base? }`: `worktree prune`, then `worktree add -- <path> <branch>` when the job's
+  branch exists, else `worktree add -b <branch> -- <path> <target>` with Amendment 113's target. Each of
+  the job's agents gets a synthetic note in its transcript saying what came back and that uncommitted
+  work is gone. 409 (with the sentence) when the folder is there, the job isn't `worktree` isolation, or
+  the project folder is gone too; 404 no such job.
+- **Web.** `folder_gone` reads "lost its folder: it was deleted". A `failed` alert with that cause offers
+  **recreate folder and continue** (`restore`: POST, then `continueAgent`) in place of continue.
+- **Verify:** daemon `session/verify-folder.ts` (port 7813, 18 checks, real worktrees, fake SDK); web
+  `attention/verify-folder.ts`. Both in `make test`.
+
 ### Amendment 113 — post-merge, applied. **The Branches screen draws against a branch that exists, and you can choose it.**
 
 Reported 9 Oct: `git branch` lists seven branches, "why does it not show that on the Branches page".
