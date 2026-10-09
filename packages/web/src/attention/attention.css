@@ -54,21 +54,6 @@
   border-bottom-color: var(--line);
 }
 
-.atn-crumb {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--ink2);
-}
-.atn-crumb b {
-  color: var(--ink);
-  font-weight: 600;
-}
-.atn-crumb i {
-  color: var(--ink3);
-  font-style: normal;
-  margin: 0 6px;
-}
-
 .atn-body {
   flex: 1;
   overflow-y: auto;

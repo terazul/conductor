@@ -35,24 +35,6 @@
   background: var(--bg2);
 }
 
-.pv-crumb {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--ink2);
-  white-space: nowrap;
-}
-
-.pv-crumb b {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.pv-crumb i {
-  color: var(--ink3);
-  font-style: normal;
-  margin: 0 6px;
-}
-
 .pv-urlbar {
   flex: 1;
   display: flex;

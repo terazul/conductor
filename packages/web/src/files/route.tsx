@@ -331,7 +331,7 @@ function Files() {
     pane = (
       <div className="c5-pane">
         <div className="c5-panehead">
-          <span className="c5-crumb">
+          <span className="ui-crumb c5-crumb">
             <b>{path}</b>
           </span>
           {node?.change?.deleted && <span className="c5-tag gone">deleted</span>}
@@ -644,7 +644,7 @@ function WholeDiffPane({
   return (
     <div className="c5-pane">
       <div className="c5-panehead">
-        <span className="c5-crumb">
+        <span className="ui-crumb c5-crumb">
           <b>full worktree diff</b>
         </span>
         <span className="c5-tag done">
@@ -703,7 +703,7 @@ function Unavailable({
   return (
     <div className="c5-pane">
       <div className="c5-panehead">
-        <span className="c5-crumb">
+        <span className="ui-crumb c5-crumb">
           <b>{path}</b>
         </span>
       </div>

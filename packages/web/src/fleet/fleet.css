@@ -55,30 +55,6 @@
   padding: 15px;
 }
 
-/* The project / agent label (Amendment 97): on its own backdrop, so where you are is the
-   first thing the eye finds. */
-.fl-crumb {
-  font-family: var(--mono);
-  font-size: var(--fs-md);
-  color: var(--ink2);
-  white-space: nowrap;
-  background: var(--here);
-  border: 1px solid color-mix(in srgb, var(--here) 60%, var(--ink3));
-  border-radius: 5px;
-  padding: 3px 10px;
-}
-
-.fl-crumb b {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.fl-crumb i {
-  color: var(--ink3);
-  font-style: normal;
-  margin: 0 6px;
-}
-
 /* ── buttons ───────────────────────────────────────────────────────────────── */
 
 .fl-btn {

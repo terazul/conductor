@@ -254,7 +254,7 @@ function Preview() {
   return (
     <div className="pv">
       <div className="pv-head">
-        <span className="pv-crumb">
+        <span className="ui-crumb">
           {project?.name ?? job?.branch ?? server.jobId}
           <i>/</i>
           <b>preview</b>
@@ -390,7 +390,7 @@ function NoServers() {
   return (
     <div className="pv">
       <div className="pv-head">
-        <span className="pv-crumb">
+        <span className="ui-crumb">
           <b>preview</b>
         </span>
       </div>
