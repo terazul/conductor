@@ -13,6 +13,8 @@
  *   server_down  a dev server stopped answering and nobody asked it to stop
  *   blocked_dep  an agent waits on one that failed or was stopped (Amendments 85, 88)
  *   handoff_held an agent others wait for ended its turn without calling `hand_off` (Amendment 104)
+ *   reconnecting an agent whose run ended because the model couldn't be reached is waiting to
+ *                be tried again (Amendment 123)
  *
  * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -31,6 +33,7 @@ import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { budgetStop } from './budget.js';
+import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
 import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
@@ -43,26 +46,8 @@ export const ALERT_FROM_ATTEMPT = 2;
 /** …unless the first attempt has been failing this long. */
 export const ALERT_AFTER_MS = 20_000;
 
-/** SDK errors only someone with the login or the account can fix. */
-const ACCOUNT_ERRORS: ReadonlySet<string> = new Set([
-  'authentication_failed',
-  'cloud_credential_error',
-  'oauth_org_not_allowed',
-  'account_on_hold',
-  'verification_required',
-  'billing_error',
-]);
-
-/** Why the SDK is retrying, from its `api_retry` message. */
-export function classifyRetry(httpStatus: number | null, error: string): RetryCause {
-  if (ACCOUNT_ERRORS.has(error) || httpStatus === 401 || httpStatus === 403) return 'auth';
-  if (error === 'rate_limit' || error === 'overloaded' || httpStatus === 429 || httpStatus === 529) {
-    return 'throttled';
-  }
-  // No HTTP response at all: DNS, the VPN, or no network.
-  if (httpStatus === null) return 'unreachable';
-  return 'server';
-}
+/** Why the SDK is retrying, from its `api_retry` message. Moved to ./retry.js (Amendment 123). */
+export { classifyRetry };
 
 /** One agent's retries since the model last answered it. */
 export interface Retrying {
@@ -120,6 +105,8 @@ export class Alerts {
     // The daily budget (Amendment 59): checked when the spend grows or the budget moves.
     this.#off.push(onCostChanged(() => this.refresh()));
     this.#off.push(onSettingsChanged((changed) => changed.includes(DAILY_KEY) && this.refresh()));
+    // An agent starts or stops waiting to be tried again (Amendment 123).
+    this.#off.push(onRetryChanged(() => this.refresh()));
     // A note due tomorrow is due today after midnight, with nothing else changing.
     this.#atMidnight();
     // And every open page is told the new day's spend, so it reads 0 (Amendment 103).
@@ -141,7 +128,9 @@ export class Alerts {
     const derived = [...this.#agentAlerts(), ...this.#blockedDeps(), ...this.#heldHandoffs(), ...this.#serversDown()].sort(
       (a, b) => a.since.localeCompare(b.since),
     );
-    return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...derived].filter((a) => !this.#dismissed(a.id));
+    return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
+      (a) => !this.#dismissed(a.id),
+    );
   }
 
   #midnight: NodeJS.Timeout | null = null;
@@ -348,6 +337,38 @@ export class Alerts {
   }
 
   /**
+   * Agents waiting to be tried again because the model couldn't be reached (Amendment 123).
+   * One alert per agent, with its own id for the whole bout: the card reads "Reconnecting in
+   * 30 s (3 of 5)" and counts down on the page, so a new retry updates it instead of raising
+   * another. Not for the first retry, a blip that waits only 5 s and is on the agent's line.
+   * It clears when the try starts, and nothing derived is left behind: if the fifth fails,
+   * the agent is `failed` and the failed (or gave-up) alert takes over.
+   */
+  #reconnecting(): Alert[] {
+    const endpoint = endpointHost();
+    const out: Alert[] = [];
+    for (const w of retryBook().list()) {
+      if (w.attempt < RETRY_ALERT_FROM) continue;
+      // Removed from Conductor while it waited: no one left to alert about.
+      if (!getAgent(this.#db, w.agentId)) continue;
+      out.push({
+        id: `reconnecting:${w.agentId}:${w.since}`,
+        kind: 'reconnecting',
+        cause: w.cause,
+        projectId: w.projectId,
+        jobId: w.jobId,
+        agentIds: [w.agentId],
+        since: new Date(w.since).toISOString(),
+        ...(endpoint ? { endpoint } : {}),
+        attempt: w.attempt,
+        maxRetries: w.of,
+        retryAt: new Date(w.at).toISOString(),
+      });
+    }
+    return out;
+  }
+
+  /**
    * Failed agents, and paused ones whose note says they stopped on a cap. An agent whose
    * retries gave up is left out unless `withOutage`: its failure is already on the
    * outage's alert, so it isn't told twice.
@@ -533,5 +554,7 @@ export function alerts(): Alerts {
 
 /** For the runner, which also runs where alerts were never started. */
 export function modelAnswered(agentId: string): void {
+  // A real reply also starts the count of tries again from the first (Amendment 123).
+  retryBook().answered(agentId);
   instance?.modelAnswered(agentId);
 }

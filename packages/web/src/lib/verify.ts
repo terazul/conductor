@@ -43,7 +43,11 @@ import {
   alertWord,
   currentAction,
   failureSentence,
+  leftIn,
   projectNeeds,
+  reconnectLine,
+  reconnectTail,
+  reconnectingNow,
   retryHead,
   retryTail,
   retryingNow,
@@ -1307,6 +1311,74 @@ console.log('\n34 · an agent says finished until you have opened it (Amendment 
   check('the first load writes its since too, once', /readSetting\(SEEN_AGENTS_KEY\) === null/.test(seenSrc));
   check('the live mark reads the setting when it writes, so two quick marks both land', /parseSeenAgents\(readSetting\(SEEN_AGENTS_KEY\)\)/.test(seenSrc));
   check('the notifier marks the open agent seen, only while the tab is in front', effect.length > 0 && /markAgentSeen\(onAgent, agents\)/.test(effect));
+}
+
+console.log('\n35 · an agent waiting to be tried again reads "Reconnecting in 30 s (3 of 5)" (Amendment 123)');
+{
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const ag = (over: Partial<Agent> = {}): Agent => ({
+    id: A,
+    jobId: J,
+    projectId: P,
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status: 'queued',
+    blockMode: null,
+    costUsd: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const wait = (attempt: number, delayMs: number, cause: 'unreachable' | 'auth' | 'throttled' | 'server' = 'unreachable', ms = T0): Event =>
+    ev({ kind: 'status', status: 'queued', error: 'x', retry: { cause, attempt, of: 5, delayMs } }, ms);
+
+  check('time left counts down in seconds, then minutes', leftIn(30_000) === '30 s' && leftIn(29_001) === '30 s' && leftIn(60_000) === '60 s' && leftIn(61_000) === '1 min 1 s' && leftIn(300_000) === '5 min');
+  check('and is empty once its time has come', leftIn(0) === '' && leftIn(-5_000) === '' && leftIn(NaN) === '');
+
+  const w3 = reconnectingNow([wait(3, 30_000)]);
+  check('a queued agent whose last status carries a retry is waiting for it', w3?.attempt === 3 && w3.of === 5 && w3.cause === 'unreachable' && w3.at === T0 + 30_000, JSON.stringify(w3));
+  check('"Reconnecting in 30 s (3 of 5)"', w3 !== null && reconnectLine(w3, T0) === 'Reconnecting in 30 s (3 of 5)', w3 ? reconnectLine(w3, T0) : '');
+  check('which counts down', w3 !== null && reconnectLine(w3, T0 + 12_000) === 'Reconnecting in 18 s (3 of 5)');
+  check('and at its time says now, while it waits for a slot', w3 !== null && reconnectTail(w3, T0 + 31_000) === 'now (3 of 5)');
+  check('a later status ends the wait: working, failed, paused', [
+    ev({ kind: 'status', status: 'working' }, T0 + 1),
+    ev({ kind: 'status', status: 'failed', error: 'api_error' }, T0 + 1),
+    ev({ kind: 'status', status: 'paused' }, T0 + 1),
+  ].every((e) => reconnectingNow([wait(3, 30_000), e]) === null));
+  check('a queued agent with no retry on it is not waiting', reconnectingNow([ev({ kind: 'status', status: 'queued', error: 'the daemon restarted mid-run — resuming it' })]) === null && reconnectingNow([]) === null);
+  check('other events after the status do not end it', reconnectingNow([wait(2, 15_000), ev({ kind: 'text', text: 'hi' }, T0 + 1)])?.attempt === 2);
+
+  const line = (events: Event[], agent = ag(), now = T0 + 10_000) => currentAction(agent, events, [], [], now);
+  const first = line([wait(1, 5_000)], ag(), T0 + 1_000);
+  check('the agent line says it is reconnecting, with the time and the count', first.head === 'reconnecting' && first.subject === 'in 4 s (1 of 5)', `${first.head} / ${first.subject}`);
+  check('the first retry is a blip: not amber', first.tone === 'queue', first.tone);
+  const third = line([wait(3, 30_000)]);
+  check('from the second it is amber, as Needs You has the card', third.head === 'reconnecting' && third.subject === 'in 20 s (3 of 5)' && third.tone === 'need', `${third.subject} (${third.tone})`);
+  check('a queued agent that waits on a dependency says so, as before', currentAction(ag(), [], [], ['architect']).head === 'waiting on');
+  check('and one that waits for a slot, as before', currentAction(ag(), [], [], []).subject === 'for a slot');
+  check('a working agent does not read as reconnecting off an old wait', line([wait(3, 30_000)], ag({ status: 'working' })).head !== 'reconnecting');
+
+  const rc = (over: Partial<Alert> = {}): Alert => ({
+    id: 'reconnecting:agt_v:1',
+    kind: 'reconnecting',
+    cause: 'throttled',
+    projectId: P,
+    jobId: J,
+    agentIds: [A],
+    since: new Date(T0).toISOString(),
+    attempt: 3,
+    maxRetries: 5,
+    retryAt: new Date(T0 + 30_000).toISOString(),
+    ...over,
+  });
+  const t = alertTitle(rc(), [ag()]);
+  check('its alert reads as what is wrong and which retry, with the role', t.head === 'the model API is busy' && t.subject === 'retry 3 of 5 · builder', `${t.head} / ${t.subject}`);
+  check('and in the top bar, a word', alertWord(rc()) === 'reconnecting');
 }
 
 console.log(

@@ -18,6 +18,7 @@
 import type { PermissionRequest, SessionEvent } from '@github/copilot-sdk';
 import type { EventPayload } from '@conductor/shared';
 import { fileEditFromTool, isWriteTool, normaliseTool, todoFromInput, toolLabel, toolSummary } from '../translate.js';
+import type { ApiFailure } from '../retry.js';
 
 /** A call that has started and not yet ended. */
 export interface CallInfo {
@@ -27,8 +28,15 @@ export interface CallInfo {
   startedAt: number;
 }
 
-/** How a turn ended, from the root agent's events. */
-export type TurnEnd = { kind: 'idle' } | { kind: 'aborted' } | { kind: 'error'; message: string };
+/**
+ * How a turn ended, from the root agent's events. An error carries what `session.error` said
+ * besides its message (Amendment 123): `apiFailureOf` reads it, to tell the model being
+ * unreachable from an error retrying can't mend.
+ */
+export type TurnEnd =
+  | { kind: 'idle' }
+  | { kind: 'aborted' }
+  | { kind: 'error'; message: string; errorType?: string; statusCode?: number };
 
 /** What one event means. Most mean nothing; a few mean several things. */
 export interface Step {
@@ -151,7 +159,14 @@ export class CopilotEvents {
           break;
 
         case 'session.error':
-          if (root) step.end = { kind: 'error', message: event.data.message || event.data.errorType || 'error' };
+          if (root) {
+            step.end = {
+              kind: 'error',
+              message: event.data.message || event.data.errorType || 'error',
+              ...(event.data.errorType ? { errorType: event.data.errorType } : {}),
+              ...(typeof event.data.statusCode === 'number' ? { statusCode: event.data.statusCode } : {}),
+            };
+          }
           break;
 
         default:
@@ -164,6 +179,33 @@ export class CopilotEvents {
     }
     return step;
   }
+}
+
+/** A message that says the connection itself failed, as Node and fetch word it. */
+const CONNECTION_LOST =
+  /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE)\b|socket hang up|fetch failed|network error|getaddrinfo|timed? ?out|connection (?:error|reset|refused|closed)/i;
+
+/**
+ * What the Copilot runtime said when a run ended in error, in the SDK's terms (Amendment 123),
+ * so Copilot and OpenRouter retry the way Claude does. Null for an error that is not the
+ * model API's, or that waiting can't mend: a full context, a bad query, or one we can't place.
+ * Pure, so session/verify.ts drives it with the errors the runtime sends.
+ *
+ * `errorType` is the runtime's category ("authentication", "authorization", "quota",
+ * "rate_limit", "context_limit", "query"); `statusCode` the upstream HTTP status. With neither,
+ * the message has to say the connection failed, or it is not treated as the model's.
+ */
+export function apiFailureOf(e: { message: string; errorType?: string; statusCode?: number }): ApiFailure | null {
+  const type = (e.errorType ?? '').toLowerCase();
+  const status = typeof e.statusCode === 'number' ? e.statusCode : null;
+  if (type === 'authentication' || type === 'authorization' || status === 401 || status === 403) {
+    return { httpStatus: status, error: 'authentication_failed' };
+  }
+  if (type === 'quota' || status === 402) return { httpStatus: status, error: 'billing_error' };
+  if (type === 'rate_limit' || status === 429) return { httpStatus: status ?? 429, error: 'rate_limit' };
+  if (type === 'context_limit' || type === 'query') return { httpStatus: status, error: 'invalid_request' };
+  if (status !== null) return { httpStatus: status, error: status >= 500 ? 'server_error' : 'invalid_request' };
+  return CONNECTION_LOST.test(e.message) ? { httpStatus: null, error: 'unknown' } : null;
 }
 
 /**

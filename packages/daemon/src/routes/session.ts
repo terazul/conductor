@@ -30,6 +30,7 @@ import type {
   SetAutonomyRequest,
   SetModelRequest,
   SetModelResponse,
+  StopRetryingResponse,
 } from '@conductor/shared';
 import { HELPERS_MAX, NOTE_MAX, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
@@ -61,6 +62,7 @@ import {
   initSupervisor,
   ProjectBusyError,
   RerunRefusedError,
+  RetryRefusedError,
   supervisor,
 } from '../session/supervisor.js';
 
@@ -919,6 +921,35 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       }
     },
   );
+
+  /*
+   * An agent waiting to be tried again because the model couldn't be reached (Amendment 123).
+   * `retry-now` ends the wait and tries at once; `stop-retrying` gives up and ends the agent
+   * `failed`, as a failure always did. Both 409, with the sentence in `detail`, when the agent
+   * is not waiting (it may have started, or been stopped, a moment ago), or, for retry-now,
+   * while everything is paused until a time.
+   */
+  app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/retry-now', async (req, reply) => {
+    if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+    try {
+      sup.retryNow(req.params.agentId);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof RetryRefusedError) return fail(reply, 409, 'could not retry now', err.message);
+      return fail(reply, 500, 'could not retry now', String(err));
+    }
+  });
+
+  app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/stop-retrying', async (req, reply) => {
+    if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+    try {
+      const done: StopRetryingResponse = { agent: sup.stopRetrying(req.params.agentId) };
+      return reply.send(done);
+    } catch (err) {
+      if (err instanceof RetryRefusedError) return fail(reply, 409, 'could not stop retrying', err.message);
+      return fail(reply, 500, 'could not stop retrying', String(err));
+    }
+  });
 
   app.log.info('Track A session engine ready');
 }

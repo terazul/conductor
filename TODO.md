@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 123.
+  green `make test` (decided 30 Sep). The next amendment is 124.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -151,35 +151,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   `dailyMeter`). Use the same thresholds and tokens for each agent's spend against its budget: in the
   details panel's budget bar, the composer's budget line and summary, the agent's tab and its Fleet card.
   Token budgets (Copilot, OpenRouter) colour the same way.
-
-- [ ] **When the model can't be reached, try again after 5 s, 15 s, 30 s, 60 s and 5 min,
-  then stop.** Asked for (8 Oct). An agent whose run ends because the SDK stopped working
-  resumes on its own, five times at most, then stops as it does today.
-  - **Today:** the SDK retries a model call by itself first, and Conductor only reports it
-    (`api_retry`, `session/backends/claude.ts:549-558`; the Needs You alert from the second
-    attempt, `session/alerts.ts:40-43`). When the run then ends with an error, the agent is
-    `failed` at once (`#settle`, `packages/daemon/src/session/supervisor.ts:1003-1012`), and a
-    failed agent fails its job (`supervisor.ts:1131`). Nothing retries after that. Only a daemon
-    restart resumes agents on its own (`RESTART_NUDGE`, `supervisor.ts:175-179`, `286-289`).
-  - **Which failures retry.** The ones where waiting can help: no network, throttled or
-    overloaded, and server errors. Not a login or billing problem (`classifyRetry`,
-    `alerts.ts:45-63`: `auth` needs a person), not a budget stop, not your own stop or pause.
-  - **How.** Instead of `failed`, the agent waits for the next delay, then resumes its own
-    session (`sdkSessionId`, as `pump` does at `supervisor.ts:723-729`) with a nudge like the
-    restart one. A real reply from the model resets the count (`modelAnswered`,
-    `claude.ts:542-544`). After the fifth retry fails it's `failed`, as now. Retries count
-    against the agent's budget like any run.
-  - **What you see.** "Reconnecting in 30 s (3 of 5)", with **retry now** and **stop
-    retrying**, on the agent and in Needs You (`attention/alerts.ts`, `AlertCard.tsx`). Its job
-    stays live while it retries.
-  - **Both engines.** Copilot and OpenRouter end their runs through the same `#settle`. Check
-    how their errors are classified (`backends/copilot-events.ts`).
-  Decide:
-  - whether a waiting agent keeps its slot or frees it until its next try.
-  - whether retries survive a daemon restart (the next try's time saved), or a restart
-    simply resumes it, as it does now.
-  Tests in `session/verify.ts`, with a fake clock: each delay in turn, a reply resets the
-  count, `auth` doesn't retry, and the sixth failure is `failed`.
 
 - [ ] **Better instructions for the built-in roles.** Asked for (8 Oct). The new text for all
   seven is already written, as option B of [docs/plans/role-definitions.md](docs/plans/role-definitions.md).

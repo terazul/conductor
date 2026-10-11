@@ -45,7 +45,8 @@ import { arbiter } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
 import { eventLog } from '../../eventlog.js';
 import type { ToolAccess } from '../../routes/helpers.js';
-import { classifyRetry, modelAnswered } from '../alerts.js';
+import { modelAnswered } from '../alerts.js';
+import { classifyRetry } from '../retry.js';
 import { budgetLeft, lifetimeCost } from '../budget.js';
 import { costChanged } from '../../daily.js';
 import { hub } from '../../hub.js';
@@ -549,7 +550,13 @@ export class ClaudeBackend implements AgentBackend {
         }
         // A real reply ends any outage it was retrying through. An API error the SDK
         // writes as the assistant's turn carries `error`, and is not a reply.
-        if (m['error'] === undefined) modelAnswered(this.#scope.agentId);
+        if (m['error'] === undefined) {
+          modelAnswered(this.#scope.agentId);
+          outcome.apiFailure = null;
+        } else if (typeof m['error'] === 'string' && m['error'] !== 'unknown') {
+          // What the API said last (Amendment 123), keeping the status the retry before it had.
+          outcome.apiFailure = { httpStatus: outcome.apiFailure?.httpStatus ?? null, error: m['error'] };
+        }
         break;
       }
 
@@ -568,6 +575,8 @@ export class ClaudeBackend implements AgentBackend {
           httpStatus,
           error,
         });
+        // If the run ends in error with no reply after this, the supervisor may try again (Amendment 123).
+        outcome.apiFailure = { httpStatus, error };
         break;
       }
 
@@ -584,6 +593,12 @@ export class ClaudeBackend implements AgentBackend {
         // A failure with no terminal_reason — a resume of a session that is gone — is
         // explained here and nowhere else (F20).
         if (outcome.isError) outcome.errorDetail = errorsOf(m['errors']);
+        // A failed result that names an HTTP status is the API's, even when no retry was announced
+        // (Amendment 123). Anything else leaves what the retries and replies above left.
+        if (!outcome.isError) outcome.apiFailure = null;
+        else if (!outcome.apiFailure && typeof m['api_error_status'] === 'number') {
+          outcome.apiFailure = { httpStatus: m['api_error_status'], error: 'unknown' };
+        }
 
         const deferred = m['deferred_tool_use'];
         if (deferred && typeof deferred === 'object') {

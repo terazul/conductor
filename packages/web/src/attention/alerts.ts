@@ -35,7 +35,13 @@ export type AlertAction =
   /** A due note (Amendment 63): tick it done, or go to its project. */
   | { id: 'note_done'; projectId: string; noteId: string }
   | { id: 'project'; projectId: string }
-  | { id: 'dismiss' };
+  | { id: 'dismiss' }
+  /**
+   * An agent waiting to be tried again because the model couldn't be reached (Amendment 123):
+   * try now, or give up and let it fail as it would have before retries.
+   */
+  | { id: 'retry_now'; agentId: string }
+  | { id: 'stop_retrying'; agentId: string };
 
 /** The daemon's own resume nudge, so a continue from here reads like one from the composer. */
 export const CONTINUE_TEXT = 'Continue from where you stopped.';
@@ -118,6 +124,14 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       // summary edited first, is the fix; replying to it, in the box on the card, is the other
       // way. A card whose agent this tab has not heard of can only be put away.
       return [...(first ? [{ id: 'hand_off', agentId: first.id } as const] : []), ...open, dismiss];
+
+    case 'reconnecting':
+      // It describes the present and clears when the try starts, so it is not put away: the two
+      // ways to settle it are the buttons. A card for an agent this tab has not heard of can only
+      // be put away.
+      return first
+        ? [{ id: 'retry_now', agentId: first.id }, { id: 'stop_retrying', agentId: first.id }, ...open]
+        : [dismiss];
 
     case 'server_down':
       return [...(alert.jobId ? [{ id: 'preview', jobId: alert.jobId } as const] : []), dismiss];

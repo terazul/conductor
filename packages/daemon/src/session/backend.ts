@@ -13,6 +13,7 @@
 
 import type { Autonomy } from '@conductor/shared';
 import type { DeferredTool } from './store.js';
+import type { ApiFailure } from './retry.js';
 import type { Db } from '../db/index.js';
 
 /** Where an agent runs. `claude` is the default, and every agent from before this. */
@@ -112,6 +113,12 @@ export interface RunOutcome {
   errorDetail: string | null;
   /** What the session has cost so far, in dollars. 0 from a backend that can't say. */
   costUsd: number;
+  /**
+   * Amendment 123. What the model API said last, when it is the reason the run ended in
+   * error and the model has not replied since: the supervisor tries the agent again after a
+   * wait when waiting can help. Null or absent for any other ending.
+   */
+  apiFailure?: ApiFailure | null;
 }
 
 export interface RunOpts {

@@ -196,6 +196,94 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 123 — post-merge, applied. **When the model can't be reached, the agent waits 5 s, 15 s, 30 s, 60 s and 5 min and tries again, then fails as it did.**
+
+Daemon (`session/retry.ts`, new; `session/supervisor.ts`, `session/alerts.ts`, `session/backend.ts`,
+`session/backends/claude.ts`, `copilot.ts`, `copilot-events.ts`, `routes/session.ts`,
+`session/verify.ts`), shared (`events.ts`, `wire.ts`) and web (`agent/Reconnect.tsx`,
+`agent/reconnecting.ts`, `agent/agent.tsx`, `agent/agent.css`, `agent/endpoints.ts`,
+`attention/AlertCard.tsx`, `attention/alerts.ts`, `shell/describe.ts`, three verify files).
+`docs/MANUAL.md` §3 (Alerts) and §7. No migration. Asked for on 8 Oct; the decisions below were the
+recommended answers given on 10 Oct, taken when the user said to execute the TODO.
+- **Before:** the SDK retried a model call by itself and Conductor only reported it (Amendment 28).
+  When the run then ended in error, `#settle` wrote `failed` at once, and a failed agent fails its job.
+- **What retries** (`decideRetry`, pure, in `session/retry.ts`): a run that ended in error because of
+  the model API where waiting can help, by `classifyRetry`: no response at all (`unreachable`),
+  throttled or overloaded (`throttled`), a 5xx or 408 (`server`). **Not:** `auth` (a login, account or
+  billing error, which needs a person and shows as before), a budget stop, your own stop or pause, an
+  interrupted run (`aborted_streaming`, `aborted_tools`), a limit of the agent's own (`blocking_limit`,
+  `max_turns`, `prompt_too_long` and the rest), an error the API answers the same every time (a 4xx
+  that is not 408 or 429, `invalid_request`, `model_not_found`, `max_output_tokens`), and any failure
+  with no API error behind it.
+- **What the API said** is carried on the run's outcome as `RunOutcome.apiFailure` (`{ httpStatus,
+  error }`, optional). Claude sets it from the SDK's `api_retry` message, from an assistant message that
+  carries `error` (an API error written in the model's place; `unknown` is not taken), or from a failed
+  result that names `api_error_status`, and clears it on any real reply. Copilot, and OpenRouter on the
+  same class, set it from `session.error` (`errorType`, `statusCode`) through `apiFailureOf` in
+  `copilot-events.ts`, or from a thrown error whose message says the connection failed (`ECONNRESET`,
+  `fetch failed`, …). `classifyRetry` moved to `retry.ts` and is re-exported from `alerts.ts`.
+- **The schedule:** `RETRY_DELAYS_MS = [5 s, 15 s, 30 s, 60 s, 5 min]`, five tries at most. The sixth
+  failure in a row is `failed`, as before, with the failed (or gave-up) alert. A try is used when its
+  wait starts. **A real reply from the model starts the count again** (`modelAnswered` also calls
+  `retryBook().answered`); an API error written as a reply is not one. What a retry spends counts
+  against the agent's budget like any run. Continuing a failed agent gets five tries again.
+- **No new status.** A waiting agent is `queued`, as one is for a slot or after a restart
+  (Amendment 53). `#settle` calls `#waitToRetry`, which writes `queued` and a status event carrying
+  `retry: { cause, attempt, of, delayMs }` (new, optional, on `StatusPayload`) and the transcript line
+  "the model is busy — trying again in 30 s (3 of 5)". `pump()` skips an agent that is in
+  `retryBook()`; its timer (unref'd) calls `pump()`, which starts it like any queued agent, with its
+  own session (`sdkSessionId`) and **`RETRY_NUDGE`**: the model couldn't be reached, a running tool call
+  was stopped, background work is gone.
+- **Slot and job.** Its slot is freed when its run ends (`#active` is cleared before `#settle`), and
+  it takes one again when its time comes; with none free it waits for one like any queued agent. Its
+  job stays `working`: `#rollUpJob` does not count a queued agent as settled, and `#settle` returns
+  before it.
+- **`RetryBook`** (`retry.ts`) holds the tries used and the waits, on an injected `Clock`, so
+  `session/verify.ts` drives it with a fake one. `retryBook()` is the daemon's one instance;
+  `resetRetryBook(clock)` replaces it for checks. In memory on purpose.
+- **A restart** forgets the waits. `reconcile` sees a `queued` agent with a session whose last status
+  event carries `retry` and resumes it as any agent a restart interrupted: `RESTART_NUDGE`, which wins
+  over `RETRY_NUDGE`, and five tries again.
+- **What ends a wait:** the timer; **retry now**; any pause (`#pause`), terminate, delete, re-run from
+  here (`rerunFrom`), or a message from you (`#launchWithPrompt`), which is the try, with your words;
+  and shutdown, which clears the timers.
+- **Routes**, at the end of `routes/session.ts`: `POST /api/agents/:agentId/retry-now` →
+  `{ ok: true }`, and `POST /api/agents/:agentId/stop-retrying` → `StopRetryingResponse { agent }`
+  (new, last in `wire.ts`). Both 404 for no such agent and 409, with the sentence in `detail`, when the
+  agent is not waiting; retry now is also refused while everything is paused until a time
+  (Amendment 111). **stop retrying** writes `failed` with the reason and detail the failed run ended
+  with, so it reads as it would have before retries.
+- **What you see.** Agent screen: a banner above the transcript, "Reconnecting in 30 s (3 of 5)", the
+  cause, **retry now** and **stop retrying** (`agent/Reconnect.tsx`; the line is worked out in
+  `agent/reconnecting.ts` and `shell/describe.ts` from the last status event, and counts down each
+  second). Fleet's agent rows and the Project lanes read "reconnecting in 30 s (3 of 5)" through
+  `currentAction`. Needs You: a new alert kind **`reconnecting`** (`AlertKind`, new `Alert.retryAt`),
+  held in memory like a connection alert, one per agent with one id for the whole bout so it updates
+  rather than repeats, from the second retry (`RETRY_ALERT_FROM = 2`): the first waits 5 s and is a
+  blip. Its buttons are **retry now**, **stop retrying** and **open agent**; it is not dismissable and
+  clears when the try starts. Amber from the second retry, `queue` before. Tokens only, both themes.
+- **Not changed:** the SDK's own retries and the `connection` alert, which still raise for a login
+  or network that stays down and say "gave up" if the last of the five fails. An agent restarted after
+  a retry is not asked to hand off by Amendment 119's rule (only a restart resume is).
+- **Not done:** the waits are not saved, so a restart gives five tries again; the delays are not
+  settings; an agent that retries and then ends its turn without `hand_off` is held as any other
+  (Amendment 119's one-time request is for a restart resume only, though `RETRY_NUDGE` says the same
+  about background work); nobody has watched the banner or the card in a browser, in either theme.
+**Verified:** `session/verify.ts` §21, with a fake clock: each delay in turn (5 s, 15 s, 30 s, 60 s,
+5 min), nothing starts a moment early, and each try resumes the agent's own session with
+`RETRY_NUDGE`; the sixth failure is `failed` with the job failed; the job stays working while an
+agent waits and a sibling finishing does not settle it; the slot is free while it waits and taken
+again when it resumes, with one slot; a reply starts the count again and an API error written as a
+reply does not; `auth` and billing, a budget stop, your own pause and stop, an interrupted run, the
+agent's own limits and a 400 are not retried; retry now (route, no clock, the timer gone, the count
+kept) and stop retrying (route, `failed` with the run's reason, the job failed); pausing or stopping a
+waiting agent removes its timer and count; a pause-all holds the try until release; a restart forgets
+the wait and resumes the agent with `RESTART_NUDGE` and five tries; the card is in the alert list,
+the frames and the snapshot from the second retry; Copilot and OpenRouter wait on a throttle and a
+lost connection, resume their session with the nudge, reset on a reply, and fail on a login or a bad
+query. `web`: `attention/verify.ts`, `agent/verify.ts`, `lib/verify.ts` for the line, the banner, the
+card's buttons and the wiring.
+
 ### Amendment 122 — post-merge, applied. **A Metrics tab (8): model usage, calls, time and errors, in total and per model.**
 
 Daemon (`session/metrics.ts` new, `routes/metrics.ts` new, `db/migrations/170_metrics.sql` new,

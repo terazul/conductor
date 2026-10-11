@@ -63,7 +63,7 @@ import { finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setA
 import { copilotToolsFor, isWriteTool, normaliseTool } from '../translate.js';
 import { recordWindows } from '../windows.js';
 import { CUT_SHORT } from './claude.js';
-import { CopilotEvents, askFromPermission, type TurnEnd } from './copilot-events.js';
+import { CopilotEvents, apiFailureOf, askFromPermission, type TurnEnd } from './copilot-events.js';
 
 export type CopilotProvider = 'copilot' | 'openrouter';
 
@@ -635,6 +635,8 @@ export class CopilotBackend implements AgentBackend {
         outcome.isError = true;
         outcome.terminalReason = 'session_error';
         outcome.errorDetail = end.message.trim().split('\n')[0]?.slice(0, 400) || null;
+        // Tried again after a wait when it was the model API's trouble (Amendment 123).
+        outcome.apiFailure = apiFailureOf(end);
       } else if (end.kind === 'aborted' || this.#stopping) {
         outcome.terminalReason = 'aborted_streaming';
       } else {
@@ -645,6 +647,8 @@ export class CopilotBackend implements AgentBackend {
         outcome.isError = true;
         outcome.terminalReason = outcome.terminalReason ?? 'iteration_error';
         outcome.errorDetail = oneLine(err) || null;
+        // A connection that dropped while the session was starting or sending counts, too (Amendment 123).
+        outcome.apiFailure = apiFailureOf({ message: oneLine(err) });
         console.error(`[copilot] ${agentId} run failed: ${oneLine(err)}`);
       }
     } finally {

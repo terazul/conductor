@@ -145,6 +145,13 @@ export interface StatusPayload {
    * `errors`. `error` stays the code the sentences and alerts key on. Amendment 28.
    */
   detail?: string;
+  /**
+   * On 'queued' (Amendment 123): the run ended because the model could not be reached, and
+   * Conductor will resume the agent itself after `delayMs` (counted from this event's `ts`).
+   * `attempt` is this retry, of `of`. Absent on every other queued agent. `error` carries the
+   * sentence the transcript shows.
+   */
+  retry?: { cause: RetryCause; attempt: number; of: number; delayMs: number };
 }
 
 /**

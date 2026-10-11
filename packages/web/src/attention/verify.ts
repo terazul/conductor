@@ -507,6 +507,60 @@ console.log('\n7 · "not handed off", on Fleet’s card and the Project lane (Am
   check('both themes read: tokens only, amber like every waiting-for-you state', !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(chipCss) && /var\(--need\)/.test(chipCss) && /color-mix\(in srgb, var\(--need\)/.test(chipCss) && !/style=/.test(chipSrc));
 }
 
+// Amendment 123. An agent whose run ended because the model couldn't be reached waits to be tried
+// again; the card says when, and offers to try now or to give up.
+console.log('\n8 · an agent waiting to be tried again (Amendment 123)');
+{
+  const agent = (over: Partial<Agent> = {}): Agent => ({
+    id: 'a1',
+    jobId: 'j1',
+    projectId: 'p1',
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status: 'queued',
+    blockMode: null,
+    costUsd: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const waiting: Alert = {
+    id: 'reconnecting:a1:1',
+    kind: 'reconnecting',
+    cause: 'unreachable',
+    projectId: 'p1',
+    jobId: 'j1',
+    agentIds: ['a1'],
+    since: '2026-10-10T12:00:00Z',
+    attempt: 3,
+    maxRetries: 5,
+    retryAt: '2026-10-10T12:00:30Z',
+  };
+  const ids = (xs: AlertAction[]) => xs.map((a) => a.id).join(' ');
+  const acts = alertActions(waiting, [agent()]);
+  check('the card offers retry now first, then stop retrying, then the agent', ids(acts) === 'retry_now stop_retrying open', ids(acts));
+  check('both are for the agent the card is about', acts.slice(0, 2).every((a) => 'agentId' in a && a.agentId === 'a1'));
+  check('it is not put away: it describes the present and clears when the try starts', !ids(acts).includes('dismiss'));
+  check('a card for an agent this tab has not heard of can only be put away', ids(alertActions(waiting, [])) === 'dismiss');
+  const n = alertNotice(waiting, [agent()], [{ id: 'p1', name: 'demo' } as Project]);
+  check('a notification says what is wrong and which retry', n.title === "demo · can't reach the model API" && n.body === 'retry 3 of 5 · builder', `${n.title} / ${n.body}`);
+
+  // The wiring: source checks, since the card is not rendered in Node.
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  const ep = readFileSync(new URL('../agent/endpoints.ts', import.meta.url), 'utf8');
+  check('the card has a label and a tone for the kind', /reconnecting: \{ label: 'Reconnecting', tone: 'var\(--need\)' \}/.test(card));
+  check('it counts down from the time the daemon will try, once a second and only then', /useNow\(alert\.kind === 'reconnecting'\)/.test(card) && /reconnectLine\(reconnect, now\)/.test(card) && /Date\.parse\(alert\.retryAt\)/.test(card));
+  check('retry now is the fix, so it is the primary button', /a\.id === 'retry_now'/.test(card.slice(card.indexOf('function isFix'))));
+  check('the buttons call the two routes, and a refusal stays on the card with its reason', /cmd\.run\('Retrying now', \(\) => retryNowAgent\(a\.agentId\)/.test(card) && /cmd\.run\('Stopping the retries', \(\) => stopRetryingAgent\(a\.agentId\)/.test(card) && !/case 'retry_now':[^}]*dismissAlert/.test(card));
+  check('the calls are POST /api/agents/:id/retry-now and /stop-retrying', /agentPath\(agentId, 'retry-now'\), \{ method: 'POST'/.test(ep) && /agentPath\(agentId, 'stop-retrying'\), \{ method: 'POST'/.test(ep));
+  check('both themes read: the card adds no colour of its own', !/#[0-9a-fA-F]{3,8}\b|rgb\(/.test(card));
+}
+
 console.log(
   failures === 0
     ? '\nTrack E verify: PASS — waits, tool calls and answers read as they should.\n'

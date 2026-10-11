@@ -549,6 +549,10 @@ export interface SendConsoleToAgentResponse {
  *                   `hand_off` (Amendment 104). It is `done` and the agents after it stay
  *                   queued until you hand off for it or it hands off itself. `agentIds` is
  *                   the held agent.
+ *  - 'reconnecting': the model couldn't be reached and the agent is waiting to be tried
+ *                   again (Amendment 123). `agentIds` is that agent, `cause` a RetryCause,
+ *                   `attempt` of `maxRetries` this retry, and `retryAt` when it happens.
+ *                   Held in memory, like a connection alert. It clears when the try starts.
  */
 export type AlertKind =
   | 'failed'
@@ -558,7 +562,8 @@ export type AlertKind =
   | 'daily_budget'
   | 'note_due'
   | 'blocked_dep'
-  | 'handoff_held';
+  | 'handoff_held'
+  | 'reconnecting';
 
 /**
  * Not a PendingRequest: a pending request is a tool call waiting for approve or deny,
@@ -581,7 +586,7 @@ export interface Alert {
   since: string;
   /** connection: the host from ANTHROPIC_BASE_URL, when the daemon can read one. */
   endpoint?: string;
-  /** connection: the latest attempt across the affected agents, and the SDK's cap. */
+  /** connection: the latest attempt across the affected agents, and the SDK's cap. reconnecting: this retry, of how many. */
   attempt?: number;
   maxRetries?: number;
   /** connection: every affected agent's run has ended, so retrying needs you. */
@@ -603,6 +608,8 @@ export interface Alert {
    * counted twice: its own failure already has an alert.
    */
   blockedBy?: string;
+  /** reconnecting (Amendment 123): when the next try starts, as an ISO time. */
+  retryAt?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1042,4 +1049,17 @@ export interface MetricsResponse {
   days: MetricsDay[];
   /** Present for `all`, when there is anything from before. */
   before: MetricsBefore | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trying again when the model can't be reached  (Amendment 123)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/agents/:agentId/stop-retrying — give up waiting: the agent ends `failed`, as it
+ * did before retries. 409, with the sentence in `detail`, when it is not waiting to retry.
+ * (POST /api/agents/:agentId/retry-now takes no body and answers `{ ok: true }`, 409 likewise.)
+ */
+export interface StopRetryingResponse {
+  agent: Agent;
 }

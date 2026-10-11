@@ -63,6 +63,7 @@ import {
   xtermTheme,
   type Tokens,
 } from './term.js';
+import { reconnectBar } from './reconnecting.js';
 import { rerunControl, rerunDone, rerunSentence, roleList } from './rerun.js';
 import { ALL_ON, NONE, capabilitiesOf, controlsFor, offersMode, parseTokens, providerModelProblem, tokenWords } from '../lib/providers.js';
 
@@ -852,6 +853,41 @@ console.log('\n11 · the re-run button knows a held agent (Amendment 120)');
   const shared = readFileSync(new URL('../../../shared/src/rerun.ts', import.meta.url), 'utf8');
   const daemon = readFileSync(new URL('../../../daemon/src/session/supervisor.ts', import.meta.url), 'utf8');
   check('the daemon uses the same rule: rerunFrom asks rerunPlan, and has no sentence of its own for a hold', /heldRefusal\(root\) \?\?/.test(shared) && !/stopped without handing off, so the agents after it/.test(daemon));
+}
+
+console.log('\n· an agent waiting to be tried again says so, with retry now and stop retrying (Amendment 123)');
+{
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const agent = (status: Agent['status'] = 'queued') => ({ status });
+  const status = (st: Agent['status'], ms: number, retry?: { cause: 'unreachable' | 'auth' | 'throttled' | 'server'; attempt: number; of: number; delayMs: number }): Event => ({
+    seq: ms,
+    ts: new Date(ms).toISOString(),
+    projectId: 'p',
+    jobId: 'j',
+    agentId: 'a',
+    payload: { kind: 'status', status: st, ...(retry ? { retry } : {}) },
+  });
+  const w = (attempt: number, delayMs: number, cause: 'unreachable' | 'auth' | 'throttled' | 'server' = 'unreachable') => status('queued', T0, { cause, attempt, of: 5, delayMs });
+
+  const bar = reconnectBar(agent(), [w(3, 30_000)], T0 + 2_000);
+  check('the banner reads "Reconnecting in 30 s (3 of 5)", counted down, with what is wrong', bar?.text === 'Reconnecting in 28 s (3 of 5)' && bar.why === "can't reach the model API", JSON.stringify(bar));
+  check('amber from the second retry, as Needs You has the card; the first is a blip', bar?.needs === true && reconnectBar(agent(), [w(1, 5_000)], T0)?.needs === false);
+  check('each cause is told as it is', reconnectBar(agent(), [w(2, 15_000, 'throttled')], T0)?.why === 'the model API is busy' && reconnectBar(agent(), [w(2, 15_000, 'server')], T0)?.why === 'the model API is failing');
+  check('at its time it says now, until the daemon starts it', reconnectBar(agent(), [w(5, 300_000)], T0 + 301_000)?.text === 'Reconnecting now (5 of 5)');
+  check('the longest wait reads in minutes', reconnectBar(agent(), [w(5, 300_000)], T0)?.text === 'Reconnecting in 5 min (5 of 5)');
+  check('not once it is working again, failed or paused', ['working', 'failed', 'paused'].every((st) => reconnectBar(agent(st as Agent['status']), [w(3, 30_000), status(st as Agent['status'], T0 + 1)], T0) === null));
+  check('nor while the status says it is anything but queued, whatever the log holds', reconnectBar(agent('working'), [w(3, 30_000)], T0) === null);
+  check('a queued agent with no retry is not waiting for the model', reconnectBar(agent(), [status('queued', T0)], T0) === null && reconnectBar(agent(), [], T0) === null);
+
+  const comp = readFileSync(new URL('./Reconnect.tsx', import.meta.url), 'utf8');
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  check('the screen shows it above the transcript, beside the blocked banner', /<Reconnect agent=\{agent\} events=\{events\} cmd=\{control\} \/>/.test(screen) && screen.indexOf('<Reconnect ') < screen.indexOf('className="ag-blocked"'));
+  check('the clock only ticks while it is waiting', /if \(reconnectBar\(agent, events, Date\.now\(\)\) === null\) return null;\s*return <Ticking/.test(comp) && /useNow\(1000\)/.test(comp));
+  check('retry now is the primary button and stop retrying the quiet one', /fl-btn is-primary[^>]*[\s\S]*retry now/.test(comp) && /fl-btn is-ghost[\s\S]*stop retrying/.test(comp));
+  check('they call the two routes through useCommand, and nothing removes the banner but the daemon starting the try', /retryNowAgent\(agent\.id\)/.test(comp) && /stopRetryingAgent\(agent\.id\)/.test(comp) && /disabled=\{cmd\.busy\}/.test(comp));
+  const rules = css.slice(css.indexOf('.ag-reconnect {'), css.indexOf('/* ── crumb as a button'));
+  check('both themes read: its CSS is tokens only', rules.length > 200 && !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(rules) && /var\(--need\)/.test(rules) && !/#[0-9a-fA-F]{3,8}\b|style=|rgb\(/.test(comp));
 }
 
 console.log(

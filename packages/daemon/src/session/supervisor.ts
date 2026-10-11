@@ -77,6 +77,7 @@ import { rerunNote, rerunStatusNote } from './rerun.js';
 import { recordRunEnd } from './metrics.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
+import { decideRetry, onRetryDue, retryBook, retryNote, type ApiFailure } from './retry.js';
 import {
   agentsForJob,
   DEFAULT_AUTONOMY,
@@ -245,6 +246,18 @@ export const RESTART_NUDGE =
   'done (Amendment 119).';
 
 /**
+ * What an agent is told when it is tried again after the model couldn't be reached
+ * (Amendment 123). Its run ended with the API failing, so a tool call that was running got no
+ * result, and anything it had running in the background went with the run.
+ */
+export const RETRY_NUDGE =
+  'Continue from where you stopped. The model could not be reached, so your last turn was ' +
+  'cut off: if a tool call was still running then, it was stopped before it finished, so ' +
+  'check what it did before relying on it. Anything you had running in the background, ' +
+  'such as background agents or tasks you started yourself, was stopped with it and will ' +
+  'not report back: do that work again yourself rather than wait for it.';
+
+/**
  * Sent once, on its own, to an agent that a restart interrupted and that then ended its
  * turn without calling `hand_off` while agents wait for it (Amendment 119). Without it the
  * agent is held and you are asked; most of the time what it needs is this sentence.
@@ -301,6 +314,14 @@ export class RerunRefusedError extends Error {
   }
 }
 
+/** `retry now` or `stop retrying` for an agent that is not waiting to retry (Amendment 123). */
+export class RetryRefusedError extends Error {
+  constructor(why: string) {
+    super(why);
+    this.name = 'RetryRefusedError';
+  }
+}
+
 export class ProjectBusyError extends Error {
   readonly roles: string[];
 
@@ -325,6 +346,12 @@ export class Supervisor implements AgentControl {
    * a run that ends held for not handing off is asked, once, before the hold.
    */
   #restartRuns = new Set<string>();
+  /**
+   * Agents whose run in flight began after a wait for the model (Amendment 123), told
+   * RETRY_NUDGE. `#settle` takes the entry out whatever way the run ends, and sets it again
+   * when the next wait starts. The tries used and the waits live in `retryBook()`.
+   */
+  #retryRuns = new Set<string>();
   /*
    * Agents `rerunFrom` queued, with the roles whose reply changed, are resumed with `rerunNote`
    * on their next run (Amendment 102). That is kept in the agent's row (`rerun_pending`, set by
@@ -357,6 +384,9 @@ export class Supervisor implements AgentControl {
 
   constructor(db: Db) {
     this.#db = db;
+    // A wait for the model is over, by its time or by `retry now` (Amendment 123): the agent is
+    // queued, so pump starts it when there is a slot, as it starts any queued agent.
+    onRetryDue(() => this.pump());
   }
 
   // ── snapshot ──────────────────────────────────────────────────────────────
@@ -400,6 +430,16 @@ export class Supervisor implements AgentControl {
         { kind: 'status', status: 'queued', error: 'the daemon restarted mid-run — resuming it' },
       );
       fixed += 1;
+    }
+    // One that was waiting to be tried again (Amendment 123) is queued with its session, and
+    // pump() resumes it. The wait and its count are gone with the process, so it carries on as
+    // an agent a restart interrupted does: told so, and with five tries again if it fails.
+    for (const agent of listAgents(this.#db)) {
+      if (agent.status !== 'queued' || !agent.sdkSessionId || this.#restarted.has(agent.id)) continue;
+      const last = eventLog().forAgent(agent.id).filter((e) => e.payload.kind === 'status').at(-1);
+      if (last?.payload.kind === 'status' && last.payload.status === 'queued' && last.payload.retry) {
+        this.#restarted.add(agent.id);
+      }
     }
     if (fixed > 0) {
       console.log(`[supervisor] reconciled ${fixed} agent(s) left working by a hard stop`);
@@ -837,6 +877,9 @@ export class Supervisor implements AgentControl {
     if (this.#hold) return;
     for (const agent of listAgents(this.#db)) {
       if (agent.status !== 'queued') continue;
+      // Waiting for the model to come back (Amendment 123): it frees its slot while it waits
+      // and starts when its time comes, like any queued agent.
+      if (retryBook().waiting(agent.id)) continue;
       if (this.#active.size >= slotLimit()) return;
       if (this.#active.has(agent.id)) continue;
       if (this.#halting.has(agent.jobId)) continue;
@@ -920,6 +963,8 @@ export class Supervisor implements AgentControl {
   #pause(agentId: string, note: string): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return;
+    // A pause of any kind ends the bout of waiting for the model (Amendment 123).
+    this.#forgetRetries(agentId);
     setAgentStatus(this.#db, agentId, 'paused');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
@@ -1000,6 +1045,8 @@ export class Supervisor implements AgentControl {
     // Its folder is gone: failed with the reason, rather than a launch error (Amendment 114).
     if (this.#refuseGone(agentId, job)) return;
 
+    // Started by pump when its wait ended, or by something else first: either way no longer waiting.
+    retryBook().cancel(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
     this.#openRun(agent);
@@ -1093,11 +1140,15 @@ export class Supervisor implements AgentControl {
     const report = this.#takeHelperReport(agentId);
     if (report) return report;
 
-    // Resumed on its own after a restart interrupted it (Amendment 53).
+    // Resumed on its own after a restart interrupted it (Amendment 53). Before a retry's words:
+    // an agent that was waiting for the model when the daemon stopped is told the restart.
     if (this.#restarted.delete(agentId) && !arbiter().stagedFor(agentId)) {
       this.#restartRuns.add(agentId);
       return RESTART_NUDGE;
     }
+
+    // Tried again after the model couldn't be reached (Amendment 123).
+    if (this.#retryRuns.has(agentId) && !arbiter().stagedFor(agentId)) return RETRY_NUDGE;
 
     const staged = arbiter().stagedFor(agentId);
     if (!staged) {
@@ -1123,12 +1174,20 @@ export class Supervisor implements AgentControl {
   /** Decide what an ended run means for the agent's status. */
   #settle(
     agentId: string,
-    outcome: { terminalReason: string | null; deferredTool: unknown; isError: boolean; errorDetail?: string | null },
+    outcome: {
+      terminalReason: string | null;
+      deferredTool: unknown;
+      isError: boolean;
+      errorDetail?: string | null;
+      apiFailure?: ApiFailure | null;
+    },
   ): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return;
     // Whether this run began as a restart resume, which is over now whichever way it ended.
     const afterRestart = this.#restartRuns.delete(agentId);
+    // And whether it began after a wait for the model (Amendment 123): over too.
+    this.#retryRuns.delete(agentId);
 
     /*
      * A terminated agent's status is final. `terminateAgent` stops the runner and then
@@ -1142,6 +1201,8 @@ export class Supervisor implements AgentControl {
     const byUser = this.#userStopped.delete(agentId);
     if (agent.status === 'stopped') return;
     if (byUser) {
+      // Your own stop or pause is never retried (Amendment 123).
+      this.#forgetRetries(agentId);
       arbiter().clearStaged(agentId);
       return;
     }
@@ -1174,6 +1235,14 @@ export class Supervisor implements AgentControl {
       this.#rollUpJob(agent.jobId);
       return;
     }
+
+    /*
+     * The model couldn't be reached (Amendment 123). Waiting can help, so instead of `failed`
+     * the agent waits for its next try, queued, with its slot freed and its job still live.
+     * Anything else ends the bout: failed, done or waiting on helpers all start the count again.
+     */
+    if (outcome.isError && outcome.terminalReason !== 'aborted_tools' && this.#waitToRetry(agent, outcome)) return;
+    this.#forgetRetries(agentId);
 
     if (outcome.isError && outcome.terminalReason !== 'aborted_tools') {
       setAgentStatus(this.#db, agentId, 'failed');
@@ -1208,6 +1277,104 @@ export class Supervisor implements AgentControl {
     }
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.#rollUpJob(agent.jobId);
+  }
+
+  // ── trying again when the model can't be reached (Amendment 123) ──────────
+
+  /** Its waits and its count both go, and the nudge it would have been told. */
+  #forgetRetries(agentId: string): void {
+    retryBook().forget(agentId);
+    this.#retryRuns.delete(agentId);
+  }
+
+  /**
+   * A run ended in error because the model couldn't be reached: wait for the next try
+   * (5 s, 15 s, 30 s, 60 s, 5 min), then resume the agent's own session with RETRY_NUDGE.
+   * False when it isn't a failure to wait out, or the fifth try has failed: the caller
+   * fails the agent as it always did.
+   *
+   * The agent is `queued` while it waits, as one is for a slot or after a restart: no new
+   * status. Its slot was freed when its run ended; `pump` skips it until its time, then
+   * starts it like any queued agent. Its job stays live because a queued agent is not
+   * settled. The status event carries the wait, which is what "Reconnecting in 30 s (3 of
+   * 5)" is drawn from, on the agent and in Needs You.
+   */
+  #waitToRetry(
+    agent: Agent,
+    outcome: { terminalReason: string | null; isError: boolean; errorDetail?: string | null; apiFailure?: ApiFailure | null },
+  ): boolean {
+    const verdict = decideRetry({
+      isError: outcome.isError,
+      terminalReason: outcome.terminalReason,
+      failure: outcome.apiFailure,
+      // A run you ended returned before this.
+      userStopped: false,
+      used: retryBook().used(agent.id),
+    });
+    if (!verdict.retry) return false;
+    // A job being stopped starts nothing by itself.
+    if (this.#halting.has(agent.jobId) || !getJob(this.#db, agent.jobId)) return false;
+
+    const wait = retryBook().wait(verdict, {
+      agentId: agent.id,
+      projectId: agent.projectId,
+      jobId: agent.jobId,
+      terminalReason: outcome.terminalReason,
+      errorDetail: outcome.errorDetail ?? null,
+    });
+    this.#retryRuns.add(agent.id);
+    setAgentStatus(this.#db, agent.id, 'queued');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
+      {
+        kind: 'status',
+        status: 'queued',
+        error: retryNote(wait.cause, wait.attempt, wait.of, wait.delayMs),
+        retry: { cause: wait.cause, attempt: wait.attempt, of: wait.of, delayMs: wait.delayMs },
+      },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agent.id)!] });
+    return true;
+  }
+
+  /**
+   * `retry now`: stop waiting and try again at once. The agent is queued, so it starts when a
+   * slot is free. Refused, with a sentence, when it is not waiting, or while everything is
+   * paused until a time.
+   */
+  retryNow(agentId: string): void {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) throw new Error('no such agent');
+    if (!retryBook().waiting(agentId)) throw new RetryRefusedError(`${agent.role} is not waiting to retry.`);
+    if (this.#hold) throw new RetryRefusedError('Everything is paused until the scheduled time, so nothing starts yet.');
+    // Fires the same handler as its timer: pump().
+    retryBook().now(agentId);
+  }
+
+  /**
+   * `stop retrying`: give up waiting. The agent ends `failed`, the way the run that failed
+   * would have ended it before retries, with the same reason and what the SDK said. Refused,
+   * with a sentence, when it is not waiting.
+   */
+  stopRetrying(agentId: string): Agent {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) throw new Error('no such agent');
+    const wait = retryBook().waiting(agentId);
+    if (!wait) throw new RetryRefusedError(`${agent.role} is not waiting to retry.`);
+    this.#forgetRetries(agentId);
+    setAgentStatus(this.#db, agentId, 'failed');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId },
+      {
+        kind: 'status',
+        status: 'failed',
+        error: wait.terminalReason ?? 'error',
+        ...(wait.errorDetail ? { detail: wait.errorDetail } : {}),
+      },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    this.#rollUpJob(agent.jobId);
+    return getAgent(this.#db, agentId)!;
   }
 
   // ── handing off (Amendment 104) ───────────────────────────────────────────
@@ -1622,6 +1789,8 @@ export class Supervisor implements AgentControl {
         if (!a) continue;
         // Its input changed, so its last summary was about work it is about to change (Amendment 104).
         setHandoff(this.#db, a.id, { summary: null, held: false });
+        // And one waiting for the model goes now, with the note, not at its time (Amendment 123).
+        this.#forgetRetries(a.id);
         // Only one with a session is resumed. One that failed before it had one starts
         // from its prompt, which carries the new reply already.
         if (s.action === 'resume') {
@@ -1696,6 +1865,8 @@ export class Supervisor implements AgentControl {
     if (!agent || !job) return;
     if (this.#refuseGone(agentId, job)) return;
 
+    // You wrote to an agent that was waiting for the model: that is its try, with your words (Amendment 123).
+    retryBook().cancel(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
     // Continuing a failed agent makes its job live again (Amendment 88): a job settled
@@ -2011,6 +2182,7 @@ export class Supervisor implements AgentControl {
 
     this.#resumeWanted.delete(agentId);
     setRerunPending(this.#db, agentId, null);
+    this.#forgetRetries(agentId);
     arbiter().cancelForAgent(agentId, 'the agent was terminated');
 
     const runner = this.#runners.get(agentId);
@@ -2185,6 +2357,8 @@ export class Supervisor implements AgentControl {
    * them here labelled every agent that was mid-run `failed`.
    */
   async shutdown(): Promise<void> {
+    // Waits for the model are not saved: a restart resumes those agents as any other (Amendment 123).
+    retryBook().clear();
     for (const id of this.#runners.keys()) this.#userStopped.add(id);
     await Promise.allSettled([...this.#runners.values()].map((r) => r.stop()));
   }

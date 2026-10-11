@@ -678,6 +678,7 @@ below the requests, one card each, and each card's first button is the one that 
 | **Agent failed** | An agent ended with an error. The card says why, in words. | **continue** (when its session can be resumed), open it, or dismiss. |
 | **Budget reached** | An agent spent its budget and was paused. | **+$10 and continue** or **+$25 and continue**, which raise its cap and wake it, or open it. |
 | **Model API** | The model API isn't answering: the network, your login, or an outage. | Nothing while Claude Code is still retrying. The alert clears itself once the model answers. If it gives up, **retry** wakes the agents it stopped. |
+| **Reconnecting** | The model couldn't be reached and Conductor is going to try again for you: *Reconnecting in 30 s (3 of 5)*. It appears from the second try (see "When the model can't be reached", §7). | **retry now** tries at once. **stop retrying** gives up and the agent ends failed. Open the agent. It goes away by itself when the try starts. |
 | **Dev server down** | A dev server an agent started has stopped answering. | Open its preview, or dismiss. |
 | **Daily budget** | Today's spend reached the daily budget set in Settings. | A warning only: nothing is stopped. Change the budget in Settings. |
 | **Note due** | One of your project notes is due or late. | **✓ mark done**, open the project, or dismiss it for the day. |
@@ -1085,6 +1086,32 @@ started with. Conductor checks for this every minute and turns the tag amber wit
 | An agent says **lost its folder: it was deleted** | Its job's worktree was removed, by `git worktree remove`, a clean-up or by hand, while the agent could still be resumed. Nothing is started there. In Needs You, **recreate folder and continue** puts the worktree back at the same path: on its branch with what was committed there, or, when the branch was deleted too, on a new branch of that name from the branch the Branches screen compares with. Then the agent carries on in its own session, told that uncommitted work is gone. A job working in a folder of its own (branch or in place isolation) can't be recreated: put the folder back. |
 | Removed a project by mistake | The files, worktrees and branches are all still there (§4). Add the folder again; you get a fresh project, and the old transcripts and spend history are gone for good. |
 
+**When the model can't be reached.** Claude Code retries a model call by itself first. If it
+gives up and the run ends because of the model API, and not because of anything the agent did,
+Conductor waits and tries again, up to five times, **5 s, 15 s, 30 s, 60 s and 5 min** after
+each failure, resuming the agent in its own session. That covers no network, a busy or
+throttled API, and server errors. It does not cover a refused login or a billing problem (those
+need you, and show as before), a budget stop, an agent you paused or stopped, or an error the
+model would give the same way every time, such as a prompt that is too long. It is the same for
+Claude, GitHub Copilot and OpenRouter agents.
+
+- While it waits the agent is **queued**: the Agent screen shows *Reconnecting in 30 s (3 of 5)*
+  above the transcript with **retry now** and **stop retrying**, and Fleet and the Project
+  screen's lines say *reconnecting in 30 s (3 of 5)*. From the second try Needs You has the same
+  card.
+- It **gives up its slot** while it waits, so something else can run, and takes one again when
+  its time comes. If every slot is taken then, it waits for one like any queued agent.
+- Its **job stays working**. A failed agent fails its job; a waiting one does not.
+- When it tries again it is told the model couldn't be reached, that a tool call that was
+  running was stopped, and that anything it had running in the background is gone.
+- Any **real reply from the model** starts the count again: the next failure waits 5 s. An
+  error message that the SDK writes in the model's place is not a reply. What a retry spends
+  counts against the agent's budget like any run.
+- After the fifth try fails, the agent is **failed**, as it always was, and Needs You says so.
+  **stop retrying** does the same at once. Continuing a failed agent gives it five tries again.
+- **Retries do not survive a restart.** The daemon forgets the waits, and an agent that was
+  waiting resumes on its own like one the restart interrupted, with five tries again.
+
 **Stopping an agent**, in increasing order of finality, all on the Agent screen (`3`):
 
 | | |
@@ -1210,6 +1237,8 @@ What cannot survive is a **running process**. So on startup:
   and to check any tool call that was cut short. They wait for free slots like any
   agent. One already at its budget is paused instead, and one that had no session yet
   starts from its prompt.
+- Agents **waiting to be tried again** because the model couldn't be reached (§7) resume the
+  same way, told the restart happened, with five tries again if they fail.
 - Agents that were **queued** simply start when a slot frees.
 - A **dev server** an agent started is its own process and is not managed by Conductor; if
   it died with your session, the next launch detection picks up a new one.

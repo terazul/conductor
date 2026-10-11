@@ -75,6 +75,20 @@ export function handOffAgent(agentId: string, body: HandOffRequest): Promise<{ a
 }
 
 /**
+ * An agent waiting to be tried again because the model couldn't be reached (Amendment 123):
+ * try now, instead of at its time. The daemon refuses with the reason (a 409) when it is no
+ * longer waiting, or while everything is paused until a time.
+ */
+export function retryNowAgent(agentId: string): Promise<unknown> {
+  return api(agentPath(agentId, 'retry-now'), { method: 'POST', body: {} });
+}
+
+/** Give up waiting: the agent ends `failed`, as it did before retries (Amendment 123). */
+export function stopRetryingAgent(agentId: string): Promise<{ agent: Agent }> {
+  return api(agentPath(agentId, 'stop-retrying'), { method: 'POST', body: {} });
+}
+
+/**
  * End an agent for good. NOT a delete: the transcript, the spend and every file it
  * wrote all stay exactly where they are — it just stops, and does not come back.
  */

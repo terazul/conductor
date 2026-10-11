@@ -33,6 +33,7 @@ import { Transcript, buildTranscript, replyKeys } from './transcript.js';
 import { Composer } from './composer.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
+import { Reconnect } from './Reconnect.js';
 import { fileLinks, filesIn } from './links.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
 import { sleepControl } from './sleep.js';
@@ -747,6 +748,9 @@ export function AgentScreen() {
             {control.notice.text}
           </div>
         )}
+
+        {/* Waiting to be tried again because the model couldn't be reached (Amendment 123). */}
+        <Reconnect agent={agent} events={events} cmd={control} />
 
         {pending.length > 0 && (
           <button

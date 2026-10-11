@@ -14,9 +14,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Agent, Alert, AlertKind, Project } from '@conductor/shared';
-import { useCommand } from '../agent/endpoints.js';
+import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
-import { alertTitle, retryHint } from '../shell/describe.js';
+import { alertTitle, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
+import { useNow } from './useNow.js';
 import { fmtMoney } from '../shell/ui.js';
 import { editNote } from '../fleet/endpoints.js';
 import { Kv } from './bits.jsx';
@@ -41,6 +42,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   note_due: { label: 'Note due', tone: 'var(--need)' },
   blocked_dep: { label: 'Waiting', tone: 'var(--need)' },
   handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
+  reconnecting: { label: 'Reconnecting', tone: 'var(--need)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -62,6 +64,8 @@ export interface AlertCardProps {
 export function AlertCard({ alert, agents, projects, focused, onAgentScreen = false }: AlertCardProps) {
   const cmd = useCommand();
   const ref = useRef<HTMLDivElement | null>(null);
+  // The countdown on a card waiting to retry (Amendment 123): one tick a second, only then.
+  const now = useNow(alert.kind === 'reconnecting');
   // The hand-off summary box (Amendment 104). A new hold is a new alert, so it closes with it.
   const [handingOff, setHandingOff] = useState(false);
   const kind = KIND[alert.kind];
@@ -117,12 +121,28 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         return;
       case 'dismiss':
         void cmd.run('Dismissing', () => dismissAlert(alert.id));
+        return;
+      case 'retry_now':
+        void cmd.run('Retrying now', () => retryNowAgent(a.agentId), 'trying again now');
+        return;
+      case 'stop_retrying':
+        void cmd.run('Stopping the retries', () => stopRetryingAgent(a.agentId), 'stopped retrying — it is failed');
     }
   };
 
   const cap = first?.autonomy.budgetUsd ?? null;
   const roles = mine.map((m) => m.role).join(' · ');
   const blocker = alert.blockedBy === undefined ? undefined : agents.find((a) => a.id === alert.blockedBy);
+  // "Reconnecting in 30 s (3 of 5)", counted down from when the daemon will try (Amendment 123).
+  const reconnect =
+    alert.kind === 'reconnecting' && alert.retryAt !== undefined
+      ? {
+          cause: alert.cause as 'unreachable' | 'auth' | 'throttled' | 'server',
+          attempt: alert.attempt ?? 1,
+          of: alert.maxRetries ?? 5,
+          at: Date.parse(alert.retryAt),
+        }
+      : null;
 
   return (
     <div
@@ -144,9 +164,15 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
       </div>
 
       <div className="atn-cardbody">
-        <div className="atn-alerttitle">
-          {head} <b>{subject}</b>
-        </div>
+        {reconnect ? (
+          <div className="atn-alerttitle">
+            <b>{reconnectLine(reconnect, now)}</b> · {retryHead({ cause: reconnect.cause, httpStatus: null })}
+          </div>
+        ) : (
+          <div className="atn-alerttitle">
+            {head} <b>{subject}</b>
+          </div>
+        )}
 
         {roles !== '' && <Kv k={mine.length > 1 ? 'agents' : 'agent'} v={roles} />}
         {alert.kind === 'budget' && first && cap !== null && (
@@ -190,6 +216,13 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
               with a summary you can edit first, or reply and it works again.
             </div>
           </>
+        )}
+        {alert.kind === 'reconnecting' && (
+          <div className="atn-note">
+            <b>{retryHint(alert.cause, false)}</b>
+            <br />
+            It is waiting, not working: its slot is free. Retry now tries at once; stop retrying ends it as failed.
+          </div>
         )}
         {alert.kind === 'connection' && (
           <div className="atn-note">
@@ -242,7 +275,9 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
 
 /** Something that makes the problem go away, as opposed to looking at it. */
 function isFix(a: AlertAction): boolean {
-  return a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off' || a.id === 'restore';
+  return (
+    a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off' || a.id === 'restore' || a.id === 'retry_now'
+  );
 }
 
 function labelOf(a: AlertAction): string {
@@ -266,6 +301,10 @@ function labelOf(a: AlertAction): string {
       return 'open project';
     case 'dismiss':
       return 'dismiss';
+    case 'retry_now':
+      return 'retry now';
+    case 'stop_retrying':
+      return 'stop retrying';
   }
 }
 
@@ -279,6 +318,10 @@ function titleOf(a: AlertAction): string | undefined {
       return "Put the job's worktree back on its branch (or from main if the branch is gone), then continue in the same session";
     case 'dismiss':
       return 'Put it away. It comes back only if this happens again.';
+    case 'retry_now':
+      return 'Try the model again now instead of waiting';
+    case 'stop_retrying':
+      return 'Give up: the agent ends failed, as it would have before retries';
     default:
       return undefined;
   }

@@ -179,6 +179,16 @@ export function currentAction(
   }
 
   if (agent.status === 'queued') {
+    // Waiting to be tried again because the model couldn't be reached (Amendment 123).
+    const again = reconnectingNow(events);
+    if (again) {
+      return {
+        head: 'reconnecting',
+        subject: reconnectTail(again, now),
+        // Amber from the second retry, when Needs You has the card too.
+        tone: again.attempt >= 2 ? 'need' : 'queue',
+      };
+    }
     if (dependencyNames.length > 0) {
       return {
         head: 'waiting on',
@@ -369,6 +379,54 @@ export function retryHint(cause: string, gaveUp: boolean): string {
   }
 }
 
+// ── waiting to be tried again (Amendment 123) ───────────────────────────────
+
+/** An agent waiting for its next try: which, of how many, and when (epoch ms). */
+export interface Reconnect {
+  cause: Retry['cause'];
+  attempt: number;
+  of: number;
+  at: number;
+}
+
+/**
+ * The wait an agent is in: its last status event is `queued` and carries the retry the daemon
+ * scheduled. Any later status (working, paused, failed…) ends it, as the daemon's own wait
+ * ends. The daemon's wait is in memory, so a restart is the one way this can read stale, and
+ * the agent is resumed at once then.
+ */
+export function reconnectingNow(events: readonly Event[]): Reconnect | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const e = events[i];
+    if (!e) continue;
+    const p = e.payload;
+    if (p.kind !== 'status') continue;
+    if (p.status !== 'queued' || !p.retry) return null;
+    return { cause: p.retry.cause, attempt: p.retry.attempt, of: p.retry.of, at: Date.parse(e.ts) + p.retry.delayMs };
+  }
+  return null;
+}
+
+/** "30 s", "4 min 12 s": the time left, counted down; '' when it has come. */
+export function leftIn(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  if (!Number.isFinite(s) || s <= 0) return '';
+  if (s <= 60) return `${s} s`;
+  const min = Math.floor(s / 60);
+  return s % 60 === 0 ? `${min} min` : `${min} min ${s % 60} s`;
+}
+
+/** "in 30 s (3 of 5)", or "now (3 of 5)" once its time has come and it waits for a slot. */
+export function reconnectTail(r: Reconnect, now: number): string {
+  const left = leftIn(r.at - now);
+  return `${left === '' ? 'now' : `in ${left}`} (${r.attempt} of ${r.of})`;
+}
+
+/** The whole line, for the Agent screen and the Needs You card: "Reconnecting in 30 s (3 of 5)". */
+export function reconnectLine(r: Reconnect, now: number): string {
+  return `Reconnecting ${reconnectTail(r, now)}`;
+}
+
 /** One line for an alert card: what happened, with the role filled in. */
 export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: string; subject: string } {
   const who = alert.agentIds.map((id) => agents.find((a) => a.id === id)?.role ?? id);
@@ -381,6 +439,12 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
         : `retry ${alert.attempt ?? '?'}${alert.maxRetries ? `/${alert.maxRetries}` : ''}`;
       return { head, subject: `${count} · ${who.join(' · ')}` };
     }
+    case 'reconnecting':
+      // The card counts down from `retryAt`; this is the line without a clock, for a notification.
+      return {
+        head: retryHead({ cause: alert.cause as Retry['cause'], httpStatus: null }),
+        subject: `retry ${alert.attempt ?? '?'} of ${alert.maxRetries ?? '?'} · ${who.join(' · ')}`,
+      };
     case 'server_down':
       return { head: `dev server :${alert.port ?? '?'}`, subject: 'stopped answering' };
     case 'daily_budget':
@@ -423,6 +487,8 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
     case 'connection':
       if (alert.gaveUp) return 'model API gave up';
       return alert.cause === 'auth' ? 'model API login' : 'no model API';
+    case 'reconnecting':
+      return 'reconnecting';
   }
 }
 

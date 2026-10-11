@@ -104,7 +104,20 @@ import {
 import { AgentRunner, CUT_SHORT, HELPER_TOOLS, sdk } from './runner.js';
 import { ClaudeBackend } from './backends/claude.js';
 import { copilotModels, copilotSdk, excludedFor, gateCall, openRouterModels, type CopilotClientLike } from './backends/copilot.js';
-import { CopilotEvents, askFromPermission } from './backends/copilot-events.js';
+import { CopilotEvents, apiFailureOf, askFromPermission } from './backends/copilot-events.js';
+import {
+  MAX_RETRIES,
+  RETRY_DELAYS_MS,
+  RetryBook,
+  decideRetry,
+  failureCause,
+  fmtDelay,
+  onRetryDue,
+  resetRetryBook,
+  retryBook,
+  retryNote,
+  type Clock,
+} from './retry.js';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
 import { forgetWindows, recordWindows, reportedWindow } from './windows.js';
 import {
@@ -127,7 +140,7 @@ import {
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
-import { HANDOFF_ASK, RESTART_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { HANDOFF_ASK, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
@@ -244,6 +257,8 @@ interface FakeRun {
     errors?: string[];
     /** The call a `defer` ended the run on, as the SDK names it in `deferred_tool_use`. */
     deferred?: { id: string; name: string; input: Record<string, unknown> };
+    /** The HTTP status a failed result names (`api_error_status`), Amendment 123. */
+    apiStatus?: number | null;
   }): void;
   finished: boolean;
 }
@@ -310,6 +325,7 @@ function fakeQuery({
       ...(r.reason ? { terminal_reason: r.reason } : {}),
       ...(r.errors ? { errors: r.errors } : {}),
       ...(r.deferred ? { deferred_tool_use: r.deferred } : {}),
+      ...(r.apiStatus !== undefined ? { api_error_status: r.apiStatus } : {}),
       usage: { input_tokens: 10, output_tokens: 5 },
       session_id: sessionId,
     };
@@ -5377,13 +5393,514 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n23 · trying again when the model can't be reached (Amendment 123)");
+  {
+    // Section 21 built extra Supervisors on second connections and closed them; the retry timer
+    // calls the handler the last-built Supervisor set, so point it back at the live one.
+    onRetryDue(() => sup.pump());
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+
+    // ── the rules, with nothing running ──
+    const failed = (httpStatus: number | null, error: string) => ({ httpStatus, error });
+    const ended = (over: Partial<Parameters<typeof decideRetry>[0]> = {}) =>
+      decideRetry({ isError: true, terminalReason: 'api_error', failure: failed(null, 'unknown'), userStopped: false, used: 0, ...over });
+    const delays = [0, 1, 2, 3, 4].map((used) => ended({ used }));
+    check(
+      'five waits, in turn: 5 s, 15 s, 30 s, 60 s, 5 min',
+      delays.every((v, i) => v.retry && v.delayMs === RETRY_DELAYS_MS[i] && v.attempt === i + 1 && v.of === 5) &&
+        RETRY_DELAYS_MS.join() === '5000,15000,30000,60000,300000' && MAX_RETRIES === 5,
+      JSON.stringify(delays),
+    );
+    check('and they read as 5 s, 15 s, 30 s, 60 s, 5 min', RETRY_DELAYS_MS.map(fmtDelay).join() === '5 s,15 s,30 s,60 s,5 min');
+    check('the sixth failure is not retried: that is `failed`, as before', JSON.stringify(ended({ used: 5 })) === '{"retry":false,"why":"out_of_tries"}');
+    check(
+      'a login problem is not retried: a person has to fix it',
+      ['authentication_failed', 'billing_error', 'account_on_hold'].every((e) => JSON.stringify(ended({ failure: failed(null, e) })) === '{"retry":false,"why":"needs_a_person"}') &&
+        JSON.stringify(ended({ failure: failed(403, 'unknown') })) === '{"retry":false,"why":"needs_a_person"}',
+    );
+    check('a budget stop is not, even with the API failing under it', JSON.stringify(ended({ terminalReason: 'budget_exhausted' })) === '{"retry":false,"why":"budget"}');
+    check('your own stop or pause is not', JSON.stringify(ended({ userStopped: true })) === '{"retry":false,"why":"stopped"}');
+    check('an interrupted run is not a failure', JSON.stringify(ended({ terminalReason: 'aborted_streaming' })) === '{"retry":false,"why":"interrupted"}');
+    check('a run that did not end in error is not', JSON.stringify(ended({ isError: false })) === '{"retry":false,"why":"not_an_error"}');
+    check(
+      "nor is the agent's own limit, whatever the API last said",
+      JSON.stringify(ended({ terminalReason: 'blocking_limit' })) === '{"retry":false,"why":"not_the_model"}' &&
+        JSON.stringify(ended({ terminalReason: 'max_turns' })) === '{"retry":false,"why":"not_the_model"}',
+    );
+    check(
+      'nor an error with nothing from the API behind it',
+      JSON.stringify(ended({ failure: null })) === '{"retry":false,"why":"not_api"}' && JSON.stringify(ended({ failure: undefined })) === '{"retry":false,"why":"not_api"}',
+    );
+    check(
+      'what the API says decides: no response, throttled, overloaded and a 5xx wait; a bad request or a missing model does not',
+      failureCause(failed(null, 'unknown')) === 'unreachable' && failureCause(failed(429, 'rate_limit')) === 'throttled' &&
+        failureCause(failed(529, 'overloaded')) === 'throttled' && failureCause(failed(503, 'unknown')) === 'server' &&
+        failureCause(failed(null, 'server_error')) === 'server' && failureCause(failed(408, 'unknown')) === 'server' &&
+        failureCause(failed(400, 'unknown')) === null && failureCause(failed(null, 'invalid_request')) === null &&
+        failureCause(failed(404, 'model_not_found')) === null && failureCause(failed(null, 'max_output_tokens')) === null,
+    );
+    check('the transcript line says why and how long', retryNote('throttled', 3, 5, 30_000) === 'the model is busy — trying again in 30 s (3 of 5)');
+
+    // ── the book, on a clock a check turns ──
+    interface Timer {
+      id: number;
+      at: number;
+      fn: () => void;
+    }
+    const makeClock = () => {
+      let t = 1_700_000_000_000;
+      let next = 1;
+      let timers: Timer[] = [];
+      return {
+        now: () => t,
+        setTimer: (fn: () => void, ms: number): unknown => {
+          const id = next++;
+          timers.push({ id, at: t + ms, fn });
+          return id;
+        },
+        clearTimer: (h: unknown): void => void (timers = timers.filter((x) => x.id !== h)),
+        advance(ms: number): void {
+          t += ms;
+          for (;;) {
+            const due = timers.filter((x) => x.at <= t).sort((a, b) => a.at - b.at)[0];
+            if (!due) return;
+            timers = timers.filter((x) => x !== due);
+            due.fn();
+          }
+        },
+        pending: () => timers.length,
+      } satisfies Clock & { advance(ms: number): void; pending(): number };
+    };
+    {
+      const c = makeClock();
+      const fired: string[] = [];
+      let changes = 0;
+      const book = new RetryBook(c, (id) => fired.push(id), () => (changes += 1));
+      const who = { agentId: 'x', projectId: 'p', jobId: 'j', terminalReason: 'api_error', errorDetail: null };
+      const verdict = (used: number) => ended({ used }) as Extract<ReturnType<typeof decideRetry>, { retry: true }>;
+      const w1 = book.wait(verdict(book.used('x')), who);
+      check('a wait is counted when it starts, and knows when it ends', book.used('x') === 1 && w1.attempt === 1 && w1.at === c.now() + 5_000 && book.waiting('x') === w1 && book.list().length === 1);
+      c.advance(4_999);
+      check('nothing fires early', fired.length === 0 && book.waiting('x') !== undefined);
+      c.advance(1);
+      check('at its time it fires once, and is no longer waiting', fired.join() === 'x' && book.waiting('x') === undefined && c.pending() === 0 && book.used('x') === 1);
+      book.wait(verdict(book.used('x')), who);
+      check('the next wait is the next delay', book.waiting('x')?.delayMs === 15_000 && book.waiting('x')?.attempt === 2);
+      check('and the trouble began at the first', book.waiting('x')?.since === w1.since);
+      check('retry now fires it at once and clears the timer', book.now('x') && fired.length === 2 && c.pending() === 0 && !book.now('x'));
+      book.wait(verdict(book.used('x')), who);
+      book.answered('x');
+      check('a reply starts the count again, with the wait left alone', book.used('x') === 0 && book.waiting('x') !== undefined);
+      book.cancel('x');
+      check('cancelling drops the wait and its timer and keeps the count', book.waiting('x') === undefined && c.pending() === 0 && fired.length === 2);
+      book.wait(verdict(0), who);
+      book.wait(verdict(1), who);
+      check('waiting again replaces the wait: one timer', c.pending() === 1 && book.list().length === 1);
+      book.forget('x');
+      check('forgetting takes the wait and the count', book.used('x') === 0 && book.list().length === 0 && c.pending() === 0 && changes > 0);
+      book.wait(verdict(0), who);
+      book.clear();
+      c.advance(10 * 60_000);
+      check('clearing (the daemon stopping) leaves no timer to fire', fired.length === 2 && c.pending() === 0);
+    }
+
+    // ── through the real supervisor and runner, on the fake SDK and a fake clock ──
+    const rpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'retry' })).body.project.id;
+    const rjob = (id: string): void => {
+      insertJob(db, { id, projectId: rpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const rfix = (id: string, jobId: string, a: Partial<Agent> = {}): void => fixture(id, jobId, { projectId: rpid, status: 'queued', autonomy: DEFAULT_AUTONOMY, ...a });
+    const clock = makeClock();
+    resetRetryBook(clock);
+    const statusOf = (id: string) => eventLog().forAgent(id).map((e) => e.payload).filter((p) => p.kind === 'status').at(-1);
+    const retryOf = (id: string) => {
+      const p = statusOf(id);
+      return p?.kind === 'status' ? p.retry : undefined;
+    };
+    /** The SDK says it is retrying a call, then gives up: the run ends in error. */
+    const failWith = (run: FakeRun | undefined, status: number | null, error: string, reason = 'api_error'): void => {
+      run?.say({ type: 'system', subtype: 'api_retry', attempt: 10, max_retries: 10, retry_delay_ms: 500, error_status: status, error });
+      run?.finish({ cost: 0, isError: true, reason });
+    };
+    const isWaiting = (id: string): boolean => retryBook().waiting(id) !== undefined && getAgent(db, id)?.status === 'queued';
+    const reconnecting = (id: string) => alerts().list().find((a) => a.kind === 'reconnecting' && a.agentIds.includes(id));
+
+    // Each delay in turn, the sixth failure `failed`, the job live and the slot free while it waits.
+    rjob('job_retry_a');
+    rfix('rt_a', 'job_retry_a');
+    const bell = await connect();
+    const atA = runs.length;
+    sup.pump();
+    check('the agent starts', await until(() => runs.length === atA + 1 && getAgent(db, 'rt_a')?.status === 'working'));
+    let run = runs[atA]!;
+    for (let i = 0; i < MAX_RETRIES; i += 1) {
+      const delay = RETRY_DELAYS_MS[i]!;
+      failWith(run, null, 'unknown');
+      await until(() => isWaiting('rt_a'));
+      const r = retryOf('rt_a');
+      check(
+        `failure ${i + 1}: queued, not failed, to try again in ${fmtDelay(delay)} (${i + 1} of 5)`,
+        isWaiting('rt_a') && r?.attempt === i + 1 && r.of === 5 && r.delayMs === delay && r.cause === 'unreachable',
+        `${getAgent(db, 'rt_a')?.status} ${JSON.stringify(r)}`,
+      );
+      check('…its slot is free and its job is still live', sup.slots.used === 0 && getJob(db, 'job_retry_a')?.status === 'working', `${sup.slots.used} used, job ${getJob(db, 'job_retry_a')?.status}`);
+      const card = reconnecting('rt_a');
+      check(
+        i === 0 ? '…the first is a blip: on its line, not in Needs You' : `…Needs You has the card: ${i + 1} of 5, at the time it will try`,
+        i === 0
+          ? card === undefined
+          : card?.attempt === i + 1 && card.maxRetries === 5 && card.cause === 'unreachable' && card.jobId === 'job_retry_a' && Date.parse(card.retryAt ?? '') === clock.now() + delay,
+        JSON.stringify(card),
+      );
+      if (i === 1) {
+        await settle(80);
+        check('…and every tab is told', bell.frames.some((f) => f.type === 'alerts' && f.alerts.some((a) => a.kind === 'reconnecting' && a.agentIds[0] === 'rt_a')));
+        const snap = await get<Snapshot>('/api/snapshot');
+        check('…a fresh tab gets it in the snapshot', snap.body.alerts.some((a) => a.kind === 'reconnecting'), JSON.stringify(snap.body.alerts.map((a) => a.kind)));
+      }
+      const before = runs.length;
+      clock.advance(delay - 1);
+      await settle(60);
+      check('…nothing starts a moment early', runs.length === before && isWaiting('rt_a'));
+      clock.advance(1);
+      check('…at its time it resumes', await until(() => runs.length === before + 1 && getAgent(db, 'rt_a')?.status === 'working'));
+      run = runs[before]!;
+      await until(() => run.prompts.length > 0);
+      check(
+        '…in its own session, told what happened',
+        run.options.resume === getAgent(db, 'rt_a')?.sdkSessionId && run.prompts[0] === RETRY_NUDGE,
+        `${run.options.resume} / ${JSON.stringify(run.prompts)}`,
+      );
+      check('…and the card is gone', reconnecting('rt_a') === undefined);
+    }
+    failWith(run, null, 'unknown');
+    check('the sixth failure is failed, as it always was', await until(() => getAgent(db, 'rt_a')?.status === 'failed'), String(getAgent(db, 'rt_a')?.status));
+    check('…with no wait left, and the job failed', retryBook().waiting('rt_a') === undefined && clock.pending() === 0 && getJob(db, 'job_retry_a')?.status === 'failed');
+    const gave = alerts().list().filter((a) => a.agentIds.includes('rt_a'));
+    check('…and Needs You says so, as it did: the outage gave up', gave.length === 1 && gave[0]?.kind === 'connection' && gave[0].gaveUp === true && gave[0].cause === 'unreachable', JSON.stringify(gave));
+    check(
+      '…and the transcript is told five times, then the failure',
+      eventLog().forAgent('rt_a').filter((e) => e.payload.kind === 'status' && e.payload.retry).length === 5 && statusOf('rt_a')?.kind === 'status' && statusOf('rt_a')?.status === 'failed',
+    );
+    bell.close();
+
+    // Continuing a failed one starts five tries again.
+    const atA2 = runs.length;
+    await send('POST', '/api/agents/rt_a/message', { text: 'try once more' });
+    await until(() => runs.length === atA2 + 1);
+    failWith(runs[atA2], null, 'unknown');
+    await until(() => isWaiting('rt_a'));
+    check('a person continuing a failed agent gets five tries again: the first wait, 5 s', retryOf('rt_a')?.attempt === 1 && retryOf('rt_a')?.delayMs === 5_000, JSON.stringify(retryOf('rt_a')));
+    await send('POST', '/api/agents/rt_a/pause');
+    await until(() => getAgent(db, 'rt_a')?.status === 'paused');
+
+    // A real reply from the model starts the count again; an API error written as a reply does not.
+    rjob('job_retry_c');
+    rfix('rt_c', 'job_retry_c');
+    const atC = runs.length;
+    sup.pump();
+    await until(() => runs.length === atC + 1);
+    failWith(runs[atC], 429, 'rate_limit');
+    await until(() => isWaiting('rt_c'));
+    check('throttled waits like the rest: 5 s', retryOf('rt_c')?.cause === 'throttled' && retryOf('rt_c')?.delayMs === 5_000);
+    clock.advance(5_000);
+    await until(() => runs.length === atC + 2);
+    failWith(runs[atC + 1], 529, 'overloaded');
+    await until(() => isWaiting('rt_c') && retryOf('rt_c')?.attempt === 2);
+    check('the second is 15 s', retryOf('rt_c')?.delayMs === 15_000);
+    clock.advance(15_000);
+    await until(() => runs.length === atC + 3);
+    runs[atC + 2]?.say({ type: 'assistant', message: { content: [{ type: 'text', text: 'API Error: overloaded' }] }, error: 'overloaded' });
+    runs[atC + 2]?.finish({ cost: 0, isError: true, reason: 'api_error' });
+    await until(() => isWaiting('rt_c') && retryOf('rt_c')?.attempt === 3);
+    check(
+      "an API error written as the assistant's turn is not a reply: the third is 30 s, and it is still the API's trouble",
+      retryOf('rt_c')?.attempt === 3 && retryOf('rt_c')?.delayMs === 30_000 && retryOf('rt_c')?.cause === 'throttled',
+      JSON.stringify(retryOf('rt_c')),
+    );
+    clock.advance(30_000);
+    await until(() => runs.length === atC + 4);
+    runs[atC + 3]?.say({ type: 'assistant', message: { content: [{ type: 'text', text: 'back again' }] } });
+    await until(() => retryBook().used('rt_c') === 0);
+    check('a real reply starts the count from nothing', retryBook().used('rt_c') === 0);
+    failWith(runs[atC + 3], null, 'unknown');
+    await until(() => isWaiting('rt_c'));
+    check('so the next failure waits 5 s again, as the first', retryOf('rt_c')?.attempt === 1 && retryOf('rt_c')?.delayMs === 5_000, JSON.stringify(retryOf('rt_c')));
+    check('…and a different cause is told as it is', retryOf('rt_c')?.cause === 'unreachable');
+    await send('POST', '/api/agents/rt_c/terminate');
+    await until(() => getAgent(db, 'rt_c')?.status === 'stopped');
+    check('stopped while it waits, nothing is left to fire', clock.pending() === 0 && retryBook().waiting('rt_c') === undefined);
+
+    // A failed result that names a status, with no retry announced, is the API's too.
+    rjob('job_retry_st');
+    rfix('rt_st', 'job_retry_st');
+    const atSt = runs.length;
+    sup.pump();
+    await until(() => runs.length === atSt + 1);
+    runs[atSt]?.finish({ cost: 0, isError: true, reason: 'api_error', apiStatus: 503 });
+    await until(() => isWaiting('rt_st'));
+    check('a 503 on the result alone is a server error, waited out', retryOf('rt_st')?.cause === 'server', JSON.stringify(retryOf('rt_st')));
+    clock.advance(5_000);
+    await until(() => runs.length === atSt + 2);
+    runs[atSt + 1]?.finish({ cost: 0, isError: true, reason: 'api_error', apiStatus: 400 });
+    await until(() => getAgent(db, 'rt_st')?.status === 'failed');
+    check('a 400 is not: the same request fails the same way', getAgent(db, 'rt_st')?.status === 'failed' && clock.pending() === 0 && getJob(db, 'job_retry_st')?.status === 'failed');
+
+    // What is not retried.
+    rjob('job_retry_n');
+    const notRetried = ['rt_auth', 'rt_bill', 'rt_budget', 'rt_pause', 'rt_stop', 'rt_plain'];
+    for (const id of notRetried) rfix(id, 'job_retry_n');
+    const atN = runs.length;
+    sup.pump();
+    await until(() => runs.length === atN + notRetried.length);
+    // Runs start in agent order, so the n-th new run is the n-th agent's.
+    const mine = (id: string): FakeRun => runs[atN + notRetried.indexOf(id)]!;
+
+    failWith(mine('rt_auth'), 401, 'authentication_failed');
+    await until(() => getAgent(db, 'rt_auth')?.status === 'failed');
+    check('a refused login is failed at once: no wait, no timer', getAgent(db, 'rt_auth')?.status === 'failed' && retryBook().waiting('rt_auth') === undefined && retryOf('rt_auth') === undefined && clock.pending() === 0);
+    check('and Needs You has it as an outage that needs a person, as before', alerts().list().some((a) => a.kind === 'connection' && a.agentIds.includes('rt_auth') && a.cause === 'auth' && a.gaveUp === true));
+    failWith(mine('rt_bill'), 402, 'billing_error');
+    await until(() => getAgent(db, 'rt_bill')?.status === 'failed');
+    check('so is a billing problem', getAgent(db, 'rt_bill')?.status === 'failed' && retryBook().waiting('rt_bill') === undefined);
+
+    failWith(mine('rt_budget'), 429, 'rate_limit', 'budget_exhausted');
+    await until(() => getAgent(db, 'rt_budget')?.status === 'paused');
+    check('a budget stop is paused with its reason, never waited out', getAgent(db, 'rt_budget')?.status === 'paused' && retryBook().waiting('rt_budget') === undefined && retryOf('rt_budget') === undefined);
+
+    mine('rt_pause').say({ type: 'system', subtype: 'api_retry', attempt: 3, max_retries: 10, retry_delay_ms: 500, error_status: null, error: 'unknown' });
+    await send('POST', '/api/agents/rt_pause/pause');
+    await until(() => getAgent(db, 'rt_pause')?.status === 'paused');
+    await settle(60);
+    check('your own pause, with the SDK mid-retry, is a pause: no wait', getAgent(db, 'rt_pause')?.status === 'paused' && retryBook().waiting('rt_pause') === undefined);
+    mine('rt_stop').say({ type: 'system', subtype: 'api_retry', attempt: 3, max_retries: 10, retry_delay_ms: 500, error_status: null, error: 'unknown' });
+    await send('POST', '/api/agents/rt_stop/terminate');
+    await until(() => getAgent(db, 'rt_stop')?.status === 'stopped');
+    await settle(60);
+    check('and your own stop is a stop', getAgent(db, 'rt_stop')?.status === 'stopped' && retryBook().waiting('rt_stop') === undefined);
+
+    mine('rt_plain').finish({ cost: 0, isError: true, reason: 'max_turns' });
+    await until(() => getAgent(db, 'rt_plain')?.status === 'failed');
+    check("a failure that is not the API's is failed as before", getAgent(db, 'rt_plain')?.status === 'failed' && retryOf('rt_plain') === undefined);
+    check('nothing is waiting anywhere', clock.pending() === 0 && retryBook().list().length === 0, `${clock.pending()} timers`);
+
+    // The job stays live while one of its agents waits, and the others finishing does not settle it.
+    rjob('job_retry_j');
+    rfix('rt_j1', 'job_retry_j');
+    rfix('rt_j2', 'job_retry_j');
+    const atJ = runs.length;
+    sup.pump();
+    await until(() => runs.length === atJ + 2);
+    failWith(runs[atJ], 500, 'server_error');
+    await until(() => isWaiting('rt_j1'));
+    runs[atJ + 1]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'rt_j2')?.status === 'done');
+    await settle(60);
+    check('the other agent finishing does not settle the job while one waits', getJob(db, 'job_retry_j')?.status === 'working', String(getJob(db, 'job_retry_j')?.status));
+
+    // retry now, and stop retrying.
+    const retryNowRoute = (id: string) => send<{ error?: string; detail?: string }>('POST', `/api/agents/${id}/retry-now`);
+    const stopRoute = (id: string) => send<{ agent?: Agent; error?: string; detail?: string }>('POST', `/api/agents/${id}/stop-retrying`);
+    check('an agent nobody has heard of → 404', (await retryNowRoute('nobody')).status === 404 && (await stopRoute('nobody')).status === 404);
+    const notWaiting = await retryNowRoute('rt_j2');
+    check('retry now for one that is not waiting → 409, with why', notWaiting.status === 409 && /not waiting to retry/.test(notWaiting.body.detail ?? ''), JSON.stringify(notWaiting.body));
+    check('so is stop retrying', (await stopRoute('rt_j2')).status === 409);
+    check('rt_j1 has a timer', clock.pending() === 1);
+    const pressed = await retryNowRoute('rt_j1');
+    check('retry now → 200', pressed.status === 200);
+    check('it starts at once, without the clock', await until(() => runs.length === atJ + 3 && getAgent(db, 'rt_j1')?.status === 'working'));
+    await until(() => runs[atJ + 2]!.prompts.length > 0);
+    check('…in its own session, told what happened', runs[atJ + 2]?.prompts[0] === RETRY_NUDGE && runs[atJ + 2]?.options.resume === getAgent(db, 'rt_j1')?.sdkSessionId);
+    check('…and its timer is gone: nothing starts a second time', clock.pending() === 0 && retryBook().waiting('rt_j1') === undefined);
+    clock.advance(10 * 60_000);
+    await settle(60);
+    check('…even when the time it had comes', runs.length === atJ + 3);
+    failWith(runs[atJ + 2], 500, 'server_error');
+    await until(() => isWaiting('rt_j1'));
+    check('the retry now counted: the next wait is 15 s', retryOf('rt_j1')?.attempt === 2 && retryOf('rt_j1')?.delayMs === 15_000, JSON.stringify(retryOf('rt_j1')));
+    const stopped2 = await stopRoute('rt_j1');
+    check('stop retrying → 200, with the agent, failed', stopped2.status === 200 && stopped2.body.agent?.status === 'failed' && getAgent(db, 'rt_j1')?.status === 'failed');
+    const f = statusOf('rt_j1');
+    check('failed with the reason the run ended with, as it would have been', f?.kind === 'status' && f.status === 'failed' && f.error === 'api_error' && f.retry === undefined, JSON.stringify(f));
+    check('…the timer is gone, the card is gone, and the job is failed now', clock.pending() === 0 && reconnecting('rt_j1') === undefined && getJob(db, 'job_retry_j')?.status === 'failed');
+    check(
+      '…and Needs You has the failure',
+      alerts().list().some((a) => a.kind === 'failed' && a.agentIds.includes('rt_j1') && a.cause === 'api_error'),
+      JSON.stringify(alerts().list().filter((a) => a.agentIds.includes('rt_j1'))),
+    );
+    check('another stop retrying → 409', (await stopRoute('rt_j1')).status === 409);
+
+    // The slot is free while it waits, and taken again when it resumes.
+    await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '1' } });
+    rjob('job_retry_s');
+    rfix('rt_s1', 'job_retry_s');
+    rfix('rt_s2', 'job_retry_s');
+    const atS = runs.length;
+    sup.pump();
+    await until(() => runs.length === atS + 1 && sup.slots.used === 1);
+    const first = getAgent(db, 'rt_s1')?.status === 'working' ? 'rt_s1' : 'rt_s2';
+    const other = first === 'rt_s1' ? 'rt_s2' : 'rt_s1';
+    check('one slot: one agent runs, the other waits for it', getAgent(db, other)?.status === 'queued' && runs.length === atS + 1);
+    failWith(runs[atS], null, 'unknown');
+    await until(() => isWaiting(first));
+    check('the one waiting for the model gives up its slot…', await until(() => getAgent(db, other)?.status === 'working' && runs.length === atS + 2));
+    check('…and the queued one takes it', sup.slots.used === 1 && getAgent(db, first)?.status === 'queued');
+    clock.advance(5_000);
+    await settle(100);
+    check('its time comes with no slot free: it keeps waiting, and no more than one runs', getAgent(db, first)?.status === 'queued' && sup.slots.used === 1 && runs.length === atS + 2);
+    runs[atS + 1]?.finish({ cost: 0, reason: 'completed' });
+    check(
+      'a slot frees and it takes one again, resuming its session',
+      (await until(() => runs.length === atS + 3 && getAgent(db, first)?.status === 'working')) && runs[atS + 2]?.options.resume === getAgent(db, first)?.sdkSessionId,
+    );
+    await until(() => runs[atS + 2]!.prompts.length > 0);
+    check('…with the nudge', runs[atS + 2]?.prompts[0] === RETRY_NUDGE);
+    runs[atS + 2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: null } });
+
+    // Stopped or paused while it waits: the wait goes, and so does the count.
+    rjob('job_retry_w');
+    rfix('rt_w1', 'job_retry_w');
+    rfix('rt_w2', 'job_retry_w');
+    const atW = runs.length;
+    sup.pump();
+    await until(() => runs.length === atW + 2);
+    failWith(runs[atW], null, 'unknown');
+    failWith(runs[atW + 1], null, 'unknown');
+    await until(() => isWaiting('rt_w1') && isWaiting('rt_w2'));
+    check('two waiting, two timers', clock.pending() === 2);
+    await send('POST', '/api/agents/rt_w1/pause');
+    check(
+      'pausing one takes its wait and timer away',
+      (await until(() => getAgent(db, 'rt_w1')?.status === 'paused')) && retryBook().waiting('rt_w1') === undefined && clock.pending() === 1 && retryBook().used('rt_w1') === 0,
+    );
+    await send('POST', '/api/agents/rt_w2/terminate');
+    check('and so does stopping one', (await until(() => getAgent(db, 'rt_w2')?.status === 'stopped')) && clock.pending() === 0 && retryBook().used('rt_w2') === 0);
+    clock.advance(10 * 60_000);
+    await settle(60);
+    check('nothing starts when their time comes', runs.length === atW + 2 && getAgent(db, 'rt_w1')?.status === 'paused');
+    const atW2 = runs.length;
+    await send('POST', '/api/agents/rt_w1/resume');
+    await until(() => runs.length === atW2 + 1);
+    await until(() => runs[atW2]!.prompts.length > 0);
+    check('resumed, it is woken as a paused agent is, not told the model failed', runs[atW2]?.prompts[0] === WAKE_NUDGE, JSON.stringify(runs[atW2]?.prompts));
+    runs[atW2]?.finish({ cost: 0, reason: 'completed' });
+
+    // Everything paused until a time: the wait ends, and nothing starts until it is released.
+    rjob('job_retry_h');
+    rfix('rt_h', 'job_retry_h');
+    const atH = runs.length;
+    sup.pump();
+    await until(() => runs.length === atH + 1);
+    failWith(runs[atH], null, 'unknown');
+    await until(() => isWaiting('rt_h'));
+    await sup.hold();
+    const heldNow = await retryNowRoute('rt_h');
+    check('while everything is paused, retry now is refused with why', heldNow.status === 409 && /paused until/.test(heldNow.body.detail ?? ''), JSON.stringify(heldNow.body));
+    clock.advance(5_000);
+    await settle(80);
+    check('and when its time comes nothing starts', runs.length === atH + 1 && getAgent(db, 'rt_h')?.status === 'queued' && retryBook().waiting('rt_h') === undefined);
+    sup.release();
+    check('released, it starts as any queued agent does', await until(() => runs.length === atH + 2 && getAgent(db, 'rt_h')?.status === 'working'));
+    runs[atH + 1]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'rt_h')?.status === 'done');
+
+    // A restart while waiting: the agent carries on as one a restart interrupted, with five tries again.
+    rjob('job_retry_r');
+    rfix('rt_r', 'job_retry_r');
+    const atR = runs.length;
+    sup.pump();
+    await until(() => runs.length === atR + 1);
+    failWith(runs[atR], null, 'unknown');
+    await until(() => isWaiting('rt_r'));
+    check('waiting, with the wait only in memory', retryOf('rt_r')?.attempt === 1 && getAgent(db, 'rt_r')?.sdkSessionId !== null);
+    resetRetryBook(clock); // the process is gone, and with it every wait
+    check('a restart forgets the wait', retryBook().waiting('rt_r') === undefined && retryBook().used('rt_r') === 0);
+    sup.reconcile();
+    sup.pump();
+    check(
+      'the agent is resumed on its own, in its own session',
+      (await until(() => runs.length === atR + 2 && getAgent(db, 'rt_r')?.status === 'working')) && runs[atR + 1]?.options.resume === getAgent(db, 'rt_r')?.sdkSessionId,
+    );
+    await until(() => runs[atR + 1]!.prompts.length > 0);
+    check('told a restart stopped it, as any agent is', runs[atR + 1]?.prompts[0] === RESTART_NUDGE, JSON.stringify(runs[atR + 1]?.prompts));
+    failWith(runs[atR + 1], null, 'unknown');
+    await until(() => isWaiting('rt_r'));
+    check('and the count starts again: the first wait, 5 s', retryOf('rt_r')?.attempt === 1 && retryOf('rt_r')?.delayMs === 5_000);
+    await send('POST', '/api/agents/rt_r/terminate');
+    await until(() => getAgent(db, 'rt_r')?.status === 'stopped');
+
+    // The Copilot engine, and OpenRouter on the same one (Amendment 76): session.error carries the type and status.
+    check(
+      "the runtime's errors are told apart: a throttle, a 5xx and a lost connection wait; a login, a quota, a full context and a bad query do not",
+      apiFailureOf({ message: 'x', errorType: 'rate_limit', statusCode: 429 })?.error === 'rate_limit' &&
+        apiFailureOf({ message: 'x', statusCode: 502 })?.error === 'server_error' &&
+        apiFailureOf({ message: 'request to https://api failed: ECONNRESET' })?.httpStatus === null &&
+        apiFailureOf({ message: 'x', errorType: 'authentication' })?.error === 'authentication_failed' &&
+        apiFailureOf({ message: 'x', errorType: 'quota' })?.error === 'billing_error' &&
+        failureCause(apiFailureOf({ message: 'x', errorType: 'authentication' })) === 'auth' &&
+        failureCause(apiFailureOf({ message: 'x', errorType: 'context_limit' })) === null &&
+        failureCause(apiFailureOf({ message: 'x', errorType: 'query' })) === null &&
+        failureCause(apiFailureOf({ message: 'x', statusCode: 404 })) === null &&
+        apiFailureOf({ message: 'model gpt-9 is not available' }) === null,
+    );
+    const cpRetry = (id: string, provider: 'copilot' | 'openrouter', model: string): void => {
+      rjob(`job_${id}`);
+      rfix(id, `job_${id}`, { model, provider } as Partial<Agent>);
+    };
+    const sessionNth = async (id: string, nth = 1): Promise<FakeCopilotSession | undefined> => {
+      await until(() => copilotSessions.filter((x) => x.id === id).length >= nth);
+      return copilotSessions.filter((x) => x.id === id)[nth - 1];
+    };
+    process.env['OPENROUTER_API_KEY'] = 'sk-or-verify';
+    for (const [provider, model] of [['copilot', 'gpt-5-mini'], ['openrouter', 'anthropic/claude-sonnet-4.5']] as const) {
+      const id = `rt_cp_${provider}`;
+      cpRetry(id, provider, model);
+      sup.pump();
+      const c1 = await sessionNth(id);
+      c1?.emit('session.error', { errorType: 'rate_limit', statusCode: 429, message: 'Too many requests' });
+      await until(() => isWaiting(id));
+      check(`${provider}: a throttle waits 5 s, queued`, retryOf(id)?.cause === 'throttled' && retryOf(id)?.delayMs === 5_000 && retryOf(id)?.attempt === 1, JSON.stringify(retryOf(id)));
+      check(`${provider}: its slot is free and its job live`, sup.slots.used === 0 && getJob(db, `job_${id}`)?.status === 'working');
+      clock.advance(5_000);
+      const c2 = await sessionNth(id, 2);
+      await until(() => (c2?.prompts.length ?? 0) > 0);
+      check(`${provider}: it resumes its own session, told what happened`, c2?.resumed === true && c2.id === id && c2.prompts[0]?.prompt === RETRY_NUDGE, JSON.stringify(c2?.prompts));
+      c2?.emit('assistant.message', { messageId: 'mr', content: 'Back.' });
+      c2?.emit('session.error', { errorType: 'unknown', message: 'read ECONNRESET' });
+      await until(() => isWaiting(id));
+      check(`${provider}: a reply starts the count again, so a lost connection waits 5 s`, retryOf(id)?.cause === 'unreachable' && retryOf(id)?.attempt === 1 && retryOf(id)?.delayMs === 5_000, JSON.stringify(retryOf(id)));
+      clock.advance(5_000);
+      const c3 = await sessionNth(id, 3);
+      c3?.emit('session.error', { errorType: 'authentication', statusCode: 401, message: 'bad credentials' });
+      await until(() => getAgent(db, id)?.status === 'failed');
+      check(`${provider}: a refused login is failed at once`, getAgent(db, id)?.status === 'failed' && retryBook().waiting(id) === undefined && getJob(db, `job_${id}`)?.status === 'failed');
+    }
+    delete process.env['OPENROUTER_API_KEY'];
+    cpRetry('rt_cp_query', 'copilot', 'gpt-5-mini');
+    sup.pump();
+    const cb = await sessionNth('rt_cp_query');
+    cb?.emit('session.error', { errorType: 'query', message: 'the query was refused' });
+    await until(() => getAgent(db, 'rt_cp_query')?.status === 'failed');
+    check("copilot: an error that is not the API's is failed as before", getAgent(db, 'rt_cp_query')?.status === 'failed' && retryOf('rt_cp_query') === undefined);
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    resetRetryBook();
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are lifetime caps; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are lifetime caps; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
