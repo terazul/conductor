@@ -129,6 +129,14 @@ export interface Agent {
    * "not handed off".
    */
   handoffHeld?: boolean;
+  /**
+   * Amendment 128. The roles an orchestrated stack's orchestrator may start (`developer`,
+   * `reviewer`, …), by id: it is what marks the agent as the orchestrator of an orchestrated
+   * stack, on Fleet, the Project lanes and the Agent tabs. Present only on such an agent, so
+   * every other agent's shape is what it was. The roles' system prompts and rope stay off the
+   * wire, as a persona's do.
+   */
+  pipelineRoles?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,7 +185,8 @@ export interface AgentSpec {
   autonomy: Autonomy;
   /**
    * Put several agents on this role (Amendment 51): this one orchestrates, and may start
-   * up to this many helpers. 0 or absent for an ordinary agent; at most HELPERS_MAX.
+   * up to this many helpers. 0 or absent for an ordinary agent; at most HELPERS_MAX, or with
+   * `helperRoles` (Amendment 128) at most `pipelineHelperCap` of them and at least 1.
    */
   helpers?: number;
   /**
@@ -191,6 +200,43 @@ export interface AgentSpec {
   skills?: string[];
   /** The engine (Amendment 74): `claude` (the default), `copilot` or `openrouter`. */
   provider?: string;
+  /**
+   * Amendment 128. Makes this agent the orchestrator of an orchestrated stack: the roles it
+   * may start, each with what a helper of that role runs with. `start_helper` takes one of
+   * their ids as its `role`, and refuses any other. Needs `helpers` above 0, which is how many
+   * helpers it may start in all, send-backs included (`pipelineHelperCap`).
+   */
+  helperRoles?: HelperRole[];
+}
+
+/**
+ * One role an orchestrated stack's orchestrator may start (Amendment 128), as Spawn resolved it
+ * at launch. Copied into the orchestrator's row, as a persona's fields are copied into an
+ * agent's, so a later edit of a persona or a tier changes nothing about a stack that is running.
+ */
+export interface HelperRole {
+  /** The role's name, which is its persona's id: `developer`. Lowercase letters, digits and dashes. */
+  id: string;
+  /** The tier it was listed on, when the engine has tiers (Claude). Spawn lets you change it per role. */
+  tier?: ModelTier;
+  /** The exact model id its helpers run on: what the tier meant at launch. */
+  model: string;
+  /** What the role is for, from its persona: part of every helper's brief. */
+  brief?: string;
+  /** The persona's system prompt and skills, which its helpers run with (Amendment 68, 126). */
+  systemPrompt?: string;
+  skills?: string[];
+  /**
+   * Its rope, pinned the way Spawn pins that role: a reading role has the write tools denied and
+   * nothing auto-approved. The daemon checks it with `readOnlyRefusal` when it is launched and
+   * again when a helper is started.
+   */
+  autonomy: Autonomy;
+  /**
+   * What each tier meant at launch, so the orchestrator can ask for a cheaper one than listed
+   * (`start_helper`'s `tier`). Absent on an engine without tiers.
+   */
+  tiers?: Partial<Record<ModelTier, string>>;
 }
 
 export const HELPERS_MAX = 8;

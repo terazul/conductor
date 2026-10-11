@@ -951,6 +951,92 @@
   font-size: var(--fs-sm);
 }
 
+/* ── an orchestrated stack (Amendment 128) ───────────────────────────────── */
+
+/*
+ * The orchestrator's row, in the plan: a left edge in neutral ink, beside the mark in its line.
+ * --ink2, not a status colour: working, done, needs you, failed and yours each already mean
+ * something. Only a stack of two or more agents has one (`orchestratedFor`).
+ */
+.sp-areorder.is-orch {
+  border-left: 3px solid var(--ink2);
+  padding-left: 9px;
+}
+
+/* The roles it may start, under its row: the plan's own kind of row, one level in. */
+.sp-pipe {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 2px 15px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line2);
+}
+
+.sp-pipe-head,
+.sp-pipe-note {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.sp-pipe-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: var(--fs-md);
+}
+
+.sp-pipe-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink3);
+  flex: none;
+  transform: translateY(-1px);
+}
+
+.sp-pipe-role {
+  font-weight: 500;
+  min-width: 74px;
+}
+
+.sp-pipe-does {
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sp-pipe-tier {
+  flex: none;
+  max-width: 15em;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.sp-pipe-model {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  flex: none;
+}
+
+.sp-pipe-x {
+  padding: 0 7px;
+  font-size: var(--fs-base);
+  line-height: 1.3;
+}
+
+.sp-pipe-add {
+  align-self: flex-start;
+  max-width: 14em;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
 /* ── moving a row up or down the stack (Amendment 99) ───────────────────────── */
 
 /* ↑ ↓ for the keyboard, and the grip to drag by. Plan rows and Custom rows share them. */

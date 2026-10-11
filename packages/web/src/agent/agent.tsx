@@ -25,7 +25,7 @@ import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
-import { Dot, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
+import { Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
 import { useFileTree } from '../files/useWorkspace.js';
 import { foldAll, unfoldAll, updateFolds, useFolds } from './folds.js';
@@ -621,10 +621,10 @@ export function AgentScreen() {
                 type="button"
                 role="tab"
                 aria-selected={t.id === agent.id}
-                className={`ag-tab${t.id === agent.id ? ' is-on' : ''}${t.needs > 0 ? ' is-need' : ''}${t.newJob ? ' is-newjob' : ''}`}
+                className={`ag-tab${t.id === agent.id ? ' is-on' : ''}${t.needs > 0 ? ' is-need' : ''}${t.newJob ? ' is-newjob' : ''}${t.orchestrator ? ' is-orch' : ''}`}
                 title={`${
                   t.needs > 0 ? `${t.label} — ${t.needs === 1 ? 'needs you' : `${t.needs} things need you`}` : `${t.label} — ${STATUS_WORD[t.status]}`
-                }${t.budget ? ` · ${t.budget.pct}% of its budget${t.budget.state === 'ok' ? '' : ' — over'}` : ''}`}
+                }${t.orchestrator ? ' · orchestrator: starts the others' : ''}${t.budget ? ` · ${t.budget.pct}% of its budget${t.budget.state === 'ok' ? '' : ' — over'}` : ''}`}
                 onClick={() => {
                   const target = agents.find((a) => a.id === t.id);
                   if (target && t.id !== agent.id) openAgent(target);
@@ -632,6 +632,8 @@ export function AgentScreen() {
               >
                 <Dot status={t.status} />
                 {t.label}
+                {/* The orchestrator of an orchestrated stack (Amendment 128). */}
+                {t.orchestrator && <OrchestratorMark short />}
                 {/* Filled, the same look as the status Tag (Amendment 94); working
                     already pulses via the Dot above. Finished only until you open that
                     agent, and again when it finishes again (Amendment 105). */}

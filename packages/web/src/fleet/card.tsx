@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Agent, PendingRequest, Project } from '@conductor/shared';
+import { marksOrchestrator } from '@conductor/shared';
 import {
   useAgentEvents,
   useAgents,
@@ -63,6 +64,7 @@ import { usePathComplete } from '../spawn/browse.js';
 import { LatestNote, NotesButton, NotesPanel } from './Notes.js';
 import { HandOffChip } from './HandOffChip.js';
 import {
+  OrchestratorMark,
   ProviderBadge,
   Dot,
   DiffNums,
@@ -91,12 +93,14 @@ function AgentRow({
   const elapsed = agent.status === 'queued' || elapsedMs === null ? null : fmtElapsed(elapsedMs);
   // How full its budget is, in the colours of the status bar's daily meter (Amendment 125).
   const budget = budgetOf(agent);
+  // The orchestrator of an orchestrated stack of two or more agents (Amendment 128), in the card's list of agents.
+  const orchestrator = marksOrchestrator(agent, siblings);
 
   return (
     <>
       <button
         type="button"
-        className={`fl-arow${action.tone === 'need' ? ' is-need' : ''}`}
+        className={`fl-arow${action.tone === 'need' ? ' is-need' : ''}${orchestrator ? ' is-orch' : ''}`}
         onClick={(e) => {
           e.stopPropagation();
           openAgent(agent);
@@ -105,6 +109,7 @@ function AgentRow({
       >
         <Dot status={shown} />
         <span className="fl-arow-nm">{agent.role}</span>
+        {orchestrator && <OrchestratorMark short />}
         <ProviderBadge provider={agent.provider} />
         <span className="fl-arow-act">
           {action.head && <>{action.head} </>}

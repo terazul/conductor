@@ -1520,6 +1520,54 @@ console.log("\n· an agent's budget is coloured as it fills, like the daily budg
   check('nothing is still marked by the old amber/red is-over class', !/is-over/.test(insp + comp + lane) && !/\.ag-budget-box\.is-over|\.ag-bar\.is-over|\.pj-meter\.is-over/.test(agentCss + fleetCss));
 }
 
+console.log('\n· the orchestrator of an orchestrated stack looks different, in neutral ink, wherever agents are shown (Amendment 128)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const tokens = src('../../../shared/src/tokens.css');
+  const themeOf = (selector: string): Map<string, string> => {
+    const at = tokens.indexOf(`${selector} {`);
+    const body = at === -1 ? '' : tokens.slice(at, tokens.indexOf('}', at));
+    return new Map([...body.matchAll(/--([a-z0-9-]+):\s*(#[0-9a-f]{6})\s*;/gi)].map((m) => [m[1]!, m[2]!]));
+  };
+  const dark = themeOf(':root');
+  const light = new Map([...dark, ...themeOf(":root[data-theme='light'], [data-theme='light']")]);
+  const lum = (hex: string): number => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const ratio = (a: string, b: string): number => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+
+  // The rules that style the orchestrator, from every stylesheet that has one.
+  const sheets = ['../shell/ui.css', '../fleet/fleet.css', '../agent/agent.css', '../spawn/spawn.css'].map(src);
+  const rules = sheets.flatMap((css) => css.match(/[^{}]*(?:is-orch|ui-orch)[^{}]*\{[^}]*\}/g) ?? []);
+  check('the orchestrator is styled in all four places: the plan row, the lane, the Fleet row and the tab (and the mark itself)', rules.length >= 5 && ['.sp-areorder.is-orch', '.pj-lane.is-orch', '.fl-arow.is-orch', '.ag-tab.is-orch', '.ui-orch {'].every((sel) => rules.some((r) => r.includes(sel))), rules.map((r) => r.trim().split('{')[0]!.trim()).join(' | '));
+  const used = [...new Set(rules.flatMap((r) => [...r.matchAll(/var\(--([a-z0-9-]+)\)/g)].map((m) => m[1]!)))];
+  check('none of them uses a status colour: --live, --done, --need, --fail, --you, --queue and --idle each mean something already', used.length > 0 && used.every((v) => !['live', 'done', 'need', 'fail', 'you', 'queue', 'idle'].includes(v)), used.join());
+  check('nor a colour of its own', rules.every((r) => !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(r)));
+  check('only tokens the contrast checks measure, and the type scale', used.every((v) => ['ink', 'ink2', 'surf3', 'disp'].includes(v) || /^fs-/.test(v)), used.join());
+
+  // Both themes: the mark's text and its edge can be seen.
+  for (const [name, theme] of [['dark', dark], ['light', light]] as const) {
+    const text = ratio(theme.get('ink')!, theme.get('surf3')!);
+    check(`${name}: the mark's --ink text on its --surf3 is readable (${text.toFixed(2)}:1)`, text >= 4.5);
+    const edge = ['bg', 'surf', 'surf2'].map((b) => ratio(theme.get('ink2')!, theme.get(b)!));
+    check(`${name}: its --ink2 edge stands out from the surfaces it sits on (${Math.min(...edge).toFixed(2)}:1 or more)`, edge.every((r) => r >= 3));
+  }
+
+  const lane = src('../fleet/lane.tsx');
+  const card = src('../fleet/card.tsx');
+  const ui = src('../shell/ui.tsx');
+  check('the Project lane and the Fleet card\'s row ask the one rule, marksOrchestrator, and wear the mark', /marksOrchestrator\(agent, siblings\)/.test(lane) && /marksOrchestrator\(agent, siblings\)/.test(card) && /\{orchestrator && <OrchestratorMark short \/>\}/.test(lane) && /\{orchestrator && <OrchestratorMark short \/>\}/.test(card));
+  check('the lane and the row carry the edge only with it', /\$\{orchestrator \? ' is-orch' : ''\}/.test(lane) && /\$\{orchestrator \? ' is-orch' : ''\}/.test(card));
+  check('the mark says orchestrator in the plan, and is the diamond alone in a lane, a row and a tab, where the name is beside it; it explains itself', /◆\{short \? '' : ' orchestrator'\}/.test(ui) && /Runs the others/.test(ui));
+}
+
 console.log(
   failures === 0
     ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included.\n'

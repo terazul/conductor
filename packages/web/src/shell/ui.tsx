@@ -84,6 +84,24 @@ export function ProviderBadge({ provider }: { provider: string | undefined }) {
 }
 
 /**
+ * The orchestrator of an orchestrated stack (Amendment 128), wherever an agent is named: Spawn's
+ * plan, a Project lane, a Fleet card's row and an Agent tab. Neutral ink, a diamond and the
+ * word, and never a status colour: working, done, needs you, failed and yours each already mean
+ * something. The caller shows it only for `marksOrchestrator` (shared), which is a stack of two
+ * or more agents; one agent has none.
+ */
+export function OrchestratorMark({ short = false }: { short?: boolean }) {
+  return (
+    <span
+      className={`ui-orch${short ? ' is-short' : ''}`}
+      title="Runs the others: it starts each agent in turn, reads what it did, and writes the next brief"
+    >
+      ◆{short ? '' : ' orchestrator'}
+    </span>
+  );
+}
+
+/**
  * The activity histogram. Bars are real tool calls per 15s bucket.
  *
  * A flat series renders grey and still — it must never be mistaken for work.

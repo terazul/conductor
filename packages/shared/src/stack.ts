@@ -8,7 +8,7 @@
  */
 
 import type { AgentRole, AgentStatus } from './events.js';
-import type { Agent, Autonomy } from './wire.js';
+import type { Agent, Autonomy, HelperRole, ModelTier } from './wire.js';
 
 /** Just what the graph needs from an agent. */
 export type StackNode = Pick<Agent, 'id' | 'dependsOn' | 'status' | 'sdkSessionId'> & {
@@ -157,3 +157,158 @@ export function waitersOf<T extends { id: string; dependsOn: readonly string[] }
   return jobAgents.filter((a) => a.dependsOn.includes(agentId) && me?.parentId !== a.id);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orchestrated stacks (Amendment 128)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * An orchestrated stack: one agent, the orchestrator, starts the others one after another,
+ * reads what each did, and writes the next one's brief. The roles it may start are listed
+ * before launch (`AgentSpec.helperRoles`), each with the tier it runs on. The rules are here,
+ * pure and shared, so the daemon that enforces them and the screens that say them agree.
+ */
+
+/** The roles an orchestrated stack lists unless you change them, in the order they run. */
+export const DEFAULT_PIPELINE_ROLES: readonly string[] = ['developer', 'validator', 'reviewer', 'scribe'];
+
+/** How many roles a stack can list. */
+export const PIPELINE_ROLES_MAX = 8;
+
+/**
+ * How many times the orchestrator may send a role's work back (start it again, as the
+ * developer after a failed review) before it must ask the user. A role is started once, so the
+ * most starts of one role is one more than this.
+ */
+export const SEND_BACKS_MAX = 2;
+
+/** How many helpers a stack listing `roles` roles may start in all: each role once, and sent back as often as allowed. */
+export function pipelineHelperCap(roles: number): number {
+  return roles * (1 + SEND_BACKS_MAX);
+}
+
+/** "a", "a and b", "a, b and c". */
+function andList(xs: readonly string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
+}
+
+/** What the orchestrator is told to do when a sentence below stops it: put the question to the user. */
+const ASK_THE_USER = 'ask the user with the question tool (AskUserQuestion, or ask_user)';
+
+/**
+ * Why `asked` is not a role this orchestrator may start, or null when it is. `listed` is the
+ * ids it was launched with; empty is an ordinary orchestrator, whose helpers have no role and
+ * run with its model and permissions, as they always did.
+ */
+export function roleRefusal(asked: string | undefined, listed: readonly string[], who = 'this agent'): string | null {
+  const want = (asked ?? '').trim().toLowerCase();
+  if (listed.length === 0) {
+    return want
+      ? `${who} was not launched with roles to start, so start_helper takes no role here: leave it out and the helper runs with your model and permissions.`
+      : null;
+  }
+  if (!want) return `This stack lists the roles you may start: ${andList(listed)}. Say which one with role.`;
+  if (!listed.includes(want)) {
+    return (
+      `"${asked?.trim()}" is not one of the roles this stack lists. You may start: ${andList(listed)}. ` +
+      `If the work needs another kind of agent, ${ASK_THE_USER}.`
+    );
+  }
+  return null;
+}
+
+/** Whether `asked` is the id of a listed role, after the same trim and case-fold `roleRefusal` applies. */
+export function listedRole<T extends { id: string }>(asked: string | undefined, listed: readonly T[]): T | undefined {
+  const want = (asked ?? '').trim().toLowerCase();
+  return want ? listed.find((r) => r.id === want) : undefined;
+}
+
+/**
+ * Why a role may not be started again, or null when it may. `started` is how many helpers of
+ * this role the orchestrator has started, ended or not. The first start is the work; every one
+ * after it is a send-back, and the third is where it must ask.
+ */
+export function sendBackRefusal(role: string, started: number): string | null {
+  if (started < 1 + SEND_BACKS_MAX) return null;
+  return (
+    `You have started the ${role} ${started} times: once, and then you sent its work back ${SEND_BACKS_MAX} times, ` +
+    'which is the most you may. Do not start it again. Ask the user with the question tool (AskUserQuestion, or ask_user): ' +
+    'say what keeps failing, and ask whether to go on, change the brief, or stop.'
+  );
+}
+
+/** The tiers from the cheapest up, which is how far a helper may be moved down from the one listed. */
+export const TIER_ORDER: readonly ModelTier[] = ['haiku', 'sonnet', 'opus'];
+
+const isTier = (t: string): t is ModelTier => (TIER_ORDER as readonly string[]).includes(t);
+
+/**
+ * The model a helper of `role` runs on. With no `asked` tier it is the listed one. The
+ * orchestrator may ask for a cheaper tier than the user listed, never a dearer one: the tier in
+ * Spawn is what the user chose to spend on that role.
+ */
+export function helperModel(
+  role: Pick<HelperRole, 'id' | 'tier' | 'model' | 'tiers'>,
+  asked: unknown,
+): { model: string; tier?: ModelTier } | { why: string } {
+  const listed = role.tier;
+  if (asked === undefined || asked === null || asked === '') return { model: role.model, ...(listed ? { tier: listed } : {}) };
+  const want = typeof asked === 'string' ? asked.trim().toLowerCase() : '';
+  if (!isTier(want)) return { why: `tier is opus, sonnet or haiku, not ${JSON.stringify(asked)}. Leave it out to use the listed one.` };
+  if (!listed || !role.tiers) {
+    return { why: `${role.id} runs on ${role.model}, and this engine has no tiers to choose between. Leave tier out.` };
+  }
+  if (want === listed) return { model: role.model, tier: listed };
+  if (TIER_ORDER.indexOf(want) > TIER_ORDER.indexOf(listed)) {
+    // The listed tier and the cheaper ones, dearest first: what it may ask for.
+    const allowed = TIER_ORDER.slice(0, TIER_ORDER.indexOf(listed) + 1).reverse();
+    return {
+      why: `The user put ${role.id} on ${listed}, so you may start it on ${andList(allowed)}, not on ${want}. Leave tier out to use ${listed}.`,
+    };
+  }
+  const id = role.tiers[want];
+  if (!id) return { why: `The model API serves no ${want} model right now, so ${role.id} cannot run on it. Leave tier out to use ${role.model}.` };
+  return { model: id, tier: want };
+}
+
+/**
+ * Whether the orchestrator of a stack of `agents` agents (itself and the ones it runs) is
+ * shown as one. One agent needs no orchestrator, so nothing marks it and nothing offers the
+ * affordance: the launch is one plain agent. The one rule Spawn's plan, Fleet and Project
+ * lanes and the Agent tabs all ask.
+ */
+export function showsOrchestrator(agents: number): boolean {
+  return agents >= 2;
+}
+
+/**
+ * How many agents the orchestrator `a` has in its stack: itself, and either the roles it was
+ * launched with or the helpers it has started, whichever is more.
+ */
+export function orchestratedSize(
+  a: Pick<Agent, 'id' | 'pipelineRoles'>,
+  jobAgents: readonly Pick<Agent, 'parentId'>[],
+): number {
+  const started = jobAgents.filter((x) => x.parentId === a.id).length;
+  return 1 + Math.max(a.pipelineRoles?.length ?? 0, started);
+}
+
+/**
+ * Whether `a` is marked as an orchestrator: the one agent of an orchestrated stack that starts
+ * the others, in a stack of two or more. A helper never is.
+ */
+export function marksOrchestrator(
+  a: Pick<Agent, 'id' | 'pipelineRoles' | 'parentId'>,
+  jobAgents: readonly Pick<Agent, 'parentId'>[],
+): boolean {
+  return !a.parentId && (a.pipelineRoles?.length ?? 0) > 0 && showsOrchestrator(orchestratedSize(a, jobAgents));
+}
+
+/**
+ * Whether helpers of this role cannot change files: a reading role (`READ_ONLY_ROLES`), or one
+ * whose rope has the write tools denied, as a reading persona's does (Amendment 68). What the
+ * orchestrator's prompt and its `start_helper` tell it, and what Spawn marks read-only.
+ */
+export function helperReads(role: Pick<HelperRole, 'id' | 'autonomy'>): boolean {
+  return isReadOnlyRole(role.id) || WRITE_TOOLS.every((t) => role.autonomy.disallowedTools.includes(t));
+}

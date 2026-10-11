@@ -196,6 +196,146 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 128 — post-merge, applied. **Orchestrated stacks: one agent runs the others, with the roles it may start listed before launch.**
+
+Shared (`wire.ts`, `stack.ts`), daemon (`routes/helpers.ts`, `routes/session.ts`, `session/handoff.ts`,
+`session/store.ts`, `session/supervisor.ts`, `session/backend.ts`, `session/backends/copilot.ts`, migration
+`200_orchestrated.sql`, `session/verify.ts`), web (`spawn/orchestrated.ts` and `Pipeline.tsx` new,
+`spawn/presets.ts`, `engine.ts`, `route.tsx`, `spawn.css`, `shell/ui.tsx` and `ui.css`, `fleet/lane.tsx`,
+`fleet/card.tsx`, `fleet/fleet.css`, `agent/tabs.ts`, `agent/agent.tsx`, `agent/agent.css`, and the verify
+files), and `docs/MANUAL.md`. The TODO.md item "Orchestrated stacks: one agent runs the others" (asked
+8 Oct; decided 10 Oct, the recommended answers). It is built on the orchestrator and helpers of
+Amendment 51 and keeps them as they were: this is a new kind of stack beside the fixed ones, picked in
+Spawn, and the fixed stacks with `hand_off` (Amendment 104) are untouched.
+
+**Decided (10 Oct, from the item's open questions):**
+- **The roles are listed before launch.** Spawn shows which roles the orchestrator may start (developer,
+  validator, reviewer and scribe by default) and the model tier of each, editable like the other plan rows:
+  remove a role, change its tier, add another. The orchestrator can start those roles and no others.
+- **It may send work back twice per role** (start the role again, as the developer after a failed review).
+  A role is started at most three times in all; the next start is refused with a sentence telling the
+  orchestrator to ask the user with the question tool.
+- **Its helpers do not get `hand_off`.** The orchestrator's own judgement of each result replaces it.
+- **The orchestrator looks different** wherever agents are shown, in neutral ink and never a status colour,
+  and only in a stack of two or more agents.
+
+**Wire** (`packages/shared/src/wire.ts`, each at the end of its interface):
+- **`AgentSpec.helperRoles?: HelperRole[]`**, new type `HelperRole`: `id` (the persona's id, which is the
+  name `start_helper` is given as `role`), `tier?`, `model` (the exact id the tier meant at launch),
+  `brief?`, `systemPrompt?`, `skills?`, `autonomy` (pinned the way Spawn pins that role), and `tiers?`
+  (what every tier meant at launch, so a cheaper one can be asked for). Spawn resolves all of it, so the
+  daemon needs no copy of the personas, which live in the browser's setting.
+- **`Agent.pipelineRoles?: string[]`**: the ids, present only on the orchestrator of an orchestrated stack.
+  It is what marks the agent as one on Fleet, Project and the Agent tabs. The roles' prompts stay off the
+  wire, as a persona's do.
+
+**Daemon:**
+- **Role-aware helpers.** `start_helper` takes a `role` and optionally a `tier`
+  (`Supervisor.startHelper(orch, task, name?, role?, tier?)`). A helper started as a role runs with that
+  persona's system prompt and skills (stored on its row, so a resume keeps them), the role's model and
+  rope, a brief made of the persona's brief, then the orchestrator's `task`, then what to reply with
+  (`pipelineHelperBrief`), and is named for the role (`developer`, then `developer-2` when it is sent back).
+  Refused with a sentence: a role not listed (naming the ones that are and saying to ask the user), no role
+  on an orchestrator that lists some, a role or a tier on one that lists none, a role or tier that is not
+  text, a tier dearer than the one listed (the tier in Spawn is what the user chose to spend on that role;
+  an orchestrator may ask for a cheaper one), a tier on an engine without tiers, and a fourth start of one
+  role. Without a role it is as it was: the orchestrator's model and permissions, `helperBrief`, its
+  persona. An ordinary orchestrator's tool schema and prompt are byte for byte what they were.
+- **A reading role stays read-only.** `readOnlyRefusal(role, autonomy)` (shared) is checked when the stack
+  is launched (400, naming the role and what is missing) and again when each helper is started, so a row
+  whose stored rope would let a reviewer write starts nothing. The roles' autonomy comes from the same
+  `toAgentSpecs` that pins a reader in any stack.
+- **Counted from the database.** Migration `200_orchestrated.sql` adds `agents.helper_roles` (the roles, as
+  JSON, on the orchestrator) and `agents.helper_role` (on a helper, the role it was started as). The
+  send-back limit counts `helper_role`, so it holds across a restart. Both are off the wire apart from the
+  ids in `pipelineRoles`.
+- **A pipeline prompt.** `pipelineSection` (`handoff.ts`), in place of `orchestratorSection` for an
+  orchestrator that lists roles: run the steps in order, one at a time; a helper is told the job
+  instruction and the `task` and sees the folder, not the conversation, so write the brief in full; read
+  each result before the next; send work back when a step fails, at most twice per role; ask the user with
+  the question tool when unsure; its helpers have no `hand_off`; the roles it may start with their tiers and
+  which only read. `helperReport` takes a closing line, and an orchestrated stack's orchestrator is woken
+  with `pipelineReportClosing` (read it, write the next brief or send the work back, ask) instead of "check
+  their work, combine it". The helper's whole conversation is passed as before (Amendment 120). The old
+  parallel-work prompt stays for ordinary orchestrators.
+- **A helper never hands off and is never held.** `Supervisor.#waiters` returns nothing for an agent with a
+  `parentId`, whoever is wired to wait for it, so `toolAccess`, `hand_off` and the hold in `#settle` all
+  agree. Before, only the orchestrator was left out of a helper's waiters.
+- **Launch checks** (`routes/session.ts`, `parseHelperRoles`): ids as `^[a-z][a-z0-9-]{0,30}$` and unique,
+  at most `PIPELINE_ROLES_MAX` (8) roles, a model that is not a nickname, a tier of opus, sonnet or haiku,
+  a brief, system prompt and skills under the persona limits, an autonomy in the engine's unit, and the
+  read-only check. `helpers` is then 1 to `pipelineHelperCap(roles)` (each role once and sent back twice:
+  4 roles, 12 helpers) instead of 0 to `HELPERS_MAX` (8), which an ordinary orchestrator still is. On
+  Copilot and OpenRouter each role's model is checked against the engine's list like the spec's.
+- **The tools.** `toolsFor(access)` gives an orchestrator with roles a `start_helper` whose schema names the
+  roles (`role`, an enum, required), the tiers and a task described as the full brief. Claude's endpoint
+  answers `tools/list` with it per agent; Copilot and OpenRouter build the same definition in-process from
+  `RunnerScope.roles`.
+
+**Web:**
+- **The preset "orchestrated pipeline"** (`spawn/presets.ts`): one row, `orchestrator`, the architect
+  persona on opus, flagged `orchestrates`. `toAgentSpecs` takes the listed roles as a tenth argument and
+  gives that row `helpers` (`helperCapFor`) and `helperRoles` (`helperRolesFor`, built by `toAgentSpecs`
+  itself so a role is launched exactly as in a fixed stack). The "+ up to N helpers" picker is not offered
+  on it.
+- **The list** (`spawn/orchestrated.ts`, pure; `Pipeline.tsx`): `defaultListed`, `withTier`, `withoutRole`,
+  `withRole`, `offeredRoles`, `unresolvedListed`. It is state of this launch only; choosing a preset puts
+  the default back. A listed tier the model API serves no model for blocks the launch and names the role.
+  Off Claude every role runs on the launch's one model and the tier picker is a plain label; an engine that
+  cannot start helpers lists none.
+- **One agent needs no orchestrator.** `showsOrchestrator(agents)` (shared) is true for two or more.
+  `orchestratedFor(preset, listed)` turns an orchestrated preset with no role listed into the full
+  pipeline's architect row, with no helpers, no list sent and nothing that says it orchestrates; the plan
+  keeps the "+ add a role…" control and says "No role listed, so this launches one architect agent".
+- **The look** (`OrchestratorMark` in `shell/ui.tsx`, `.is-orch` rules): a "◆ orchestrator" mark in the plan
+  and the diamond alone on a Project lane, a Fleet card row and an Agent tab, with a heavier edge in `--ink2`
+  (left on the plan row and the Fleet row, top on the lane and the tab). `marksOrchestrator(agent, jobAgents)`
+  is the one rule all four ask: it has `pipelineRoles`, is not a helper, and its stack is two or more agents.
+  No status colour (`--live`, `--done`, `--need`, `--fail`, `--you`, `--queue`, `--idle`) is used, and
+  `lib/verify.ts` checks that from the CSS and measures the contrast in both themes (12.2:1 and 13.3:1 for
+  the mark's text, 8.1:1 or more for the edge).
+
+**Not done / not decided:**
+- **An ordinary orchestrator (anonymous helpers) is not marked.** Only an orchestrator with listed roles
+  is, so "+ up to N helpers" on a fixed stack's row looks as it did.
+- **The tier ceiling.** The item said "a model tier" for `start_helper` without saying whether it could
+  override the user's. It can only ask for the listed tier or a cheaper one.
+- **The lone architect.** With every role removed the launch is the full pipeline's architect, not a
+  developer. The item says "launches that one agent plainly" and the row's persona is the architect.
+- **Not saved in a Custom setup.** The roles are not part of a saved setup, and Custom has no orchestrated
+  row (as helper counts are not saved either, Amendment 51).
+- **No role-level budget or per-role brief edit in Spawn.** A role's brief is its persona's; edit it in
+  Settings → Personas.
+- **Not tried against a real model.** Everything above is checked with the fake SDK. Whether an orchestrator
+  on opus writes good briefs, judges a review well, and stops at the second send-back needs a real run and
+  spend, and a person watching.
+- **Not looked at on a real project in a browser**, apart from headless Chrome on macOS in both themes
+  against a replayed fixture: the Spawn plan with the roles, with one agent, and the Project screen.
+
+**Verified:**
+- `session/verify.ts` §25 (inside the lock): the pure rules; the migration's columns; the launch's 400s
+  (a reader with a rope that lets it write, a missing write tool, a bad tier, id, model or list, no
+  helpers, too many); the orchestrator's row, its role ids on the wire and its prompts kept off it; the
+  pipeline prompt (roles, tiers, reads only, ask, send back, no `hand_off`) and not the parallel one;
+  `tools/list` naming the roles; a helper started as a role (its model, rope, persona, brief, run options);
+  a cheaper tier honoured and a dearer one refused; an unlisted role, no role, a non-text role refused; the
+  send-back count (named apart, counted from the database, the fourth refused with the question-tool
+  sentence); a helper with no `hand_off`, no tools, and no hold even with an agent waiting for it; the
+  orchestrator woken with each helper's whole conversation and the pipeline closing; an ordinary
+  orchestrator unchanged (prompt, schema, model, brief); a stored loose reader refused at start; a stack
+  on Copilot with the roles reaching its backend's scope. 1,253 checks.
+- Six mutations were caught: the helper guard in `#waiters` removed; the read-only check at start removed;
+  the pipeline closing not used; a tier with no role allowed; the send-back limit off by one; a dearer
+  tier allowed.
+- `spawn/verify.ts` §21: the preset, the default list and its tiers, the specs and request body, the
+  roles editable (remove, tier, add, no duplicates, at most eight), a single agent shows no orchestrator,
+  another engine, and the CSS. `agent/verify.ts`: the tab mark, only with two or more agents, never a
+  helper. `lib/verify.ts`: neutral ink, contrast in both themes, and the lane, row and tab asking the one
+  rule. Five existing source checks in `spawn/verify.ts` (the `toAgentSpecs` call, the personas hand-on,
+  the helpers picker) were widened to allow the new argument and condition.
+- `pnpm -r typecheck`, `pnpm --filter @conductor/web verify` and every web verify file in the Makefile:
+  pass. `session/verify.ts`, `verify-schedule.ts` and `verify-folder.ts`: pass, inside the lock.
+
 ### Amendment 127 — post-merge, applied. **The Project and Agent screens each have their own backdrop for the label at the top.**
 
 Shared (`tokens.css`) and web (`shell/ui.css`, `fleet/project.tsx`, `agent/agent.tsx`,

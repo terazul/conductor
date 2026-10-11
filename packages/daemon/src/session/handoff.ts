@@ -517,7 +517,12 @@ export function helperBrief(orchestrator: string, task: string): string {
  * (`handoffCap` of the orchestrator's model), the oldest going first and the last reply never
  * cut. A helper that failed or was stopped is marked, as in Amendment 51.
  */
-export function helperReport(helpers: readonly (Upstream & { status: string })[], cap: number): string {
+export function helperReport(
+  helpers: readonly (Upstream & { status: string })[],
+  cap: number,
+  /** Replaces the last line, for an orchestrated stack's (`PIPELINE_REPORT_CLOSING`, Amendment 128). */
+  closing?: string,
+): string {
   const shown = dropRepeats(helpers) as (Upstream & { status: string })[];
   const allowance = shareCap(
     cap,
@@ -527,6 +532,81 @@ export function helperReport(helpers: readonly (Upstream & { status: string })[]
     `Your helper${helpers.length === 1 ? ' has' : 's have'} finished. What each was told and said, in order, with a line ` +
       'for each tool it called (what the tools returned is left out):',
     ...shown.map((h, i) => `\n${head(h)}\n${upstreamBody(h, allowance[i]!)}`),
-    '\nCheck their work, combine it, and carry on. Start more helpers if something is left.',
+    closing ?? '\nCheck their work, combine it, and carry on. Start more helpers if something is left.',
   ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orchestrated stacks (Amendment 128)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A role the orchestrator may start, as its prompt names it. */
+export interface ListedRole {
+  id: string;
+  tier?: string;
+  /** A reading role: the helper cannot change files. */
+  reads?: boolean;
+}
+
+/**
+ * What an orchestrator of an orchestrated stack is told, in place of `orchestratorSection`
+ * (Amendment 128). That one is written for parallel work: split it into parts that do not touch
+ * the same files. A pipeline is the opposite: the steps run in order, the orchestrator reads each
+ * result before it writes the next brief, asks the user when it is unsure, and sends work back
+ * when a step fails. It says which roles it may start and how often it may send one back.
+ */
+export function pipelineSection(role: string, cap: number, roles: readonly ListedRole[], sendBacks = 2): string {
+  const named = roles
+    .map((r) => `${r.id}${r.tier || r.reads ? ` (${[r.tier ? `on ${r.tier}` : '', r.reads ? 'reads only' : ''].filter(Boolean).join(', ')})` : ''}`)
+    .join(', ');
+  return [
+    `You orchestrate this ${role} pipeline. You do not do its steps yourself: you start one agent for each, with the ` +
+      '`start_helper` tool, one at a time and in order. Each works in this same folder, with the instructions, tools and ' +
+      `model of its role. You may start these roles and no others: ${named}. Say which with \`role\`; ` +
+      'a `tier` asks for a cheaper model than the one listed, and is worth it only for an easy step.',
+    '1. Plan the steps from the job instruction, then start the first. A helper is told the job instruction and the ' +
+      '`task` you give it, and sees the folder. It does not see this conversation or what the other helpers did, so ' +
+      'write the `task` in full: what to do, which files, what done looks like, and what the earlier steps found, ' +
+      'quoted where it needs the words.',
+    '2. End your turn after you start a helper. You are woken with its whole conversation: what it was told, what it ' +
+      'said, and a line for each tool it called. Read it before you decide anything. A step that stopped is not a step ' +
+      'that is ready: start the next when the result does what was asked and its checks passed.',
+    `3. When a step fails (a review that finds a fault, a test that does not pass), send the work back: start the role ` +
+      `that must fix it again, with a new \`task\` that quotes what failed. You may send a role's work back at most ` +
+      `${sendBacks} times (a role is started at most ${1 + sendBacks} times in all; a start after that is refused). ` +
+      'When the same step keeps failing, ask the user before you get that far.',
+    '4. When you are unsure (a choice that is the user\'s, a result you cannot judge, a step that keeps failing), ask the ' +
+      'user with the question tool (AskUserQuestion, or ask_user), not in your reply: a question in your reply only ends ' +
+      'your turn and nobody is asked.',
+    `5. Your helpers have no hand_off tool: your judgement of each result replaces it. You may start up to ${cap} ` +
+      'helpers in all; `list_helpers` shows where they are. When the last step is ready, finish with a short summary ' +
+      'for the user: what each role did, what was decided, and what is left.',
+  ].join('\n');
+}
+
+/**
+ * A helper's brief in an orchestrated stack: its role's own (the persona's), then the brief the
+ * orchestrator wrote for this step, and what to reply with. It is not told other helpers are at
+ * work beside it, as `helperBrief` says: the steps run one after another.
+ */
+export function pipelineHelperBrief(orchestrator: string, role: string, roleBrief: string | undefined, task: string): string {
+  return (
+    `You are the ${role} in a pipeline the ${orchestrator} runs, one step at a time. ` +
+    (roleBrief?.trim() ? `${roleBrief.trim()}\n\n` : '') +
+    `The ${orchestrator} wrote this brief for your step:\n\n${task.trim()}\n\n` +
+    'Do this step only: the steps before it are done, and the ones after wait for you. When you are done, reply with ' +
+    'what you did, what you decided and why, what is left, and the files to look at. The ' +
+    `${orchestrator} reads your whole conversation, then decides whether the step is ready and what comes next.`
+  );
+}
+
+/** The last line of what an orchestrator of an orchestrated stack is woken with. */
+export function pipelineReportClosing(sendBacks = 2): string {
+  return (
+    '\nRead what each did before you decide anything. If the step is ready, write the next brief in full and start the ' +
+    'next role. If it is not (a review that found a fault, a test that fails), send the work back: start the role that ' +
+    `must fix it, with a new brief that says what failed. A role's work may be sent back at most ${sendBacks} times; after ` +
+    'that, ask the user with the question tool (AskUserQuestion, or ask_user). When the last step is ready, finish with ' +
+    'a short summary for the user.'
+  );
 }

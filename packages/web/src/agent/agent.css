@@ -1460,6 +1460,11 @@ a.ag-files-p:focus-visible {
   background: color-mix(in srgb, var(--need) 10%, transparent);
 }
 
+/* The orchestrator of an orchestrated stack (Amendment 128): a top edge in neutral ink, no status colour. */
+.ag-tab.is-orch {
+  border-top: 2px solid var(--ink2);
+}
+
 .ag-tab.is-newjob {
   margin-left: 10px;
 }

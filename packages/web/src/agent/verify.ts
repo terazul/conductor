@@ -943,6 +943,26 @@ console.log("\n· its tab shows how full its budget is, in the daily meter's col
   check('a token budget colours its tab the same way', tokenTab[0]?.budget?.tone === 'over' && tokenTab[0]?.budget?.pct === 98);
 }
 
+console.log('\n· the orchestrator of an orchestrated stack wears its mark, and only a stack of two or more has one (Amendment 128)');
+{
+  const node = (id: string, extra: Record<string, unknown> = {}) => ({ id, projectId: 'p', jobId: 'j', role: id, status: 'working' as const, ...extra });
+  const marked = (agents: ReturnType<typeof node>[]) => agentTabs(agents, 'p', ['j', 'k'], [], []).filter((t) => t.orchestrator).map((t) => t.id).join();
+
+  const stack = [node('orchestrator', { pipelineRoles: ['developer', 'reviewer'] }), node('developer', { parentId: 'orchestrator' }), node('reviewer', { parentId: 'orchestrator' })];
+  check('the orchestrator\'s tab is marked, and no helper\'s', marked(stack) === 'orchestrator');
+  check('it is marked as soon as it is launched, before it has started a helper: its roles make the stack two or more', marked([node('orchestrator', { pipelineRoles: ['developer'] })]) === 'orchestrator');
+  check('a stack of one has no orchestrator: nothing is marked', marked([node('architect')]) === '' && marked([node('orchestrator', { pipelineRoles: [] })]) === '');
+  check('an orchestrator whose helpers have no role is not one (Amendment 51), however many it starts', marked([node('builder', { helperCap: 3 }), node('builder-api', { parentId: 'builder' }), node('builder-ui', { parentId: 'builder' })]) === '');
+  check('a fixed stack has none', marked([node('architect'), node('developer'), node('validator')]) === '');
+  check('a helper never is, even if it somehow carries roles', marked([node('o', { pipelineRoles: ['developer'] }), node('h', { parentId: 'o', pipelineRoles: ['developer'] })]) === 'o');
+  check("another job's helpers do not make a stack of this job's lone agent", marked([node('o', { pipelineRoles: undefined }), node('h', { jobId: 'k', parentId: 'o' })]) === '');
+  const tab = agentTabs(stack, 'p', ['j'], [], []);
+  check('the mark is on the tab and changes nothing else on it: label, status, needs and budget as they were', tab.map((t) => `${t.id}:${t.label}:${t.status}:${t.needs}`).join() === 'orchestrator:orchestrator:working:0,developer:developer:working:0,reviewer:reviewer:working:0' && tab.every((t) => t.budget === null));
+  check('a blocked orchestrator keeps its mark: it is a mark of what the agent is, not of its state', agentTabs(stack, 'p', ['j'], [{ agentId: 'orchestrator' }], []).find((t) => t.id === 'orchestrator')?.orchestrator === true);
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('the screen draws it: the mark in the tab, and the edge on it', /t\.orchestrator && <OrchestratorMark short \/>/.test(screen) && /t\.orchestrator \? ' is-orch' : ''/.test(screen));
+}
+
 console.log(
   failures === 0
     ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'

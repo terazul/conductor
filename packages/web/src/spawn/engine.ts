@@ -55,12 +55,17 @@ export function autonomyOn(a: Autonomy, l: EngineLaunch): Autonomy {
 /** The specs for the engine. Claude's are the same array, untouched. */
 export function specsOn(specs: AgentSpec[], l: EngineLaunch): AgentSpec[] {
   if (l.provider === CLAUDE) return specs;
-  return specs.map(({ helpers, ...s }) => ({
+  return specs.map(({ helpers, helperRoles, ...s }) => ({
     ...s,
     model: l.model,
     ...(l.caps.helperTools && helpers ? { helpers } : {}),
     autonomy: autonomyOn(s.autonomy, l),
     provider: l.provider,
+    // An orchestrated stack's roles (Amendment 128) run on the launch's one model too, with no
+    // tiers to choose between; kept only where the helpers are.
+    ...(l.caps.helperTools && helpers && helperRoles
+      ? { helperRoles: helperRoles.map(({ tier: _tier, tiers: _tiers, ...r }) => ({ ...r, model: l.model, autonomy: autonomyOn(r.autonomy, l) })) }
+      : {}),
   }));
 }
 

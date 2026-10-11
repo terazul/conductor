@@ -279,6 +279,11 @@
   opacity: 0.6;
 }
 
+/* The orchestrator of an orchestrated stack (Amendment 128): a left edge in neutral ink, no status colour. */
+.fl-arow.is-orch {
+  border-left: 3px solid var(--ink2);
+}
+
 .fl-arow-nm {
   font-family: var(--disp);
   font-size: var(--fs-xs);
@@ -910,6 +915,15 @@
 
 .pj-lane.s-done {
   box-shadow: inset 3px 0 0 var(--done);
+}
+
+/*
+ * The orchestrator of an orchestrated stack (Amendment 128): a heavier top edge in neutral ink,
+ * which the status edges (a left edge, in --live or --done) and the amber of a lane that needs
+ * you do not use.
+ */
+.pj-lane.is-orch {
+  border-top: 3px solid var(--ink2);
 }
 
 .pj-lanehead {

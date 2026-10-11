@@ -34,7 +34,7 @@ import type {
 } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { catalogLine, useModels } from '../lib/models.js';
-import { ModelSelect } from '../shell/ui.js';
+import { ModelSelect, OrchestratorMark } from '../shell/ui.js';
 import { useCommand } from '../agent/endpoints.js';
 import { removeProject } from './endpoints.js';
 import { errorText } from '../lib/errors.js';
@@ -56,6 +56,7 @@ import {
   TIER_HINTS,
   commonPick,
   modelFor,
+  orchestratedFor,
   personaOf,
   pickAll,
   pickFor,
@@ -85,6 +86,8 @@ import {
 } from './custom.js';
 import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
+import { Pipeline } from './Pipeline.js';
+import { defaultListed, helperCapFor, orchestrates, unresolvedListed, type ListedRole } from './orchestrated.js';
 import { METHODS, branchProblem, launchBody, methodReady, presetLabel, type Method } from './launch.js';
 import { useReorder } from './reorder.js';
 import { WaitsFor } from './RoleRow.js';
@@ -274,6 +277,8 @@ function Spawn() {
   const [custom, setCustom] = useState<CustomRole[]>([FIRST_ROLE]);
   /** Per role, the helpers it may start: several agents on one role (Amendment 51). */
   const [helpers, setHelpers] = useState<Record<string, number>>({});
+  /** An orchestrated stack's listed roles, once you change them; null is the default list (Amendment 128). */
+  const [listedEdit, setListedEdit] = useState<ListedRole[] | null>(null);
   const [customName, setCustomName] = useState('');
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
@@ -289,11 +294,20 @@ function Spawn() {
    */
   const [arranged, setArranged] = useState<{ presetId: string; roles: PresetRole[] } | null>(null);
   const base = presetById(presetId);
-  const preset = isCustom
+  /*
+   * An orchestrated pipeline's roles (Amendment 128): the default list until you change it, and
+   * none on an engine that cannot start helpers. With none the stack is one agent, so the
+   * orchestrator row becomes a plain architect and nothing says it orchestrates (`orchestratedFor`).
+   */
+  const listed: readonly ListedRole[] = has.helpers ? (listedEdit ?? defaultListed(personas)) : [];
+  const ownRows = isCustom
     ? toPreset(CUSTOM_ID, customName.trim() || 'custom', custom, personas)
     : arranged?.presetId === presetId
       ? { ...base, roles: arranged.roles }
       : base;
+  const preset = orchestratedFor(ownRows, listed);
+  /** The chosen preset lists roles, whether or not any are left: the list stays editable when it is one agent. */
+  const listsRoles = !isCustom && base.orchestrated === true && has.helpers;
   /** Change a preset row's place or ticks for this launch; back to the preset's own is no change. */
   const arrange = (roles: PresetRole[]): void =>
     setArranged(sameStack(roles, base.roles) ? null : { presetId, roles });
@@ -375,8 +389,8 @@ function Spawn() {
     [pills, budgetPerAgent, effort, mode, launchOn],
   );
   const specs = useMemo(
-    () => specsOn(toAgentSpecs(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas), launchOn),
-    [preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, launchOn],
+    () => specsOn(toAgentSpecs(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed), launchOn),
+    [preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, launchOn],
   );
   /** The "every role" picker's value: the id every row runs on, or "" for per role. */
   const every = commonPick(preset, picks, tiers);
@@ -386,10 +400,12 @@ function Spawn() {
    * every row has an id — its tier's, or one picked for it.
    */
   const missing = claude ? unresolvedRoles(preset, tiers, picks) : [];
+  // The same for the roles an orchestrator may start (Amendment 128): each needs a model its tier means.
+  const missingListed = claude && preset.roles.some((r) => r.orchestrates) ? unresolvedListed(listed, tiers) : [];
   // Another engine needs one id for the launch, and a token cap that parses.
   const engineReady =
     providers?.find((p) => p.id === provider)?.unavailable === null && launchOn.model !== '' && tokenWhy === null;
-  const modelsReady = claude ? models.catalog !== null && missing.length === 0 : engineReady;
+  const modelsReady = claude ? models.catalog !== null && missing.length === 0 && missingListed.length === 0 : engineReady;
 
   /*
    * Picks belong to a preset's rows, so switching preset drops them — except one id
@@ -400,6 +416,7 @@ function Spawn() {
       setPresetId(id);
       setArranged(null);
       setHelpers({});
+      setListedEdit(null);
       const next = id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : presetById(id);
       setPicks(every ? pickAll(next, every) : {});
     },
@@ -792,6 +809,14 @@ function Spawn() {
           </div>
         )}
 
+        {missingListed.length > 0 && models.catalog && (
+          <div className="sp-cf-note t-fail is-still">
+            {models.catalog.host ?? 'The model API'} serves no {[...new Set(missingListed.map((r) => r.tier))].join(' or ')}{' '}
+            model, which the orchestrator would start {missingListed.map((r) => r.id).join(', ')} on — pick another tier
+            for {missingListed.length === 1 ? 'it' : 'each'} below.
+          </div>
+        )}
+
         <div className="sp-plan">
           <div className="sp-plan-head">
             <span className="sp-lab">
@@ -823,7 +848,7 @@ function Spawn() {
               const persona = personaOf(r, personas);
               return (
               <div
-                className={`sp-areorder${movable ? ` sp-reorder${reorder.markOf(i)}` : ''}`}
+                className={`sp-areorder${movable ? ` sp-reorder${reorder.markOf(i)}` : ''}${r.orchestrates ? ' is-orch' : ''}`}
                 key={r.role}
                 {...(movable ? reorder.rowProps(i) : {})}
               >
@@ -831,6 +856,8 @@ function Spawn() {
                   {movable && reorder.handle(i, r.role)}
                   <i className="sp-dot" />
                   <span className="sp-role">{r.role}</span>
+                  {/* The orchestrator of an orchestrated stack: only when it has roles to start, so two or more agents (Amendment 128). */}
+                  {r.orchestrates && <OrchestratorMark />}
                   {/* A row named apart from its persona says which it is (Amendment 68). */}
                   {persona && persona.name !== r.role && (
                     <span className="sp-persona" title={persona.description || undefined}>
@@ -880,7 +907,7 @@ function Spawn() {
                    * the work, starts helpers with its own model and permissions, and hears
                    * what they report. Each helper takes a slot and a per-agent budget.
                    */}
-                  {has.helpers && (
+                  {has.helpers && !r.orchestrates && !listsRoles && (
                   <select
                     className="ui-select sp-helpers"
                     value={helpers[r.role] ?? 0}
@@ -897,6 +924,21 @@ function Spawn() {
                   )}
                   <span className="sp-when">{startsWhen(r)}</span>
                 </div>
+                {/*
+                 * The roles an orchestrated stack's orchestrator may start (Amendment 128), under
+                 * its row: editable here, sent with the launch. With none listed the row above is
+                 * one plain agent, and this is where to add a role back.
+                 */}
+                {listsRoles && i === 0 && (
+                  <Pipeline
+                    listed={listed}
+                    personas={personas}
+                    tiers={tiers}
+                    claude={claude}
+                    model={launchOn.model}
+                    onChange={setListedEdit}
+                  />
+                )}
                 {movable && i > 0 && (
                   <div className="sp-awaits">
                     <WaitsFor

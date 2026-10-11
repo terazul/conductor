@@ -11,6 +11,7 @@
  */
 
 import type { Agent, PendingRequest } from '@conductor/shared';
+import { marksOrchestrator } from '@conductor/shared';
 import { useAgentEvents } from '../lib/store.js';
 import { useActivity, useElapsedMs } from '../shell/clock.js';
 import { budgetOf } from '../shell/autonomy.js';
@@ -21,6 +22,7 @@ import { shortModel } from '../lib/models.js';
 import { capabilitiesOf, tokenWords, useProviders } from '../lib/providers.js';
 import {
   Dot,
+  OrchestratorMark,
   ProviderBadge,
   Spark,
   STATUS_KEY,
@@ -64,10 +66,12 @@ export function Lane({
   // blocked lane keeps its amber treatment instead — `shown` already reads
   // `blocked` there, so `key` can't also be `live` or `done` at the same time.
   const edge = key === 'live' ? ' s-live' : key === 'done' ? ' s-done' : '';
+  // The orchestrator of an orchestrated stack of two or more agents wears its own mark and top edge (Amendment 128).
+  const orchestrator = marksOrchestrator(agent, siblings);
 
   return (
     <div
-      className={`pj-lane${blockedHere ? ' is-need' : edge}`}
+      className={`pj-lane${blockedHere ? ' is-need' : edge}${orchestrator ? ' is-orch' : ''}`}
       role="button"
       tabIndex={0}
       onClick={() => openAgent(agent)}
@@ -81,6 +85,7 @@ export function Lane({
       <div className="pj-lanehead">
         <Dot status={shown} />
         <span className="pj-lane-nm">{agent.role}</span>
+        {orchestrator && <OrchestratorMark short />}
         <Tag tone={key}>{STATUS_WORD[shown]}</Tag>
         <span className="pj-lane-mdl" title={agent.model}>{shortModel(agent.model)}</span>
         <ProviderBadge provider={agent.provider} />

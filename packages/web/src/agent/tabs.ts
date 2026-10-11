@@ -10,6 +10,7 @@
  */
 
 import type { Agent, AgentStatus } from '@conductor/shared';
+import { marksOrchestrator } from '@conductor/shared';
 import { budgetOf, type Budget } from '../shell/autonomy.js';
 
 export interface AgentTab {
@@ -26,11 +27,17 @@ export interface AgentTab {
    * Null for an agent with no budget, or when the caller didn't give its spend.
    */
   budget: Pick<Budget, 'tone' | 'fraction' | 'pct' | 'state'> | null;
+  /**
+   * The orchestrator of an orchestrated stack of two or more agents (Amendment 128): the tab
+   * wears the orchestrator's mark. False for every other agent, a helper included, and for
+   * a stack of one.
+   */
+  orchestrator: boolean;
 }
 
 export function agentTabs(
   agents: (Pick<Agent, 'id' | 'projectId' | 'jobId' | 'role' | 'status'> &
-    Partial<Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy'>>)[],
+    Partial<Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy' | 'pipelineRoles' | 'parentId'>>)[],
   projectId: string,
   jobOrder: string[],
   pending: { agentId: string }[],
@@ -64,6 +71,8 @@ export function agentTabs(
       needs,
       newJob: i > 0 && a.jobId !== ordered[i - 1]!.jobId,
       budget: b === null ? null : { tone: b.tone, fraction: b.fraction, pct: b.pct, state: b.state },
+      // Its stack is the agents of its own job (Amendment 128).
+      orchestrator: marksOrchestrator(a, ordered.filter((x) => x.jobId === a.jobId)),
     };
   });
 }

@@ -177,6 +177,31 @@
   flex: none;
 }
 
+/* ── the orchestrator of an orchestrated stack (Amendment 128) ───────────────── */
+
+/*
+ * Neutral ink on a raised surface, edged in --ink2: a mark no status colour is used for. The
+ * rows and lanes it sits on get `.is-orch`, and their own rule (a left or top edge in --ink2).
+ */
+.ui-orch {
+  font-family: var(--disp);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--ink2);
+  background: var(--surf3);
+  color: var(--ink);
+  white-space: nowrap;
+  flex: none;
+}
+
+.ui-orch.is-short {
+  padding: 0 4px;
+}
+
 /* ── activity histogram ────────────────────────────────────────────────────── */
 
 .ui-spark {

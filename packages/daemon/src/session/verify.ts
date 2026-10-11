@@ -144,6 +144,9 @@ import { HANDOFF_ASK, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NU
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
+import { SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
+import { getHelperRole, getHelperRoles, startedAsRole } from './store.js';
+import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
 /*
  * Nothing here may ask the real model API or start a real Claude Code: §12 answers for
@@ -6095,6 +6098,276 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
     if (enginesBefore.copilot) registerBackend(enginesBefore.copilot);
     if (enginesBefore.openrouter) registerBackend(enginesBefore.openrouter);
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n25 · orchestrated stacks: one agent starts the others, as the roles it was launched with (Amendment 128)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // Nothing is known of what the gateway serves, so a model id is checked only against the nicknames.
+    forgetCatalog();
+
+    const O_OPUS = 'claude-opus-o128';
+    const O_SONNET = 'claude-sonnet-o128';
+    const O_HAIKU = 'claude-haiku-o128';
+    const tierIds = { opus: O_OPUS, sonnet: O_SONNET, haiku: O_HAIKU };
+    const rope = (a: Partial<Agent['autonomy']> = {}): Agent['autonomy'] => ({ ...DEFAULT_AUTONOMY, budgetUsd: 5, ...a });
+    const ROLES: HelperRole[] = [
+      { id: 'developer', tier: 'sonnet', model: O_SONNET, brief: 'Implement the work.', systemPrompt: 'DEVELOPER PROMPT o128', skills: ['tdd'], autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds },
+      { id: 'reviewer', tier: 'opus', model: O_OPUS, brief: 'Review the change.', systemPrompt: 'REVIEWER PROMPT o128', autonomy: rope({ mode: 'default', disallowedTools: [...WRITE_TOOLS] }), tiers: tierIds },
+      { id: 'scribe', tier: 'haiku', model: O_HAIKU, brief: 'Write it down.', systemPrompt: 'SCRIBE PROMPT o128', autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds },
+    ];
+
+    // ── the pure rules, shared with the screens ─────────────────────────────────
+    check('the helpers a stack may start in all: each role once, and sent back twice', SEND_BACKS_MAX === 2 && pipelineHelperCap(4) === 12 && pipelineHelperCap(3) === 9 && pipelineHelperCap(1) === 3);
+    check('one agent needs no orchestrator; two or more do', !showsOrchestrator(0) && !showsOrchestrator(1) && showsOrchestrator(2) && showsOrchestrator(5));
+    const lone = { id: 'o', pipelineRoles: undefined, parentId: undefined };
+    check('an orchestrator is marked only with roles to start, and never a helper', marksOrchestrator({ id: 'o', pipelineRoles: ['developer'] }, []) && !marksOrchestrator(lone, []) && !marksOrchestrator({ id: 'o', pipelineRoles: [] }, []) && !marksOrchestrator({ id: 'h', pipelineRoles: ['developer'], parentId: 'o' }, []));
+    check('an ordinary orchestrator, whose helpers have no role, is not marked', !marksOrchestrator({ id: 'o' }, [{ parentId: 'o' }, { parentId: 'o' }]));
+    check('a role not listed is refused, with the roles that are and the question tool', (() => {
+      const why = roleRefusal('designer', ['developer', 'reviewer'], 'orchestrator');
+      return !!why && /"designer" is not one of the roles this stack lists/.test(why) && /developer and reviewer/.test(why) && /question tool/.test(why);
+    })());
+    check('a stack with roles needs one named', /lists the roles you may start: developer and reviewer/.test(roleRefusal(undefined, ['developer', 'reviewer']) ?? '') && roleRefusal(' Developer ', ['developer']) === null);
+    check('and an orchestrator with none takes no role, but starts helpers as before', /takes no role here/.test(roleRefusal('developer', [], 'builder') ?? '') && roleRefusal(undefined, []) === null);
+    check('a role is started three times at most: once, and sent back twice; the fourth asks the user', sendBackRefusal('developer', 0) === null && sendBackRefusal('developer', 2) === null && /4 times|3 times/.test(sendBackRefusal('developer', 3) ?? '') && /Ask the user with the question tool/.test(sendBackRefusal('developer', 3) ?? ''));
+    check('a tier is the listed one or a cheaper one, never a dearer one', (() => {
+      const dev = ROLES[0]!;
+      const same = helperModel(dev, undefined);
+      const cheaper = helperModel(dev, 'haiku');
+      const dearer = helperModel(dev, 'opus');
+      return 'model' in same && same.model === O_SONNET && 'model' in cheaper && cheaper.model === O_HAIKU && 'why' in dearer && /sonnet and haiku, not on opus/.test(dearer.why);
+    })());
+    check('a tier on an engine without tiers, or one that is not a tier, is refused', 'why' in helperModel({ id: 'developer', model: 'gpt-5' }, 'haiku') && 'why' in helperModel(ROLES[0]!, 'gigantic'));
+    check('a reading role is one by its name or by its rope', helperReads(ROLES[1]!) && !helperReads(ROLES[0]!) && helperReads({ id: 'custom', autonomy: rope({ disallowedTools: [...WRITE_TOOLS] }) }));
+
+    // ── the migration ────────────────────────────────────────────────────────────
+    const cols = (db.prepare('PRAGMA table_info(agents)').all() as { name: string }[]).map((c) => c.name);
+    check('the columns are there: the roles on the orchestrator, the role on a helper', cols.includes('helper_roles') && cols.includes('helper_role'));
+
+    // ── a launch is checked, as every other field of a spec is ───────────────────
+    const opid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'orch128' })).body.project.id;
+    type Made = { agents?: Agent[]; error?: string; detail?: string };
+    const launch = (agents: Record<string, unknown>[]) =>
+      send<Made>('POST', '/api/jobs', { projectId: opid, prompt: 'the orchestrated prompt', isolation: 'in_place', agents });
+    const orchSpec = { role: 'orchestrator', model: O_OPUS, autonomy: rope(), persona: 'architect', systemPrompt: 'ARCHITECT PROMPT o128', helpers: pipelineHelperCap(ROLES.length), helperRoles: ROLES };
+    const bad = async (over: Record<string, unknown>): Promise<{ status: number; detail: string }> => {
+      const r = await launch([{ ...orchSpec, ...over }]);
+      return { status: r.status, detail: r.body.detail ?? r.body.error ?? '' };
+    };
+    const looseReviewer = await bad({ helperRoles: [{ ...ROLES[1]!, autonomy: rope({ mode: 'acceptEdits' }) }] });
+    check('a reading role whose rope would let it write → 400, by readOnlyRefusal', looseReviewer.status === 400 && /reviewer is a reading role/.test(looseReviewer.detail), looseReviewer.detail);
+    const noWrite = await bad({ helperRoles: [{ ...ROLES[1]!, autonomy: rope({ mode: 'plan', disallowedTools: ['Edit'] }) }] });
+    check('or one missing some of the write tools', noWrite.status === 400 && /Write, MultiEdit, NotebookEdit must be in disallowedTools/.test(noWrite.detail), noWrite.detail);
+    check('a tier that is not a tier → 400', (await bad({ helperRoles: [{ ...ROLES[0]!, tier: 'gigantic' }] })).status === 400);
+    check('a role id that is not an id, or listed twice → 400', (await bad({ helperRoles: [{ ...ROLES[0]!, id: 'Not An Id' }] })).status === 400 && (await bad({ helperRoles: [ROLES[0]!, ROLES[0]!] })).status === 400);
+    check('a role with no model, or a nickname for one → 400', (await bad({ helperRoles: [{ ...ROLES[0]!, model: '' }] })).status === 400 && (await bad({ helperRoles: [{ ...ROLES[0]!, model: 'sonnet' }] })).status === 400);
+    check('roles that are not a list → 400', (await bad({ helperRoles: 'developer' })).status === 400);
+    check('more than 8 roles → 400', (await bad({ helperRoles: Array.from({ length: 9 }, (_, i) => ({ ...ROLES[0]!, id: `role-${i}` })), helpers: 8 })).status === 400);
+    const none = await bad({ helpers: 0 });
+    check('roles with no helpers to start them as → 400', none.status === 400 && /helpers must be above 0/.test(none.detail), none.detail);
+    const tooMany = await bad({ helpers: pipelineHelperCap(ROLES.length) + 1 });
+    check('and no more helpers than the roles, each started and sent back twice → 400', tooMany.status === 400 && /0 to 9/.test(tooMany.detail), tooMany.detail);
+    check('an ordinary orchestrator is still held to 8', (await bad({ helperRoles: undefined, helpers: 9 })).status === 400);
+
+    // ── an orchestrated stack, launched ──────────────────────────────────────────
+    const made = await launch([orchSpec]);
+    check('the launch → 201', made.status === 201, `${made.status} ${made.body.detail ?? ''}`);
+    const orchId = made.body.agents?.[0]?.id ?? '~';
+    const orchJob = made.body.agents?.[0]?.jobId ?? '~';
+    const orchAgent = getAgent(db, orchId);
+    check('the orchestrator carries its role ids on the wire, and the cap that covers them', JSON.stringify(orchAgent?.pipelineRoles) === '["developer","reviewer","scribe"]' && orchAgent?.helperCap === 9, JSON.stringify(orchAgent));
+    check('but not their prompts: those stay on the row, like a persona', !JSON.stringify(orchAgent).includes('DEVELOPER PROMPT') && getHelperRoles(db, orchId).length === 3 && getHelperRoles(db, orchId)[0]?.systemPrompt === 'DEVELOPER PROMPT o128');
+    check('and listAgents (what a restart reads back) says the same', listAgents(db).find((a) => a.id === orchId)?.pipelineRoles?.join() === 'developer,reviewer,scribe');
+    await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('the orchestrated prompt') && (r.prompts[0] ?? '').includes('orchestrate this orchestrator pipeline')));
+    const orchRun = runs.find((r) => (r.prompts[0] ?? '').includes('orchestrate this orchestrator pipeline'))!;
+    const p0 = orchRun.prompts[0] ?? '';
+    check('it is given the pipeline prompt, not the parallel-work one', /one at a time and in order/.test(p0) && !/parts that can run in parallel/.test(p0), p0);
+    check('which names the roles it may start, with their tiers and which only read', /developer \(on sonnet\), reviewer \(on opus, reads only\), scribe \(on haiku\)/.test(p0), p0);
+    check('says to read each result before the next, and to write the brief in full', /Read it before you decide anything/.test(p0) && /write the `task` in full/.test(p0));
+    check('says to ask the user with the question tool when unsure', /ask the user with the question tool \(AskUserQuestion, or ask_user\)/.test(p0));
+    check('says to send work back, at most twice a role', /send the work back/.test(p0) && /at most 2 times/.test(p0) && /started at most 3 times in all/.test(p0));
+    check('and that its helpers have no hand_off', /no hand_off tool/.test(p0) && /up to 9 helpers in all/.test(p0));
+    check('it runs on its persona: the architect prompt', JSON.stringify(orchRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: 'ARCHITECT PROMPT o128' }));
+
+    const mcp = (agentId: string, method: string, params: Record<string, unknown> = {}) =>
+      send<{ result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string; inputSchema: { properties?: Record<string, { enum?: string[] }>; required?: string[] } }[] } }>('POST', `/mcp/agents/${agentId}`, { jsonrpc: '2.0', id: 1, method, params });
+    const startOver = async (agentId: string, args: Record<string, unknown>) => {
+      const r = (await mcp(agentId, 'tools/call', { name: 'start_helper', arguments: args })).body.result;
+      return { text: r?.content?.[0]?.text ?? '', isError: r?.isError === true };
+    };
+    const listed = (await mcp(orchId, 'tools/list')).body.result?.tools ?? [];
+    const sh = listed.find((t) => t.name === 'start_helper');
+    check('tools/list gives its start_helper the roles to choose from, and requires one', JSON.stringify(sh?.inputSchema.properties?.['role']?.enum) === '["developer","reviewer","scribe"]' && JSON.stringify(sh?.inputSchema.required) === '["role","task"]' && JSON.stringify(sh?.inputSchema.properties?.['tier']?.enum) === '["opus","sonnet","haiku"]');
+    check('Copilot and OpenRouter are given the same schema, in-process', JSON.stringify(toolsFor({ helperCap: 9, roles: [{ id: 'developer', tier: 'sonnet' }, { id: 'reviewer', reads: true }] }).find((t) => t.name === 'start_helper')?.inputSchema['properties']).includes('"enum":["developer","reviewer"]'));
+
+    // ── start_helper with a role ─────────────────────────────────────────────────
+    const asDev = await startOver(orchId, { role: 'developer', task: 'Build the parser in src/parse.ts.' });
+    check('a listed role starts, named for the role', !asDev.isError && /^Started developer\./.test(asDev.text) && /woken with its whole conversation/.test(asDev.text), asDev.text);
+    const dev1 = helpersOf(db, orchId)[0]!;
+    check('the helper is the role: its model, its rope, its persona', dev1.role === 'developer' && dev1.model === O_SONNET && dev1.autonomy.mode === 'acceptEdits' && dev1.autonomy.budgetUsd === 5 && dev1.parentId === orchId && dev1.jobId === orchJob, JSON.stringify(dev1));
+    check("with the persona's prompt and skills, stored for every run", JSON.stringify(getAgentPersona(db, dev1.id)) === JSON.stringify({ persona: 'developer', systemPrompt: 'DEVELOPER PROMPT o128', skills: ['tdd'] }), JSON.stringify(getAgentPersona(db, dev1.id)));
+    check("and the brief is the role's, then the orchestrator's, then what to reply with", (() => {
+      const b = getAgentBrief(db, dev1.id) ?? '';
+      return b.includes('You are the developer in a pipeline the orchestrator runs') && b.includes('Implement the work.') && b.includes('Build the parser in src/parse.ts.') && b.includes('what you did, what you decided and why');
+    })(), getAgentBrief(db, dev1.id) ?? '');
+    await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Build the parser in src/parse.ts.')));
+    const devRun = runs.find((r) => (r.prompts[0] ?? '').includes('Build the parser in src/parse.ts.'))!;
+    check('it launches on that model, with that persona and skills', devRun.options.model === O_SONNET && JSON.stringify(devRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: 'DEVELOPER PROMPT o128' }) && JSON.stringify(devRun.options.skills) === '["tdd"]', JSON.stringify([devRun.options.model, devRun.options.systemPrompt]));
+    check('and is told the job, and its role — not that it works beside others', (devRun.prompts[0] ?? '').startsWith('the orchestrated prompt') && /Your role is developer\./.test(devRun.prompts[0] ?? '') && !/Other helpers are working/.test(devRun.prompts[0] ?? ''));
+
+    const asRev = await startOver(orchId, { role: 'reviewer', task: 'Review src/parse.ts against the brief.', tier: 'haiku' });
+    const rev = helpersOf(db, orchId).find((h) => h.role === 'reviewer')!;
+    check('a cheaper tier than the listed one is honoured', !asRev.isError && rev.model === O_HAIKU, `${asRev.text} ${rev?.model}`);
+    check('a reading role stays read-only: the write tools denied, and it is not auto-approved', readOnlyRefusal('reviewer', rev.autonomy) === null && WRITE_TOOLS.every((t) => rev.autonomy.disallowedTools.includes(t)) && rev.autonomy.mode === 'default', JSON.stringify(rev.autonomy));
+    await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Review src/parse.ts')));
+    const revRun = runs.find((r) => (r.prompts[0] ?? '').includes('Review src/parse.ts'))!;
+    check('and its run is denied them too, in every permission mode', WRITE_TOOLS.every((t) => revRun.options.disallowedTools?.includes(t)) && revRun.options.permissionMode !== 'acceptEdits', JSON.stringify([revRun.options.disallowedTools, revRun.options.permissionMode]));
+    const dearer = await startOver(orchId, { role: 'scribe', task: 'Write it down.', tier: 'opus' });
+    check('a dearer tier than the user listed is refused with a sentence', dearer.isError && /The user put scribe on haiku/.test(dearer.text) && helpersOf(db, orchId).every((h) => h.role !== 'scribe'), dearer.text);
+
+    const unlisted = await startOver(orchId, { role: 'designer', task: 'Design it.' });
+    check('a role not in the list is refused, with the ones that are', unlisted.isError && /not one of the roles this stack lists/.test(unlisted.text) && /developer, reviewer and scribe/.test(unlisted.text), unlisted.text);
+    const roleless = await startOver(orchId, { task: 'Do it yourself.' });
+    check('so is no role at all: it can start only the listed ones', roleless.isError && /Say which one with role/.test(roleless.text), roleless.text);
+    check('a role that is not text is refused, not dropped', (await startOver(orchId, { role: 7, task: 'x' })).isError);
+    check('and a task is still required', (await startOver(orchId, { role: 'developer' })).isError);
+    check('none of those started anything', helpersOf(db, orchId).length === 2);
+
+    // ── sending work back, at most twice a role ──────────────────────────────────
+    const again1 = await startOver(orchId, { role: 'developer', task: 'The review found a fault in line 3; fix it.' });
+    const again2 = await startOver(orchId, { role: 'developer', task: 'The test still fails; fix it.' });
+    check('the developer can be started again, twice: named apart', !again1.isError && /^Started developer-2\./.test(again1.text) && !again2.isError && /^Started developer-3\./.test(again2.text), `${again1.text} | ${again2.text}`);
+    check('and it is counted from the database, by the role it was started as', startedAsRole(db, orchId, 'developer') === 3 && startedAsRole(db, orchId, 'reviewer') === 1 && helpersOf(db, orchId).filter((h) => getHelperRole(db, h.id) === 'developer').length === 3);
+    const third = await startOver(orchId, { role: 'developer', task: 'One more go.' });
+    check('a fourth start of the same role is refused', third.isError && helpersOf(db, orchId).length === 4, third.text);
+    check('with a sentence that tells it to ask the user, with the question tool', /Ask the user with the question tool \(AskUserQuestion, or ask_user\)/.test(third.text) && /sent its work back 2 times/.test(third.text) && /Do not start it again/.test(third.text), third.text);
+    check('other roles are not affected', !(await startOver(orchId, { role: 'scribe', task: 'Write it down.', tier: 'haiku' })).isError);
+
+    // ── a helper never hands off, and is never held ──────────────────────────────
+    const helperAccess = sup.toolAccess(dev1.id);
+    check('a helper is given no hand_off, and no start_helper: it starts nothing', helperAccess.handOff === false && !helperAccess.helperCap && JSON.stringify((await mcp(dev1.id, 'tools/list')).body.result?.tools) === '[]');
+    check('its run is given no Conductor tools at all', !('mcpServers' in devRun.options) && !(devRun.prompts[0] ?? '').includes(HAND_OFF_LINE));
+    const handed = await mcp(dev1.id, 'tools/call', { name: 'hand_off', arguments: { summary: 'Done.' } });
+    check('and calling hand_off anyway is refused: there is no one to hand off to', handed.body.result?.isError === true && /No agent waits for you/.test(handed.body.result.content?.[0]?.text ?? ''));
+    // Even with an agent wired to wait for it, which the stack's own screens never do.
+    fixture('o128_after', orchJob, { projectId: opid, role: 'after', status: 'queued', dependsOn: [dev1.id], autonomy: DEFAULT_AUTONOMY });
+    check('wired so another agent waits for the helper, it still has no hand_off', sup.toolAccess(dev1.id).handOff === false && JSON.stringify((await mcp(dev1.id, 'tools/list')).body.result?.tools) === '[]');
+    check("and the orchestrator's own wait is not a hand-off either", sup.toolAccess(orchId).handOff === false);
+    const said128 = (agentId: string, text: string) => eventLog().emit({ projectId: opid, jobId: orchJob, agentId }, { kind: 'text', text });
+
+    // The orchestrator ends its turn, having started helpers: it waits for them, queued.
+    orchRun.finish({ cost: 0.1, reason: 'completed' });
+    check('it ends its turn and waits for the helpers, giving its slot back', await until(() => getAgent(db, orchId)?.status === 'queued'));
+
+    said128(dev1.id, 'Parser done in src/parse.ts; the tests pass.');
+    devRun.finish({ cost: 0.2, reason: 'completed' });
+    check('the helper ends done, not held, though another agent waits for it', await until(() => getAgent(db, dev1.id)?.status === 'done'));
+    await settle(100);
+    check('no hold on it, and no card in Needs You for one', !getHandoff(db, dev1.id).held && getAgent(db, dev1.id)?.handoffHeld === undefined && !alerts().list().some((a) => a.kind === 'handoff_held' && a.agentIds.includes(dev1.id)));
+    check('and the agent waiting for it starts, as for any agent that ended', await until(() => getAgent(db, 'o128_after')?.status !== 'queued'));
+
+    // ── the orchestrator hears each helper, and is told to judge it ──────────────
+    said128(rev.id, 'Found a fault: parse.ts line 3 drops the last token.');
+    revRun.finish({ cost: 0.1, reason: 'completed' });
+    await until(() => getAgent(db, rev.id)?.status === 'done');
+    // The two send-backs and the scribe are still running; end every helper's run so the orchestrator is woken.
+    for (let i = 0; i < 8; i += 1) {
+      for (const r of runs) if (!r.finished && (r.prompts[0] ?? '').includes('in a pipeline the orchestrator runs')) r.finish({ cost: 0, reason: 'completed' });
+      await settle(80);
+    }
+    const woke = await until(() => runs.some((r) => r.options.resume === getAgent(db, orchId)?.sdkSessionId && (r.prompts[0] ?? '').includes('Your helpers have finished')));
+    check('when they have all ended it is woken in its own session', woke);
+    const wokeRun = runs.find((r) => r.options.resume === getAgent(db, orchId)?.sdkSessionId && (r.prompts[0] ?? '').includes('Your helpers have finished'))!;
+    const wp = wokeRun?.prompts[0] ?? '';
+    check("told what each said, as the next agent in a stack is: the helper's whole conversation", wp.includes('[developer]') && wp.includes('Agent: Parser done in src/parse.ts; the tests pass.') && wp.includes('[reviewer]') && wp.includes('Agent: Found a fault: parse.ts line 3 drops the last token.'), wp);
+    check('and told to judge the step, write the next brief, send work back or ask — not "combine it"', /Read what each did before you decide anything/.test(wp) && /send the work back/.test(wp) && /at most 2 times/.test(wp) && /question tool/.test(wp) && !/combine it/.test(wp), wp);
+    check('and it ends with the pipeline closing line', wp.includes(pipelineReportClosing(SEND_BACKS_MAX).trim().slice(0, 40)));
+    wokeRun.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, orchId)?.status === 'done');
+
+    // ── an ordinary orchestrator is as it was ────────────────────────────────────
+    const plainMade = await launch([{ role: 'builder', model: O_OPUS, helpers: 2, autonomy: rope({ mode: 'acceptEdits' }) }]);
+    const plainId = plainMade.body.agents?.[0]?.id ?? '~';
+    await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('You orchestrate this builder work')));
+    const plainPrompt = runs.find((r) => (r.prompts[0] ?? '').includes('You orchestrate this builder work'))?.prompts[0] ?? '';
+    check('its prompt is the old parallel-work one, not the pipeline', /parts that can run in parallel/.test(plainPrompt) && !/one at a time and in order/.test(plainPrompt) && !/pipeline/.test(plainPrompt), plainPrompt);
+    check('it is not marked, whatever it starts, and carries no roles', !marksOrchestrator(getAgent(db, plainId)!, [{ parentId: plainId }, { parentId: plainId }]) && getAgent(db, plainId)?.pipelineRoles === undefined && getHelperRoles(db, plainId).length === 0);
+    check('with no roles of its own it takes no role, and says so', (await startOver(plainId, { role: 'developer', task: 'x' })).isError && helpersOf(db, plainId).length === 0);
+    const plainRole = await startOver(plainId, { role: 'developer', task: 'x' });
+    check('in a sentence', /takes no role here/.test(plainRole.text), plainRole.text);
+    check('nor a tier', (await startOver(plainId, { tier: 'haiku', task: 'x' })).isError);
+    const plainStart = await startOver(plainId, { task: 'Build the API.', name: 'API' });
+    const plainHelper = helpersOf(db, plainId)[0];
+    check('without a role it starts as it always did: its model, its permissions, the old brief', !plainStart.isError && /^Started builder-api\./.test(plainStart.text) && plainHelper?.model === O_OPUS && plainHelper.autonomy.mode === 'acceptEdits' && (getAgentBrief(db, plainHelper.id) ?? '').includes('Other helpers are working in this folder at the same time') && getHelperRole(db, plainHelper.id) === null, plainStart.text);
+    check('its tool schema has no role, and is the old one', (() => {
+      const t = toolsFor({ helperCap: 2 }).find((x) => x.name === 'start_helper');
+      return !!t && !('role' in (t.inputSchema['properties'] as object)) && JSON.stringify(t.inputSchema['required']) === '["task"]' && t === MCP_TOOLS[0];
+    })());
+    check('the pipeline prompt is its own text, for the pipeline', (() => {
+      const o = pipelineSection('builder', 2, [{ id: 'developer' }]);
+      return /one at a time and in order/.test(o) && !/parts that can run in parallel/.test(o);
+    })());
+    check('the pipeline helper brief names the role, the orchestrator and the step', pipelineHelperBrief('orchestrator', 'validator', 'Write tests.', 'Cover the parser.').includes('You are the validator in a pipeline the orchestrator runs') && pipelineHelperBrief('orchestrator', 'validator', undefined, 'Cover the parser.').includes('Cover the parser.'));
+
+    // ── the defence at start: a row whose rope no longer keeps a reader reading ──
+    fixture('o128_loose', orchJob, { projectId: opid, role: 'orchestrator', status: 'working', sdkSessionId: 'sess_o128_loose', helperCap: 3, autonomy: rope() });
+    db.prepare('UPDATE agents SET helper_roles = ? WHERE id = ?').run(JSON.stringify([{ ...ROLES[1]!, autonomy: rope({ mode: 'acceptEdits' }) }]), 'o128_loose');
+    const loose = await startOver('o128_loose', { role: 'reviewer', task: 'Review it.' });
+    check('a reading role whose stored rope would let it write is not started', loose.isError && /reviewer is a reading role/.test(loose.text) && helpersOf(db, 'o128_loose').length === 0, loose.text);
+
+
+    // ── the other engines: the same roles reach their in-process tools ───────────
+    const scopes: { agentId: string; helperCap?: number; handOff?: boolean; roles?: { id: string; tier?: string; model?: string; reads?: boolean }[]; model: string }[] = [];
+    const seen = { copilot: backendFor('copilot') };
+    registerBackend({
+      provider: 'copilot',
+      capabilities: { defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true },
+      listModels: async () => [],
+      unavailable: () => null,
+      create: (d: Db, scope: (typeof scopes)[number]) => {
+        scopes.push(scope);
+        return {
+          agentId: scope.agentId,
+          isLive: false,
+          sessionId: null,
+          run: () => new Promise(() => {}),
+          send: () => false,
+          setModel: async () => false,
+          interrupt: async () => {},
+          stop: async () => {},
+        } as never;
+      },
+    });
+    const onCopilot = await launch([
+      {
+        role: 'orchestrator',
+        model: 'gpt-5',
+        provider: 'copilot',
+        autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 500_000 },
+        helpers: pipelineHelperCap(2),
+        helperRoles: [
+          { id: 'developer', model: 'gpt-5', autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 500_000 } },
+          { id: 'reviewer', model: 'gpt-5', autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 500_000, mode: 'default', disallowedTools: [...WRITE_TOOLS] } },
+        ],
+      },
+    ]);
+    check('a stack on Copilot or OpenRouter launches with its roles, with no tiers to choose between', onCopilot.status === 201 && getAgent(db, onCopilot.body.agents?.[0]?.id ?? '~')?.pipelineRoles?.join() === 'developer,reviewer', `${onCopilot.status} ${onCopilot.body.detail ?? ''}`);
+    await until(() => scopes.length > 0);
+    check("its backend is given the roles, to build start_helper from in-process", scopes[0]?.helperCap === 6 && scopes[0]?.roles?.map((r) => r.id).join() === 'developer,reviewer' && scopes[0]?.roles?.find((r) => r.id === 'reviewer')?.reads === true && scopes[0]?.roles?.find((r) => r.id === 'developer')?.reads === undefined, JSON.stringify(scopes[0]));
+    const copilotTool = toolsFor({ helperCap: scopes[0]?.helperCap, roles: scopes[0]?.roles }).find((t) => t.name === 'start_helper');
+    check('which is the schema Claude\'s endpoint serves: a role is required, and a tier is not offered where no tier was listed', JSON.stringify(copilotTool?.inputSchema['required']) === '["role","task"]' && /developer, reviewer \(reads only\)/.test(copilotTool?.description ?? ''));
+    const cpHelper = await startOver(onCopilot.body.agents?.[0]?.id ?? '~', { role: 'reviewer', task: 'Review it.' });
+    const cpH = helpersOf(db, onCopilot.body.agents?.[0]?.id ?? '~')[0];
+    check('a role starts there too, on the same provider, read-only and capped in tokens', !cpHelper.isError && cpH?.provider === 'copilot' && cpH.model === 'gpt-5' && cpH.autonomy.budgetTokens === 500_000 && readOnlyRefusal('reviewer', cpH.autonomy) === null, cpHelper.text);
+    check('and a tier is refused there: this engine has none', (await startOver(onCopilot.body.agents?.[0]?.id ?? '~', { role: 'developer', task: 'x', tier: 'haiku' })).isError);
+    if (seen.copilot) registerBackend(seen.copilot);
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
     sdk.query = realQuery;
   }
 

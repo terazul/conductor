@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, readOnlyRefusal, type Agent, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -56,7 +56,22 @@ import {
   readsOnly,
   toAgentSpecs,
   unresolvedRoles,
+  orchestratedFor,
 } from './presets.js';
+import {
+  ORCHESTRATED_ID,
+  defaultListed,
+  helperCapFor,
+  offeredRoles,
+  orchestrates,
+  sendBackWords,
+  stackAgents,
+  unresolvedListed,
+  withRole,
+  withTier,
+  withoutRole,
+  type ListedRole,
+} from './orchestrated.js';
 
 let failures = 0;
 
@@ -575,7 +590,7 @@ console.log('\n10 · how the agents interact with you, chosen at launch (Amendme
   check('a saved default is read, and a bad one is the default', launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'auto' : null)).mode === 'auto' && launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'yolo' : null)).mode === 'acceptEdits');
   check('the summary says when nothing will ask, shell included', describeAutonomy(bypass).startsWith('⚠ asks you nothing · runs shell unattended'), describeAutonomy(bypass));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
+  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
 }
 
 console.log('\n11 · MCP tools, and what a reading role never gets (Amendment 67)');
@@ -664,7 +679,7 @@ console.log('\n13 · presets and Custom rows take their personas (Amendment 68)'
   check('a saved setup keeps each persona by id', back[0]?.roles.map((r) => r.persona ?? '-').join() === 'developer,developer,validator,-', JSON.stringify(back));
   check('a persona name becomes a role name', roleFromName('Migrator Pro') === 'migrator-pro' && roleFromName('developer') === 'developer' && /^[a-z]/.test(roleFromName('2 fast')));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn reads the personas setting and hands it on', /personasFrom\(personasRaw\)/.test(src) && /useSetting\(PERSONAS_KEY\)/.test(src) && /mode, personas\)/.test(src) && /personas=\{personas\}/.test(src) && /personaPicks\(custom, personas\)/.test(src));
+  check('Spawn reads the personas setting and hands it on', /personasFrom\(personasRaw\)/.test(src) && /useSetting\(PERSONAS_KEY\)/.test(src) && /mode, personas(, listed)?\)/.test(src) && /personas=\{personas\}/.test(src) && /personaPicks\(custom, personas\)/.test(src));
 }
 
 {
@@ -721,11 +736,11 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('stops at 500k tokens') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
+  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span className="sp-pill" aria-pressed=\{budgetPerAgent !== null\}>\s*⏱ stop each agent after \$/.test(src) && /value=\{budgetTok\}/.test(src));
-  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && \(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
+  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && !listsRoles && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 
 console.log('\n16 · fewer built-in personas, and the full pipeline reads the plan (Amendment 84)');
@@ -1188,6 +1203,108 @@ console.log('\n20 · better instructions for the built-in roles (Amendment 126)'
   );
   const theirs = withPersona(null, { ...personaFor(every, 'developer')!, systemPrompt: 'Prefer pure functions.' });
   check('someone who replaced a system prompt keeps theirs, and Reset gives them the new one', personaFor(personasFrom(theirs), 'developer')?.systemPrompt === 'Prefer pure functions.' && personaFor(personasFrom(resetPersona(theirs, 'developer')), 'developer')?.systemPrompt === sp('developer') && JSON.parse(mine).edits.validator && Object.keys(JSON.parse(mine).edits.validator).join() === 'brief');
+}
+
+console.log('\n21 · orchestrated stacks: one agent runs the others, with the roles it may start listed before launch (Amendment 128)');
+{
+  const tiersNow = { opus: 'us.anthropic.claude-opus-5', sonnet: 'us.anthropic.claude-sonnet-5', haiku: 'us.anthropic.claude-haiku-5' };
+  const every = personasFrom(null);
+  const orch = presetById(ORCHESTRATED_ID);
+  const specsFor = (listed: readonly ListedRole[], personas = every, tiers = tiersNow) =>
+    toAgentSpecs(orchestratedFor(orch, listed), PERMISSIVE, 5, undefined, {}, tiers, {}, undefined, personas, listed);
+
+  check('there is a preset "orchestrated pipeline", beside the fixed ones', orch.id === 'orchestrated' && orch.label === 'orchestrated pipeline' && PRESETS.some((p) => p.id === 'full') && PRESETS.some((p) => p.id === 'orchestrated'));
+  check('it is one row, the orchestrator: the architect persona on a strong model', orch.roles.length === 1 && orch.roles[0]!.role === 'orchestrator' && orch.roles[0]!.persona === 'architect' && orch.roles[0]!.model === 'opus' && orch.roles[0]!.orchestrates === true);
+  check('and no other preset has an orchestrator row', PRESETS.filter((p) => p.id !== 'orchestrated').every((p) => !p.orchestrated && p.roles.every((r) => !r.orchestrates)));
+  check('its brief says to run the steps one at a time, send work back and ask', /one role at a time/.test(orch.roles[0]!.brief) && /Send work back/.test(orch.roles[0]!.brief) && /ask the user/.test(orch.roles[0]!.brief));
+
+  // The roles it may start, before launch.
+  const defaults = defaultListed(every);
+  check('the roles listed are developer, validator, reviewer and scribe, each on its persona\'s tier', defaults.map((r) => `${r.id}:${r.tier}`).join() === 'developer:sonnet,validator:sonnet,reviewer:opus,scribe:sonnet');
+  check('as the full pipeline has their tiers', defaults.every((r) => presetById('full').roles.find((x) => x.role === r.id)!.model === r.tier));
+  check('a persona edited to another tier moves its role', defaultListed(personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, model: 'haiku' }))).find((r) => r.id === 'scribe')?.tier === 'haiku');
+  check('with no personas loaded, the built-ins\' tiers', defaultListed().map((r) => r.tier).join() === 'sonnet,sonnet,opus,sonnet');
+
+  const specs = specsFor(defaults);
+  check('one agent is launched: the orchestrator, as the architect', specs.length === 1 && specs[0]!.role === 'orchestrator' && specs[0]!.persona === 'architect' && specs[0]!.systemPrompt === personaFor(every, 'architect')!.systemPrompt);
+  const o = specs[0]!;
+  check('it may start helpers enough for each role once and sent back twice: 4 roles × 3', o.helpers === 12 && o.helpers === helperCapFor(defaults) && o.helpers === pipelineHelperCap(4));
+  check('and carries the roles in the launch request', o.helperRoles?.map((r) => r.id).join() === 'developer,validator,reviewer,scribe', JSON.stringify(o.helperRoles?.map((r) => r.id)));
+  const role = (id: string) => o.helperRoles!.find((r) => r.id === id)!;
+  check('each with the model its tier means now', role('developer').model === tiersNow.sonnet && role('reviewer').model === tiersNow.opus && role('developer').tier === 'sonnet' && role('reviewer').tier === 'opus');
+  check("and its persona's system prompt, brief and skills", role('developer').systemPrompt === personaFor(every, 'developer')!.systemPrompt && role('developer').brief === personaFor(every, 'developer')!.brief.trim() && /^End with: /.test(role('validator').systemPrompt!.trimEnd().split('\n').at(-1) ?? ''));
+  check('and what every tier meant at launch, so it can ask for a cheaper one', JSON.stringify(role('developer').tiers) === JSON.stringify(tiersNow));
+  check('a reading role is pinned read-only whatever the pills: write tools denied, no shell, not auto-approved', WRITE_TOOLS.every((t) => role('reviewer').autonomy.disallowedTools.includes(t)) && role('reviewer').autonomy.mode !== 'acceptEdits' && !role('reviewer').autonomy.allowedTools.includes('Bash') && readOnlyRefusal('reviewer', role('reviewer').autonomy) === null);
+  check('a writing role is as it is in any stack', !role('developer').autonomy.disallowedTools.includes('Write') && role('developer').autonomy.budgetUsd === 5);
+  check('each role is launched exactly as the same role is in the full pipeline', ['developer', 'reviewer', 'validator', 'scribe'].every((id) => {
+    const inFull = toAgentSpecs(presetById('full'), PERMISSIVE, 5, undefined, {}, tiersNow, {}, undefined, every).find((x) => x.role === id)!;
+    return JSON.stringify(role(id).autonomy) === JSON.stringify(inFull.autonomy) && role(id).systemPrompt === inFull.systemPrompt && role(id).model === inFull.model;
+  }));
+  check('the orchestrator itself is not a reading role: it can write the plan', !o.autonomy.disallowedTools.includes('Write'));
+
+  // The request body.
+  const body = launchBody({ projectId: 'p', prompt: 'Build it.', method: 'worktree', branch: '', preset: presetLabel(orch.label, false), agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) });
+  const wire = JSON.parse(JSON.stringify(body)) as { agents: { helpers?: number; helperRoles?: { id: string; model: string }[] }[]; preset: string };
+  check('the launch request carries the roles and the helper cap', wire.preset === 'orchestrated pipeline' && wire.agents[0]!.helpers === 12 && wire.agents[0]!.helperRoles!.length === 4 && wire.agents[0]!.helperRoles![0]!.model === tiersNow.sonnet);
+  check('an ordinary launch sends neither', ['full', 'bugfix', 'review', 'analysis', 'single'].every((id) => {
+    const j = JSON.stringify(toAgentSpecs(presetById(id), PERMISSIVE, 5, undefined, {}, tiersNow, {}, undefined, every, defaults));
+    return !j.includes('helperRoles') && !j.includes('"helpers"');
+  }));
+
+  // Editable, like the other plan rows.
+  const noReviewer = withoutRole(defaults, 'reviewer');
+  const lighter = withTier(noReviewer, 'developer', 'haiku');
+  const s2 = specsFor(lighter)[0]!;
+  check('a role can be removed: it is not listed, and the cap follows', s2.helperRoles?.map((r) => r.id).join() === 'developer,validator,scribe' && s2.helpers === 9);
+  check('a tier can be changed: the model follows it, and the others are as they were', s2.helperRoles?.find((r) => r.id === 'developer')?.model === tiersNow.haiku && s2.helperRoles?.find((r) => r.id === 'developer')?.tier === 'haiku' && s2.helperRoles?.find((r) => r.id === 'validator')?.model === tiersNow.sonnet);
+  check('a role can be added, on its persona\'s tier, at the end', withRole(defaults, 'debugger', every).at(-1)?.id === 'debugger' && withRole(defaults, 'debugger', every).at(-1)?.tier === 'opus' && specsFor(withRole(defaults, 'debugger', every))[0]!.helpers === 15);
+  check('a debugger it may start is read-only too', WRITE_TOOLS.every((t) => specsFor(withRole(defaults, 'debugger', every))[0]!.helperRoles!.find((r) => r.id === 'debugger')!.autonomy.disallowedTools.includes(t)));
+  check('but not one twice', withRole(defaults, 'developer', every).length === 4 && withRole(defaults, 'developer', every).map((r) => r.id).join() === 'developer,validator,reviewer,scribe');
+  check('nor more than eight', withRole(Array.from({ length: 8 }, (_, i) => ({ id: `r${i}`, tier: 'sonnet' as const })), 'architect', every).length === 8);
+  check('what is left to add is every persona not listed', offeredRoles(defaults, every).map((p) => p.id).join() === 'architect,debugger,analyst' && offeredRoles([], every).length === every.length);
+  check('the list is this launch\'s only: the default is untouched by an edit', defaultListed(every).length === 4 && defaults.length === 4 && noReviewer.length === 3);
+  check('a tier with no model served blocks the launch, and names the role', unresolvedListed(defaults, { opus: tiersNow.opus, sonnet: tiersNow.sonnet }).map((r) => r.id).join() === '' && unresolvedListed(lighter, { opus: tiersNow.opus, sonnet: tiersNow.sonnet }).map((r) => r.id).join() === 'developer');
+
+  // One agent needs no orchestrator.
+  check('with every role removed it is one agent, and one agent has no orchestrator', !orchestrates([]) && !showsOrchestrator(stackAgents([])) && orchestrates(withoutRole(withoutRole(withoutRole([{ id: 'developer', tier: 'sonnet' }, { id: 'scribe', tier: 'sonnet' }], 'developer'), 'scribe'), 'x')) === false);
+  const lone = orchestratedFor(orch, []);
+  check('the preset then launches that one agent plainly: the architect row, no orchestrator, no list', lone.roles.length === 1 && lone.roles[0]!.role === 'architect' && !lone.roles[0]!.orchestrates && !lone.orchestrated && lone.roles[0]!.persona === undefined);
+  const plain = specsFor([])[0]!;
+  check('and its spec has no helpers and no roles, so nothing orchestrates', specsFor([]).length === 1 && plain.role === 'architect' && !('helpers' in plain) && !('helperRoles' in plain) && !JSON.stringify(plain).includes('orchestrat'), JSON.stringify(plain));
+  check('and is the full pipeline\'s architect: its brief, its tier, its persona', plain.brief === presetById('full').roles[0]!.brief && plain.model === tiersNow.opus && plain.persona === 'architect');
+  check('one role listed is two agents, so there is an orchestrator after all', orchestrates([{ id: 'developer', tier: 'sonnet' }]) && showsOrchestrator(stackAgents([{ id: 'developer', tier: 'sonnet' }])) && specsFor([{ id: 'developer', tier: 'sonnet' }])[0]!.helpers === 3 && orchestratedFor(orch, [{ id: 'developer', tier: 'sonnet' }]) === orch);
+  check('a preset that is not orchestrated is returned as it is', orchestratedFor(presetById('full'), []) === presetById('full') && orchestratedFor(presetById('single'), defaults) === presetById('single'));
+  check('the preset is not changed by launching it plain', orchestratedFor(orch, []) !== orch && orch.roles[0]!.role === 'orchestrator' && orch.orchestrated === true);
+
+  // Without a persona in hand, or off Claude.
+  const bare = toAgentSpecs(orchestratedFor(orch, defaults), PERMISSIVE, 5, undefined, {}, tiersNow, {}, undefined, undefined, defaults)[0]!;
+  check('without personas the roles are listed with no prompts, still read-only where they read', bare.helperRoles!.length === 4 && bare.helperRoles!.every((r) => !('systemPrompt' in r)) && WRITE_TOOLS.every((t) => bare.helperRoles!.find((r) => r.id === 'reviewer')!.autonomy.disallowedTools.includes(t)));
+  const copilotCaps: Capabilities = { defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true };
+  const on = specsOn(specs, { provider: 'copilot', caps: copilotCaps, model: 'gpt-5', budgetTokens: 500_000 });
+  check('off Claude every role runs on the launch\'s one model, in tokens, with no tiers', on[0]!.helperRoles!.every((r) => r.model === 'gpt-5' && !('tier' in r) && !('tiers' in r) && r.autonomy.budgetUsd === null && r.autonomy.budgetTokens === 500_000) && on[0]!.helpers === 12);
+  check('and a reading role there is still read-only', WRITE_TOOLS.every((t) => on[0]!.helperRoles!.find((r) => r.id === 'reviewer')!.autonomy.disallowedTools.includes(t)));
+  const none = specsOn(specs, { provider: 'copilot', caps: NONE, model: 'gpt-5', budgetTokens: null });
+  check('an engine that cannot start helpers is sent neither the helpers nor the roles', !('helpers' in none[0]!) && !('helperRoles' in none[0]!));
+  check('a Claude launch is the very same specs', specsOn(specs, { provider: CLAUDE, caps: ALL_ON, model: '', budgetTokens: null }) === specs);
+
+  // What Spawn shows.
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check('Spawn lists the roles under the row, and marks the orchestrator only on that row', /listsRoles && i === 0 && \(\s*<Pipeline/.test(route) && /\{r\.orchestrates && <OrchestratorMark \/>\}/.test(route) && /\$\{r\.orchestrates \? ' is-orch' : ''\}/.test(route));
+  check('the row\'s "+ up to N helpers" is not offered on it, nor on the lone architect it becomes: the list sets the cap, and one agent has no orchestrator affordance', /has\.helpers && !r\.orchestrates && !listsRoles/.test(route));
+  check('the list is state of this launch: a preset change puts the default back', /setListedEdit\(null\)/.test(route) && /listedEdit \?\? defaultListed\(personas\)/.test(route));
+  check('an engine that cannot start helpers lists none', /has\.helpers \? \(listedEdit \?\? defaultListed\(personas\)\) : \[\]/.test(route));
+  check('a launch waits for a tier with no model, as it does for a row', /missingListed\.length === 0/.test(route) && /unresolvedListed\(listed, tiers\)/.test(route));
+  const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
+  check('the list can remove a role, change a tier and add one, and says how work is sent back', /withoutRole\(listed, l\.id\)/.test(picker) && /withTier\(listed, l\.id/.test(picker) && /withRole\(listed, e\.target\.value/.test(picker) && /sendBackWords\(\)/.test(picker));
+  check('a stack of one says it is one agent, with no orchestrator', /No role listed, so this launches one architect agent and nothing orchestrates/.test(picker));
+  check('the words say what the daemon enforces: twice a role, then it asks', /at most 2 times, then it asks you/.test(sendBackWords()));
+
+  // Both themes: the new rules use the measured tokens, and no colour of their own, and no status colour.
+  const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');
+  const mine = css.slice(css.indexOf('an orchestrated stack (Amendment 128)'), css.indexOf('moving a row up or down the stack (Amendment 99)'));
+  const vars = [...mine.matchAll(/var\(--([a-z0-9-]+)\)/g)].map((m) => m[1]!);
+  const STATUS = ['live', 'need', 'fail', 'done', 'you', 'queue', 'idle'];
+  check('the orchestrator\'s plan rules use ink and line tokens only: no hex, and not --live, --done, --need, --fail or --you', mine.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(mine) && vars.every((v) => !STATUS.includes(v)) && ['ink2', 'line2'].every((v) => vars.includes(v)), [...new Set(vars)].join());
 }
 
 console.log(

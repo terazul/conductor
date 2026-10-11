@@ -302,6 +302,7 @@ Spawn. Jobs that were launched with it are unchanged.
 | Preset | |
 |---|---|
 | **full build pipeline** | architect designs it, then developer builds it, validator tests what was built, reviewer judges it against the plan, and scribe records it, one after another. The reviewer and the scribe are also handed the architect's plan. The default. |
+| **orchestrated pipeline** | one architect, the **orchestrator**, runs the others: it starts developer, validator, reviewer and scribe one at a time, reads what each did, writes the next one's brief, sends work back when a review fails, and asks you when it is unsure. You choose the roles it may start. See "An orchestrated pipeline" below. |
 | **bug fix** | debugger finds the root cause, developer fixes it. |
 | **review only** | one reviewer. Judges a change; reports findings. |
 | **analysis** | analyst explains how the code works, then scribe writes that into the project's docs. |
@@ -395,6 +396,55 @@ system prompt is what reaches every stack. If you had edited a built-in, you kee
 The job's budget is the sum of its agents' budgets, so each helper adds one agent's budget. It
 works as an agent's does: Needs You warns when the job passes it, and agents still to start
 are held only at twice it (§6).
+
+**An orchestrated pipeline.** The other presets fix the order before you launch and have each
+agent judge its own work and hand it on (`hand_off`). **orchestrated pipeline** is the other
+kind: one agent, the **orchestrator** (the architect persona, on opus), decides the order while
+it runs and judges every step. Pick it beside the fixed ones, and keep the fixed ones for work
+whose steps you already know.
+
+- **The roles it may start are listed under its row before you launch.** Unless you change
+  them: developer, validator, reviewer and scribe, each on the tier its persona asks for
+  (sonnet, sonnet, opus and sonnet). Change a role's **tier** with its picker, remove one
+  with **×**, or add another (architect, debugger, analyst or a persona of your own) with
+  **+ add a role…**. It can start those roles and no others. The list is for this launch only;
+  choosing the preset again puts the default back.
+- **How it works.** It plans the steps, then starts one role at a time with `start_helper`,
+  giving it a `role` and a `task` it writes in full: a helper is told the job instruction and that
+  task and sees the folder, but not the orchestrator's conversation. It ends its turn and waits,
+  **queued**, giving its slot back. When the helper has ended it is woken with that helper's
+  **whole conversation**: what it was told, what it said, and a line for each tool it called
+  (the same text, within the same share of the window, as for an agent in a stack). It reads
+  it before it decides whether the step is ready, and then writes the next brief. A step that
+  stopped is not a step that is ready.
+- **Each helper runs as its role.** It has that persona's system prompt (what the built-in roles
+  are told, above), skills, tools and model, and its lane is named for the role (`developer`,
+  `reviewer`, …), under the orchestrator's. A reading role (reviewer, debugger, analyst) stays
+  read-only: the write tools are denied outright, whatever the pills say. The orchestrator may
+  ask for a **cheaper tier** than the one listed for a step that is easy (`tier` on
+  `start_helper`); a dearer one than you chose is refused.
+- **It can send work back**, at most **twice per role**. After a failed review it starts the
+  developer again with a new brief that says what failed; that is the first send-back. The
+  second is the last: a role is started at most three times in all, and a fourth start is
+  refused with a sentence telling it to ask you with the question tool, which puts the question
+  in **Needs You**. It also asks you, in the same way, whenever it is unsure: a choice that is
+  yours, a result it cannot judge, a step that keeps failing.
+- **Its helpers have no `hand_off`.** The orchestrator's own judgement of each result replaces
+  it, so a helper is never **held** as "not handed off" and never waits in Needs You for you to
+  hand off for it.
+- **Cost.** Each helper takes a slot and one agent's budget, so the job's budget is the sum of
+  its agents' budgets, as for helpers above. The launch allows the orchestrator as many helpers
+  as the roles listed times three (four roles, twelve helpers): each role once, and sent back
+  twice. The orchestrator wakes with a growing conversation each time and is the one
+  agent to put on a strong model; a fixed stack costs less. If it misjudges a step the mistake
+  runs through every step after it, where a fixed stack's agents each judge their own.
+- **How it looks.** The orchestrator wears a **◆ orchestrator** mark and a heavier edge in plain
+  ink, no status colour, in the plan, on its Project lane and Fleet card row (◆) and on its
+  Agent tab (◆). Only a stack of two or more agents has one. Take every role off the list
+  and it is one agent: the plan says so, the mark and the helper cap are gone, and it launches as
+  the full pipeline's architect on its own.
+- **On Copilot or OpenRouter** every role runs on the launch's one model, with no tiers to
+  choose between; the rest is the same.
 
 Each row gets its model in the plan preview, like the presets. Each role can appear only
 once, and a role that only reads (`reviewer`, `analyst`, …) stays read-only here too. Name

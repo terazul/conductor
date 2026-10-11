@@ -21,7 +21,9 @@ import type {
   Decision,
   EffortLevel,
   HandOffRequest,
+  HelperRole,
   Isolation,
+  ModelTier,
   PendingRequest,
   Project,
   RemoveAgentResponse,
@@ -32,7 +34,7 @@ import type {
   SetModelResponse,
   StopRetryingResponse,
 } from '@conductor/shared';
-import { HELPERS_MAX, NOTE_MAX, type ProviderInfo } from '@conductor/shared';
+import { HELPERS_MAX, NOTE_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
@@ -176,6 +178,73 @@ function parsePersona(role: string, e: Record<string, unknown>): Pick<AgentSpec,
   return out;
 }
 
+/** Limits on the roles an orchestrated stack lists (Amendment 128). */
+const HELPER_ROLE_ID = /^[a-z][a-z0-9-]{0,30}$/;
+const HELPER_TIERS: ModelTier[] = ['opus', 'sonnet', 'haiku'];
+const ROLE_BRIEF_MAX = 8_000;
+
+/**
+ * The roles an orchestrated stack's orchestrator may start (Amendment 128), checked as a spec's
+ * own persona and rope are: refused, not trimmed into shape, since a role with its rope loosened
+ * would start helpers that are not what was listed. A reading role whose rope does not keep it
+ * reading is refused here (`readOnlyRefusal`) and again when a helper is started.
+ */
+function parseHelperRoles(owner: string, provider: ProviderId, raw: unknown): HelperRole[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error(`agent ${owner}: helperRoles is an array of the roles it may start`);
+  if (raw.length > PIPELINE_ROLES_MAX) throw new Error(`agent ${owner}: at most ${PIPELINE_ROLES_MAX} roles may be listed`);
+  const out: HelperRole[] = [];
+  for (const entry of raw) {
+    const e = asRecord(entry);
+    const id = typeof e['id'] === 'string' ? e['id'].trim() : '';
+    if (!HELPER_ROLE_ID.test(id)) {
+      throw new Error(`agent ${owner}: a listed role's id is lowercase letters, digits and dashes, starting with a letter, at most 31 characters`);
+    }
+    if (out.some((r) => r.id === id)) throw new Error(`agent ${owner}: role ${id} is listed twice`);
+    const label = `agent ${owner}, role ${id}`;
+    const model = typeof e['model'] === 'string' ? e['model'].trim() : '';
+    if (!model) throw new Error(`${label} needs a model`);
+    const refused = provider === 'claude' ? refusal(model) : null;
+    if (refused) throw new Error(`${label}: ${refused}`);
+    const tier = e['tier'];
+    if (tier !== undefined && tier !== null && !HELPER_TIERS.includes(tier as ModelTier)) {
+      throw new Error(`${label}: tier is one of ${HELPER_TIERS.join(', ')}`);
+    }
+    const brief = e['brief'];
+    if (brief !== undefined && brief !== null) {
+      if (typeof brief !== 'string') throw new Error(`${label}: brief must be a string`);
+      if (brief.length > ROLE_BRIEF_MAX) throw new Error(`${label}: brief is at most ${ROLE_BRIEF_MAX} characters`);
+    }
+    let autonomy: Autonomy;
+    try {
+      autonomy = autonomyFor(provider, e['autonomy']);
+    } catch (err) {
+      throw new Error(`${label}: ${(err as Error).message}`);
+    }
+    const rope = readOnlyRefusal(id, autonomy);
+    if (rope) throw new Error(`${label}: ${rope}`);
+    const tiers: Partial<Record<ModelTier, string>> = {};
+    for (const [k, v] of Object.entries(asRecord(e['tiers']))) {
+      if (!HELPER_TIERS.includes(k as ModelTier) || typeof v !== 'string' || !v.trim() || v.length > 200) {
+        throw new Error(`${label}: tiers names opus, sonnet or haiku, each with a model id`);
+      }
+      tiers[k as ModelTier] = v.trim();
+    }
+    const { systemPrompt, skills } = parsePersona(label, e);
+    out.push({
+      id,
+      ...(typeof tier === 'string' ? { tier: tier as ModelTier } : {}),
+      model,
+      ...(typeof brief === 'string' && brief.trim() ? { brief: brief.trim() } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(skills ? { skills } : {}),
+      autonomy,
+      ...(Object.keys(tiers).length > 0 ? { tiers } : {}),
+    });
+  }
+  return out;
+}
+
 /**
  * One agent's spec, checked as a launch checks each of its agents: what Spawn sends, and
  * what `POST /api/jobs/:jobId/agents` adds to a running job (Amendment 89). Its
@@ -198,9 +267,16 @@ function parseAgentSpec(entry: unknown): AgentSpec {
   // is checked after these, in checkProviderModels (Amendment 78).
   const refused = provider === 'claude' ? refusal(model) : null;
   if (refused) throw new Error(`agent ${role}: ${refused}`);
+  // An orchestrated stack (Amendment 128) lists the roles its orchestrator may start. Its helpers
+  // are counted in all, send-backs included, so its cap is the roles times the starts each may have.
+  const helperRoles = parseHelperRoles(role, provider, e['helperRoles']);
   const helpers = e['helpers'] ?? 0;
-  if (typeof helpers !== 'number' || !Number.isInteger(helpers) || helpers < 0 || helpers > HELPERS_MAX) {
-    throw new Error(`agent ${role}: helpers is a whole number from 0 to ${HELPERS_MAX}`);
+  const helpersMax = helperRoles.length > 0 ? pipelineHelperCap(helperRoles.length) : HELPERS_MAX;
+  if (typeof helpers !== 'number' || !Number.isInteger(helpers) || helpers < 0 || helpers > helpersMax) {
+    throw new Error(`agent ${role}: helpers is a whole number from 0 to ${helpersMax}`);
+  }
+  if (helperRoles.length > 0 && helpers === 0) {
+    throw new Error(`agent ${role}: helperRoles are the roles it may start, so helpers must be above 0`);
   }
   let autonomy: Autonomy;
   try {
@@ -220,6 +296,7 @@ function parseAgentSpec(entry: unknown): AgentSpec {
     ...(helpers > 0 ? { helpers } : {}),
     ...parsePersona(role, e),
     ...(provider !== 'claude' ? { provider } : {}),
+    ...(helperRoles.length > 0 ? { helperRoles } : {}),
   };
 }
 
@@ -261,8 +338,14 @@ function parseAgentSpecs(raw: unknown): AgentSpec[] {
 async function checkProviderModels(specs: AgentSpec[]): Promise<void> {
   for (const spec of specs) {
     if (!spec.provider || spec.provider === 'claude' || !isProvider(spec.provider)) continue;
-    const refused = providerModelRefusal(await providerModels(spec.provider, backendFor(spec.provider)), spec.model);
+    const list = await providerModels(spec.provider, backendFor(spec.provider));
+    const refused = providerModelRefusal(list, spec.model);
     if (refused) throw new Error(`agent ${spec.role}: ${refused}`);
+    // And the models of the roles it may start (Amendment 128).
+    for (const r of spec.helperRoles ?? []) {
+      const why = providerModelRefusal(list, r.model);
+      if (why) throw new Error(`agent ${spec.role}, role ${r.id}: ${why}`);
+    }
   }
 }
 

@@ -83,6 +83,12 @@ export interface RunnerScope {
    * has no one to hand off to and finishes `done` as it always did.
    */
   handOff?: boolean;
+  /**
+   * Amendment 128: the roles an orchestrated stack's orchestrator may start, which its
+   * `start_helper` is told (in-process for Copilot and OpenRouter; Claude's endpoint answers
+   * from the agent's row). Absent for every other agent.
+   */
+  roles?: { id: string; tier?: string; model?: string; reads?: boolean }[];
   model: string;
   autonomy: Autonomy;
   /**

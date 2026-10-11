@@ -15,6 +15,7 @@ import type {
   Autonomy,
   BlockMode,
   DecisionSummary,
+  HelperRole,
   Isolation,
   Job,
   PendingRequest,
@@ -382,6 +383,8 @@ interface AgentRow {
   system_prompt?: string | null;
   skills?: string | null;
   handoff_held?: number | null;
+  helper_roles?: string | null;
+  helper_role?: string | null;
 }
 
 /** Used when a row predates a field, or carries unparseable JSON. */
@@ -417,6 +420,8 @@ const toAgent = (r: AgentRow): Agent => ({
   // Only while it is done and held for not handing off (Amendment 120), so every other agent's
   // shape is what it was. The same pair the alert and the daemon's refusals read (Amendment 104).
   ...(r.status === 'done' && r.handoff_held === 1 ? { handoffHeld: true } : {}),
+  // Only on the orchestrator of an orchestrated stack (Amendment 128): the ids, nothing of the roles' prompts.
+  ...pipelineRolesField(r.helper_roles),
 });
 
 /** The engine an agent runs on (Amendment 74). `claude` for every agent from before. */
@@ -426,6 +431,44 @@ export function getAgentProvider(db: Db, id: string): ProviderId {
 }
 
 // ── orchestrators and helpers (Amendment 51) ────────────────────────────────
+
+/** The roles stored on an orchestrator row, whole, dropping anything that is not one (Amendment 128). */
+function pipelineRolesOf(raw: string | null | undefined): HelperRole[] {
+  const v = raw ? parse<unknown>(raw, []) : [];
+  return Array.isArray(v)
+    ? v.filter((r): r is HelperRole => !!r && typeof r === 'object' && typeof (r as HelperRole).id === 'string' && typeof (r as HelperRole).model === 'string')
+    : [];
+}
+
+/** `{ pipelineRoles }` for an orchestrator's wire shape, or nothing: the ids of its roles (Amendment 128). */
+function pipelineRolesField(raw: string | null | undefined): { pipelineRoles?: string[] } {
+  if (!raw) return {};
+  const ids = pipelineRolesOf(raw).map((r) => r.id);
+  return ids.length > 0 ? { pipelineRoles: ids } : {};
+}
+
+/**
+ * The roles an orchestrator may start, as it was launched with them (Amendment 128): each with
+ * the prompt, rope and model a helper of that role runs with. Empty for an ordinary agent and
+ * for an ordinary orchestrator, whose helpers have no role.
+ */
+export function getHelperRoles(db: Db, id: string): HelperRole[] {
+  const r = row<Pick<AgentRow, 'helper_roles'>>(db.prepare('SELECT helper_roles FROM agents WHERE id = ?').get(id));
+  return pipelineRolesOf(r?.helper_roles);
+}
+
+/** The listed role a helper was started as, or null (Amendment 128). */
+export function getHelperRole(db: Db, id: string): string | null {
+  const r = row<Pick<AgentRow, 'helper_role'>>(db.prepare('SELECT helper_role FROM agents WHERE id = ?').get(id));
+  return r?.helper_role ?? null;
+}
+
+/** How many helpers of this role the orchestrator has started, ended or not (Amendment 128). */
+export function startedAsRole(db: Db, orchestratorId: string, role: string): number {
+  return row<{ n: number }>(
+    db.prepare('SELECT COUNT(*) AS n FROM agents WHERE parent_id = ? AND helper_role = ?').get(orchestratorId, role),
+  )?.n ?? 0;
+}
 
 export function helpersOf(db: Db, parentId: string): Agent[] {
   return rows<AgentRow>(
@@ -581,6 +624,9 @@ export function insertAgent(
     persona?: string;
     systemPrompt?: string;
     skills?: string[];
+    /** Amendment 128: the roles an orchestrator may start; and, on a helper, the one it was started as. Off the wire. */
+    helperRoles?: HelperRole[];
+    helperRole?: string;
   },
 ): Agent {
   const agent: Agent = {
@@ -602,13 +648,14 @@ export function insertAgent(
     ...(a.helperCap ? { helperCap: a.helperCap } : {}),
     ...(a.parentId ? { parentId: a.parentId } : {}),
     ...(a.provider && a.provider !== 'claude' ? { provider: a.provider } : {}),
+    ...(a.helperRoles?.length ? { pipelineRoles: a.helperRoles.map((r) => r.id) } : {}),
   };
   db.prepare(
     `INSERT INTO agents (id, job_id, project_id, role, model, sdk_session_id, status,
                          block_mode, cost_usd, input_tokens, output_tokens,
                          depends_on, autonomy, brief, started_at, ended_at, helper_cap, parent_id,
-                         persona, system_prompt, skills, provider)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
+                         persona, system_prompt, skills, provider, helper_roles, helper_role)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     agent.id,
     agent.jobId,
@@ -630,6 +677,8 @@ export function insertAgent(
     a.systemPrompt ?? null,
     a.skills ? JSON.stringify(a.skills) : null,
     a.provider ?? 'claude',
+    a.helperRoles?.length ? JSON.stringify(a.helperRoles) : null,
+    a.helperRole ?? null,
   );
   return agent;
 }

@@ -44,11 +44,17 @@ import {
   HANDOFF_BY_USER_NOTE,
   HANDOFF_HELD_NOTE,
   HANDOFF_SUMMARY_MAX,
+  SEND_BACKS_MAX,
   createsCycle,
+  helperModel,
+  helperReads,
   isStuck,
+  listedRole,
   readOnlyRefusal,
   rerunPlan,
   rewireOnRemoval,
+  roleRefusal,
+  sendBackRefusal,
   waitersOf,
 } from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
@@ -70,11 +76,14 @@ import {
   helperReport,
   inStack,
   orchestratorSection,
+  pipelineHelperBrief,
+  pipelineReportClosing,
+  pipelineSection,
   stackLine,
   turnsFromEvents,
   type Upstream,
 } from './handoff.js';
-import type { ToolAccess } from '../routes/helpers.js';
+import type { ToolAccess, ToolRole } from '../routes/helpers.js';
 import { rerunNote, rerunStatusNote } from './rerun.js';
 import { recordRunEnd } from './metrics.js';
 import type { AgentBackend } from './backend.js';
@@ -115,6 +124,8 @@ import {
   setJobStatus,
   updateProject,
   helpersOf,
+  getHelperRoles,
+  startedAsRole,
   markReported,
   setAgentDependsOn,
   unreportedHelpers,
@@ -166,6 +177,8 @@ function agentRow(
     autonomy: spec.autonomy,
     brief: spec.brief,
     ...(spec.helpers ? { helperCap: spec.helpers } : {}),
+    // The roles an orchestrated stack's orchestrator may start, as resolved at launch (Amendment 128).
+    ...(spec.helperRoles?.length ? { helperRoles: spec.helperRoles } : {}),
     // Copied, not referenced: the agent keeps these if the persona changes (Amendment 68).
     ...(spec.persona ? { persona: spec.persona } : {}),
     ...(spec.systemPrompt ? { systemPrompt: spec.systemPrompt } : {}),
@@ -1028,7 +1041,11 @@ export class Supervisor implements AgentControl {
     if (ask) parts.push(`\n${ask}`);
     if (hand) parts.push(`\n${hand}`);
     if (brief?.trim()) parts.push(`\nYour role is ${agent.role}. ${brief.trim()}`);
-    if (agent.helperCap) parts.push(`\n${orchestratorSection(agent.role, agent.helperCap)}`);
+    if (agent.helperCap) {
+      // A pipeline is run one step at a time, not split into parallel parts (Amendment 128).
+      const roles = this.#rolesScope(agent).roles;
+      parts.push(`\n${roles ? pipelineSection(agent.role, agent.helperCap, roles, SEND_BACKS_MAX) : orchestratorSection(agent.role, agent.helperCap)}`);
+    }
     return parts.join('\n').trim();
   }
 
@@ -1072,6 +1089,7 @@ export class Supervisor implements AgentControl {
       extraDirs: this.#reachable(agent.projectId, job.worktreePath),
       helperCap: agent.helperCap ?? 0,
       handOff: this.#hasWaiters(agent),
+      ...this.#rolesScope(agent),
       model: agent.model,
       autonomy: this.#autonomyFor(agentId),
       spentUsd: agent.costUsd,
@@ -1382,8 +1400,13 @@ export class Supervisor implements AgentControl {
 
   // ── handing off (Amendment 104) ───────────────────────────────────────────
 
-  /** The agents that wait for this one: those its `hand_off` is for (not its orchestrator). */
+  /**
+   * The agents that wait for this one: those its `hand_off` is for (not its orchestrator). A
+   * helper has none, whoever is wired to wait for it: its reply goes to the agent that started
+   * it, which judges it (Amendment 128), so a helper is never given `hand_off` and is never held.
+   */
   #waiters(agent: Agent): Agent[] {
+    if (agent.parentId) return [];
     return waitersOf(agent.id, agentsForJob(this.#db, agent.jobId));
   }
 
@@ -1395,7 +1418,24 @@ export class Supervisor implements AgentControl {
   /** What an agent is given: asked by the MCP endpoint, which answers `tools/list` for one agent. */
   toolAccess(agentId: string): ToolAccess {
     const agent = getAgent(this.#db, agentId);
-    return agent ? { helperCap: agent.helperCap ?? 0, handOff: this.#hasWaiters(agent) } : {};
+    return agent ? { helperCap: agent.helperCap ?? 0, handOff: this.#hasWaiters(agent), ...this.#rolesScope(agent) } : {};
+  }
+
+  /**
+   * The roles an orchestrated stack's orchestrator may start, as its `start_helper` is told
+   * them (Amendment 128): `{ roles }`, or nothing for every other agent, so their scope and tool
+   * list are what they were.
+   */
+  #rolesScope(agent: Agent): { roles?: ToolRole[] } {
+    if (!agent.pipelineRoles?.length) return {};
+    return {
+      roles: getHelperRoles(this.#db, agent.id).map((r) => ({
+        id: r.id,
+        ...(r.tier ? { tier: r.tier } : {}),
+        model: r.model,
+        ...(helperReads(r) ? { reads: true } : {}),
+      })),
+    };
   }
 
   /** `{ summary }` for an `Upstream`, or nothing when it has not handed off. */
@@ -1508,28 +1548,68 @@ export class Supervisor implements AgentControl {
    * Same job, folder, model and autonomy as the orchestrator, including its per-agent
    * budget, so the job's cap grows by one agent's cap per helper, as for any agent.
    * Queued like any agent: it takes a slot when one is free.
+   *
+   * With a `role` (Amendment 128), for the orchestrator of an orchestrated stack, the helper
+   * runs as that role instead: its persona's system prompt and skills, its model (the listed
+   * tier, or a cheaper `tier` asked for), and its rope, which keeps a reading role read-only.
+   * Only the roles the stack was launched with may be started, and one role at most
+   * `1 + SEND_BACKS_MAX` times, after which the orchestrator is told to ask the user. A
+   * `role` on an orchestrator launched with none, and none on one launched with some, is
+   * refused with a sentence; an ordinary orchestrator's helpers are as they always were.
    */
-  startHelper(orchestratorId: string, task: string, name?: string): Agent {
+  startHelper(orchestratorId: string, task: string, name?: string, askedRole?: string, askedTier?: string): Agent {
     const orch = getAgent(this.#db, orchestratorId);
     if (!orch) throw new Error('no such agent');
     const cap = orch.helperCap ?? 0;
     if (cap === 0) throw new Error(`${orch.role} was not launched to orchestrate, so it has no helpers to start`);
     if (!task.trim()) throw new Error('a helper needs a task: the part of the work it should do');
+
+    const listed = getHelperRoles(this.#db, orch.id);
+    const refused = roleRefusal(askedRole, listed.map((r) => r.id), orch.role);
+    if (refused) throw new Error(refused);
+    const chosen = listedRole(askedRole, listed);
+    if (!chosen && askedTier) throw new Error('tier goes with a role: a helper started without one runs on your model.');
+    // Rule on the role before the total, so the sentence that names it is the one it reads.
+    if (chosen) {
+      const again = sendBackRefusal(chosen.id, startedAsRole(this.#db, orch.id, chosen.id));
+      if (again) throw new Error(again);
+    }
     const mine = helpersOf(this.#db, orch.id);
     if (mine.length >= cap) {
       throw new Error(`${orch.role} may start ${cap} helper${cap === 1 ? '' : 's'}, and has started ${mine.length}. Wait for them, or do the rest yourself.`);
     }
+    // What the role runs on and with, checked before anything is made.
+    let model = orch.model;
+    let autonomy = orch.autonomy;
+    if (chosen) {
+      const m = helperModel(chosen, askedTier);
+      if ('why' in m) throw new Error(m.why);
+      model = m.model;
+      autonomy = chosen.autonomy;
+      // A reading role stays read-only whatever the request that launched the stack held (Amendment 41, 89).
+      const rope = readOnlyRefusal(chosen.id, autonomy);
+      if (rope) throw new Error(`${rope}, so it was not started.`);
+    }
+
     const taken = new Set(agentsForJob(this.#db, orch.jobId).map((a) => a.role));
     const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
-    let role = slug ? `${orch.role}-${slug}` : `${orch.role}-helper-${mine.length + 1}`;
-    for (let n = 2; taken.has(role); n += 1) role = `${slug ? `${orch.role}-${slug}` : `${orch.role}-helper`}-${n}`;
+    let role: string;
+    if (chosen) {
+      // Named for its role (`developer`, then `developer-2` when it is sent back), so the lanes read as the pipeline.
+      const stem = slug ? `${chosen.id}-${slug}` : chosen.id;
+      role = stem;
+      for (let n = 2; taken.has(role); n += 1) role = `${stem}-${n}`;
+    } else {
+      role = slug ? `${orch.role}-${slug}` : `${orch.role}-helper-${mine.length + 1}`;
+      for (let n = 2; taken.has(role); n += 1) role = `${slug ? `${orch.role}-${slug}` : `${orch.role}-helper`}-${n}`;
+    }
 
     const helper = insertAgent(this.#db, {
       id: newId('agt'),
       jobId: orch.jobId,
       projectId: orch.projectId,
       role,
-      model: orch.model,
+      model,
       sdkSessionId: null,
       status: 'queued',
       blockMode: null,
@@ -1537,11 +1617,15 @@ export class Supervisor implements AgentControl {
       inputTokens: 0,
       outputTokens: 0,
       dependsOn: [],
-      autonomy: orch.autonomy,
-      brief: helperBrief(orch.role, task),
+      autonomy,
+      brief: chosen ? pipelineHelperBrief(orch.role, chosen.id, chosen.brief, task) : helperBrief(orch.role, task),
       parentId: orch.id,
-      // A helper is more of its orchestrator, so it runs as the same persona (Amendment 68).
-      ...personaFields(getAgentPersona(this.#db, orch.id)),
+      // A helper is more of its orchestrator, so it runs as the same persona (Amendment 68); started
+      // as a role, it runs as that role's (Amendment 128).
+      ...(chosen
+        ? personaFields({ persona: chosen.id, systemPrompt: chosen.systemPrompt ?? null, skills: chosen.skills ?? null })
+        : personaFields(getAgentPersona(this.#db, orch.id))),
+      ...(chosen ? { helperRole: chosen.id } : {}),
       // And on the same engine (Amendment 74).
       ...(orch.provider ? { provider: orch.provider } : {}),
     });
@@ -1605,6 +1689,8 @@ export class Supervisor implements AgentControl {
         turns: turnsFromEvents(eventLog().conversation(h.id), jobPrompt),
       })),
       this.#handoffCapOf(agent),
+      // An orchestrated stack's orchestrator is told to judge the step and write the next brief (Amendment 128).
+      agent.pipelineRoles?.length ? pipelineReportClosing(SEND_BACKS_MAX) : undefined,
     );
   }
 
@@ -1893,6 +1979,7 @@ export class Supervisor implements AgentControl {
       extraDirs: this.#reachable(agent.projectId, job.worktreePath),
       helperCap: agent.helperCap ?? 0,
       handOff: this.#hasWaiters(agent),
+      ...this.#rolesScope(agent),
       model: agent.model,
       autonomy: this.#autonomyFor(agentId),
       spentUsd: agent.costUsd,

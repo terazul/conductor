@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 128.
+  green `make test` (decided 30 Sep). The next amendment is 129.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -37,56 +37,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 *Built (8 Oct): the question-tool line (Amendment 100), choosing who each agent waits for
 (99), passing the whole conversation as text (101), re-run from here (102) and the
 `hand_off` tool (104).*
-
-- [ ] **Orchestrated stacks: one agent runs the others.** Asked for (8 Oct), as a design
-  question. A new kind of stack you pick in Spawn, beside the fixed ones. An orchestrator
-  starts each agent, reads what it did, decides when the step is ready, and writes the next
-  agent's brief in full. It can send work back (start the developer again after a failed
-  review) and asks you when unsure. It answers the same problem as the items above: a stop
-  isn't "ready", and the next agent gets only a last reply.
-  - **Built on the orchestrator and helpers (Amendment 51).** An agent given **+ up to N
-    helpers** gets `start_helper` and `list_helpers` (`MCP_TOOLS`,
-    `packages/daemon/src/routes/helpers.ts:24-44`). It ends its turn, waits, and is woken with
-    each helper's reply (`#awaitHelpers`, `session/supervisor.ts:1095`; `helperReport`,
-    `session/handoff.ts:91-97`). This works on Claude, Copilot and OpenRouter.
-  - **What's missing:**
-    - **Role-aware helpers.** Every helper runs on "your model and permissions"
-      (`helpers.ts:28`; `startHelper`, `supervisor.ts:1036`), with no role or persona. A
-      reviewer started this way can edit files, and a scribe can't be put on a cheaper model.
-      `start_helper` should take a role or persona and a model tier, and a reading role should
-      stay read-only (`readOnlyRefusal`, `packages/shared/src/stack.ts:136`).
-    - **A pipeline prompt.** `orchestratorSection` is written for parallel work: "split the
-      work into parts that can run in parallel without touching the same files"
-      (`handoff.ts:69-79`). A pipeline needs the opposite. Run the steps in order, read each
-      result before the next, ask the user with the question tool when unsure, and send work
-      back when a review fails.
-    - **A preset.** "orchestrated pipeline": one orchestrator row, with the roles it may start
-      listed (`spawn/presets.ts`).
-  - **Trade-offs against a fixed stack with `hand_off`:**
-
-    | | fixed stack with `hand_off` | orchestrated |
-    |---|---|---|
-    | Order | fixed, shown in Spawn before launch | decided while it runs |
-    | Who judges a step ready | each agent judges its own | one agent judges all |
-    | Context for the next agent | the agent's own summary | a full brief the orchestrator writes |
-    | Loops (review, then fix) | no | yes |
-    | Cost | lowest | higher: the orchestrator re-reads its growing conversation each time it wakes, and wants a strong model |
-    | Failure | one agent's misjudgement | the orchestrator's misjudgement carries through every step |
-
-    Keep both. `hand_off` stays for plain stacks.
-  - **To try it today, with no change:** in Spawn's **custom…**, one row named
-    `orchestrator` with the architect persona and **+ up to 4 helpers**, and the steps in its
-    brief (plan; then a helper to implement it; then one to review; then one to document; each
-    waiting for the last). Every helper has its model and permissions, so the "reviewer" can
-    still write.
-  Decide:
-  - whether an orchestrated stack lists its roles before launch (which roles it may start, and
-    on which models), or leaves them all to the orchestrator.
-  - how many times it may send work back before it asks you.
-  - whether its helpers also get `hand_off`, or its own judgement replaces it.
-  *Decided (8 Oct): the orchestrator row looks different from the others wherever agents
-  are shown (Spawn, its Fleet lane, the agent tabs). It appears only when the stack has two
-  or more agents; one agent needs no orchestrator.*
 
 ## Housekeeping
 
