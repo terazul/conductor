@@ -24,9 +24,11 @@ import {
   applyLink,
   keyOf,
   linkOf,
+  openTab,
   parseState,
   serialize,
   setScroll,
+  tabKey,
   type FilesState,
   type View,
 } from './tabs.js';
@@ -144,6 +146,9 @@ export interface Edit {
 }
 
 const edits = new Map<string, Edit>();
+
+/** Tabs whose editor should take the cursor the first time it shows (Amendment 121). */
+const focusWanted = new Set<string>();
 const editListeners = new Set<() => void>();
 /** Replaced only when membership changes, so `useDirty` re-renders only then. */
 let dirty: ReadonlySet<string> = new Set();
@@ -160,6 +165,7 @@ function dropEditsOfClosedTabs(): void {
   for (const k of edits.keys()) {
     if (!open.has(k)) {
       edits.delete(k);
+      focusWanted.delete(k);
       changed = true;
     }
   }
@@ -179,8 +185,31 @@ export function putEdit(key: string, edit: Edit | null): void {
   editsChanged();
 }
 
+/** Whether this tab was opened to be typed in, once: the pane asks as its editor appears. */
+export function takeFocus(key: string): boolean {
+  return focusWanted.delete(key);
+}
+
+/**
+ * Open a file that was just made, in front, and start the editor on it (Amendment 121).
+ * It is empty, so the draft equals the file and nothing is unsaved until you type. `edit`
+ * is false for a file the pane has no editor for, such as an image.
+ */
+export function openNew(root: string, path: string, raw: string, edit: boolean): void {
+  update((s) => openTab(s, root, path, Date.now(), keep));
+  if (!edit) return;
+  const key = tabKey(root, path);
+  focusWanted.add(key);
+  putEdit(key, { draft: raw, base: raw });
+}
+
+/** The unsaved edit of a tab, if it has one, outside a component. */
+export function editOf(key: string): Edit | null {
+  return edits.get(key) ?? null;
+}
+
 export function useEdit(key: string): Edit | null {
-  return useSyncExternalStore(subscribeEdits, () => edits.get(key) ?? null);
+  return useSyncExternalStore(subscribeEdits, () => editOf(key));
 }
 
 export function useDirty(): ReadonlySet<string> {

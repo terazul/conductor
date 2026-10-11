@@ -86,6 +86,14 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
     .send({ error: 'workspace error', detail: err instanceof Error ? err.message : String(err) });
 }
 
+/**
+ * `createOnly` is a flag that protects a file, so anything but a boolean is refused rather
+ * than ignored: a client that sent the string "true" and had it taken for "absent" would
+ * replace the file it meant to protect (Amendment 121).
+ */
+const CREATE_ONLY_BAD = 'createOnly must be true or false';
+const createOnlyOk = (v: unknown): boolean => v === undefined || typeof v === 'boolean';
+
 /** `image` and its headers, for either kind of root. */
 function sendImage(reply: FastifyReply, img: { buf: Buffer; mime: string }): FastifyReply {
   return reply
@@ -165,8 +173,14 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       if (!body || typeof body.path !== 'string' || typeof body.content !== 'string') {
         return reply.code(400).send({ error: 'body must be { path: string, content: string }' });
       }
+      if (!createOnlyOk(body.createOnly)) return reply.code(400).send({ error: CREATE_ONLY_BAD });
       try {
-        return await workspace().write(req.params.jobId, body.path, body.content);
+        return await workspace().write(
+          req.params.jobId,
+          body.path,
+          body.content,
+          body.createOnly === true,
+        );
       } catch (err) {
         return fail(reply, err);
       }
@@ -248,9 +262,12 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       if (!body || typeof body.path !== 'string' || typeof body.content !== 'string') {
         return reply.code(400).send({ error: 'body must be { path: string, content: string }' });
       }
+      if (!createOnlyOk(body.createOnly)) return reply.code(400).send({ error: CREATE_ONLY_BAD });
       try {
         const ws = root(req, reply);
-        return ws ? await workspace().writeOf(ws, body.path, body.content) : reply;
+        return ws
+          ? await workspace().writeOf(ws, body.path, body.content, body.createOnly === true)
+          : reply;
       } catch (err) {
         return fail(reply, err);
       }

@@ -13,11 +13,13 @@
  */
 
 import {
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -521,29 +523,62 @@ export class WorkspaceService {
    * a partial file is worse than a failed write, and an agent may be reading
    * this path in the same instant.
    */
-  async write(jobId: string, relPath: string, content: string): Promise<FileContentResponse> {
-    return this.writeOf(this.resolve(jobId), relPath, content);
+  async write(
+    jobId: string,
+    relPath: string,
+    content: string,
+    createOnly = false,
+  ): Promise<FileContentResponse> {
+    return this.writeOf(this.resolve(jobId), relPath, content, createOnly);
   }
 
   /**
    * `write` for any root. A project directory is locked on its path rather than a
    * job, and nothing watches it, so no file_edit is emitted: there is no job for one
    * to belong to, and the pane re-reads what it saved.
+   *
+   * `createOnly` (Amendment 121) makes it a create: a name that is taken, by a file, a
+   * folder or a link, is a 409 and nothing is written. Without it a write replaces the
+   * file, which is what editing is.
    */
-  async writeOf(ws: WorkspaceRecord, relPath: string, content: string): Promise<FileContentResponse> {
+  async writeOf(
+    ws: WorkspaceRecord,
+    relPath: string,
+    content: string,
+    createOnly = false,
+  ): Promise<FileContentResponse> {
     const { abs } = resolveForWrite(ws.path, relPath);
     const path = relativePosix(ws.path, abs);
     const lockKey = ws.jobId.startsWith(DIR_KEY) ? `dir:${ws.path}` : `job:${ws.jobId}`;
 
     await this.#lock.run(lockKey, async () => {
-      mkdirSync(dirname(abs), { recursive: true });
+      // Looked at inside the lock, so two creates of one name from this screen cannot both
+      // pass. An agent is not behind the lock: the link below is what covers that.
+      if (createOnly && taken(abs)) throw new WorkspaceError(409, `${path} already exists`);
+      try {
+        mkdirSync(dirname(abs), { recursive: true });
+      } catch (err) {
+        if (!createOnly) throw err;
+        // A folder in the name that is a file already: the person typing the name needs
+        // to hear that, not "workspace error".
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST' || code === 'ENOTDIR') {
+          throw new WorkspaceError(409, `${path} cannot be made: a folder in that name is a file`);
+        }
+        throw new WorkspaceError(
+          500,
+          `could not make the folders for ${path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       // Temp file in the SAME directory, so the rename is atomic (a cross-device
       // rename is a copy, and a copy is not atomic).
       const tmp = join(dirname(abs), `.conductor-write-${process.pid}-${Date.now()}.tmp`);
       try {
         writeFileSync(tmp, content, 'utf8');
-        renameSync(tmp, abs);
+        if (createOnly) publishNew(tmp, abs, path);
+        else renameSync(tmp, abs);
       } catch (err) {
+        if (err instanceof WorkspaceError) throw err;
         throw new WorkspaceError(
           500,
           `could not write ${path}: ${err instanceof Error ? err.message : String(err)}`,
@@ -586,6 +621,45 @@ export class WorkspaceService {
       return null;
     }
   }
+}
+
+/**
+ * Is something at this path, whatever it is? `lstat` rather than `exists`, so a link to
+ * nothing counts: replacing it would write through to wherever it points.
+ */
+function taken(abs: string): boolean {
+  try {
+    lstatSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Put a finished temp file at `abs` only if nothing is there (Amendment 121). A hard link
+ * fails with EEXIST if the name was taken since the check, which is the one thing a
+ * rename cannot do: it replaces, so an agent that wrote the same name a moment ago would
+ * lose its file. The temp name is dropped either way. A filesystem with no hard links
+ * falls back to the rename, and the check made under the lock stands.
+ */
+export function publishNew(tmp: string, abs: string, path: string): void {
+  try {
+    linkSync(tmp, abs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      rmSync(tmp, { force: true });
+      throw new WorkspaceError(409, `${path} already exists`);
+    }
+    if (code === 'EPERM' || code === 'ENOTSUP' || code === 'EOPNOTSUPP' || code === 'EXDEV') {
+      renameSync(tmp, abs);
+      return;
+    }
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+  rmSync(tmp, { force: true });
 }
 
 /** Where a symlink points when nothing is there. Null for anything that isn't a link. */

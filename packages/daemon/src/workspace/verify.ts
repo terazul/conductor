@@ -33,6 +33,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -55,7 +56,7 @@ import { build } from '../index.js';
 import { eventLog } from '../eventlog.js';
 import { openDb } from '../db/index.js';
 import { registerSnapshotContributor } from '../hub.js';
-import { workspace } from './service.js';
+import { WorkspaceError, publishNew, workspace } from './service.js';
 import { type CompleteResult } from './browse.js';
 import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
 import { KeyedLock } from './lock.js';
@@ -1253,6 +1254,151 @@ async function main(): Promise<void> {
     cappedFlat.find((n) => n.path === 'inner')?.repo?.branch === 'feature/nested' &&
       cappedFlat.find((n) => n.path === 'vendor-lib')?.repo?.branch === 'main',
   );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n16 · a new file from the Files tree (Amendment 121)');
+
+  /*
+   * The route already made a file out of a name that was not there; what was missing was
+   * a way to say "only if it is new". So the plain PUT is checked to behave as it always
+   * has, and then `createOnly`: a taken name is a 409 that ends "already exists" and
+   * writes nothing, whatever holds the name, and the path gate is the same one.
+   */
+  const NEW = '121-new';
+  const NEW_ROOT = join(SCRATCH, NEW);
+  const OUTSIDE = resolve(SCRATCH, '..', 'conductor-121-escape.md');
+  rmSync(NEW_ROOT, { recursive: true, force: true });
+  rmSync(OUTSIDE, { force: true });
+  const putNew = (path: string, content = '', createOnly?: boolean | string) =>
+    send<FileContentResponse & { error?: string }>('PUT', '/api/jobs/job_inplace/file', {
+      path,
+      content,
+      ...(createOnly === undefined ? {} : { createOnly }),
+    });
+
+  const first = await putNew(`${NEW}/notes/deep/untitled.md`, '', true);
+  check('a PUT of a name that is not there makes the file and its folders', first.status === 200, JSON.stringify(first.body).slice(0, 160));
+  check(
+    'it is on disk, empty, in the folders the name asked for',
+    existsSync(join(NEW_ROOT, 'notes/deep/untitled.md')) &&
+      readFileSync(join(NEW_ROOT, 'notes/deep/untitled.md'), 'utf8') === '',
+  );
+  check('the answer is the new file, empty but there, markdown rendered', first.body.path === `${NEW}/notes/deep/untitled.md` && first.body.raw === '' && first.body.html === '', JSON.stringify(first.body).slice(0, 160));
+
+  const readBack = await get<FileContentResponse>(`/api/jobs/job_inplace/file?path=${encodeURIComponent(`${NEW}/notes/deep/untitled.md`)}`);
+  check('an empty file opens: 200, not "binary" or "gone"', readBack.status === 200 && readBack.body.raw === '', `${readBack.status}`);
+  const listedNew = await get<FileTreeResponse>('/api/jobs/job_inplace/tree');
+  check('and the tree lists it', find(listedNew.body, `${NEW}/notes/deep/untitled.md`)?.type === 'file');
+  const seenNew = await waitForEdits('job_inplace', [`${NEW}/notes/deep/untitled.md`]);
+  check('a file_edit is emitted for it, with no agent behind it', seenNew.size === 1 && [...seenNew.values()][0]?.agentId == null);
+
+  const taken = await putNew(`${NEW}/notes/deep/untitled.md`, 'replaced', true);
+  check('createOnly on a name that exists → 409', taken.status === 409, `${taken.status}`);
+  check('whose sentence says it already exists', /already exists$/.test(taken.body.error ?? ''), taken.body.error);
+  check('and writes nothing', readFileSync(join(NEW_ROOT, 'notes/deep/untitled.md'), 'utf8') === '');
+
+  const edit = await putNew(`${NEW}/notes/deep/untitled.md`, 'edited');
+  check('without createOnly the same PUT replaces the file, as editing always has', edit.status === 200 && edit.body.raw === 'edited');
+  const editFalse = await putNew(`${NEW}/notes/deep/untitled.md`, 'edited again', false);
+  check('and createOnly false is the same as leaving it out', editFalse.status === 200 && editFalse.body.raw === 'edited again');
+
+  const onFolder = await putNew(`${NEW}/notes`, '', true);
+  check('a folder holding the name is taken too', onFolder.status === 409 && /already exists$/.test(onFolder.body.error ?? ''), `${onFolder.status}`);
+  check('and is still a folder', existsSync(join(NEW_ROOT, 'notes/deep')));
+
+  symlinkSync('nowhere-at-all', join(NEW_ROOT, 'dangling.md'));
+  const onLink = await putNew(`${NEW}/dangling.md`, 'through the link', true);
+  check('a link to nothing holds the name as well', onLink.status === 409, `${onLink.status}`);
+  check('and nothing was written through it', !existsSync(join(NEW_ROOT, 'nowhere-at-all')));
+
+  const underFile = await putNew('docs/PLAN.md/inside.md', '', true);
+  check('a folder in the name that is a file is refused with a sentence', underFile.status === 409 && /a folder in that name is a file/.test(underFile.body.error ?? ''), JSON.stringify(underFile.body));
+
+  const notBool = await putNew(`${NEW}/stringly.md`, '', 'true');
+  check('createOnly that is not true or false is refused, not taken for absent', notBool.status === 400 && !existsSync(join(NEW_ROOT, 'stringly.md')), `${notBool.status}`);
+
+  const race = await Promise.all([
+    putNew(`${NEW}/race.md`, 'one', true),
+    putNew(`${NEW}/race.md`, 'two', true),
+    putNew(`${NEW}/race.md`, 'three', true),
+  ]);
+  const won = race.filter((r) => r.status === 200).length;
+  const lost = race.filter((r) => r.status === 409).length;
+  check('three creates of one name at once: one makes it, the others hear it exists', won === 1 && lost === 2, race.map((r) => r.status).join(','));
+  check('and the file is the winner\'s whole text', ['one', 'two', 'three'].includes(readFileSync(join(NEW_ROOT, 'race.md'), 'utf8')));
+
+  // A file that appears between the check and the write, as an agent's would.
+  writeFileSync(join(NEW_ROOT, 'agent.md'), 'the agent wrote this first');
+  const behind = await putNew(`${NEW}/agent.md`, 'mine', true);
+  check('a file an agent wrote first is not replaced', behind.status === 409 && readFileSync(join(NEW_ROOT, 'agent.md'), 'utf8') === 'the agent wrote this first');
+
+  // The window between the check and the write, which an agent can use and the lock cannot
+  // close: the hard link is what refuses, so it is tried with the name taken underneath it.
+  writeFileSync(join(NEW_ROOT, 'late.md'), 'there first');
+  writeFileSync(join(NEW_ROOT, '.conductor-write-late.tmp'), 'mine');
+  let late: unknown = null;
+  try {
+    publishNew(join(NEW_ROOT, '.conductor-write-late.tmp'), join(NEW_ROOT, 'late.md'), `${NEW}/late.md`);
+  } catch (err) {
+    late = err;
+  }
+  check(
+    'a name taken after the check is a 409 from the link, not a replacement',
+    late instanceof WorkspaceError && late.status === 409 && /already exists$/.test(late.message) && readFileSync(join(NEW_ROOT, 'late.md'), 'utf8') === 'there first',
+    String(late),
+  );
+  check('and its temp file goes', !existsSync(join(NEW_ROOT, '.conductor-write-late.tmp')));
+  writeFileSync(join(NEW_ROOT, '.conductor-write-free.tmp'), 'fresh');
+  publishNew(join(NEW_ROOT, '.conductor-write-free.tmp'), join(NEW_ROOT, 'free.md'), `${NEW}/free.md`);
+  check('a free name gets the text and the temp name is gone', readFileSync(join(NEW_ROOT, 'free.md'), 'utf8') === 'fresh' && !existsSync(join(NEW_ROOT, '.conductor-write-free.tmp')));
+
+  const strays = (dir: string): string[] =>
+    readdirSync(dir).filter((n) => n.startsWith('.conductor-write-'));
+  check(
+    'no temp file is left behind by any of those refusals',
+    strays(NEW_ROOT).length === 0 && strays(join(NEW_ROOT, 'notes/deep')).length === 0,
+    [...strays(NEW_ROOT), ...strays(join(NEW_ROOT, 'notes/deep'))].join(','),
+  );
+
+  for (const [label, path] of [
+    ['a path that climbs out with ..', '../conductor-121-escape.md'],
+    ['a climb hidden in the middle', `${NEW}/../../conductor-121-escape.md`],
+    ['an absolute path', OUTSIDE],
+    ['a file under .git', '.git/hooks/post-checkout'],
+    ['a folder named .git anywhere', `${NEW}/.git/config`],
+    ['.git in another case', '.GIT/config'],
+  ] as const) {
+    for (const flag of [true, undefined] as const) {
+      const r = await putNew(path, '', flag);
+      check(`${label} is refused ${flag ? 'with createOnly' : 'without it'}`, r.status === 400, `${r.status}`);
+    }
+  }
+  check('and nothing was written outside the worktree', !existsSync(OUTSIDE));
+  check('nor under .git', !existsSync(join(SCRATCH, '.git/hooks/post-checkout')) && !existsSync(join(NEW_ROOT, '.git')));
+
+  // The same for a project's directory, which no watcher is looking at.
+  const PROJ = join(realpathSync(tmpdir()), `conductor-121-project-${Date.now()}`);
+  mkdirSync(join(PROJ, 'docs'), { recursive: true });
+  writeFileSync(join(PROJ, 'docs', 'kept.md'), 'kept\n');
+  const proj = await send<{ project: { id: string } }>('POST', '/api/projects', { path: PROJ });
+  check('a project over a plain folder is made to try it on', proj.status === 201, `${proj.status}`);
+  const dirPut = (path: string, createOnly?: boolean) =>
+    send<FileContentResponse & { error?: string }>(
+      'PUT',
+      `/api/projects/${proj.body.project?.id}/dir/file?dir=${encodeURIComponent(PROJ)}`,
+      { path, content: '', ...(createOnly === undefined ? {} : { createOnly }) },
+    );
+  const inDir = await dirPut('docs/ideas/untitled.md', true);
+  check('a project folder makes a new file and its folders', inDir.status === 200 && existsSync(join(PROJ, 'docs/ideas/untitled.md')), JSON.stringify(inDir.body).slice(0, 160));
+  const inDirAgain = await dirPut('docs/ideas/untitled.md', true);
+  check('and refuses a name that is taken', inDirAgain.status === 409 && /already exists$/.test(inDirAgain.body.error ?? ''), `${inDirAgain.status}`);
+  const inDirKept = await dirPut('docs/kept.md', true);
+  check('including one that was there before Conductor looked', inDirKept.status === 409 && readFileSync(join(PROJ, 'docs/kept.md'), 'utf8') === 'kept\n');
+  check('a project folder refuses .. and .git as well', (await dirPut('../x.md', true)).status === 400 && (await dirPut('.git/x', true)).status === 400);
+
+  rmSync(NEW_ROOT, { recursive: true, force: true });
+  rmSync(PROJ, { recursive: true, force: true });
+  check('the fixture is back as it was', !existsSync(NEW_ROOT));
 
   // ───────────────────────────────────────────────────────────────────────────
   rmSync(join(SCRATCH, '.conductor'), { recursive: true, force: true });

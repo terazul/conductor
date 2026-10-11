@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 121.
+  green `make test` (decided 30 Sep). The next amendment is 122.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -116,45 +116,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   person watching. Try it once on a real parked agent. The other loose ends of Amendments 99-104
   were built in 115 and 120.
 ## Files
-
-- [ ] **Create a new file while browsing directories.** Asked for (8 Oct). From the file tree,
-  make a new file, such as a `.md` or `.txt`, in the folder you're looking at, and start
-  writing in it.
-  - **The daemon can already do it.** `PUT /api/jobs/:jobId/file` and
-    `PUT /api/projects/:projectId/dir/file?dir=…` (`routes/workspace.ts:161`, `:244`) take
-    `{ path, content }`, make any missing folders and write atomically (`writeOf`,
-    `workspace/service.ts`). So a path that doesn't exist becomes a file. The path gate still
-    applies: no `..`, no absolute path, nothing under `.git` (`workspace/paths.ts`). No new
-    route is needed for the plain case.
-  - **But it overwrites.** Typing the name of a file that exists replaces it with an empty
-    one. `WriteFileRequest` (`shared/src/wire.ts:404`) has no "only if new". Either the web
-    checks the tree first, which races with an agent writing the same name, or an optional
-    field such as `createOnly` makes the daemon answer 409. That is an additive wire change,
-    so it needs an amendment.
-  - **The web has the call but not the control.** `writeFile` (`files/useWorkspace.ts:376`)
-    already reaches either route from a root key, a job or a project folder. `FileTree.tsx` has
-    nothing that creates. A **+** on a folder row, and on the root, would ask for a name with
-    the folder already filled in. The tree is drawn at `files/route.tsx:614`.
-  - **A project folder's tree won't refresh by itself.** It is never watched, so a write there
-    emits no `file_edit`, and the screen re-reads only what it saved (`writeOf`'s comment). Call
-    `refreshRoot(root)` (`useWorkspace.ts:43`) after the write. In a job's worktree the watcher
-    does it, and the file belongs to no agent, as with any human edit.
-  - **Then open it, ready to type.** Open the new file in a tab and start the editor on it
-    (`putEdit`, `files/useTabs.ts`). An empty file has to open; check that an empty `raw`
-    renders.
-  Decide:
-  - where: the Files tree only, or the navigator's folders too (Amendment 92;
-    `shell/Navigator.tsx:277` uses the same tree hook).
-  - the name: any name, a default `.md` when none is typed, or only `.md` and `.txt`. And
-    whether a name with new folders in it, such as `docs/notes/x.md`, is allowed. The daemon
-    would make them.
-  - when the name is taken: refuse with `createOnly`, or ask to replace.
-  - whether it works in an agent's running worktree. The file lands beside what the agent is
-    writing.
-  Not asked for, and separate items if wanted: new folders, rename and delete.
-  Tests: `files/verify.ts` for the control, the name checks and the refresh after a write;
-  `workspace/verify.ts` for a PUT that makes a new file and its folders, `..` and `.git`
-  refused, and, with `createOnly`, a 409 on a name that exists.
 
 ## Seeing what's happening
 

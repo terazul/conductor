@@ -1042,3 +1042,96 @@
   margin-left: 0;
   padding-top: 10px;
 }
+
+/* ── a new file from the tree (Amendment 121) ────────────────────────────── */
+
+/* A folder row with its + beside it. The + is a sibling of the row's button, so the row
+   keeps the whole width it had and the + takes a fixed slot at the end of it. */
+.c5-dirrow {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.c5-dirrow:hover {
+  background: var(--surf);
+}
+
+.c5-dirrow > .c5-row {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.c5-add {
+  width: 20px;
+  padding: 0;
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0;
+}
+
+.c5-dirrow:hover .c5-add,
+.c5-dirrow:focus-within .c5-add,
+.c5-add:focus-visible {
+  opacity: 1;
+}
+
+/* Nothing to hover with: the + is always there, quietly. */
+@media (hover: none) {
+  .c5-add {
+    opacity: 1;
+  }
+}
+
+.c5-newfile {
+  padding: 2px 8px 5px 8px;
+  line-height: 1.4;
+}
+
+.c5-newrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.c5-newinput {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 2px 6px;
+}
+
+.c5-newinput:focus-visible {
+  outline: none;
+  border-color: var(--live);
+}
+
+.c5-newinput[aria-invalid='true'] {
+  border-color: var(--fail);
+}
+
+.c5-newinput:disabled {
+  opacity: 0.6;
+}
+
+/* The refusal, in the daemon's own words, right under the name it is about. */
+.c5-newerr {
+  margin-top: 3px;
+  color: var(--fail);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* An empty file's pane: a quiet line rather than a blank page. */
+.c5-emptyfile {
+  padding: 4px 0;
+}

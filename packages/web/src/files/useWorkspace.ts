@@ -45,13 +45,18 @@ export function refreshRoot(root: string): void {
   for (const l of askers) l();
 }
 
+/** How many times a root has been asked to re-read, which is what a refresh bumps. */
+export function askedOf(root: string | null): number {
+  return root ? (asked.get(root) ?? 0) : 0;
+}
+
 function useAsked(root: string | null): number {
   return useSyncExternalStore(
     (fn) => {
       askers.add(fn);
       return () => askers.delete(fn);
     },
-    () => (root ? (asked.get(root) ?? 0) : 0),
+    () => askedOf(root),
   );
 }
 
@@ -372,13 +377,18 @@ export function useWholeDiff(jobId: string | null, enabled: boolean) {
   );
 }
 
-/** Write a file back into its root. The response is the re-read file. */
+/**
+ * Write a file back into its root. The response is the re-read file. `createOnly` makes
+ * it a create (Amendment 121): a name that is taken is refused with the daemon's own
+ * sentence, as an `ApiError`, and nothing is written.
+ */
 export async function writeFile(
   jobId: string,
   path: string,
   content: string,
+  opts: { createOnly?: boolean } = {},
 ): Promise<FileContentResponse> {
-  const body: WriteFileRequest = { path, content };
+  const body: WriteFileRequest = { path, content, ...(opts.createOnly ? { createOnly: true } : {}) };
   const d = parseDirRoot(jobId);
   const url = d
     ? `/api/projects/${encodeURIComponent(d.projectId)}/dir/file?dir=${encodeURIComponent(d.dir)}`
@@ -387,7 +397,21 @@ export async function writeFile(
   // What was just written is the newest copy there is. A tab switched back to shows
   // it at once, rather than the text from before the save until its refetch lands.
   lastFiles.set(`${jobId}\u0000${path}`, saved);
+  // The daemon's spelling of the path, which is the one a tab is opened under.
+  if (saved.path !== path) lastFiles.set(`${jobId}\u0000${saved.path}`, saved);
   return saved;
+}
+
+/**
+ * Make a new, empty file in a root, and say so to the tree (Amendment 121). A job's
+ * worktree is watched and the write comes back as a `file_edit`, but a project's
+ * directory never is, so its tree is re-read here; doing it for both costs one coalesced
+ * refetch and does not depend on which kind of root it is.
+ */
+export async function createFile(root: string, path: string): Promise<FileContentResponse> {
+  const made = await writeFile(root, path, '', { createOnly: true });
+  refreshRoot(root);
+  return made;
 }
 
 /** Bootstrap a workspace. Track A's session engine is the real caller. */

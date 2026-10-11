@@ -437,6 +437,13 @@ export interface FileContentResponse {
 export interface WriteFileRequest {
   path: string;
   content: string;
+  /**
+   * Make a new file and refuse to replace one (Amendment 121). With it set, a name that
+   * is taken, whether by a file, a folder or a link, is a 409 whose sentence ends
+   * "already exists", and nothing is written. Without it the write replaces the file, as
+   * editing always has. Missing folders are still made.
+   */
+  createOnly?: boolean;
 }
 
 export interface DiffResponse {

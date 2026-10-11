@@ -19,6 +19,7 @@
 import { useMemo } from 'react';
 import type { FileNode } from '@conductor/shared';
 import type { Folders } from './tabs.js';
+import { NewFileForm } from './NewFileForm.js';
 import { since, type Touch } from './useWorkspace.js';
 
 interface Props {
@@ -36,6 +37,16 @@ interface Props {
   touches: Map<string, Touch>;
   roles: Map<string, string>;
   now: number;
+  /**
+   * Making a new file (Amendment 121). Without `onAdd` the tree has no + at all.
+   * `adding` is the folder whose name box is open ('' is the root), `onAdd` opens one,
+   * `onCreate` makes the file at the path typed, rejecting with the reason it could not,
+   * and `onCancelAdd` puts the box away.
+   */
+  adding?: string | null;
+  onAdd?: (dir: string) => void;
+  onCreate?: (path: string) => Promise<void>;
+  onCancelAdd?: () => void;
 }
 
 /** Directories that contain a change, so the interesting paths open themselves. */
@@ -46,7 +57,20 @@ function dirsWithChanges(node: FileNode, acc = new Set<string>()): Set<string> {
   return acc;
 }
 
-export function FileTree({ root, selected, onSelect, folders, onToggle, touches, roles, now }: Props) {
+export function FileTree({
+  root,
+  selected,
+  onSelect,
+  folders,
+  onToggle,
+  touches,
+  roles,
+  now,
+  adding = null,
+  onAdd,
+  onCreate,
+  onCancelAdd,
+}: Props) {
   const autoOpen = useMemo(() => dirsWithChanges(root), [root]);
   const collapsed = useMemo(() => new Set(folders?.collapsed), [folders]);
   const openedByUser = useMemo(() => new Set(folders?.opened), [folders]);
@@ -61,33 +85,67 @@ export function FileTree({ root, selected, onSelect, folders, onToggle, touches,
 
   const rows: React.ReactNode[] = [];
 
+  /** The name box for `dir`, sat where that folder's children are. */
+  const form = (dir: string, depth: number): React.ReactNode =>
+    onCreate && onCancelAdd ? (
+      <NewFileForm
+        key={`n:${dir}`}
+        dir={dir}
+        indent={8 + depth * 13}
+        onCreate={onCreate}
+        onCancel={onCancelAdd}
+      />
+    ) : null;
+
+  // The root's box is the first thing in the tree.
+  const rootForm = adding === '' ? form('', 0) : null;
+  if (rootForm) rows.push(rootForm);
+
   const walk = (node: FileNode, depth: number): void => {
     for (const kid of node.children ?? []) {
       const indent = { paddingLeft: 8 + depth * 13 };
 
       if (kid.type === 'dir') {
         const open = isOpen(kid.path);
+        // The + is a sibling of the row's button, not inside it: a button in a button is
+        // not valid, and the row's click is the folder opening.
         rows.push(
-          <button
-            key={`d:${kid.path}`}
-            type="button"
-            className="c5-row dir"
-            style={indent}
-            onClick={() => toggle(kid.path)}
-            aria-expanded={open}
-          >
-            <span className="c5-caret">{open ? '▾' : '▸'}</span>
-            <span className="c5-name">{kid.name}/</span>
-            {/* A nested clone or submodule's branch, as a quiet mark (Amendment 94). */}
-            {kid.repo && <span className="c5-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
-            {kid.change && (kid.change.added > 0 || kid.change.removed > 0) ? (
-              <span className="c5-badge">
-                {kid.change.added > 0 && <b className="c5-pos">+{kid.change.added}</b>}
-                {kid.change.removed > 0 && <b className="c5-neg">−{kid.change.removed}</b>}
-              </span>
-            ) : null}
-          </button>,
+          <div key={`d:${kid.path}`} className="c5-dirrow">
+            <button
+              type="button"
+              className="c5-row dir"
+              style={indent}
+              onClick={() => toggle(kid.path)}
+              aria-expanded={open}
+            >
+              <span className="c5-caret">{open ? '▾' : '▸'}</span>
+              <span className="c5-name">{kid.name}/</span>
+              {/* A nested clone or submodule's branch, as a quiet mark (Amendment 94). */}
+              {kid.repo && <span className="c5-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
+              {kid.change && (kid.change.added > 0 || kid.change.removed > 0) ? (
+                <span className="c5-badge">
+                  {kid.change.added > 0 && <b className="c5-pos">+{kid.change.added}</b>}
+                  {kid.change.removed > 0 && <b className="c5-neg">−{kid.change.removed}</b>}
+                </span>
+              ) : null}
+            </button>
+            {onAdd && (
+              <button
+                type="button"
+                className="c5-iconbtn c5-add"
+                onClick={() => onAdd(kid.path)}
+                title={`New file in ${kid.path}/`}
+                aria-label={`New file in ${kid.path}`}
+              >
+                +
+              </button>
+            )}
+          </div>,
         );
+        // Under its own row, open or not: asking for a name on a folded folder still
+        // has to show the box. Opening the file then opens the folder.
+        const own = adding === kid.path ? form(kid.path, depth + 1) : null;
+        if (own) rows.push(own);
         if (open) walk(kid, depth + 1);
         continue;
       }

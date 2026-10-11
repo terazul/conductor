@@ -39,7 +39,7 @@ import { DiffView } from './DiffView.js';
 import { headingSlugs, resolveDocLink } from './links.js';
 import { printRendered } from './print.js';
 import type { View } from './tabs.js';
-import { putEdit, useEdit, useScrollMemory } from './useTabs.js';
+import { putEdit, takeFocus, useEdit, useScrollMemory } from './useTabs.js';
 import { imageUrl, isImagePath, since, writeFile } from './useWorkspace.js';
 import { errorText } from '../lib/errors.js';
 import { hrefFor, navigate } from '../lib/nav.js';
@@ -111,9 +111,11 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
   useScrollMemory(body, tabKey, editing ? null : shown);
 
   useEffect(() => {
-    if (editing && started.current) area.current?.focus();
+    // `takeFocus`: a file just made from the tree opens with its editor already started
+    // (Amendment 121), so the click that would have said "focus it" never happened.
+    if (editing && (started.current || takeFocus(tabKey))) area.current?.focus();
     started.current = false;
-  }, [editing]);
+  }, [editing, tabKey]);
 
   // A new copy of the file clears a failed save's message: it's about a file that has moved on.
   useEffect(() => setError(null), [file.raw]);
@@ -376,6 +378,12 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
           />
         ) : shown === 'diff' ? (
           <DiffView diff={file.diff ?? ''} />
+        ) : file.raw.length === 0 ? (
+          // Nothing to render, and a blank pane reads as one that failed to load
+          // (Amendment 121: a file made from the tree starts this way).
+          <div className="c5-note c5-emptyfile">
+            This file is empty.{!file.deleted && ' ✎ edit to write in it.'}
+          </div>
         ) : shown === 'rendered' && file.html !== undefined ? (
           // Sanitized server-side — see the note at the top of this file.
           <div

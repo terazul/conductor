@@ -37,7 +37,11 @@ import {
   type FilesState,
 } from './tabs.js';
 import { readFileSync } from 'node:fs';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { FileNode } from '@conductor/shared';
 import { headingSlugs, resolveDocLink, type DocLink } from './links.js';
+import { DEFAULT_NAME, checkName, prefill } from './naming.js';
 import { pdfTitle } from './print.js';
 
 let failures = 0;
@@ -454,6 +458,174 @@ console.log('\na nested repo\'s branch, beside its folder (Amendment 94)');
   );
   check('a plain directory with no repo field shows nothing extra', /\{kid\.repo && /.test(tree));
   check('the mark is quiet — ink3, no status colour', /\.c5-repo\s*\{[^}]*color:\s*var\(--ink3\)/.test(css));
+}
+
+console.log('\na new file from the tree (Amendment 121)');
+{
+  const named = (raw: string): string => {
+    const c = checkName(raw);
+    return c.ok ? c.path : `refused: ${c.reason}`;
+  };
+
+  // The box starts with the folder in it, and the file name selected.
+  const root = prefill('');
+  check('at the root the box offers a default name', root.value === DEFAULT_NAME && DEFAULT_NAME === 'untitled.md', root.value);
+  const deep = prefill('docs/notes');
+  check('in a folder the name starts with the folder shown', deep.value === 'docs/notes/untitled.md', deep.value);
+  check('and only the file name is selected, not its extension or the folder', deep.value.slice(deep.from, deep.to) === 'untitled', deep.value.slice(deep.from, deep.to));
+  check('a stray slash on the folder does not double up', prefill('/docs/').value === 'docs/untitled.md');
+
+  // What is typed becomes the path to send.
+  check('a plain name is the path', named('notes.txt') === 'notes.txt');
+  check('a name with folders in it is allowed: the daemon makes them', named('docs/notes/x.md') === 'docs/notes/x.md');
+  check('spaces around it are not part of it', named('  docs/x.md \n') === 'docs/x.md');
+  check('empty segments and . are dropped, so the tab opens under the path that was written', named('docs//./x.md') === 'docs/x.md' && named('./x.md') === 'x.md');
+  check('a name with no extension is a name', named('Makefile') === 'Makefile' && named('docs/.env.example') === 'docs/.env.example');
+  check('nothing typed is refused', named('') .startsWith('refused') && named('   ').startsWith('refused') && named('/./').startsWith('refused'));
+  check('.. is refused, at the start and in the middle', named('../x.md').startsWith('refused') && named('docs/../../x.md').startsWith('refused'));
+  check('an absolute path is refused', named('/etc/x').startsWith('refused') && named('C:/x').startsWith('refused'));
+  check('.git is refused at any depth and in any case', ['.git/hooks/x', 'a/.git/config', '.GIT/x', 'a/.Git'].every((n) => named(n).startsWith('refused')));
+  check('a name that merely starts with .git is fine', named('.gitignore') === '.gitignore' && named('.github/ci.yml') === '.github/ci.yml');
+  check('a trailing slash names a folder, which is not a file', named('docs/').startsWith('refused'));
+  check('a backslash and a control character are refused', named('a\\b.md').startsWith('refused') && named('a\u0000b').startsWith('refused') && named('a\nb').startsWith('refused'));
+  check('one name too long for the filesystem is refused', named(`${'a'.repeat(256)}.md`).startsWith('refused') && !named(`${'a'.repeat(200)}.md`).startsWith('refused'));
+  check('every refusal is a sentence a person can act on', ['', '../x', '/x', '.git/x', 'a/', 'a\\b', 'a\u0000'].every((n) => /^refused: [A-Z][^\n]*\.$/.test(named(n))), named('../x'));
+
+  // The control, drawn: a + on each folder row, beside its button and not inside it.
+  const { FileTree } = await import('./FileTree.js');
+  const node = (path: string, type: 'file' | 'dir', children?: FileNode[]): FileNode => ({
+    path,
+    name: path.split('/').pop() ?? path,
+    type,
+    ...(children ? { children } : {}),
+  });
+  const top = node('', 'dir', [
+    node('docs', 'dir', [node('docs/notes', 'dir', [node('docs/notes/a.md', 'file')]), node('docs/b.md', 'file')]),
+    node('src', 'dir', []),
+    node('README.md', 'file'),
+  ]);
+  const props = {
+    root: top,
+    selected: null,
+    onSelect: () => {},
+    folders: undefined,
+    onToggle: () => {},
+    touches: new Map(),
+    roles: new Map(),
+    now: 0,
+  };
+  const draw = (extra: Record<string, unknown>): string =>
+    renderToStaticMarkup(createElement(FileTree, { ...props, ...extra }));
+  const noop = async (): Promise<void> => {};
+  const wired = { adding: null, onAdd: () => {}, onCreate: noop, onCancelAdd: () => {} };
+
+  const plain = draw({});
+  check('without the new-file props the tree is as it was: no +, no box', !plain.includes('c5-add') && !plain.includes('c5-newfile'));
+
+  const withPlus = draw(wired);
+  const adds = [...withPlus.matchAll(/<button[^>]*class="c5-iconbtn c5-add"[^>]*aria-label="New file in ([^"]*)"/g)].map((m) => m[1]);
+  check('every folder row has a +, the open ones and the empty ones too', adds.join(',') === 'docs,docs/notes,src', adds.join(','));
+  check('and a file row has none', !/c5-row[^>]*>(?:(?!<\/button>).)*README\.md(?:(?!<\/button>).)*<\/button><button[^>]*c5-add/.test(withPlus) && adds.length === 3);
+  check('the + is not inside the row button (a button in a button is invalid)', /<div class="c5-dirrow"><button[^>]*class="c5-row dir"[^>]*>(?:(?!<\/button>).)*<\/button><button[^>]*c5-add/.test(withPlus));
+  check('arrow-key movement still walks the rows alone', !/class="c5-row[^"]*"[^>]*c5-add/.test(withPlus) && /button\.c5-row/.test(readFileSync(new URL('./FileTree.tsx', import.meta.url), 'utf8')));
+  check('no box is open until one is asked for', !withPlus.includes('c5-newfile'));
+
+  const rootBox = draw({ ...wired, adding: '' });
+  check('the root\'s box is the first row, with the default name in it', rootBox.indexOf('c5-newfile') > -1 && rootBox.indexOf('c5-newfile') < rootBox.indexOf('c5-dirrow') && rootBox.includes(`value="${DEFAULT_NAME}"`), rootBox.slice(0, 200));
+  const folderBox = draw({ ...wired, adding: 'docs/notes', folders: { collapsed: [], opened: ['docs/notes'] } });
+  check('a folder\'s box is under its row with the folder already filled in', folderBox.includes('value="docs/notes/untitled.md"') && folderBox.indexOf('c5-newfile') > folderBox.indexOf('>notes/<') && folderBox.indexOf('c5-newfile') < folderBox.indexOf('a.md'), folderBox.slice(0, 200));
+  check('only that one box is open', (folderBox.match(/c5-newfile/g) ?? []).length === 1);
+  check('it says which folder it is for', folderBox.includes('aria-label="name of the new file in docs/notes"') && rootBox.includes('aria-label="name of the new file in the top"'));
+  const foldedBox = draw({ ...wired, adding: 'src' });
+  check('an empty folder gets its box too, and the tree does not say "no files"', foldedBox.includes('value="src/untitled.md"') && !foldedBox.includes('no files'));
+  check('the box has a way for the mouse to create and to cancel', /aria-label="create the file"/.test(rootBox) && /aria-label="cancel"/.test(rootBox));
+
+  const form = readFileSync(new URL('./NewFileForm.tsx', import.meta.url), 'utf8');
+  check('Escape puts the box away, Enter makes the file', /e\.key === 'Escape'[\s\S]*?onCancel\(\)/.test(form) && /e\.key === 'Enter'[\s\S]*?submit\(\)/.test(form));
+  check('arrow keys in the box are not taken by the tree', /onKeyDown=\{\(e\) => \{\s*e\.stopPropagation\(\)/.test(form));
+  check('a refusal shows under the box, as an alert, in the daemon\'s words', /setError\(errorText\(err\)\)/.test(form) && /role="alert"/.test(form) && /checkName\(value\)/.test(form));
+  check('a refusal leaves what was typed to be fixed, and clears when it is edited', /setBusy\(false\)/.test(form) && /onChange=\{\(e\) => \{\s*setValue\(e\.target\.value\);\s*setError\(null\)/.test(form));
+
+  // Making it: the request, the refresh, the tab.
+  const { createFile, writeFile, askedOf } = await import('./useWorkspace.js');
+  const { errorText } = await import('../lib/errors.js');
+  const { openNew, takeFocus, editOf, getFiles } = await import('./useTabs.js');
+  const real = globalThis.fetch;
+  const sent: { url: string; method: string; body: Record<string, unknown> }[] = [];
+  let reply: { status: number; body: unknown } = { status: 200, body: { path: 'docs/x.md', raw: '', html: '' } };
+  globalThis.fetch = (async (url: string, init?: { method?: string; body?: string }) => {
+    sent.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(init.body) : {} });
+    return {
+      ok: reply.status < 400,
+      status: reply.status,
+      json: async () => reply.body,
+    };
+  }) as unknown as typeof fetch;
+  try {
+    const before = askedOf('j-new');
+    const made = await createFile('j-new', 'docs/x.md');
+    check('a new file is a PUT of nothing, to be made only if new', sent[0]?.method === 'PUT' && sent[0].url === '/api/jobs/j-new/file' && JSON.stringify(sent[0].body) === '{"path":"docs/x.md","content":"","createOnly":true}', JSON.stringify(sent[0]));
+    check('the answer is the empty file', made.raw === '' && made.path === 'docs/x.md');
+    check("the root's tree is told to read again after the write", askedOf('j-new') === before + 1);
+
+    const dir = dirRoot('prj_n', '/Users/me/my code');
+    const dirBefore = askedOf(dir);
+    await createFile(dir, 'docs/x.md');
+    check("a project folder's write goes to the project, and its never-watched tree is read again", sent[1]?.url === '/api/projects/prj_n/dir/file?dir=%2FUsers%2Fme%2Fmy%20code' && sent[1].body['createOnly'] === true && askedOf(dir) === dirBefore + 1, sent[1]?.url);
+    check("and only that root's", askedOf('j-new') === before + 1);
+
+    await writeFile('j-new', 'docs/x.md', 'edited');
+    check('saving an edit still replaces: no createOnly in it', sent[2]?.method === 'PUT' && !('createOnly' in (sent[2]?.body ?? {})) && sent[2]?.body['content'] === 'edited', JSON.stringify(sent[2]?.body));
+    check('and does not ask for a re-read, which the pane does itself', askedOf('j-new') === before + 1);
+
+    reply = { status: 409, body: { error: 'docs/x.md already exists' } };
+    const askedNow = askedOf('j-new');
+    let refusal: unknown = null;
+    await createFile('j-new', 'docs/x.md').catch((err: unknown) => {
+      refusal = err;
+    });
+    check('a name that is taken rejects with the daemon\'s sentence', errorText(refusal) === 'docs/x.md already exists', errorText(refusal));
+    check('and a refused write does not refresh anything', askedOf('j-new') === askedNow);
+    reply = { status: 400, body: { error: 'invalid path', detail: 'refusing path "../x": resolves outside the worktree' } };
+    let escape: unknown = null;
+    await createFile('j-new', '../x').catch((err: unknown) => {
+      escape = err;
+    });
+    check('a path the daemon refuses shows why', errorText(escape).includes('resolves outside the worktree'), errorText(escape));
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  // Then it is open, and the editor is on it.
+  const k = tabKey('j-new', 'docs/x.md');
+  openNew('j-new', 'docs/x.md', '', true);
+  check('the new file is open in front', getFiles().active === k && getFiles().tabs.some((t) => keyOf(t) === k));
+  const started = editOf(k);
+  check('with the editor started on an empty draft, nothing unsaved yet', started !== null && started.draft === '' && started.base === '');
+  check('and the cursor asked for, once', takeFocus(k) === true && takeFocus(k) === false);
+
+  const img = tabKey('j-new', 'pic.png');
+  openNew('j-new', 'pic.png', '', false);
+  check('a file the pane cannot edit, such as an image, opens without an editor', getFiles().active === img && editOf(img) === null && takeFocus(img) === false);
+
+  // The caller: make, open, close the box; the box stays up if the make fails.
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check(
+    'the tree makes the file, opens what the daemon named, and closes the box only after',
+    /const made = await createFile\(r\.root, path\);\s*openNew\(r\.root, made\.path, made\.raw, !isImagePath\(made\.path\)\);\s*setAdding\(null\);/.test(route),
+  );
+  check('the root has a + beside its name, once its tree has loaded', /\{tree\.data && \(\s*<button[^>]*onClick=\{\(\) => setAdding\(adding === '' \? null : ''\)\}/.test(route));
+  check('the tree is handed the box: which folder, how to open it, make, cancel', /adding=\{adding\}\s*onAdd=\{setAdding\}\s*onCreate=\{create\}\s*onCancelAdd=\{\(\) => setAdding\(null\)\}/.test(route));
+
+  const pane = readFileSync(new URL('./FilePane.tsx', import.meta.url), 'utf8');
+  check('the editor takes the cursor when a tab opens already editing', /started\.current \|\| takeFocus\(tabKey\)/.test(pane));
+  check('an empty file draws a line saying so, rather than a blank pane', /file\.raw\.length === 0 \? \(\s*(?:\/\/[^\n]*\n\s*)*<div className="c5-note c5-emptyfile">/.test(pane) && /This file is empty\./.test(pane));
+  check('and an empty draft still edits: the buffer is read with ?? and not ||', /const draft = edit\?\.draft \?\? file\.raw;/.test(pane));
+
+  const css = readFileSync(new URL('./files.css', import.meta.url), 'utf8');
+  check('the + shows on hover and focus, and always where there is no hover', /\.c5-dirrow:hover \.c5-add,[^{]*\.c5-dirrow:focus-within \.c5-add[^{]*\{\s*opacity: 1;/.test(css) && /@media \(hover: none\)\s*\{\s*\.c5-add\s*\{\s*opacity: 1;/.test(css));
+  const mine = css.slice(css.indexOf('a new file from the tree (Amendment 121)'));
+  check('it is drawn in existing tokens only, so both themes get it', !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(mine) && /var\(--fail\)/.test(mine) && /var\(--live\)/.test(mine));
 }
 
 console.log(

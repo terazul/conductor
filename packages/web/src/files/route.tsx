@@ -49,9 +49,10 @@ import {
   toggleFolder,
   type FilesState,
 } from './tabs.js';
-import { followLink, keep, update, useDirty, useFiles, useScrollMemory } from './useTabs.js';
+import { followLink, keep, openNew, update, useDirty, useFiles, useScrollMemory } from './useTabs.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeMax, treeWidth } from './width.js';
 import {
+  createFile,
   imageUrl,
   isImagePath,
   openWorkspace,
@@ -562,6 +563,19 @@ function RootSection({
   const touches = useTouches(r.root);
   const roles = useAgentRoles(r.root);
   const top = tree.data?.root;
+  /** Which folder's new-file box is open: its tree path, '' for the root, null for none. */
+  const [adding, setAdding] = useState<string | null>(null);
+
+  /**
+   * Make the file, open it in a tab and start the editor on it (Amendment 121). Rejects
+   * with the daemon's sentence if the name is taken or the path is refused, and the box
+   * shows it; it closes only once the file is there.
+   */
+  const create = async (path: string): Promise<void> => {
+    const made = await createFile(r.root, path);
+    openNew(r.root, made.path, made.raw, !isImagePath(made.path));
+    setAdding(null);
+  };
 
   // Chosen with nothing open: its default pick, once its tree lands.
   useEffect(() => {
@@ -582,6 +596,18 @@ function RootSection({
           <span className="c5-rootstat">
             {changed} changed
           </span>
+        )}
+        {tree.data && (
+          <button
+            type="button"
+            className="c5-iconbtn"
+            onClick={() => setAdding(adding === '' ? null : '')}
+            title={`New file in ${r.name}`}
+            aria-label={`New file in ${r.name}`}
+            aria-pressed={adding === ''}
+          >
+            +
+          </button>
         )}
         {r.job ? (
           <span className={`c5-tag ${tree.error ? 'idle' : 'live'}`}>
@@ -620,6 +646,10 @@ function RootSection({
           touches={touches}
           roles={roles}
           now={now}
+          adding={adding}
+          onAdd={setAdding}
+          onCreate={create}
+          onCancelAdd={() => setAdding(null)}
         />
       ) : (
         <div className="c5-note">reading {r.job ? 'the worktree' : 'the directory'}…</div>

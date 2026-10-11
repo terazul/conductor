@@ -196,6 +196,78 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 121 — post-merge, applied. **Make a new file from the Files tree, and open it ready to type.**
+
+Shared (`wire.ts`), daemon (`workspace/service.ts`, `routes/workspace.ts`, `workspace/verify.ts`) and web
+(`files/naming.ts` and `files/NewFileForm.tsx`, new; `files/FileTree.tsx`, `files/route.tsx`,
+`files/useWorkspace.ts`, `files/useTabs.ts`, `files/FilePane.tsx`, `files/files.css`, `files/verify.ts`).
+A TODO.md item (8 Oct): "Create a new file while browsing directories". No migration.
+- **`WriteFileRequest.createOnly?: boolean`**, added at the end of the interface. With it, the daemon
+  looks at the name before writing, under the same lock as any write: a file, a folder or a link
+  (even one to nothing, which `lstat` sees and `stat` does not) holding it is a 409, "<path> already
+  exists", and nothing is written. Without it a PUT replaces the file as before, so editing is
+  unchanged. Both PUT routes, a job's and a project folder's, take it. Missing folders are still made;
+  a folder in the name that is already a file is a 409 with its own sentence ("… cannot be made: a
+  folder in that name is a file") instead of a 500.
+- **The lock does not cover an agent.** Between the check and the write another process can take the
+  name, and a rename would replace what it wrote. With `createOnly` the temp file is published with a
+  hard link (`publishNew`), which fails with EEXIST if the name is taken, and the temp name is dropped
+  either way. A filesystem with no hard links falls back to the rename, and the check made under the
+  lock stands.
+- **`createOnly` that is not true or false is a 400**, not taken for absent: a client that sent
+  `"true"` and had it ignored would replace the file it meant to protect.
+- **The path gate is the same one** (`workspace/paths.ts`): `..`, an absolute path and anything under
+  `.git` (any case, any depth) are 400, with or without `createOnly`.
+- **A `+` on every folder row, and on each tree's heading** (`FileTree.tsx`, `route.tsx`
+  `RootSection`). It shows when you point at the row or tab to it, and always where there is no hover.
+  It is a sibling of the row's button, not inside it. Arrow keys still walk the rows only. The
+  Navigator's folders (Amendment 92) have none; the item said the Files tree only.
+- **The box** (`NewFileForm`) opens under the row with the folder already in the name and the file
+  name selected: `docs/notes/untitled.md`, `untitled` selected. Enter makes the file, Escape or the
+  **✕** puts the box away. `checkName` (`naming.ts`) answers the mistakes a keyboard makes before the
+  round trip, with a sentence: nothing typed, `..`, an absolute path or drive, `.git`, a trailing `/`,
+  a backslash, a control character, a segment over 255 bytes. `a//b` and `./a` are tidied to `a/b` and
+  `a`, so the tab opens under the path that was written. Any other name is allowed, with folders in it
+  if it has them. The daemon's own sentence (a name taken, a path refused) shows under the input, the
+  box stays open, and what was typed stays to be fixed; the error clears when it is edited.
+- **Making it** (`createFile`, `useWorkspace.ts`): a `writeFile` of `''` with `createOnly`, then
+  `refreshRoot(root)`. A project folder's tree is never watched, so nothing else would re-read it; a
+  job's worktree does emit `file_edit` and the refresh is then one coalesced refetch more, so it is
+  done for both. A refused write refreshes nothing. It works in a running agent's worktree: the file
+  belongs to no agent, as with any human edit.
+- **Then it opens ready to type** (`openNew`, `useTabs.ts`): the daemon's spelling of the path is
+  opened in front, `putEdit` starts the editor on an empty draft (draft equals file, so nothing is
+  unsaved until you type), and the pane takes the cursor the first time it shows (`takeFocus`). An
+  image name (`x.png`) opens with no editor, since the pane has none for it.
+- **An empty file renders.** `FilePane` draws "This file is empty." (plus "✎ edit to write in it." when
+  it can be edited) instead of a blank pane. The daemon already read an empty file (not "binary", not
+  gone), and an empty draft already worked (`edit?.draft ?? file.raw`).
+- **Not changed:** editing (`writeFile` without `createOnly`) and the Navigator. Colours are
+  existing tokens only (`--surf`, `--line2`, `--ink`, `--live`, `--fail`), so
+  both themes get the box.
+- **Not done:** new folders, rename and delete (separate items in TODO.md); the box does not close when
+  you click elsewhere, only on Escape, **✕** or a made file; a name that differs only by case from
+  one that exists is refused only on a case-insensitive filesystem; the box and the `+` have not been
+  looked at in a browser in either theme.
+**Verified:** `workspace/verify.ts` §16: a PUT of a new name makes the file and its folders (empty, with
+`html` for markdown, in the tree, a `file_edit` with no agent); `createOnly` on a taken name is a 409
+ending "already exists" and writes nothing (a file, a folder, a link to nothing), three concurrent
+creates of one name give one 200 and two 409, a file written by something else first is kept, and
+`publishNew` refuses a name taken after the check and drops its temp file; the plain PUT still replaces,
+and `createOnly: false` is the same; `createOnly: "true"` is a 400; `..`, a climb in the middle, an
+absolute path and `.git` (three ways) are 400 with and without it, and nothing lands outside; a folder
+in the name that is a file is a 409 with its sentence; no `.conductor-write-*` is left behind; the same
+for a project folder (new file and folders, 409 on a taken name and on a file that was there before
+Conductor looked, `..` and `.git` refused). `files/verify.ts` "a new file from the tree": `prefill`,
+`checkName` for every rule above, the tree drawn with a `+` on each folder (none without the props), the
+`+` beside the row's button and not inside it, the root's box first and a folder's box under its row
+with the folder in it, an empty folder's box; Enter and Escape, arrow keys kept in the box, a refusal
+shown under it; `createFile` sends `{path, content: '', createOnly: true}` to the job's route or the
+project's, bumps that root's refresh count once, and bumps nothing when refused (the daemon's sentence
+is what shows); an edit's save has no `createOnly` and no refresh; `openNew` puts the tab in front with
+an empty draft and the cursor asked for once, and none for an image; the wiring in `route.tsx` and
+`FilePane.tsx`; the CSS uses tokens only.
+
 ### Amendment 120 — post-merge, applied. **The hold is on the wire, the re-run note outlives a restart, and the handoff is tighter.**
 
 Shared (`wire.ts`, `rerun.ts`), daemon (`session/handoff.ts`, `session/windows.ts` new, `session/store.ts`,
