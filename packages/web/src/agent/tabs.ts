@@ -10,6 +10,7 @@
  */
 
 import type { Agent, AgentStatus } from '@conductor/shared';
+import { budgetOf, type Budget } from '../shell/autonomy.js';
 
 export interface AgentTab {
   id: string;
@@ -20,10 +21,16 @@ export interface AgentTab {
   needs: number;
   /** The first tab of a job that isn't the first job: where a divider goes. */
   newJob: boolean;
+  /**
+   * How full its budget is, in the colours of the status bar's daily meter (Amendment 125).
+   * Null for an agent with no budget, or when the caller didn't give its spend.
+   */
+  budget: Pick<Budget, 'tone' | 'fraction' | 'pct' | 'state'> | null;
 }
 
 export function agentTabs(
-  agents: Pick<Agent, 'id' | 'projectId' | 'jobId' | 'role' | 'status'>[],
+  agents: (Pick<Agent, 'id' | 'projectId' | 'jobId' | 'role' | 'status'> &
+    Partial<Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy'>>)[],
   projectId: string,
   jobOrder: string[],
   pending: { agentId: string }[],
@@ -49,12 +56,14 @@ export function agentTabs(
     const needs = pending.filter((p) => p.agentId === a.id).length + mine.length;
     // What stops it, as opposed to a warning that it is over its budget.
     const stops = needs - mine.filter((x) => x.kind === 'budget_over').length;
+    const b = a.autonomy ? budgetOf({ costUsd: a.costUsd ?? 0, inputTokens: a.inputTokens ?? 0, outputTokens: a.outputTokens ?? 0, autonomy: a.autonomy }) : null;
     return {
       id: a.id,
       label: (total.get(a.role) ?? 1) > 1 ? `${a.role} ${n}` : a.role,
       status: stops > 0 ? 'blocked' : a.status,
       needs,
       newJob: i > 0 && a.jobId !== ordered[i - 1]!.jobId,
+      budget: b === null ? null : { tone: b.tone, fraction: b.fraction, pct: b.pct, state: b.state },
     };
   });
 }

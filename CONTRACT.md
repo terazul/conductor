@@ -196,6 +196,56 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 125 — post-merge, applied. **An agent's budget is coloured as it fills, like the daily budget.**
+
+Web only (`shell/spend.ts`, `shell/autonomy.ts`, the details panel, the composer, the Agent
+screen's tabs, the Project lane and the Fleet card). A TODO.md item (10 Oct): "use the same
+thresholds and tokens as the status bar's daily meter for each agent's spend against its budget".
+- **One helper, `toneOf(fraction)` in `shell/spend.ts`**, is the status bar's own rule pulled out:
+  green (`ok`), yellow from 75% (`warn`), red from 95% (`over`). `dailyMeter` now calls it, and
+  `budgetOf(agent).tone` (the agent's budget, Amendment 124) calls it, so the two cannot drift. The
+  tokens are the daily meter's too: `--done`, `--need` and `--fail`, no colour of any theme's own,
+  and the contrast checks in `lib/verify.ts` already clear all three at 4.5:1 on every surface in
+  both themes.
+- **From 100% it reads red and says over.** The tone is `over` (red) from 95%, and `Budget.over` /
+  `state` mark 100%: the bar stays full, the percentage goes past 100, and each place says it in
+  words (below). A budget in tokens (Copilot, OpenRouter) colours the same way, in tokens.
+- **Where it is drawn:**
+  - **The details panel's bar** (`inspector.tsx`, `.ag-bar`) fills green, yellow, red; its
+    percentage goes red when over.
+  - **The composer's budget line** (`composer.tsx`): the box's border and the spent figure take
+    the tone (green is the default, so they only change when they should), with a small meter
+    beside the figure (`BudgetMeter`, `.ag-meter`); the "over budget: ... a warning only; stops
+    at ..." line under it takes it too. **The folded summary** carries the same small meter and its
+    text goes yellow, then red. An unsafe interaction mode is still the alarm (`is-alarm`); the
+    budget is no longer part of it, since it now has its own colours.
+  - **The agent's tab** (`agent/tabs.ts`: `AgentTab.budget`; `agent.tsx`): a thin bar along the foot
+    of the tab, and the percentage in its hover text.
+  - **Its Fleet card, in both places an agent is on one:** the Project screen's lane (`fleet/lane.tsx`)
+    has its meter in the tone and the figure in the tone, and says `· over`; the Fleet screen's card
+    (`fleet/card.tsx` `AgentRow`) has a small meter on each agent's row.
+
+**Verified:** `lib/verify.ts` ends with a section for it: green, yellow and red at 74.99/75/94.99/95
+percent and over the budget; `toneOf` equals the daily meter's tone for every step from 0 to 240%;
+the thresholds are the status bar's `WARN_AT` and `OVER_AT`; a token budget colours the same;
+no budget has no colour; the status bar's bar fills with `--done`, `--need`, `--fail` and each of the
+four new fills (composer meter, tab bar, lane meter, Fleet row meter) uses the same three, and so does
+the details panel's bar; none of those CSS rules has a hex, `rgb()` or `hsl()`; each component carries
+the tone as `data-tone`. `agent/verify.ts` checks the tab's bar for each tone and for a token budget.
+The existing check on the composer's folded-line markup, the exact shape of `budgetOf`, and the old
+"budget is the alarm" check were updated to the new markup. `pnpm -r typecheck`, the web verify files,
+and a `vite build` into a scratch folder pass.
+
+**Not done:**
+- **Nobody has looked at it in a browser, in either theme.** The colours are the daily meter's tokens,
+  so the contrast checks cover them, but how the tab's 2px bar, the 30px bar on a Fleet row and the
+  composer's meter sit against their neighbours is for a person to see.
+- **The navigator's agent rows have no meter.** The TODO named the details panel, the composer, the
+  tab and the Fleet card; the navigator draws rows from the same `agentTabs` result, which now carries
+  `budget`, so it is one line to add.
+- **The job's budget, and the daily one, are unchanged**: the daily meter is as it was, and a job has
+  no meter of its own (its warning is the Over budget card of Amendment 124).
+
 ### Amendment 124 — post-merge, applied. **An agent's budget warns instead of stopping it, and a ceiling at twice the budget stops it.**
 
 Daemon, shared and web (`shared/src/budget.ts` new, `session/budget.ts`, `session/alerts.ts`,

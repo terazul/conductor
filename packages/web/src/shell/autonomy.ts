@@ -9,6 +9,7 @@
 
 import { agentBudget, capState, ceilingOf, type Agent, type Autonomy, type BudgetState } from '@conductor/shared';
 import { tokenWords } from '../lib/providers.js';
+import { toneOf, type SpendTone } from './spend.js';
 
 export type ToolPolicy = 'denied' | 'asks' | 'allowed';
 
@@ -62,6 +63,11 @@ export interface Budget {
   pct: number;
   /** ok under the budget, over from it, ceiling from twice it. */
   state: BudgetState;
+  /**
+   * The colour it reads in: the status bar's daily meter's thresholds and tokens
+   * (Amendment 125), green, yellow from 75%, red from 95% and so from the budget on.
+   */
+  tone: SpendTone;
   /** At or past the budget. A warning, not a stop: only `state === 'ceiling'` has stopped it. */
   over: boolean;
   /**
@@ -84,7 +90,7 @@ export interface Budget {
  * also uncaps its job (the daemon's `jobCap`), so no job figure ever pauses it and a
  * bar measuring one would be measuring nothing.
  */
-export function budgetOf(agent: Agent): Budget | null {
+export function budgetOf(agent: Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy'>): Budget | null {
   const b = agentBudget(agent);
   if (b === null || b.budget <= 0) return null;
   const ratio = b.spent / b.budget;
@@ -96,6 +102,7 @@ export function budgetOf(agent: Agent): Budget | null {
     fraction: Math.min(1, ratio),
     pct: Math.round(ratio * 100),
     state,
+    tone: toneOf(ratio),
     over: state !== 'ok',
     unit: b.unit,
   };

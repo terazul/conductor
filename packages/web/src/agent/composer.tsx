@@ -21,7 +21,7 @@
 import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
 import type { Agent, Autonomy, EffortLevel } from '@conductor/shared';
-import { BUDGET_RAISES, budgetOf, parseBudget } from '../shell/autonomy.js';
+import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
@@ -456,7 +456,8 @@ export function Composer({ agent }: { agent: Agent }) {
         ? overSays(tokenWords(spend.spent), tokenWords(spend.cap), tokenWords(spend.ceiling), true)
         : overSays(fmtMoney(spend.spent), fmtMoney(spend.cap), fmtMoney(spend.ceiling))
       : null;
-  const summaryAlarm = spend?.over === true || current?.danger === true;
+  // The mode alone is the alarm now; the budget colours itself, green to red (Amendment 125).
+  const summaryAlarm = current?.danger === true;
 
   return (
     <div className="ag-composer">
@@ -498,8 +499,9 @@ export function Composer({ agent }: { agent: Agent }) {
           >
             <Chevron open={open} />
             <span className="ag-fold-lab">agent</span>
+            {!open && spend && <BudgetMeter spend={spend} />}
             {!open && (
-              <span className={`ag-summary${summaryAlarm ? ' is-alarm' : ''}`} title={summary}>
+              <span className={`ag-summary${summaryAlarm ? ' is-alarm' : ''}`} data-tone={spend?.tone} title={summary}>
                 {summary}
               </span>
             )}
@@ -674,7 +676,7 @@ export function Composer({ agent }: { agent: Agent }) {
           {has.budget === 'tokens' ? (
           <div className="ag-budget">
             <span className="ui-lab">budget</span>
-            <label className={`ag-budget-box${spend?.over ? ' is-over' : ''}`}>
+            <label className="ag-budget-box" data-tone={spend?.tone}>
               <input
                 className="ag-budget-in"
                 inputMode="numeric"
@@ -701,14 +703,15 @@ export function Composer({ agent }: { agent: Agent }) {
               />
               tokens
             </label>
-            <span className={`ag-budget-spent${spend?.over ? ' is-over' : ''}`}>
+            {spend && <BudgetMeter spend={spend} />}
+            <span className="ag-budget-spent" data-tone={spend?.tone}>
               {tokenWords(agent.inputTokens + agent.outputTokens)} used
             </span>
           </div>
           ) : (
           <div className="ag-budget">
             <span className="ui-lab">budget</span>
-            <label className={`ag-budget-box${spend?.over ? ' is-over' : ''}`}>
+            <label className="ag-budget-box" data-tone={spend?.tone}>
               $
               <input
                 className="ag-budget-in"
@@ -735,7 +738,8 @@ export function Composer({ agent }: { agent: Agent }) {
                 }}
               />
             </label>
-            <span className={`ag-budget-spent${spend?.over ? ' is-over' : ''}`}>
+            {spend && <BudgetMeter spend={spend} />}
+            <span className="ag-budget-spent" data-tone={spend?.tone}>
               {fmtMoney(agent.costUsd)} spent
             </span>
             {autonomy.budgetUsd !== null &&
@@ -775,7 +779,7 @@ export function Composer({ agent }: { agent: Agent }) {
         {modelWarning && <div className="ag-modesays is-danger">{modelWarning}</div>}
 
         {open && budgetSays && (
-          <div className="ag-modesays ag-budgetsays" role="status">
+          <div className="ag-modesays ag-budgetsays" data-tone={spend?.tone} role="status">
             {budgetSays}
           </div>
         )}
@@ -795,5 +799,22 @@ export function Composer({ agent }: { agent: Agent }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * How full the agent's budget is, in the daily meter's colours (Amendment 125): green,
+ * yellow from 75%, red from 95%. It stays full past the budget; the words say it is over.
+ */
+function BudgetMeter({ spend }: { spend: Budget }) {
+  return (
+    <span
+      className="ag-meter"
+      data-tone={spend.tone}
+      aria-hidden="true"
+      title={`${spend.pct}% of the budget${spend.state === 'ok' ? '' : ' — over it'}`}
+    >
+      <i style={{ width: `${Math.round(spend.fraction * 100)}%` }} />
+    </span>
   );
 }

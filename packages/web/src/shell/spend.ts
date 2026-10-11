@@ -5,6 +5,10 @@
  * Green while there's room, yellow from 75%, red from 95% — the user's thresholds. Past
  * 100% the bar stays full and red: nothing stops, by the user's choice, so the number
  * keeps going and says so.
+ *
+ * Each agent's spend against its own budget reads the same way, through the same
+ * `toneOf` (Amendment 125): green, yellow from 75%, red from 95%, and from 100% it is
+ * over, which the line says in words.
  */
 
 export const DAILY_KEY = 'conductor.dailyBudget';
@@ -13,6 +17,11 @@ export const OVER_AT = 0.95;
 
 export type SpendTone = 'ok' | 'warn' | 'over';
 
+/** The colour a fraction of a budget reads in: the daily meter's, and every agent's. */
+export function toneOf(fraction: number): SpendTone {
+  return fraction >= OVER_AT ? 'over' : fraction >= WARN_AT ? 'warn' : 'ok';
+}
+
 export function parseBudget(raw: string | null): number | null {
   const n = Number(raw);
   return raw !== null && Number.isFinite(n) && n > 0 ? n : null;
@@ -20,7 +29,7 @@ export function parseBudget(raw: string | null): number | null {
 
 export function dailyMeter(spent: number, budget: number): { fraction: number; tone: SpendTone; label: string; title: string } {
   const fraction = budget > 0 ? spent / budget : 0;
-  const tone: SpendTone = fraction >= OVER_AT ? 'over' : fraction >= WARN_AT ? 'warn' : 'ok';
+  const tone = toneOf(fraction);
   const money = (n: number): string => `$${n.toFixed(2)}`;
   const pct = Math.round(fraction * 100);
   return {

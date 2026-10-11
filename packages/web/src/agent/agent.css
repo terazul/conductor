@@ -562,11 +562,16 @@
 }
 
 /*
- * At or over the cap. Amber: the agent will not run again until a person raises it —
- * the one case in this panel where a human is genuinely required.
+ * How full the budget is, in the status bar's daily meter's colours (Amendment 125):
+ * green while there's room, yellow from 75%, red from 95%, so red from the budget on. Green
+ * is the default, so the box and the figure only change colour when they should.
  */
-.ag-budget-box.is-over {
+.ag-budget-box[data-tone='warn'] {
   border-color: var(--need);
+}
+
+.ag-budget-box[data-tone='over'] {
+  border-color: var(--fail);
 }
 
 .ag-budget-in {
@@ -590,8 +595,47 @@
   white-space: nowrap;
 }
 
-.ag-budget-spent.is-over {
+.ag-budget-spent[data-tone='warn'] {
   color: var(--need);
+}
+
+.ag-budget-spent[data-tone='over'] {
+  color: var(--fail);
+}
+
+/* The same bar the status bar draws for today's spend, small, beside a figure. */
+.ag-meter {
+  display: inline-block;
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line2);
+  overflow: hidden;
+  flex: none;
+}
+
+.ag-meter i {
+  display: block;
+  height: 100%;
+  background: var(--done);
+  transition: width 0.3s;
+}
+
+.ag-meter[data-tone='warn'] i {
+  background: var(--need);
+}
+
+.ag-meter[data-tone='over'] i {
+  background: var(--fail);
+}
+
+/* What the open composer says while the agent is over its budget. */
+.ag-budgetsays[data-tone='warn'] {
+  color: var(--need);
+}
+
+.ag-budgetsays[data-tone='over'] {
+  color: var(--fail);
 }
 
 /* ── tool call ─────────────────────────────────────────────────────────────── */
@@ -1090,6 +1134,15 @@ a.ag-tool-subj:focus-visible {
   color: var(--fail);
 }
 
+/* And the budget in it, in the daily meter's colours (Amendment 125). */
+.ag-summary[data-tone='warn'] {
+  color: var(--need);
+}
+
+.ag-summary[data-tone='over'] {
+  color: var(--fail);
+}
+
 .ag-pill {
   font: inherit;
   font-size: var(--fs-sm);
@@ -1207,12 +1260,21 @@ a.ag-tool-subj:focus-visible {
 .ag-bar i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--live), color-mix(in srgb, var(--live) 65%, var(--bg)));
+  background: linear-gradient(90deg, var(--done), color-mix(in srgb, var(--done) 65%, var(--bg)));
   transition: width 0.4s;
 }
 
-.ag-bar.is-over i {
+/* Green, yellow from 75%, red from 95%: the status bar's daily meter's (Amendment 125). */
+.ag-bar[data-tone='warn'] i {
+  background: linear-gradient(90deg, var(--need), color-mix(in srgb, var(--need) 65%, var(--bg)));
+}
+
+.ag-bar[data-tone='over'] i {
   background: linear-gradient(90deg, var(--fail), color-mix(in srgb, var(--fail) 70%, var(--bg)));
+}
+
+.ag-bar-pct[data-tone='over'] {
+  color: var(--fail);
 }
 
 .ag-todo {
@@ -1364,6 +1426,7 @@ a.ag-files-p:focus-visible {
 }
 
 .ag-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1403,6 +1466,33 @@ a.ag-files-p:focus-visible {
 .ag-tab-need {
   font-family: var(--mono);
   font-weight: 600;
+}
+
+/* How full its budget is, along the foot of the tab, in the daily meter's colours (Amendment 125). */
+.ag-tab-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ag-tab-bar i {
+  display: block;
+  height: 100%;
+  background: var(--done);
+}
+
+.ag-tab-bar[data-tone='warn'] i {
+  background: var(--need);
+}
+
+.ag-tab-bar[data-tone='over'] i {
+  background: var(--fail);
 }
 
 /*

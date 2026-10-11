@@ -316,6 +316,30 @@
   flex: none;
 }
 
+/* How full its budget is, in the status bar's daily meter's colours (Amendment 125). */
+.fl-arow-bud {
+  width: 30px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line2);
+  overflow: hidden;
+  flex: none;
+}
+
+.fl-arow-bud i {
+  display: block;
+  height: 100%;
+  background: var(--done);
+}
+
+.fl-arow-bud[data-tone='warn'] i {
+  background: var(--need);
+}
+
+.fl-arow-bud[data-tone='over'] i {
+  background: var(--fail);
+}
+
 /* This row is why the project is amber. */
 .fl-arow.is-need {
   background: color-mix(in srgb, var(--need) 10%, transparent);
@@ -1006,13 +1030,28 @@
 .pj-meter i {
   display: block;
   height: 100%;
-  background: var(--live);
+  background: var(--done);
   transition: width 0.4s;
 }
 
-/* Over its cap: the agent stops, which is a failure to plan, not a request. */
-.pj-meter.is-over i {
+/*
+ * Green, yellow from 75%, red from 95%: the status bar's daily meter's (Amendment 125).
+ * Over its budget it reads red and says so; the agent is only warned about, not stopped.
+ */
+.pj-meter[data-tone='warn'] i {
+  background: var(--need);
+}
+
+.pj-meter[data-tone='over'] i {
   background: var(--fail);
+}
+
+.pj-budget[data-tone='warn'] {
+  color: var(--need);
+}
+
+.pj-budget[data-tone='over'] {
+  color: var(--fail);
 }
 
 .pj-meter-none {

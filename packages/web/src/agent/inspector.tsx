@@ -94,7 +94,7 @@ export function Inspector({
           <span className="ui-lab">Usage</span>
           {budget ? (
             <>
-              <div className={`ag-bar${budget.over ? ' is-over' : ''}`}>
+              <div className="ag-bar" data-tone={budget.tone}>
                 <i style={{ width: `${Math.round(budget.fraction * 100)}%` }} />
               </div>
               <div className="pj-kv">
@@ -103,7 +103,9 @@ export function Inspector({
                     ? `${tokenWords(budget.spent)} of ${tokenWords(budget.cap)} tokens`
                     : `${fmtMoney(budget.spent)} of ${fmtMoney(budget.cap)}`}
                 </span>
-                <span>{budget.pct}%</span>
+                <span className="ag-bar-pct" data-tone={budget.tone}>
+                  {budget.pct}%
+                </span>
               </div>
               {budget.state !== 'ok' && (
                 <p className="ag-isec-note">

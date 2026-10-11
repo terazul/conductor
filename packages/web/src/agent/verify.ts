@@ -610,7 +610,7 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   check('a token cap is a bar, in tokens, against input plus output', b?.unit === 'tokens' && b.spent === 184_000 && b.cap === 500_000 && Math.abs(b.fraction - 0.368) < 1e-9, JSON.stringify(b));
   check('at the budget is over it, as the daemon counts; twice it is the ceiling', budgetOf(tokenAgent(500_000, 500_000))?.over === true && budgetOf(tokenAgent(499_999, 500_000))?.over === false && budgetOf(tokenAgent(999_999, 500_000))?.state === 'over' && budgetOf(tokenAgent(1_000_000, 500_000))?.state === 'ceiling');
   check('no token cap is no bar', budgetOf(tokenAgent(9_000, null)) === null);
-  check("a Claude agent's dollar bar is what it was, and says dollars", JSON.stringify(budgetOf(agentAt(5, 25))) === JSON.stringify({ spent: 5, cap: 25, ceiling: 50, fraction: 0.2, pct: 20, state: 'ok', over: false, unit: 'usd' }));
+  check("a Claude agent's dollar bar is what it was, and says dollars", JSON.stringify(budgetOf(agentAt(5, 25))) === JSON.stringify({ spent: 5, cap: 25, ceiling: 50, fraction: 0.2, pct: 20, state: 'ok', tone: 'ok', over: false, unit: 'usd' }));
 
   const copilot = { defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true };
   check('Claude has every control', JSON.stringify(controlsFor(capabilitiesOf(agentAt(0, 25), null))) === JSON.stringify({ effort: true, helpers: true, budget: 'usd' }));
@@ -654,12 +654,13 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
   check('send stays, and the fold says whether it is open', /aria-expanded=\{open\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
   // Amendment 110: a header with the shared chevron, like every other fold, not a "settings" button.
   check('the fold is a header with the shared chevron, first in the row', /<div className="ag-crow">[\s\S]{0,600}?<button[^>]*?className=\{`ag-fold\$\{open \? ' is-open' : ''\}`\}[\s\S]{0,400}?<Chevron open=\{open\} \/>\s*<span className="ag-fold-lab">agent<\/span>/.test(comp));
-  check('and the folded line is inside it, so the summary is what you click', /<span className="ag-fold-lab">agent<\/span>\s*\{!open && \(\s*<span className=\{`ag-summary/.test(comp));
+  check('and the folded line is inside it, so the summary is what you click', /<span className="ag-fold-lab">agent<\/span>\s*\{!open && spend && <BudgetMeter spend=\{spend\} \/>\}\s*\{!open && \(\s*<span className=\{`ag-summary/.test(comp));
   check('no "settings ▸" button is left', !/settings \{open \?/.test(comp) && !/'▸'/.test(comp));
   const navSrc = readFileSync(new URL('../shell/Navigator.tsx', import.meta.url), 'utf8');
   const uiSrc = readFileSync(new URL('../shell/ui.tsx', import.meta.url), 'utf8');
   check('one Chevron, in ui.tsx, used by the navigator too', /export function Chevron\(/.test(uiSrc) && !/function Chevron\(/.test(navSrc) && /import \{ Chevron,/.test(navSrc));
-  check('a reached budget or an unsafe mode stays in sight while folded', /const summaryAlarm = spend\?\.over === true \|\| current\?\.danger === true;/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
+  // Amendment 125: the mode is the alarm; the budget in the line keeps its own colour (data-tone), yellow then red.
+  check('a passed budget or an unsafe mode stays in sight while folded', /const summaryAlarm = current\?\.danger === true;/.test(comp) && /data-tone=\{spend\?\.tone\} title=\{summary\}/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
 }
 
 console.log('\n10 · re-run the agents after this one (Amendment 102)');
@@ -915,6 +916,31 @@ console.log("\n· over its budget it warns, and says where it stops (Amendment 1
   check('the composer asks to raise only when stopped: its placeholder is for the ceiling', /const atCap = spend\?\.state === 'ceiling' && agent\.status !== 'working';/.test(comp));
   check('the sentence shows when the settings are open and the agent is over', /\{open && budgetSays && \(/.test(comp) && /spend\?\.state === 'over'/.test(comp));
   check('the header says over budget while it works, and budget reached only at the ceiling', /budgetNow\?\.state === 'ceiling'/.test(head) && /budgetNow\?\.state === 'over'/.test(head) && />over budget</.test(head));
+}
+
+console.log("\n· its tab shows how full its budget is, in the daily meter's colours (Amendment 125)");
+{
+  const withSpend = (id: string, costUsd: number, budgetUsd: number | null) => ({
+    id,
+    projectId: 'p',
+    jobId: 'j',
+    role: id,
+    status: 'working' as const,
+    costUsd,
+    inputTokens: 0,
+    outputTokens: 0,
+    autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd },
+  });
+  const tabs = agentTabs([withSpend('a', 5, 25), withSpend('b', 20, 25), withSpend('c', 30, 25), withSpend('d', 9, null)], 'p', ['j'], [], []);
+  const by = (id: string) => tabs.find((t) => t.id === id)!;
+  check('green with room', by('a').budget?.tone === 'ok' && by('a').budget?.pct === 20);
+  check('yellow from 75%', by('b').budget?.tone === 'warn' && by('b').budget?.pct === 80);
+  check('red when over, with the bar full and the percentage past 100', by('c').budget?.tone === 'over' && by('c').budget?.fraction === 1 && by('c').budget?.pct === 120 && by('c').budget?.state === 'over');
+  check('no budget, no bar', by('d').budget === null);
+  const bare = agentTabs([{ id: 'x', projectId: 'p', jobId: 'j', role: 'x', status: 'working' }], 'p', ['j'], [], []);
+  check("a caller that doesn't give the spend gets no bar, not a wrong one", bare[0]?.budget === null);
+  const tokenTab = agentTabs([{ ...withSpend('t', 0, null), inputTokens: 450_000, outputTokens: 40_000, autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }], 'p', ['j'], [], []);
+  check('a token budget colours its tab the same way', tokenTab[0]?.budget?.tone === 'over' && tokenTab[0]?.budget?.pct === 98);
 }
 
 console.log(

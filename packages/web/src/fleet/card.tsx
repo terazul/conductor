@@ -51,6 +51,7 @@ import {
   startedMs,
 } from '../shell/describe.js';
 import { useCommand } from '../agent/endpoints.js';
+import { budgetOf } from '../shell/autonomy.js';
 import {
   addProjectDir,
   editProject,
@@ -88,6 +89,8 @@ function AgentRow({
   const shown = shownStatus(agent, pending);
   const elapsedMs = useElapsedMs(startedMs(agent, events), agent.endedAt, events);
   const elapsed = agent.status === 'queued' || elapsedMs === null ? null : fmtElapsed(elapsedMs);
+  // How full its budget is, in the colours of the status bar's daily meter (Amendment 125).
+  const budget = budgetOf(agent);
 
   return (
     <>
@@ -98,7 +101,7 @@ function AgentRow({
           e.stopPropagation();
           openAgent(agent);
         }}
-        title={`${agent.role} — ${STATUS_WORD[shown]}`}
+        title={`${agent.role} — ${STATUS_WORD[shown]}${budget ? ` · ${budget.pct}% of its budget${budget.over ? ' — over' : ''}` : ''}`}
       >
         <Dot status={shown} />
         <span className="fl-arow-nm">{agent.role}</span>
@@ -107,6 +110,11 @@ function AgentRow({
           {action.head && <>{action.head} </>}
           {action.subject && <b>{action.subject}</b>}
         </span>
+        {budget && (
+          <span className="fl-arow-bud" data-tone={budget.tone} aria-hidden="true">
+            <i style={{ width: `${Math.round(budget.fraction * 100)}%` }} />
+          </span>
+        )}
         <span className="fl-arow-el">
           {agent.status === 'queued' ? 'queued' : agent.status === 'done' ? 'finished' : (elapsed ?? '—')}
         </span>

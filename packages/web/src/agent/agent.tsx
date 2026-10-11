@@ -622,7 +622,9 @@ export function AgentScreen() {
                 role="tab"
                 aria-selected={t.id === agent.id}
                 className={`ag-tab${t.id === agent.id ? ' is-on' : ''}${t.needs > 0 ? ' is-need' : ''}${t.newJob ? ' is-newjob' : ''}`}
-                title={t.needs > 0 ? `${t.label} — ${t.needs === 1 ? 'needs you' : `${t.needs} things need you`}` : `${t.label} — ${STATUS_WORD[t.status]}`}
+                title={`${
+                  t.needs > 0 ? `${t.label} — ${t.needs === 1 ? 'needs you' : `${t.needs} things need you`}` : `${t.label} — ${STATUS_WORD[t.status]}`
+                }${t.budget ? ` · ${t.budget.pct}% of its budget${t.budget.state === 'ok' ? '' : ' — over'}` : ''}`}
                 onClick={() => {
                   const target = agents.find((a) => a.id === t.id);
                   if (target && t.id !== agent.id) openAgent(target);
@@ -634,6 +636,12 @@ export function AgentScreen() {
                     already pulses via the Dot above. Finished only until you open that
                     agent, and again when it finishes again (Amendment 105). */}
                 {t.status === 'done' && unseenAgents.has(t.id) && <span className="ag-tab-tag">finished</span>}
+                {/* How full its budget is, along the foot of the tab, in the daily meter's colours (Amendment 125). */}
+                {t.budget && (
+                  <span className="ag-tab-bar" data-tone={t.budget.tone} aria-hidden="true">
+                    <i style={{ width: `${Math.round(t.budget.fraction * 100)}%` }} />
+                  </span>
+                )}
                 {/* The count opens that agent with its Needs you panel (Amendment 108); the
                     rest of the tab only switches agent. */}
                 {t.needs > 0 && (

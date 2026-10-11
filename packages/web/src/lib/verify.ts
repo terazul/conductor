@@ -69,7 +69,8 @@ import { REVOKE_NOTE, copyLine, ruleOrigin, ruleTitle } from '../settings/rules.
 import { nestHelpers } from '../fleet/nest.js';
 import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortProjects, type SortFacts } from '../fleet/order.js';
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
-import { budgetProblem, dailyMeter, parseBudget } from '../shell/spend.js';
+import { OVER_AT, WARN_AT, budgetProblem, dailyMeter, parseBudget, toneOf } from '../shell/spend.js';
+import { budgetOf } from '../shell/autonomy.js';
 import { readdirSync, statSync } from 'node:fs';
 import type { StorageState } from '@conductor/shared';
 import { keyLine, keyStateFrom, loginLine, providerLabel, readCopilotLogin, readKeyState, saveKey } from './providers.js';
@@ -1423,6 +1424,75 @@ console.log("\n36 · an agent's budget warns, in words (Amendment 124)");
   check('the top bar has a word or two for each', alertWord(warn()) === 'over its budget' && alertWord(warn({ cause: 'job_budget_over' })) === 'job over its budget');
   check('a stop at twice a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'stopped at twice its 500k-token budget');
   check('raised since, it says so in tokens too', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 2_000_000 } })) === 'stopped on its budget, now raised to 2M tokens');
+}
+
+console.log("\n· an agent's budget is coloured as it fills, like the daily budget (Amendment 125)");
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const A = (costUsd: number, budgetUsd: number | null, over: Partial<Agent> = {}): Agent => ({
+    id: 'agt_c',
+    jobId: 'job_c',
+    projectId: 'p',
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 's',
+    status: 'working',
+    blockMode: null,
+    costUsd,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const tone = (spent: number, budget = 100) => budgetOf(A(spent, budget))!.tone;
+
+  check('green with room, as the daily meter', tone(0) === 'ok' && tone(74.99) === 'ok');
+  check('yellow from 75%', tone(75) === 'warn' && tone(94.99) === 'warn');
+  check('red from 95%, and from the budget on', tone(95) === 'over' && tone(100) === 'over' && tone(180) === 'over');
+  check('the same thresholds and the same function as the status bar, at every step', Array.from({ length: 241 }, (_, i) => i / 100).every((f) => toneOf(f) === dailyMeter(f * 10, 10).tone && budgetOf(A(f * 10, 10))!.tone === toneOf(f)));
+  check('the thresholds are the status bar\'s own: 75% and 95%', WARN_AT === 0.75 && OVER_AT === 0.95);
+  check('it says over from 100%, not from 95%', budgetOf(A(96, 100))!.over === false && budgetOf(A(96, 100))!.tone === 'over' && budgetOf(A(100, 100))!.over === true);
+  const tok = (spent: number) => budgetOf(A(0, null, { inputTokens: spent - 1_000, outputTokens: 1_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }))!;
+  check('a token budget colours the same way', tok(300_000).tone === 'ok' && tok(375_000).tone === 'warn' && tok(475_000).tone === 'over' && tok(612_000).tone === 'over' && tok(612_000).over === true);
+  check('an agent with no budget has no colour to show', budgetOf(A(40, null)) === null);
+  check('the bar stays full past the budget; the percentage does not', budgetOf(A(120, 100))!.fraction === 1 && budgetOf(A(120, 100))!.pct === 120);
+
+  // The same three tokens as the status bar's bar, in every place it is drawn. Tokens only, so both themes
+  // read: --done, --need and --fail already clear 4.5:1 on every surface in the contrast checks above.
+  const shell = src('../shell/shell.css');
+  const bar = (css: string, sel: string, tone: string): string | null =>
+    new RegExp(`${sel.replace(/[.[\]]/g, '\\$&')}\\[data-tone='${tone}'\\] i \\{[^}]*background:\\s*([^;]+);`).exec(css)?.[1] ?? null;
+  check('the status bar fills green, then var(--need), then var(--fail)', /\.sh-spend-bar i \{[^}]*background: var\(--done\)/.test(shell) && /\.sh-spend\[data-tone='warn'\] \.sh-spend-bar i \{\s*background: var\(--need\)/.test(shell) && /\.sh-spend\[data-tone='over'\] \.sh-spend-bar i \{\s*background: var\(--fail\)/.test(shell));
+  const agentCss = src('../agent/agent.css');
+  const fleetCss = src('../fleet/fleet.css');
+  const fills: [string, string, string][] = [
+    [agentCss, '.ag-meter', 'the composer and its folded line'],
+    [agentCss, '.ag-tab-bar', "the agent's tab"],
+    [fleetCss, '.pj-meter', "the Project screen's lane"],
+    [fleetCss, '.fl-arow-bud', "the Fleet card's agent row"],
+  ];
+  for (const [css, sel, where] of fills) {
+    check(`${where} fills with the status bar's tokens`, /var\(--done\)/.test(new RegExp(`${sel.replace('.', '\\.')} i \\{[^}]*`).exec(css)?.[0] ?? '') && bar(css, sel, 'warn') === 'var(--need)' && bar(css, sel, 'over') === 'var(--fail)', `${bar(css, sel, 'warn')} ${bar(css, sel, 'over')}`);
+  }
+  check("the details panel's bar fills in them too, and its figure goes red when over", /\.ag-bar\[data-tone='warn'\] i \{[^}]*var\(--need\)/.test(agentCss) && /\.ag-bar\[data-tone='over'\] i \{[^}]*var\(--fail\)/.test(agentCss) && /\.ag-bar-pct\[data-tone='over'\] \{\s*color: var\(--fail\)/.test(agentCss));
+  const rules = [agentCss, fleetCss].flatMap((css) => css.match(/[^{}]*\[data-tone='(?:ok|warn|over)'\][^{}]*\{[^}]*\}/g) ?? []).filter((r) => /ag-(?:meter|tab-bar|bar|budget|summary)|pj-(?:meter|budget)|fl-arow-bud/.test(r));
+  check('and none of those rules has a colour of its own', rules.length >= 14 && rules.every((r) => !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(r)), `${rules.length} rules`);
+
+  const insp = src('../agent/inspector.tsx');
+  const comp = src('../agent/composer.tsx');
+  const lane = src('../fleet/lane.tsx');
+  const card = src('../fleet/card.tsx');
+  const screen = src('../agent/agent.tsx');
+  check("the details panel's bar and figure carry the tone", /<div className="ag-bar" data-tone=\{budget\.tone\}>/.test(insp) && /className="ag-bar-pct" data-tone=\{budget\.tone\}/.test(insp));
+  check("the composer's box, figure and meter carry it, and so does the folded line", /<label className="ag-budget-box" data-tone=\{spend\?\.tone\}>/.test(comp) && /className="ag-budget-spent" data-tone=\{spend\?\.tone\}/.test(comp) && /className="ag-meter"/.test(comp) && /className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\} data-tone=\{spend\?\.tone\}/.test(comp));
+  check('an unsafe mode is still the alarm, and the budget no longer is', /const summaryAlarm = current\?\.danger === true;/.test(comp));
+  check("the agent's tab draws its bar", /className="ag-tab-bar" data-tone=\{t\.budget\.tone\}/.test(screen));
+  check("the Project lane's meter and figure carry the tone, and say over", (lane.match(/data-tone=\{budget\.tone\}/g) ?? []).length === 4 && /budget\.over \? ' · over' : ''/.test(lane));
+  check("the Fleet card's agent row draws its meter", /className="fl-arow-bud" data-tone=\{budget\.tone\}/.test(card));
+  check('nothing is still marked by the old amber/red is-over class', !/is-over/.test(insp + comp + lane) && !/\.ag-budget-box\.is-over|\.ag-bar\.is-over|\.pj-meter\.is-over/.test(agentCss + fleetCss));
 }
 
 console.log(

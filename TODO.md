@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 125.
+  green `make test` (decided 30 Sep). The next amendment is 126.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -138,12 +138,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   `TZ`), so it is your machine's zone unless the daemon is started under another.
 
 ## Agents
-
-- [ ] **Colour an agent's budget as it fills, like the daily budget.** Asked for (10 Oct). The status
-  bar's daily meter is green, yellow from 75% and red from 95% (`web/src/shell/spend.ts`,
-  `dailyMeter`). Use the same thresholds and tokens for each agent's spend against its budget: in the
-  details panel's budget bar, the composer's budget line and summary, the agent's tab and its Fleet card.
-  Token budgets (Copilot, OpenRouter) colour the same way.
 
 - [ ] **Better instructions for the built-in roles.** Asked for (8 Oct). The new text for all
   seven is already written, as option B of [docs/plans/role-definitions.md](docs/plans/role-definitions.md).

@@ -149,20 +149,29 @@ export function Lane({
         <Spark activity={activity} tone={blockedHere ? 'need' : 'live'} />
         {budget?.unit === 'tokens' ? (
           <>
-            <span className={`pj-meter${budget.over ? ' is-over' : ''}`}>
+            <span className="pj-meter" data-tone={budget.tone}>
               <i style={{ width: `${Math.round(budget.fraction * 100)}%` }} />
             </span>
-            <span title={`${tokenWords(budget.spent)} of a ${tokenWords(budget.cap)}-token cap`}>
-              {Math.round(budget.fraction * 100)}% of {tokenWords(budget.cap)} tok
+            <span
+              className="pj-budget"
+              data-tone={budget.tone}
+              title={`${tokenWords(budget.spent)} of a ${tokenWords(budget.cap)}-token budget${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${tokenWords(budget.ceiling)}`}`}
+            >
+              {budget.pct}% of {tokenWords(budget.cap)} tok{budget.over ? ' · over' : ''}
             </span>
           </>
         ) : budget ? (
           <>
-            <span className={`pj-meter${budget.over ? ' is-over' : ''}`}>
+            <span className="pj-meter" data-tone={budget.tone}>
               <i style={{ width: `${Math.round(budget.fraction * 100)}%` }} />
             </span>
-            <span title={`${fmtMoney(budget.spent)} of a ${fmtMoney(budget.cap)} cap`}>
-              {Math.round(budget.fraction * 100)}% of {fmtMoney(budget.cap)}
+            <span
+              className="pj-budget"
+              data-tone={budget.tone}
+              title={`${fmtMoney(budget.spent)} of a ${fmtMoney(budget.cap)} budget${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${fmtMoney(budget.ceiling)}`}`}
+            >
+              {budget.pct}% of {fmtMoney(budget.cap)}
+              {budget.over ? ' · over' : ''}
             </span>
           </>
         ) : (
