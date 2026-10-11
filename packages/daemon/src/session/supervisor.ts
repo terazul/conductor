@@ -232,7 +232,21 @@ export const WAKE_NUDGE =
 export const RESTART_NUDGE =
   'Continue from where you stopped. Conductor restarted while you were working: if a tool ' +
   'call was still running then, it was stopped before it finished, so check what it did ' +
-  'before relying on it.';
+  'before relying on it. Anything you had running in the background, such as background ' +
+  'agents or tasks you started yourself, was stopped with it and will not report back: do ' +
+  'that work again yourself rather than wait for it, and do not end your turn until it is ' +
+  'done (Amendment 119).';
+
+/**
+ * Sent once, on its own, to an agent that a restart interrupted and that then ended its
+ * turn without calling `hand_off` while agents wait for it (Amendment 119). Without it the
+ * agent is held and you are asked; most of the time what it needs is this sentence.
+ */
+export const HANDOFF_ASK =
+  'You ended your turn without calling hand_off, and the agents after you cannot start ' +
+  'until you have. Conductor restarted while you were working, so check what is really ' +
+  'finished: anything you had running in the background was stopped and will not report ' +
+  'back. Finish what is left yourself, then call hand_off with a summary for them.';
 
 /** What `deleteProject` forgot, and what it left alone. Reported to the human. */
 export interface ProjectRemoval {
@@ -298,6 +312,12 @@ export class Supervisor implements AgentControl {
   #runners = new Map<string, AgentBackend>();
   /** Agents a restart interrupted, resumed with RESTART_NUDGE on their next run. */
   #restarted = new Set<string>();
+  /**
+   * Agents whose run in flight began as a restart resume, told RESTART_NUDGE (Amendment 119).
+   * `#settle` takes the entry out whatever way the run ends, so it never outlives the run:
+   * a run that ends held for not handing off is asked, once, before the hold.
+   */
+  #restartRuns = new Set<string>();
   /**
    * Agents `rerunFrom` queued, with the roles whose reply changed, resumed with `rerunNote`
    * on their next run (Amendment 102). In memory, like `#restarted`: a restart between the
@@ -1039,7 +1059,10 @@ export class Supervisor implements AgentControl {
     if (report) return report;
 
     // Resumed on its own after a restart interrupted it (Amendment 53).
-    if (this.#restarted.delete(agentId) && !arbiter().stagedFor(agentId)) return RESTART_NUDGE;
+    if (this.#restarted.delete(agentId) && !arbiter().stagedFor(agentId)) {
+      this.#restartRuns.add(agentId);
+      return RESTART_NUDGE;
+    }
 
     const staged = arbiter().stagedFor(agentId);
     if (!staged) {
@@ -1069,6 +1092,8 @@ export class Supervisor implements AgentControl {
   ): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return;
+    // Whether this run began as a restart resume, which is over now whichever way it ended.
+    const afterRestart = this.#restartRuns.delete(agentId);
 
     /*
      * A terminated agent's status is final. `terminateAgent` stops the runner and then
@@ -1137,6 +1162,8 @@ export class Supervisor implements AgentControl {
        * written before the status event so the alert it raises is there when the event is.
        */
       const held = this.#holdsHandoff(agent);
+      // A restart is the likeliest reason it forgot: ask once, itself, before asking you (Amendment 119).
+      if (held && afterRestart && this.#askToHandOff(agent)) return;
       setAgentStatus(this.#db, agentId, 'done');
       setHandoff(this.#db, agentId, { summary: getHandoff(this.#db, agentId).summary, held });
       eventLog().emit(
@@ -1193,6 +1220,25 @@ export class Supervisor implements AgentControl {
     return this.#waiters(agent).some(
       (w) => w.status === 'queued' || (w.status === 'paused' && w.sdkSessionId === null),
     );
+  }
+
+  /**
+   * An agent a restart interrupted ended its turn without handing off (Amendment 119): tell
+   * it so, once, in its own session, instead of holding it for you. It stays `working` and
+   * nothing after it starts. The next time it ends this way it is held as usual, because
+   * that run did not begin as a restart resume.
+   *
+   * Not sent where nothing may start by itself (everything held until a time, a job paused,
+   * halting or failed, a cap reached, a folder that is gone) or where there is no session
+   * to resume: the hold stands and you are asked. True when it was sent.
+   */
+  #askToHandOff(agent: Agent): boolean {
+    if (!agent.sdkSessionId || this.#hold || this.#halting.has(agent.jobId)) return false;
+    const job = getJob(this.#db, agent.jobId);
+    if (!job || job.status === 'paused' || job.status === 'failed' || !existsSync(job.worktreePath)) return false;
+    if (budgetRefusal(agent)) return false;
+    void this.#launchWithPrompt(agent.id, agent.sdkSessionId, HANDOFF_ASK, true);
+    return true;
   }
 
   /**

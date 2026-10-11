@@ -196,6 +196,37 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 119 — post-merge, applied. **An agent a restart interrupted is told its background work is gone, and asked once to hand off.**
+
+Daemon only (`session/supervisor.ts`, `session/verify.ts`). Reported on 10 Oct from a session whose
+analyst was running background search helpers when Conductor restarted. It resumed (Amendment 53),
+found them stopped, answered "No response requested", and ended its turn with no `hand_off`. The hold
+of Amendment 104 did its job: the agents after it did not start with nothing. But you had to ask why,
+twice, before it picked the work up.
+- **The restart nudge says what a restart takes.** `RESTART_NUDGE` already warned about a tool call
+  that was still running. It now adds that anything the agent had running in the background, such as
+  background agents or tasks it started itself, was stopped with it and will not report back: do that
+  work again, and do not end the turn until it is done. Conductor's own helpers are unaffected; they
+  are agents, and resume on their own.
+- **Asked once, before the hold.** `#restartRuns` marks a run that began as a restart resume (it was
+  given `RESTART_NUDGE`). If that run ends where `#holdsHandoff` would hold it, `#settle` does not
+  write `done`: `#askToHandOff` resumes the agent in its own session with `HANDOFF_ASK` (shown as
+  `auto`), and it stays `working`. If that run also ends without `hand_off`, it is held as before,
+  with the alert and the card. Asked once, because the second run did not begin as a restart resume.
+- **Where it is not sent.** With no session to resume, while everything is paused until a time
+  (Amendment 111), when the job is paused, halting or failed, at a cap, or with the folder gone:
+  nothing starts by itself there, so the hold stands and you are asked. A run that ends in any other
+  way (failed, parked on a question, waiting for helpers) takes its mark with it and asks nothing.
+- **Not changed.** An agent that did not begin its run from a restart is held at once. One that
+  called `hand_off` is not asked, and what waits for it starts. The mark is in memory: a second
+  restart gives the agent a new restart run and so a new request, which is right, since it lost
+  its background work again.
+**Verified:** `session/verify.ts` §20, "a restart is the likeliest reason an agent forgot": the nudge
+text; a restart-resumed analyst that ends without `hand_off` is resumed in its session with
+`HANDOFF_ASK`, working, not held, no alert, the developer queued; ending that run the same way holds
+it with the alert and no third run; one that hands off after the restart starts the developer and is
+not asked.
+
 ### Amendment 118 — post-merge, applied. **A scheduled message opens to its whole text.**
 
 Web only (`agent/scheduled.tsx`, `agent/agent.css`, `agent/verify.ts`). Asked for on 9 Oct: "when I

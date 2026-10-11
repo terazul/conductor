@@ -547,6 +547,10 @@ have not started*, with the agents waiting listed.
 - **Reply to it instead**, in the box on the card: the agent works again, and hands off when
   it is done.
 - The hold is kept if the daemon restarts. The job stays working while one is held.
+- An agent that **a restart interrupted** is told that anything it had running in the background
+  was stopped with it. If it still ends its turn without handing off, Conductor asks it once to
+  hand off, in the same session, before it comes to you. If it ends without handing off again,
+  you get the card as above.
 
 An agent you write to after it has finished is a new run. If the agents after it have all run
 already, nothing is held, and **↻ re-run after this** (below) works as before. Re-run asks each

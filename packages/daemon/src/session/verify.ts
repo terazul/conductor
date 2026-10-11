@@ -121,7 +121,7 @@ import {
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
-import { RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { HANDOFF_ASK, RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
@@ -4512,6 +4512,55 @@ async function main(): Promise<void> {
     runs[atFail]?.finish({ cost: 0, isError: true, reason: 'error' });
     await until(() => getAgent(db, 'hf_a')?.status === 'failed');
     check('an agent that failed is failed, not held', !getHandoff(db, 'hf_a').held && held().length === 0 && alerts().list().some((a) => a.kind === 'failed' && a.agentIds[0] === 'hf_a'));
+
+    // A restart is the likeliest reason an agent forgot: asked once, itself, before you are (Amendment 119).
+    check('the restart nudge says background work was stopped with it', /background/.test(RESTART_NUDGE) && /do not end your turn/.test(RESTART_NUDGE), RESTART_NUDGE);
+    hjobRow('job_handoff119');
+    hfix('hr_a', 'job_handoff119', { role: 'analyst', status: 'working', sdkSessionId: 'sess_hr_a', autonomy: DEFAULT_AUTONOMY });
+    hfix('hr_b', 'job_handoff119', { role: 'developer', status: 'queued', dependsOn: ['hr_a'], autonomy: DEFAULT_AUTONOMY });
+    const at119 = runs.length;
+    sup.reconcile();
+    sup.pump();
+    check('a restart resumes the analyst in its own session', await until(() => runs.slice(at119).some((r) => r.options.resume === 'sess_hr_a')));
+    const hr1 = runs.slice(at119).find((r) => r.options.resume === 'sess_hr_a')!;
+    await until(() => hr1.prompts.length > 0);
+    check('told a restart stopped it', hr1.prompts[0] === RESTART_NUDGE, JSON.stringify(hr1.prompts));
+    const before119 = runs.length;
+    hr1.finish({ cost: 0, reason: 'completed' });
+    check('it ends its turn without hand_off: it is asked, in the same session, not held', await until(() => runs.length === before119 + 1) && runs.at(-1)?.options.resume === 'sess_hr_a');
+    const hr2 = runs.at(-1)!;
+    await until(() => hr2.prompts.length > 0);
+    check('and what it is told is to hand off', hr2.prompts[0] === HANDOFF_ASK, JSON.stringify(hr2.prompts));
+    check(
+      'meanwhile it is working, nothing is held, no alert, and the developer waits',
+      getAgent(db, 'hr_a')?.status === 'working' && !getHandoff(db, 'hr_a').held && held().length === 0 && getAgent(db, 'hr_b')?.status === 'queued',
+      String(getAgent(db, 'hr_a')?.status),
+    );
+    hr2.finish({ cost: 0, reason: 'completed' });
+    check('ending that turn without it as well: it is held, as before', await until(() => getAgent(db, 'hr_a')?.status === 'done' && getHandoff(db, 'hr_a').held));
+    await settle(150);
+    check(
+      'asked once: no third run, the developer waits, and Needs You has it',
+      runs.length === before119 + 1 && getAgent(db, 'hr_b')?.status === 'queued' && held().some((a) => a.agentIds[0] === 'hr_a'),
+      `${runs.length - before119} runs`,
+    );
+
+    // One that does hand off after the restart is not asked, and what waits for it starts.
+    hjobRow('job_handoff119_ok');
+    hfix('hq_a', 'job_handoff119_ok', { role: 'analyst', status: 'working', sdkSessionId: 'sess_hq_a', autonomy: DEFAULT_AUTONOMY });
+    hfix('hq_b', 'job_handoff119_ok', { role: 'developer', status: 'queued', dependsOn: ['hq_a'], autonomy: DEFAULT_AUTONOMY });
+    const atOk = runs.length;
+    sup.reconcile();
+    sup.pump();
+    await until(() => runs.slice(atOk).some((r) => r.options.resume === 'sess_hq_a'));
+    const hq1 = runs.slice(atOk).find((r) => r.options.resume === 'sess_hq_a')!;
+    check('it hands off', !(await handOffOver('hq_a', 'Findings are in notes.md.')).isError);
+    hq1.finish({ cost: 0, reason: 'completed' });
+    check('and the developer starts, with no second request to the analyst', (await until(() => getAgent(db, 'hq_b')?.status === 'working')) && !runs.slice(atOk).some((r) => r !== hq1 && r.options.resume === 'sess_hq_a'));
+    check('the analyst is done and not held', getAgent(db, 'hq_a')?.status === 'done' && !getHandoff(db, 'hq_a').held);
+
+    // Nothing that is not a restart resume is asked: an ordinary turn that ends without it is held at once
+    // (the first check in this section), and a person's reply to a held agent works it again as before.
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
