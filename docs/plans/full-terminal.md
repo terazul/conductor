@@ -3,6 +3,9 @@
 **Status:** proposed, 9 Oct 2026. Not built. The decisions marked **(you)** are open; the rest are the
 architect's reversible defaults.
 
+**Update (10 Oct): Windows is dropped.** This is macOS and Ubuntu only. §8, phase 4, D9 and
+question 4 no longer apply, and nothing is built or tested for Windows.
+
 **Asked (9 Oct):** "develop a plan to have a full terminal capability that works across Mac, ubuntu
 and windows. the terminal is lack luster."
 

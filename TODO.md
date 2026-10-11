@@ -14,8 +14,8 @@ the last of it on 8 Oct).
   green `make test` (decided 30 Sep). The next amendment is 119.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
-- Later, not planned: a real terminal (xterm.js). The terminal is a command runner on the
-  Agent screen today (Amendment 58).
+- A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
+  terminal is a command runner on the Agent screen today (Amendment 58).
 
 ## Stacks: handing off from one agent to the next
 
@@ -87,6 +87,118 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   *Decided (8 Oct): the orchestrator row looks different from the others wherever agents
   are shown (Spawn, its Fleet lane, the agent tabs). It appears only when the stack has two
   or more agents; one agent needs no orchestrator.*
+
+## Wave 9: decided, not yet built
+
+- [ ] **A full terminal on macOS and Ubuntu (Amendment 112).** Asked for (9 Oct): "a full
+  terminal capability... the terminal is lack luster." **Windows is dropped (10 Oct):** nothing is
+  built or tested for it, and the plan's Windows parts (§8, phase 4, D9, question 4) no longer
+  apply.
+  - **Today:** the Agent screen's **›_ terminal** tab is a command runner (Amendment 58): it runs
+    `$SHELL -c <command>` with no stdin, `TERM=dumb`, no colour and the escape codes stripped, so
+    nothing interactive works (`daemon/src/session/terminal.ts:77-79`,
+    `web/src/agent/Terminal.tsx`). Its output goes to every tab as JSON frames through the hub.
+  - **Design, accepted by default on 9 Oct** (you declined the question round and said
+    "continue"): [ADR 0009](docs/adr/0009-default-branch-terminal-methodology.md) §2, cut down from
+    [docs/plans/full-terminal.md](docs/plans/full-terminal.md).
+    - `@lydell/node-pty` behind `daemon/src/terminal/pty.ts`, which returns null if it fails to
+      load. xterm.js (`@xterm/xterm`, `addon-fit`) in a new `web/src/agent/Xterm.tsx`, on the
+      terminal tab, with `cwd` set to the job's worktree.
+    - Routes `POST` and `GET /api/agents/:agentId/terminals` and `DELETE /api/terminals/:id`,
+      and a socket `/ws/term/:id` with the same local-only guard and `?token=` check as `/ws`.
+      On attach the last 512 KB is replayed.
+    - Shell `$SHELL`, else `/bin/bash`, else `/bin/sh`, with `-l`; `TERM=xterm-256color`. At most
+      16 live terminals. A terminal ends when its shell exits, when it's closed, when its agent or
+      job is removed, or when the daemon stops. It is not killed when the page closes.
+    - The real terminal replaces the runner. The runner stays only as the fallback when no PTY
+      loads, with a banner saying why.
+  - **Started, not built.** The `w9/t` worktree (under `.conductor/wt/job_07af774e-eb6/.claude/
+    worktrees/w9-t`) has three uncommitted dependency edits (`@lydell/node-pty` 1.2.0-beta.15,
+    `@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0) and no code. `daemon/src/terminal/verify.ts`
+    is a stub already in `make test`.
+  - **A native module ships for the first time.** If it fails to load, the runner still works.
+  - **Later, not planned:** a Terminal dock under every screen (the plan's D8b), and shells that
+    survive a daemon restart.
+  Tests in `terminal/verify.ts`: DELETE kills the process, the cap of 16 holds, an unknown id gives
+  404, and a non-local Origin on the socket is refused. Web source checks in `agent/verify.ts`: the
+  tab mounts `Xterm` when available and the runner otherwise.
+
+- [ ] **Pick a git methodology per launch (Amendment 115).** Asked for (9 Oct): "let me specify
+  what git branch methodology you should use." Spawn's isolation pills become three choices
+  ([ADR 0009](docs/adr/0009-default-branch-terminal-methodology.md) §4, accepted by default on 9 Oct):
+  - **(1) Default branch, in the folder** sends `isolation: 'in_place'`: the agent works in the
+    project folder on what's checked out, normally the default branch (Amendment 117).
+  - **(2) New branch: [name]** sends `isolation: 'worktree', branch: <name>`: a worktree on the
+    branch you name.
+  - **(3) New branch per launch** sends `isolation: 'worktree'`: as now, `conductor/<jobId>`. A
+    "text input command" here means a launch from Spawn; a follow-up message stays on its job's
+    branch.
+  - **Wire:** `CreateJobRequest.branch?: string`, allowed only with `worktree`.
+  - **Daemon** (`workspace/worktree.ts`, `POST /api/jobs` in `routes/session.ts`, `createJob` in
+    `supervisor.ts`): check the name with `git check-ref-format --branch` (400 if invalid); refuse
+    (409) a branch that's checked out in another worktree or is the project's default branch; add an
+    existing branch with `worktree add <path> <branch>`, never `-B`, which would reset its commits;
+    add a new one with `worktree add -b <branch> <path> HEAD`.
+  - **Web:** the `branch` isolation ("branch in place") is no longer offered in Spawn, and the API
+    still accepts it, so existing jobs are unchanged. The setting `conductor.launch.isolation`
+    offers the same three. Choosing (2) as the default leaves the name empty, and Spawn won't launch
+    until you fill it in (`spawn/*`, `settings/route.tsx`).
+  - **Not started:** the `w9/m` worktree has no commits. `workspace/verify-methodology.ts` is a
+    stub already in `make test`.
+  Tests: a named new branch; a named existing branch keeps its commits; an invalid name gives 400;
+  a branch checked out elsewhere gives 409; `in_place` is unchanged. `spawn/verify.ts` covers the
+  three pills, (2) needing a name, and the request body.
+
+- [ ] **Clear out wave 9's worktrees and branches once its lanes are merged.** Found (10 Oct). The
+  job `job_07af774e-eb6` is `done`, but its folder `.conductor/wt/job_07af774e-eb6` (with `w9/d`,
+  `w9/m`, `w9/t` under `.claude/worktrees/`) and branch `conductor/job_07af774e-eb6` are still
+  there, and `conductor/job_91cc23e2-9b7` is a recreated folder. `w9/d` is merged. `w9/m` and `w9/t`
+  hold the two lanes above, which aren't started. **Ask first** which folders are still in use: a
+  `done` job's agent can be messaged again, and its folder is needed then (Needs You → recreate
+  folder makes it again from its branch, or from `main`, without anything that wasn't committed).
+
+## Loose ends and checks from Amendments 99–104
+
+- [ ] **Look at Amendments 99–104 in a browser, in both themes.** Found (10 Oct). `make test` passes
+  and the colour checks hold, but nobody has seen these. Look at:
+  - Spawn: the ↑ ↓ buttons and the drag grip on a preset's rows and a Custom setup's rows, the
+    **waits for** ticks on preset rows, and **↺ back to …** (99).
+  - The Agent screen: **↻ re-run after this** on an agent with agents after it, its armed state and
+    its banner (102).
+  - Needs You: the **Not handed off** card, **hand off**, and the summary box (104).
+  - The status bar: a tab left open past midnight reads $0.00 today (103). Moving the system clock
+    forward is enough to see it.
+
+- [ ] **Loose ends from the stack work (Amendments 99–104).** Found (10 Oct), while building them.
+  - **Amendment 100's prompt line is out of date.** `STACK_ASK_LINE` (`session/handoff.ts`) says a
+    question left in the reply "starts the agents after you without the answer". Since `hand_off`
+    (104) an agent with agents waiting on it is held, not finished. Reword it.
+  - **Re-run on a held agent (102, 104).** The Agent screen's button stays enabled, and the daemon
+    answers 409 with the reason. The web doesn't know about the hold because it isn't on the wire.
+    Put it on the wire so the button is disabled with its reason. There is also no **hand off**
+    button on the Fleet card or the Project lane, only in Needs You.
+  - **The re-run note is kept in memory (102).** A daemon restart between pressing the button and
+    an agent starting loses it; the agent then resumes with the usual wake nudge. Make it durable
+    (a column or a table).
+  - **A re-run of a parked agent is untested against the real SDK (102).** It resumes a session that
+    ended on `tool_deferred` with a prompt. `sendMessage` already does that for a message, but only
+    a fake backend has run it.
+  - **The restart test for `hand_off` isn't a real restart (104).** It uses a fresh `Alerts`
+    instance and a second connection to the same file, not a second `Supervisor`.
+  - **Spawn (99).** Removing a Custom row doesn't re-chain the rows that waited for it, and a
+    job's `preset` label stays the preset's name even when its rows were moved.
+
+- [ ] **Tighten the whole-conversation handoff (Amendment 101).** Found (10 Oct).
+  - **Real model windows, and tokens.** The cap is a quarter of a window taken from a small table
+    in `session/handoff.ts` (`handoffCap`): Claude 200,000 tokens, or 1,000,000 with `[1m]`;
+    `gpt-`, `o<digit>` and `gemini` 128,000; anything else 64,000; counted as 3 characters per token.
+    OpenRouter reports a `context_length` and nothing reads it. Use the real window and count
+    tokens.
+  - **Repeated text.** In a chain A, B, C, the third agent sees A's part inside B's launch prompt.
+    A reviewer that waits for three agents which share a parent can see the parent's text up to
+    three times. The cap drops the oldest first, which is the repeated part, but drop repeats before
+    spending the cap on them.
+  - **An orchestrator's helper reports** (`helperReport`) still keep their own 8,000-character cut.
 
 ## Files
 
