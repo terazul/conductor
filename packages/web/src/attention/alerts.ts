@@ -218,3 +218,49 @@ export async function raiseAndContinue(agent: Pick<Agent, 'id' | 'status'>, to: 
 export function dismissAlert(alertId: string): Promise<unknown> {
   return api(`/api/alerts/${encodeURIComponent(alertId)}/dismiss`, { method: 'POST', body: {} });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The chip on Fleet's card and the Project lane (Amendment 120)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What Fleet and the Project lane show of an agent held for not handing off. */
+export interface HandOffChip {
+  /** What it says: the state. */
+  label: string;
+  /** What pressing it does, said on the chip. */
+  action: string;
+  /** Hover text: why, who is waiting, and what pressing does. */
+  title: string;
+  /** The card to land on in Needs You, or null when there is none (its card was put away): then it opens the agent. */
+  alertId: string | null;
+}
+
+/**
+ * The chip for `agent`, or null when it is not held. The summary box is not repeated on a card
+ * or a lane: they are small, and the whole card is one button. The chip says "not handed off"
+ * and takes you to the card in Needs You, which has the box (`HandOffPanel`), or, when that
+ * card was put away, to the agent, where a message works it again and it hands off when done.
+ *
+ * Held means what the wire says (`handoffHeld`, only while `done`) with an agent still waiting
+ * for it: the daemon's rule for the alert, so the chip and the card appear and clear together.
+ */
+export function handOffChip(
+  agent: Pick<Agent, 'id' | 'role' | 'status' | 'handoffHeld'>,
+  agents: readonly Agent[],
+  alerts: readonly Alert[],
+): HandOffChip | null {
+  if (agent.status !== 'done' || agent.handoffHeld !== true) return null;
+  const waiting = waitingRoles(agent.id, agents);
+  if (waiting.length === 0) return null;
+  const card = alerts.find((a) => a.kind === 'handoff_held' && a.agentIds.includes(agent.id));
+  const who = waiting.length === 1 ? waiting[0]! : `${waiting.slice(0, -1).join(', ')} and ${waiting.at(-1)}`;
+  const why = `${agent.role} stopped without handing off, so ${who} ${waiting.length === 1 ? "hasn't" : "haven't"} started.`;
+  return card
+    ? { label: 'not handed off', action: 'hand off in Needs You', title: `${why} Open its card in Needs You to hand off.`, alertId: card.id }
+    : {
+        label: 'not handed off',
+        action: 'open the agent',
+        title: `${why} Its card in Needs You was put away. Open the agent and reply: it works again and hands off when it is done.`,
+        alertId: null,
+      };
+}

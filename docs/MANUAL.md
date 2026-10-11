@@ -364,7 +364,9 @@ launches and saved setups get. A running or sleeping agent keeps what it launche
   under the orchestrator's (**↳ helper of developer**).
 - While they work the orchestrator waits, **queued**, and gives its slot back. Once every
   helper has ended (a failed one counts, and it's told which), it starts again in its own
-  session with what each one said last. It can then check, combine, or start more.
+  session with what each one was told and said: its task, its replies and a line for each
+  tool it called, within the same share of the model's window an agent in a stack is given
+  (below). It can then check, combine, or start more.
 
 The job's budget is the sum of its agents' caps, so each helper adds one agent's cap.
 
@@ -418,16 +420,25 @@ You'll see the agent plan before launching — which agents run in parallel and 
 wait on others. A `reviewer` typically sits queued until `developer` and `validator`
 both finish, and starts itself.
 
-An agent that waited is told what the ones before it said last. Its first message is
-the job prompt, then each earlier agent's final reply under its role, then its own
-brief. So the developer in **bug fix** starts with the cause the debugger reported, and
-the reviewer in the full pipeline starts with what the architect, developer and validator
-concluded. Only the final
-reply is passed on, not the working notes before it, and a reply over 8,000
-characters is cut and says so. It is sent once, at launch. You can read exactly what
-the agent was told as the first turn of its transcript. The files come the other way:
-every agent in a job works in the same folder, so what an earlier agent changed is
-already there.
+An agent that waited is told what the ones before it said. Its first message is the job
+prompt, then each earlier agent's whole conversation under its role (what you told it, what it
+replied, and a line for each tool it called, though not what the tools returned), then its own
+brief. So the developer in **bug fix** starts with the cause the debugger reported, and the
+reviewer in the full pipeline starts with what the architect, developer and validator
+concluded. It is sent once, at launch. You can read exactly what the agent was told as the
+first turn of its transcript. The files come the other way: every agent in a job works in the
+same folder, so what an earlier agent changed is already there.
+
+How much of it is passed on is about a quarter of the next agent's model's context window,
+shared between the agents it waited for. The window is the real one when the engine says what
+it is (OpenRouter's, Copilot's, and a Claude gateway's when it reports one); when it doesn't,
+Conductor assumes a small one, so an unknown model is given less rather than more. The
+amount is counted in characters, at about three to a token: it is an estimate, not a count.
+Over it, the oldest goes first and the last reply is always whole. When the agent waits for
+several that were each given the same earlier text (three agents that share a parent), that
+text is passed on once, and a line says where it went. Right after the daemon restarts it
+doesn't yet know the real windows, and uses the small assumption until the model list has
+been asked for again (opening Spawn does it).
 
 Roles that only read — reviewer, debugger, analyst, and auditor (from older analysis
 jobs) — are marked
@@ -570,6 +581,11 @@ have not started*, with the agents waiting listed.
 - **Reply to it instead**, in the box on the card: the agent works again, and hands off when
   it is done.
 - The hold is kept if the daemon restarts. The job stays working while one is held.
+- **Fleet and the Project screen show it too.** The agent's row on its project's card on Fleet,
+  and its lane on the Project screen, have an amber **not handed off** chip: *hand off in Needs
+  You →*. It opens that card in Needs You. If you dismissed the card, the chip says *open the
+  agent* instead, where a reply works it again and it hands off when it is done. The chip goes
+  once it has handed off or nothing is left waiting for it.
 - An agent that **a restart interrupted** is told that anything it had running in the background
   was stopped with it. If it still ends its turn without handing off, Conductor asks it once to
   hand off, in the same session, before it comes to you. If it ends without handing off again,
@@ -578,8 +594,10 @@ have not started*, with the agents waiting listed.
 An agent you write to after it has finished is a new run. If the agents after it have all run
 already, nothing is held, and **↻ re-run after this** (below) works as before. Re-run asks each
 agent that has agents after it to hand off again, since its old summary was about the old plan;
-if it doesn't, it is held the same way. A re-run from an agent that is held is refused: hand it
-off first.
+if it doesn't, it is held the same way. **↻ re-run after this** on an agent that is held is
+greyed out, with the reason as its hover text (*architect stopped without handing off, so the
+agents after it haven't started. Hand it off in Needs You first.*): none of them has started, so
+there is nothing to run again. Hand it off first.
 
 ### Run the agents after one again
 
@@ -606,10 +624,14 @@ The first press says what it will do, in a banner under the header, and a second
 
 The button is greyed out, with the reason as its hover text, when the agent is still
 working or waiting for you (re-run once it has finished its reply), is paused or failed, or
-has written nothing, or when an agent after it was stopped (remove it from the stack first)
+has written nothing, or is held for not handing off (hand it off in Needs You first), or when
+an agent after it was stopped (remove it from the stack first)
 or is only just starting. If an agent after it has reached its budget, or the job has, the
 daemon refuses when you press it and says so (raise the cap first). The sentence shows in
 the same place. Nothing is stopped or started on a refusal.
+
+Pressing it is kept: if the daemon restarts before an agent starts again, that agent still
+starts with the note that its input changed, and not with the ordinary wake-up message.
 
 ---
 

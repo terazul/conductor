@@ -17,10 +17,14 @@
  */
 
 import type { AgentStatus } from './events.js';
-import type { Agent } from './wire.js';
+import { HANDOFF_HELD_NOTE, type Agent } from './wire.js';
 
-/** Just what the plan needs from an agent. */
-export type RerunNode = Pick<Agent, 'id' | 'role' | 'dependsOn' | 'status' | 'sdkSessionId'> & {
+/**
+ * Just what the plan needs from an agent. `handoffHeld` is the hold of Amendment 104, which
+ * Amendment 120 put on the wire: the daemon reads it off the row, the browser off the agent
+ * it was sent, and both ask this file what it means for a re-run.
+ */
+export type RerunNode = Pick<Agent, 'id' | 'role' | 'dependsOn' | 'status' | 'sdkSessionId' | 'handoffHeld'> & {
   parentId?: string | null;
 };
 
@@ -77,6 +81,19 @@ function notReady(agent: RerunNode, hasReply: boolean): string | null {
     case 'stopped':
       return `${who} was stopped, so it has no finished reply to pass on.`;
   }
+}
+
+/**
+ * Why `agent` can't be re-run from while it is held for not handing off (Amendment 104), or
+ * null. None of the agents after a held agent has started, so there is nothing to run again:
+ * the way on is to hand off, from Needs You. One copy of the rule and of the sentence
+ * (Amendment 120): the Agent screen's button is disabled with it, and the daemon answers 409
+ * with it, from the same call.
+ */
+export function heldRefusal(agent: Pick<RerunNode, 'role' | 'status' | 'handoffHeld'>): string | null {
+  return agent.status === 'done' && agent.handoffHeld === true
+    ? `${agent.role} ${HANDOFF_HELD_NOTE}, so the agents after it haven't started. Hand it off in Needs You first.`
+    : null;
 }
 
 /**
@@ -146,6 +163,8 @@ export function rerunPlan(agents: readonly RerunNode[], rootId: string, opts: { 
   }
 
   const refusal =
+    // Before anything else: it says the one thing to do, and nothing after it has run to be in the way.
+    heldRefusal(root) ??
     notReady(root, opts.hasReply) ??
     inTheWay ??
     (steps.every((s) => s.action === 'wait')

@@ -1,0 +1,12 @@
+-- 160_rerun_note — Track A. The re-run note survives a restart (Amendment 120).
+--
+-- APPEND-ONLY. Once applied, never edited (db/index.ts records it by name).
+--
+-- `rerun_pending` is set by "re-run from here" (Amendment 102) on every agent it puts back into
+-- its own session: a JSON array of the roles whose reply changed, which is what the note it
+-- resumes with says first. It was held in the supervisor's memory, so a daemon restart between
+-- the press and the agent's start lost it, and the agent resumed with the usual wake nudge
+-- instead. NULL means no note is waiting. The column is cleared when the note is taken (the
+-- agent starts), and when the agent is terminated. Off the wire, like `handoff_summary`: only
+-- the agent's next prompt reads it.
+ALTER TABLE agents ADD COLUMN rerun_pending TEXT;

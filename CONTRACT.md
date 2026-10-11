@@ -196,6 +196,140 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 120 — post-merge, applied. **The hold is on the wire, the re-run note outlives a restart, and the handoff is tighter.**
+
+Shared (`wire.ts`, `rerun.ts`), daemon (`session/handoff.ts`, `session/windows.ts` new, `session/store.ts`,
+`session/supervisor.ts`, `session/models.ts`, `session/backends/copilot.ts`, `session/verify.ts`, migration
+`160_rerun_note.sql`) and web (`fleet/HandOffChip.tsx` and `fleet/handoffchip.css` new, `fleet/card.tsx`,
+`fleet/lane.tsx`, `attention/alerts.ts`, `shell/nav.ts`, `agent/verify.ts`, `attention/verify.ts`), and
+`docs/MANUAL.md`. Two TODO.md items, both found on 10 Oct: "Loose ends from the stack work (Amendments
+99-104)" (all but its Spawn bullet) and "Tighten the whole-conversation handoff (Amendment 101)".
+
+**The line about asking.**
+- **`STACK_ASK_LINE` no longer says the agents after it start without the answer.** Since `hand_off`
+  (Amendment 104) an agent that others wait for is held when its turn ends without handing off. The line
+  now says a question in the reply "is only the end of your turn: it is not put to anyone, and if agents wait
+  for you, you are held as not handed off", and that the question tool puts it in Needs You and holds you,
+  and the agents after you, until the user has answered. It is read by an agent nobody waits for as well
+  (the last in a chain), so it says only what is true of both. The tests quoted the constant itself, so
+  they follow it; a new one checks the wording.
+- An agent launched under Amendment 100's wording has that wording taken out of its prompt when the next
+  agent is given its conversation (`AMENDMENT_100_ASK_LINE`, never sent again), so it is not passed on as
+  if it were that agent's brief.
+
+**The hold on the wire.**
+- `Agent.handoffHeld?: boolean`, at the end of the type: present, and true, only while the agent is `done`
+  and held (the `handoff_held` column of migration 130). Every other agent's shape is what it was. `toAgent`
+  sets it, so it is in the snapshot, in `entities` frames, and in `GET` responses.
+- **One copy of the rule, in shared.** `heldRefusal(agent)` (`shared/src/rerun.ts`) is the sentence
+  ("architect stopped without handing off, so the agents after it haven't started. Hand it off in Needs You
+  first."), and `rerunPlan` returns it as the plan's `refusal` before any other, still listing who is after
+  the agent. `Supervisor.rerunFrom` lost the check and the sentence it had of its own: it asks `rerunPlan`,
+  so the 409 and the Agent screen's button say the same words from the same call. The button was already
+  disabled with `plan.refusal` as its hover text (Amendment 102), so `agent.tsx` is unchanged.
+- **The Fleet card and the Project lane.** An amber **not handed off** chip, "hand off in Needs You →"
+  (`fleet/HandOffChip.tsx`, tokens only in `fleet/handoffchip.css`), under the agent's row on the card
+  (it cannot nest in the row, which is a button) and between the lane's head and its tail. It opens that
+  agent's card in Needs You by its alert id (`openAlert(alertId)`, new in `shell/nav.ts`, the same deep link
+  a notification uses); if the person dismissed the card, it says "open the agent" and goes to the Agent
+  screen, where a reply works the agent again. It is there when the agent is held and an agent is still
+  waiting for it, the daemon's rule for the alert (`handOffChip` in `attention/alerts.ts`, pure). **Decision:
+  a chip, not `HandOffPanel`.** The summary box is built on the Needs You card's `atn-*` styles and wants a
+  card's width; a Fleet card or a lane is small and the whole of it is one button that navigates, so a text
+  box inside it would fight the click and the keys. The chip stops both, as the card's `…` menu does.
+  `openAttention()` is unchanged: the top bar passes it as a click handler.
+
+**The re-run note is durable.**
+- Migration `160_rerun_note.sql`: `agents.rerun_pending TEXT`, a JSON array of the roles whose reply
+  changed, NULL when no note is waiting. `rerunFrom` sets it (`setRerunPending`) where it used to put the
+  agent in the supervisor's `#rerunPending` map; `#takeRerunNote` reads it and clears it when taken;
+  `terminateAgent` clears it. A daemon that restarts between the press and the agent's start still resumes
+  it with the note. Off the wire. The map is gone.
+
+**Real windows.**
+- `session/windows.ts` keeps what the engines reported, by provider and exact id: OpenRouter's
+  `context_length` (read in `openRouterModels`), Copilot's `capabilities.limits.max_context_window_tokens`
+  (`copilotModels`), and the gateway's `max_input_tokens` on `GET /v1/models` (`askGateway`, recorded in
+  `catalog()`; checked against the Models API reference: `number or null`). Claude Code's own list has no
+  window. A model whose list gave none, or a nonsense one (zero, negative, not a number), has none.
+- `contextWindow(model, reported?)` and `handoffCap(model, reported?)` take it and fall back to the floor
+  table, which is unchanged. The supervisor looks it up (`#handoffCapOf`, by the agent's provider and exact
+  model) in `#promptFor` and the re-run note. A `[1m]` model is not looked up: the list gives the base
+  model's window, and `[1m]` is the 1,000,000 one the floor already says.
+- **Still an estimate.** The cap is a quarter of the window, counted in characters at 3 to a token. There is
+  no tokenizer in the repo, and none that runs offline for every engine, so tokens are not counted; this was
+  the TODO's second half ("and count tokens") and it is not done. What changed is the window.
+
+**Repeated text is dropped before the cap is spent on it.**
+- `dropRepeats(upstream)` (`handoff.ts`, pure; `handoffSection` calls it first). An agent's launch prompt holds
+  what the agents before it said, so an agent waiting for several that share a parent sees the parent's part in
+  each of their prompts, and again if it waits for the parent too. In the user turns of each upstream
+  (where a part is quoted), a run of paragraphs said above is replaced by `(repeated from above, left out
+  here)`: said in the voice of another upstream (its summary, replies and tool lines) wherever it is in the
+  list, or shown by an earlier upstream's user turns (the first copy stays). A run starts at a paragraph of 60
+  characters or more and takes the shorter ones said above with it. Replies are never touched, nor a short
+  paragraph that stands alone, nor text only one upstream said. A chain where C waits only for B has nothing
+  to drop: A's part is there once, inside B's. **The TODO's chain case is therefore not a repeat** as it is
+  worded; only the shared-parent case is.
+- Order matters only for which copy stays: if the parent is listed after the agents that quote it, its own
+  part stays and the quotes go.
+
+**Orchestrator helper reports.** `helperReport(helpers, cap)` now gives each helper's whole conversation
+(its task, replies, one line per tool), shared out within a quarter of the orchestrator's window with the
+same `shareCap`, oldest first, last reply whole, repeats dropped, instead of the last reply cut at 8,000
+characters. `HELPER_REPLY_CAP` is gone. It was a small change in `handoff.ts`, but it needs
+`#takeHelperReport` in `supervisor.ts` to pass the helpers' turns and the cap, which is outside the regions
+the plan lets this lane touch; the edit is six lines and no other lane touches that function. An
+orchestrator's wake-up prompt is therefore bigger than before (up to a quarter of its window, not 8,000
+characters per helper).
+
+**Checked.**
+- `session/verify.ts` §17 (end): the new line's wording and that it names both tools; the old line taken out of
+  an old prompt; a reported window used as is and a bad one ignored; the cap at 8,192 tokens is 6,144
+  characters; `recordWindows` by provider and exact id, `[1m]`; `dropRepeats` and `handoffSection` with three
+  agents sharing a parent (the plan, its summary and its tool lines once; the opening sentence and each
+  agent's own brief and reply kept), with the parent listed first, last, or not at all; a chain, two agents
+  saying the same long thing in their own voice, a short paragraph in both, and objects handed back when
+  nothing is dropped; a cap too small for the three as they were cuts nothing now; `helperReport` (whole
+  conversation, failed helper marked, shared cap, oldest first, 12,000 characters whole). The three
+  helper-report assertions of §17, §17c and §19 that pinned the 8,000-character cut and the bare reply were
+  changed to match.
+- `session/verify.ts` §21 (new, last): a held architect: `handoffHeld` on the agent, in `GET /api/snapshot` and
+  in an `entities` frame on an open socket; `rerunPlan` refuses with the sentence, still listing the
+  developer, and `POST /rerun` answers 409 with the same string; a second `Supervisor` on a second connection to
+  the file finds the hold, pumps and starts nothing, refuses the re-run in the same words, then
+  `handOffByUser` through it starts the developer in that Supervisor with the summary, and the first connection
+  sees the field gone; a re-run pressed on a held Supervisor leaves `rerun_pending` in the row, a second
+  Supervisor on a reopened file starts the developer with the note (not the wake nudge) and clears the column,
+  and terminating clears a waiting note; OpenRouter's `context_length`, Copilot's window and the gateway's
+  `max_input_tokens` recorded (the last read from a local server shaped like the Models API response, with
+  `null` and a missing field); an agent on a model reported at 2,000 tokens is given ~1,500 characters and one
+  with none the floor; a diamond run by the real supervisor: the architect's plan and summary are in the
+  scribe's prompt once and the three agents' own replies and summaries are all there.
+- `attention/verify.ts` §7 and `agent/verify.ts` §11: `handOffChip` (held, waiting, who is named, dismissed,
+  not held, not done, nobody waiting), the wiring of the chip in the card and the lane, stopping the click,
+  `openAlert` and `openAttention` as they were, tokens only; the re-run button on a held agent is there and
+  blocked with the daemon's sentence, and the screen has no rule of its own.
+
+**Not done.**
+- **A re-run of a parked agent against the real SDK** (the item's fifth bullet). It resumes a session that ended
+  on `tool_deferred` with a prompt; only a fake backend has run it. It costs money and needs a person watching
+  (plan: "Not done by design"). Untouched.
+- **Spawn (99)**: removing a Custom row re-chaining the rows that waited for it, and a job's `preset` label.
+  Another lane's.
+- **Tokens are not counted**, as above. The characters-per-token figure is a guess that errs small.
+- **The real window is in memory.** After a daemon restart it is empty until a model list is asked for again
+  (opening Spawn, or `GET /api/models`), so a stack that resumes straight after a restart is capped by the
+  floor until then. The floor is small for most models and too big for a model with an unusually small window.
+  Persisting them (a table in migration 160) is a small step if wanted. Claude Code's result message carries
+  `modelUsage[model].contextWindow` for a Claude run, which would fill this without a list; reading it belongs
+  in `backends/claude.ts`'s `result` case, which the usage, retry and budget lanes edit, so it is left.
+- **The chip is not the summary box.** Hand-off happens in Needs You (or the Agent screen's Needs panel); the
+  chip only gets you there. A dismissed card is not brought back by the chip.
+- Not looked at in a browser: the chip on the card and the lane in both themes, and the disabled re-run
+  button on a held agent.
+- Not run by this lane: `make test`, the daemon smoke test, the workspace and preview suites.
+
 ### Amendment 119 — post-merge, applied. **An agent a restart interrupted is told its background work is gone, and asked once to hand off.**
 
 Daemon only (`session/supervisor.ts`, `session/verify.ts`). Reported on 10 Oct from a session whose

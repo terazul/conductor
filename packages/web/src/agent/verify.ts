@@ -824,6 +824,36 @@ console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
   check('the two packages are declared, pinned', pkg.dependencies['@xterm/xterm'] === '6.0.0' && pkg.dependencies['@xterm/addon-fit'] === '0.11.0');
 }
 
+console.log('\n11 · the re-run button knows a held agent (Amendment 120)');
+{
+  const ag = (id: string, role: string, o: Partial<Agent> = {}): Agent => ({ ...agentAt(0, null), id, role, status: 'done', sdkSessionId: `s_${id}`, ...o });
+  const stack = (o: Record<string, Partial<Agent>> = {}): Agent[] => [
+    ag('arch', 'architect', o['arch']),
+    ag('dev', 'developer', { status: 'queued', sdkSessionId: null, dependsOn: ['arch'], ...o['dev'] }),
+  ];
+  const free = rerunControl(stack(), 'arch', true);
+  check('an architect that handed off, with the developer still to start, has nothing to re-run: the developer reads the reply when it does', free !== null && /None of the agents after architect has started/.test(free.blocked ?? ''));
+  const held = rerunControl(stack({ arch: { handoffHeld: true } }), 'arch', true);
+  check('held for not handing off, the button is there and cannot be pressed (Amendment 120)', held !== null && held.blocked !== null);
+  check(
+    'and its hover text is the daemon’s sentence, so it is read where the button is and not learned from a 409',
+    held?.blocked === "architect stopped without handing off, so the agents after it haven't started. Hand it off in Needs You first.",
+    held?.blocked ?? 'null',
+  );
+  check('the banner has no plan to show: the explanation IS the reason', held?.explain === held?.blocked);
+  check('and who is after it is still known, so the button is not taken away', held?.plan.steps.map((s) => s.role).join() === 'developer');
+  check('the hold is read from the agent the daemon sent, only while it is done', rerunControl(stack({ arch: { handoffHeld: true, status: 'working' } }), 'arch', true)?.blocked?.includes('still working') === true);
+  check('once it hands off the field is gone and the button is as it was', rerunControl(stack({ arch: { handoffHeld: undefined } }), 'arch', true)?.blocked === free?.blocked);
+
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  const block = screen.slice(screen.indexOf('function RerunControl'), screen.indexOf('/** Composer height limits'));
+  check('the screen has no second copy of the rule: it asks the control, whose plan comes from shared', /rerunControl\(siblings, agent\.id, hasReply\)/.test(block) && !/handoffHeld/.test(block));
+  check('and the button is disabled with that reason as before', /disabled=\{cmd\.busy \|\| control\.blocked !== null\}/.test(block) && /title=\{control\.blocked \?\? control\.title\}/.test(block));
+  const shared = readFileSync(new URL('../../../shared/src/rerun.ts', import.meta.url), 'utf8');
+  const daemon = readFileSync(new URL('../../../daemon/src/session/supervisor.ts', import.meta.url), 'utf8');
+  check('the daemon uses the same rule: rerunFrom asks rerunPlan, and has no sentence of its own for a hold', /heldRefusal\(root\) \?\?/.test(shared) && !/stopped without handing off, so the agents after it/.test(daemon));
+}
+
 console.log(
   failures === 0
     ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'

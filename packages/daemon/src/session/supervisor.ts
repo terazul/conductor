@@ -118,9 +118,12 @@ import {
   setWentWithout,
   getHandoff,
   setHandoff,
+  getRerunPending,
+  setRerunPending,
   lastStatusNote,
   type AgentPersona,
 } from './store.js';
+import { reportedWindow } from './windows.js';
 
 const exec = promisify(execFile);
 
@@ -321,12 +324,12 @@ export class Supervisor implements AgentControl {
    * a run that ends held for not handing off is asked, once, before the hold.
    */
   #restartRuns = new Set<string>();
-  /**
-   * Agents `rerunFrom` queued, with the roles whose reply changed, resumed with `rerunNote`
-   * on their next run (Amendment 102). In memory, like `#restarted`: a restart between the
-   * press and the run resumes the agent without the note.
+  /*
+   * Agents `rerunFrom` queued, with the roles whose reply changed, are resumed with `rerunNote`
+   * on their next run (Amendment 102). That is kept in the agent's row (`rerun_pending`, set by
+   * `setRerunPending`, migration 160), not here: it used to be a map in memory, and a restart
+   * between the press and the run resumed the agent without the note (Amendment 120).
    */
-  #rerunPending = new Map<string, string[]>();
   /** Jobs part-way through `rerunFrom`, which a second press must not interleave with. */
   #rerunning = new Set<string>();
   /** Agents whose run() is in flight, whether working or held. */
@@ -929,6 +932,15 @@ export class Supervisor implements AgentControl {
   }
 
   /**
+   * What the agents before this one may take up of its prompt, in characters: a quarter of its
+   * model's window, the real one where its engine has said (OpenRouter's `context_length`,
+   * Copilot's and the gateway's lists, Amendment 120), else the floor in handoff.ts.
+   */
+  #handoffCapOf(agent: Agent): number {
+    return handoffCap(agent.model, reportedWindow(getAgentProvider(this.#db, agent.id), agent.model));
+  }
+
+  /**
    * The prompt one agent sees: the job instruction, which is first and outside any cap,
    * what the agents it waited for did and said (Amendments 37, 101) with the summary each
    * handed off with on top (Amendment 104), for an agent in a stack how to ask (Amendment
@@ -958,7 +970,7 @@ export class Supervisor implements AgentControl {
       ...getWentWithout(this.#db, agentId).map((w) => ({ ...heard(w.id, w.role), status: 'stopped' })),
     ];
     // About a quarter of this agent's model's window, shared by those it waited for.
-    const handoff = handoffSection(upstream, handoffCap(agent.model));
+    const handoff = handoffSection(upstream, this.#handoffCapOf(agent));
     // In a stack, it asks with the question tool, which holds it in Needs You (Amendment 100).
     const ask = stackLine(inStack(agentId, agentsForJob(this.#db, agent.jobId), getWentWithout(this.#db, agentId).length));
     // And one that others wait for is told to hand off, since they do not start until it does (Amendment 104).
@@ -1409,7 +1421,17 @@ export class Supervisor implements AgentControl {
     if (done.length === 0) return '';
     markReported(this.#db, done.map((h) => h.id));
     setAgentDependsOn(this.#db, agentId, agent.dependsOn.filter((id) => !done.some((h) => h.id === id)));
-    return helperReport(done.map((h) => ({ role: h.role, status: h.status, reply: eventLog().lastText(h.id) })));
+    // Each one's whole conversation, shared out within a quarter of this orchestrator's window (Amendment 120).
+    const jobPrompt = getJob(this.#db, agent.jobId)?.prompt ?? '';
+    return helperReport(
+      done.map((h) => ({
+        role: h.role,
+        status: h.status,
+        reply: eventLog().lastText(h.id),
+        turns: turnsFromEvents(eventLog().conversation(h.id), jobPrompt),
+      })),
+      this.#handoffCapOf(agent),
+    );
   }
 
   /** A job is done when none of its agents can still make progress. */
@@ -1562,12 +1584,8 @@ export class Supervisor implements AgentControl {
       throw new RerunRefusedError('The agents after it are still being stopped for a re-run. Wait a moment.');
     }
     // Held for not handing off (Amendment 104): none of the agents after it has started, so
-    // there is nothing to run again. The way on is to hand off, from Needs You.
-    if (root.status === 'done' && getHandoff(this.#db, agentId).held) {
-      throw new RerunRefusedError(
-        `${root.role} stopped without handing off, so the agents after it haven't started. Hand it off in Needs You first.`,
-      );
-    }
+    // there is nothing to run again. `rerunPlan` says so, from the agent's `handoffHeld` (Amendment
+    // 120): the same call and the same sentence the Agent screen's button is disabled with.
     const plan = rerunPlan(agentsForJob(this.#db, jobId), agentId, { hasReply: eventLog().lastText(agentId) !== null });
     if (plan.refusal) throw new RerunRefusedError(plan.refusal);
 
@@ -1606,7 +1624,7 @@ export class Supervisor implements AgentControl {
           const changed = a.dependsOn
             .filter((id) => changedBy.has(id))
             .flatMap((id) => (getAgent(this.#db, id) ? [getAgent(this.#db, id)!.role] : []));
-          this.#rerunPending.set(a.id, changed);
+          setRerunPending(this.#db, a.id, changed);
         }
         if (a.status !== 'queued') {
           setAgentStatus(this.#db, a.id, 'queued');
@@ -1646,9 +1664,9 @@ export class Supervisor implements AgentControl {
    * helpers that have ended (Amendment 51), which would otherwise be lost to this note.
    */
   #takeRerunNote(agentId: string): string {
-    const changed = this.#rerunPending.get(agentId);
+    const changed = getRerunPending(this.#db, agentId);
     if (!changed) return '';
-    this.#rerunPending.delete(agentId);
+    setRerunPending(this.#db, agentId, null);
     const agent = getAgent(this.#db, agentId);
     if (!agent) return '';
     const jobPrompt = getJob(this.#db, agent.jobId)?.prompt ?? '';
@@ -1658,7 +1676,7 @@ export class Supervisor implements AgentControl {
         ? [{ role: dep.role, reply: eventLog().lastText(id), turns: turnsFromEvents(eventLog().conversation(id), jobPrompt), ...this.#summaryOf(id) }]
         : [];
     });
-    return [rerunNote(changed, upstream, handoffCap(agent.model), this.#hasWaiters(agent)), this.#takeHelperReport(agentId)]
+    return [rerunNote(changed, upstream, this.#handoffCapOf(agent), this.#hasWaiters(agent)), this.#takeHelperReport(agentId)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -1986,7 +2004,7 @@ export class Supervisor implements AgentControl {
     if (ENDED_STATUSES.has(agent.status)) return agent;
 
     this.#resumeWanted.delete(agentId);
-    this.#rerunPending.delete(agentId);
+    setRerunPending(this.#db, agentId, null);
     arbiter().cancelForAgent(agentId, 'the agent was terminated');
 
     const runner = this.#runners.get(agentId);

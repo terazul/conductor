@@ -19,7 +19,8 @@
  *
  * It is capped at about a quarter of the next model's context window (`handoffCap`),
  * shared between the agents it waited for. Over the cap the OLDEST goes first and the last
- * reply stays whole. The job instruction is not part of it: `#promptFor` puts that first,
+ * reply stays whole. Text the agents already gave each other is dropped before the cap is
+ * spent on it (`dropRepeats`, Amendment 120). The job instruction is not part of it: `#promptFor` puts that first,
  * and it is not counted. It goes in once, at launch: a resume continues a session that
  * already has it.
  *
@@ -34,8 +35,9 @@ import type { Event as LogEvent } from '@conductor/shared';
 
 /**
  * Context windows, in tokens, as a floor: a model with a bigger window than the table says
- * is only given less than it could take. The repo did not know any (nothing reads one from
- * Claude Code, Copilot or OpenRouter's lists), so this is the whole table. First match wins,
+ * is only given less than it could take. This is what stands in when the engine has not
+ * reported the real window (session/windows.ts, Amendment 120: OpenRouter's `context_length`,
+ * Copilot's `max_context_window_tokens`, the gateway's `max_input_tokens`). First match wins,
  * on the id with any `vendor/` in front of it removed (OpenRouter's `anthropic/claude-…`).
  */
 const WINDOWS: ReadonlyArray<readonly [RegExp, number]> = [
@@ -53,17 +55,29 @@ export const DEFAULT_WINDOW_TOKENS = 64_000;
 /** What an upstream conversation may take up of the next model's window. */
 export const HANDOFF_SHARE = 0.25;
 
-/** Characters to a token, low on purpose: code and paths run to 3, prose to 4. */
+/**
+ * Characters to a token, low on purpose: code and paths run to 3, prose to 4.
+ *
+ * THIS IS AN ESTIMATE, AND IT IS NOT A COUNT. The cap is in characters because nothing here can
+ * count tokens: there is no tokenizer in the repo, and none that runs offline for every engine
+ * (each model has its own). The window is the engine's real one where it reported one
+ * (Amendment 120); the characters-per-token figure is a guess that errs small.
+ */
 export const CHARS_PER_TOKEN = 3;
 
-export function contextWindow(model: string): number {
+/**
+ * `model`'s window in tokens: `reported`, when the engine said what it is (session/windows.ts),
+ * else the floor in the table above. Pure; the caller looks the report up.
+ */
+export function contextWindow(model: string, reported?: number): number {
+  if (typeof reported === 'number' && Number.isFinite(reported) && reported >= 1) return Math.floor(reported);
   const id = model.trim().replace(/^[^/]+\//, '');
   return WINDOWS.find(([re]) => re.test(id))?.[1] ?? DEFAULT_WINDOW_TOKENS;
 }
 
 /** In characters, for all the upstream conversations together: a quarter of `model`'s window. */
-export function handoffCap(model: string): number {
-  return Math.floor(contextWindow(model) * HANDOFF_SHARE * CHARS_PER_TOKEN);
+export function handoffCap(model: string, reported?: number): number {
+  return Math.floor(contextWindow(model, reported) * HANDOFF_SHARE * CHARS_PER_TOKEN);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,7 +128,12 @@ export function turnsFromEvents(events: readonly LogEvent[], jobPrompt: string):
           // Neither the job instruction nor the lines about asking (Amendment 100) and handing
           // off (Amendment 104) are repeated: the next agent has the first at the top and is
           // given the others for itself.
-          text = text.replace(STACK_ASK_LINE, '').replace(HAND_OFF_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
+          text = text
+            .replace(STACK_ASK_LINE, '')
+            .replace(AMENDMENT_100_ASK_LINE, '')
+            .replace(HAND_OFF_LINE, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
           if (job && text.startsWith(job)) {
             const rest = text.slice(job.length).trim();
             text = rest ? `${JOB_PLACEHOLDER}\n\n${rest}` : '';
@@ -225,6 +244,116 @@ function turnsOf(u: Upstream): readonly Turn[] {
   return reply ? [{ kind: 'agent', text: reply }] : [];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Text that would be said twice (Amendment 120)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A run of repeated paragraphs STARTS only at one this long: "(the job instruction, as above)"
+ * and "Done." are said twice for good reason, and a paragraph is only worth a marker when it
+ * is worth the line. Once a run has started, the shorter paragraphs that were also said above
+ * go with it, so a quoted conversation is one gap and not a gap for each of its short replies.
+ */
+const MIN_REPEAT = 60;
+
+/** Stands where a run of paragraphs was left out because the section says them above. */
+export const REPEAT_MARKER = '(repeated from above, left out here)';
+
+/** A paragraph as it is compared: without the `[role]` heading line that opens an agent's part. */
+const keyOf = (p: string): string => p.replace(/^\[[^\]\n]*\]\n/, '').trim();
+
+const paragraphs = (text: string): string[] => text.split(/\n{2,}/);
+
+/**
+ * What an upstream says in its own voice, as paragraphs the way the section sets them out: its
+ * summary (Amendment 104), its replies, and its tool calls (consecutive ones are one
+ * paragraph). Not its user turns: those are where another agent's part turns up inside a
+ * launch prompt.
+ */
+function ownVoice(u: Upstream): string[] {
+  const turns = turnsOf(u);
+  const out: string[] = u.summary?.trim() ? paragraphs(`${SUMMARY_HEAD}${u.summary.trim()}`) : [];
+  let tools: string[] = [];
+  const flush = (): void => {
+    if (tools.length > 0) out.push(tools.join('\n'));
+    tools = [];
+  };
+  for (const t of turns) {
+    if (t.kind === 'tool') {
+      tools.push(blockOf(t));
+      continue;
+    }
+    flush();
+    if (t.kind === 'agent') out.push(...paragraphs(blockOf(t)));
+  }
+  flush();
+  return out;
+}
+
+/**
+ * The upstreams with the text they repeat taken out, before the cap is spent on it.
+ *
+ * An agent's launch prompt holds what the agents before it said (Amendment 101: "a chain A, B,
+ * C hands C everything B knew, A's part included"). So when one agent waits for several, the
+ * same text comes in more than once: a reviewer waiting for three agents that share a parent
+ * sees the parent's part in each of their launch prompts, and again as its own part if it waits
+ * for the parent too. The cap drops the oldest first, which is the repeated part, but only
+ * after it has been counted and a share of the cap has gone on it.
+ *
+ * Only the user turns are looked at, because that is where a part is quoted. A paragraph of one
+ * is left out, and one marker stands where a run of them was, when it was said above:
+ *  - by another upstream in its own voice (its replies and tool lines), wherever that upstream
+ *    is in the list, or
+ *  - in an earlier upstream's user turns (the first copy stays).
+ * A run starts at a paragraph of 60 characters or more (`MIN_REPEAT`) and takes the shorter
+ * ones said above along with it. An agent's own replies are never touched, and nor is an
+ * upstream's text that only it said. A chain where the third agent waits only for the second
+ * has nothing to drop: A's part is there once, inside B's.
+ */
+export function dropRepeats(upstream: readonly Upstream[]): Upstream[] {
+  // paragraph → the upstreams that say it in their own voice
+  const voice = new Map<string, Set<number>>();
+  upstream.forEach((u, i) => {
+    for (const p of ownVoice(u)) {
+      const owners = voice.get(p) ?? new Set<number>();
+      owners.add(i);
+      voice.set(p, owners);
+    }
+  });
+  // what earlier upstreams' user turns already show
+  const shown = new Set<string>();
+
+  return upstream.map((u, i) => {
+    if (!u.turns || u.turns.length === 0) return u;
+    const fresh: string[] = [];
+    let changed = false;
+    const turns = u.turns.map((t): Turn => {
+      if (t.kind !== 'user') return t;
+      const out: string[] = [];
+      let dropping = false;
+      paragraphs(t.text).forEach((p, at) => {
+        const key = keyOf(p);
+        const saidAbove = shown.has(key) || [...(voice.get(key) ?? [])].some((o) => o !== i);
+        if (saidAbove && (dropping || key.length >= MIN_REPEAT)) {
+          if (!dropping) out.push(REPEAT_MARKER);
+          dropping = true;
+          changed = true;
+          return;
+        }
+        dropping = false;
+        out.push(p);
+        fresh.push(key);
+        // As the section will set it down: the turn's first paragraph carries the `User: ` label.
+        if (at === 0) fresh.push(`${LABELS.user}${p}`);
+      });
+      return { kind: 'user', text: out.join('\n\n') };
+    });
+    // Registered once the upstream is done, so none of its own paragraphs repeat another of its own.
+    for (const k of fresh) shown.add(k);
+    return changed ? { ...u, turns } : u;
+  });
+}
+
 /** What to say of an agent that wrote nothing, as its status says why. */
 function noReply(u: Upstream): string {
   return u.status === 'stopped' ? '(It was stopped before it wrote a reply.)' : '(It finished without a written reply.)';
@@ -235,12 +364,15 @@ function head(u: Upstream): string {
   return !u.status || u.status === 'done' ? `[${u.role}]` : `[${u.role} — ${u.status}, so it may not have finished its part]`;
 }
 
+/** What an upstream's summary (Amendment 104) is printed under. */
+const SUMMARY_HEAD = 'Its summary of its work:\n';
+
 /** One upstream under its heading: its summary, what was left out, its conversation, and a note if it wrote no reply. */
 function upstreamBody(u: Upstream, allowance: number): string {
   const all = turnsOf(u);
   const { kept, dropped } = fitTurns(all, allowance);
   const parts: string[] = [];
-  if (u.summary?.trim()) parts.push(`Its summary of its work:\n${u.summary.trim()}`);
+  if (u.summary?.trim()) parts.push(`${SUMMARY_HEAD}${u.summary.trim()}`);
   if (dropped > 0) parts.push(`… (the first ${dropped.toLocaleString('en')} of ${all.length.toLocaleString('en')} entries are left out to fit)`);
   if (kept.length > 0) parts.push(renderTurns(kept));
   if (!all.some((t) => t.kind === 'agent')) parts.push(noReply(u));
@@ -261,9 +393,11 @@ export function handoffSection(upstream: readonly Upstream[], cap: number, openi
   if (upstream.length === 0) return '';
   const who = upstream.length === 1 ? 'the agent' : 'the agents';
   const all = upstream.every((u) => !u.status || u.status === 'done');
+  // What one upstream quotes of another is said once, before any of it is counted against the cap (Amendment 120).
+  const parts = dropRepeats(upstream);
   const allowance = shareCap(
     cap,
-    upstream.map((u) => turnsOf(u).reduce((n, t) => n + costOf(t), 0)),
+    parts.map((u) => turnsOf(u).reduce((n, t) => n + costOf(t), 0)),
   );
   return [
     (opening ??
@@ -272,7 +406,7 @@ export function handoffSection(upstream: readonly Upstream[], cap: number, openi
         : `You were started without waiting for every agent before you to finish.`)) +
       ` They worked in this same folder, so what they changed is already here. What each was told and said, in ` +
       `order, with a line for each tool it called (what the tools returned is left out):`,
-    ...upstream.map((u, i) => `\n${head(u)}\n${upstreamBody(u, allowance[i]!)}`),
+    ...parts.map((u, i) => `\n${head(u)}\n${upstreamBody(u, allowance[i]!)}`),
   ].join('\n');
 }
 
@@ -295,13 +429,29 @@ export function inStack(
 }
 
 /**
- * The one line an agent in a stack is told about asking. A question left in its reply ends
- * its turn, and everything waiting on it starts without an answer; the question tool holds
- * it in Needs You and starts nothing after it until you reply. Claude's tool is called
- * AskUserQuestion and Copilot's (and so OpenRouter's) is ask_user, so both are named.
- * It does not replace ending a turn with "I'll wait": that still works as it did.
+ * The one line an agent in a stack is told about asking. A question left in its reply is only
+ * the end of its turn: nobody is asked. Since `hand_off` (Amendment 104) an agent that others
+ * wait for is HELD when its turn ends without handing off, not finished, so they do not start
+ * "without the answer" as this line said under Amendment 100: it waits in Needs You as "not
+ * handed off", with a question nobody was asked in its last reply. The question tool puts the
+ * question in Needs You and holds it, and what waits for it, until the user has answered.
+ * Claude's tool is called AskUserQuestion and Copilot's (and so OpenRouter's) is ask_user, so
+ * both are named. The line is also read by an agent that nobody waits for (the last in the
+ * chain), for whom the end of a turn is simply the end, so it says only what is true of both.
  */
 export const STACK_ASK_LINE =
+  'You are one agent in a stack, and some agents wait for others to finish. When you need an answer from ' +
+  'the user, ask with the question tool (AskUserQuestion, or ask_user), not in your reply. A question in your ' +
+  'reply is only the end of your turn: it is not put to anyone, and if agents wait for you, you are held as ' +
+  'not handed off. The question tool puts it in Needs You and holds you, and the agents after you, until the ' +
+  'user has answered.';
+
+/**
+ * The line as Amendment 100 worded it, which agents launched before Amendment 120 had in their
+ * first prompt. Never sent again; only taken out of such a prompt when the next agent is given
+ * that agent's conversation, so the old wording is not passed on as if it were its brief.
+ */
+const AMENDMENT_100_ASK_LINE =
   'You are one agent in a stack, and some agents wait for others to finish. When you need an answer from ' +
   'the user, ask with the question tool (AskUserQuestion, or ask_user), not in your reply: a question in your ' +
   'reply ends your turn and the agents after you start without the answer, while the question tool holds you, ' +
@@ -359,25 +509,24 @@ export function helperBrief(orchestrator: string, task: string): string {
   );
 }
 
-/** A helper's report is cut at this many characters; the rest is in its transcript. */
-const HELPER_REPLY_CAP = 8_000;
-
-function helperBody(u: Upstream): string {
-  const reply = u.reply?.trim();
-  if (!reply && u.status === 'stopped') return '(It was stopped before it wrote a reply.)';
-  if (!reply) return '(It finished without a written reply.)';
-  if (reply.length <= HELPER_REPLY_CAP) return reply;
-  return (
-    `${reply.slice(0, HELPER_REPLY_CAP)}\n` +
-    `… (cut at ${HELPER_REPLY_CAP.toLocaleString('en')} of ${reply.length.toLocaleString('en')} characters)`
+/**
+ * What an orchestrator is told when its helpers have finished (Amendment 51): each one's whole
+ * conversation as text, as the next agent in a stack is given it (Amendment 120). It was each
+ * helper's last reply cut at 8,000 characters. Now a helper's launch prompt (its task), its
+ * replies and one line for each tool it called are shared out between the helpers within `cap`
+ * (`handoffCap` of the orchestrator's model), the oldest going first and the last reply never
+ * cut. A helper that failed or was stopped is marked, as in Amendment 51.
+ */
+export function helperReport(helpers: readonly (Upstream & { status: string })[], cap: number): string {
+  const shown = dropRepeats(helpers) as (Upstream & { status: string })[];
+  const allowance = shareCap(
+    cap,
+    shown.map((h) => turnsOf(h).reduce((n, t) => n + costOf(t), 0)),
   );
-}
-
-/** What an orchestrator is told when its helpers have finished: each one's last reply, as before Amendment 101. */
-export function helperReport(helpers: readonly (Upstream & { status: string })[]): string {
   return [
-    `Your helper${helpers.length === 1 ? ' has' : 's have'} finished. What each said last:`,
-    ...helpers.map((h) => `\n${head(h)}\n${helperBody(h)}`),
+    `Your helper${helpers.length === 1 ? ' has' : 's have'} finished. What each was told and said, in order, with a line ` +
+      'for each tool it called (what the tools returned is left out):',
+    ...shown.map((h, i) => `\n${head(h)}\n${upstreamBody(h, allowance[i]!)}`),
     '\nCheck their work, combine it, and carry on. Start more helpers if something is left.',
   ].join('\n');
 }

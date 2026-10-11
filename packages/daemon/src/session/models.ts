@@ -33,6 +33,7 @@ import { query, type ModelInfo, type SDKUserMessage } from '@anthropic-ai/claude
 import type { EffortLevel, ModelCatalog, ModelOption, ModelTier, ProviderModelList } from '@conductor/shared';
 import { MODEL_NICKNAMES } from '@conductor/shared';
 import type { BackendFactory } from './backend.js';
+import { recordWindows } from './windows.js';
 
 const TTL_MS = 10 * 60_000;
 const ASK_TIMEOUT_MS = 20_000;
@@ -44,6 +45,8 @@ const UNNAMED = ['default', 'best', 'opusplan'];
 export interface ServedModel {
   id: string;
   displayName?: string;
+  /** What the gateway says it takes in (`max_input_tokens`), when it says (Amendment 120). */
+  contextTokens?: number;
 }
 
 /**
@@ -97,7 +100,8 @@ function hostOf(base: string): string {
   }
 }
 
-async function askGateway(): Promise<{ host: string; models: ServedModel[] }> {
+/** Exported so session/verify.ts can read a served list from a local server (Amendment 120). */
+export async function askGateway(): Promise<{ host: string; models: ServedModel[] }> {
   const { base, headers } = endpoint();
   const host = hostOf(base);
   const models: ServedModel[] = [];
@@ -109,7 +113,7 @@ async function askGateway(): Promise<{ host: string; models: ServedModel[] }> {
     // The status only: a body can echo what was sent.
     if (!res.ok) throw new Error(`${host} answered ${res.status} to a request for its models`);
     const body = (await res.json()) as {
-      data?: { id?: unknown; display_name?: unknown }[];
+      data?: { id?: unknown; display_name?: unknown; max_input_tokens?: unknown }[];
       has_more?: unknown;
       last_id?: unknown;
     };
@@ -118,6 +122,8 @@ async function askGateway(): Promise<{ host: string; models: ServedModel[] }> {
       models.push({
         id: m.id,
         ...(typeof m.display_name === 'string' && m.display_name !== m.id ? { displayName: m.display_name } : {}),
+        // The window the handoff cap is a quarter of (Amendment 120); a gateway that does not say leaves the floor.
+        ...(typeof m.max_input_tokens === 'number' && m.max_input_tokens >= 1 ? { contextTokens: m.max_input_tokens } : {}),
       });
     }
     if (body.has_more !== true || typeof body.last_id !== 'string') break;
@@ -280,6 +286,8 @@ export function catalog(fresh = false): Promise<ModelCatalog> {
     if (c.status === 'rejected') notes.push(`Claude Code: ${reason(c.reason)} — names and effort levels are missing`);
     last = combine(g.status === 'fulfilled' ? g.value : null, c.status === 'fulfilled' ? c.value : null, notes);
     lastAt = Date.now();
+    // What the gateway said each model takes in, for the handoff cap (Amendment 120).
+    if (g.status === 'fulfilled') recordWindows('claude', g.value.models.map((m) => ({ id: m.id, tokens: m.contextTokens })));
     return last;
   })().finally(() => {
     asking = null;

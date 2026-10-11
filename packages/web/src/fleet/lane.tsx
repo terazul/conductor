@@ -16,6 +16,7 @@ import { useActivity, useElapsedMs } from '../shell/clock.js';
 import { budgetOf } from '../shell/autonomy.js';
 import { currentAction, shownStatus, startedMs, tailLines } from '../shell/describe.js';
 import { openAgent } from '../shell/nav.js';
+import { HandOffChip } from './HandOffChip.js';
 import { shortModel } from '../lib/models.js';
 import { capabilitiesOf, tokenWords, useProviders } from '../lib/providers.js';
 import {
@@ -84,6 +85,9 @@ export function Lane({
         <span className="pj-lane-mdl" title={agent.model}>{shortModel(agent.model)}</span>
         <ProviderBadge provider={agent.provider} />
       </div>
+
+      {/* Held for not handing off (Amendment 120): the way to its card in Needs You. */}
+      <HandOffChip agent={agent} siblings={siblings} />
 
       <div className="pj-tail">
         {agent.status === 'queued' ? (

@@ -121,6 +121,14 @@ export interface Agent {
    * which every agent from before this is.
    */
   provider?: string;
+  /**
+   * Amendment 120. True while the agent is `done` but held for not handing off (Amendment
+   * 104): it ended its turn without calling `hand_off`, so the agents after it have not
+   * started. Present only when true, so every other agent's shape is what it was. It is what
+   * `rerunPlan` reads to refuse a re-run, and what Fleet and the Project lane read to show
+   * "not handed off".
+   */
+  handoffHeld?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

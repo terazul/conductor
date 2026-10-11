@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 120.
+  green `make test` (decided 30 Sep). The next amendment is 121.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -110,35 +110,11 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   - The status bar: a tab left open past midnight reads $0.00 today (103). Moving the system clock
     forward is enough to see it.
 
-- [ ] **Loose ends from the stack work (Amendments 99–104).** Found (10 Oct), while building them.
-  - **Amendment 100's prompt line is out of date.** `STACK_ASK_LINE` (`session/handoff.ts`) says a
-    question left in the reply "starts the agents after you without the answer". Since `hand_off`
-    (104) an agent with agents waiting on it is held, not finished. Reword it.
-  - **Re-run on a held agent (102, 104).** The Agent screen's button stays enabled, and the daemon
-    answers 409 with the reason. The web doesn't know about the hold because it isn't on the wire.
-    Put it on the wire so the button is disabled with its reason. There is also no **hand off**
-    button on the Fleet card or the Project lane, only in Needs You.
-  - **The re-run note is kept in memory (102).** A daemon restart between pressing the button and
-    an agent starting loses it; the agent then resumes with the usual wake nudge. Make it durable
-    (a column or a table).
-  - **A re-run of a parked agent is untested against the real SDK (102).** It resumes a session that
-    ended on `tool_deferred` with a prompt. `sendMessage` already does that for a message, but only
-    a fake backend has run it.
-  - **The restart test for `hand_off` isn't a real restart (104).** It uses a fresh `Alerts`
-    instance and a second connection to the same file, not a second `Supervisor`.
-
-- [ ] **Tighten the whole-conversation handoff (Amendment 101).** Found (10 Oct).
-  - **Real model windows, and tokens.** The cap is a quarter of a window taken from a small table
-    in `session/handoff.ts` (`handoffCap`): Claude 200,000 tokens, or 1,000,000 with `[1m]`;
-    `gpt-`, `o<digit>` and `gemini` 128,000; anything else 64,000; counted as 3 characters per token.
-    OpenRouter reports a `context_length` and nothing reads it. Use the real window and count
-    tokens.
-  - **Repeated text.** In a chain A, B, C, the third agent sees A's part inside B's launch prompt.
-    A reviewer that waits for three agents which share a parent can see the parent's text up to
-    three times. The cap drops the oldest first, which is the repeated part, but drop repeats before
-    spending the cap on them.
-  - **An orchestrator's helper reports** (`helperReport`) still keep their own 8,000-character cut.
-
+- [ ] **A re-run of a parked agent, tried against the real SDK (Amendment 102).** Found (10 Oct).
+  A re-run resumes a session that ended on `tool_deferred` with a prompt. `sendMessage` already does
+  that for a message, but only a fake backend has run it, and a real run costs money and needs a
+  person watching. Try it once on a real parked agent. The other loose ends of Amendments 99-104
+  were built in 115 and 120.
 ## Files
 
 - [ ] **Create a new file while browsing directories.** Asked for (8 Oct). From the file tree,

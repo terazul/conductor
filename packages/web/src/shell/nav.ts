@@ -125,6 +125,14 @@ export function openAttention(): void {
   navigate(SCREEN.attention);
 }
 
+/**
+ * Needs You, on one alert's card, scrolled into view: what a clicked notification does. Fleet's
+ * "not handed off" chip goes to the card with the hand-off box (Amendment 120).
+ */
+export function openAlert(alertId: string): void {
+  navigate(SCREEN.attention, { alertId });
+}
+
 /** Track A's spawn screen, optionally pre-aimed at a project. */
 export function openSpawn(project?: Project | null): void {
   navigate(SCREEN.spawn, project ? { projectId: project.id } : {});

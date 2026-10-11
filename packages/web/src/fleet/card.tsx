@@ -60,6 +60,7 @@ import {
 } from './endpoints.js';
 import { usePathComplete } from '../spawn/browse.js';
 import { LatestNote, NotesButton, NotesPanel } from './Notes.js';
+import { HandOffChip } from './HandOffChip.js';
 import {
   ProviderBadge,
   Dot,
@@ -89,26 +90,30 @@ function AgentRow({
   const elapsed = agent.status === 'queued' || elapsedMs === null ? null : fmtElapsed(elapsedMs);
 
   return (
-    <button
-      type="button"
-      className={`fl-arow${action.tone === 'need' ? ' is-need' : ''}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        openAgent(agent);
-      }}
-      title={`${agent.role} — ${STATUS_WORD[shown]}`}
-    >
-      <Dot status={shown} />
-      <span className="fl-arow-nm">{agent.role}</span>
-      <ProviderBadge provider={agent.provider} />
-      <span className="fl-arow-act">
-        {action.head && <>{action.head} </>}
-        {action.subject && <b>{action.subject}</b>}
-      </span>
-      <span className="fl-arow-el">
-        {agent.status === 'queued' ? 'queued' : agent.status === 'done' ? 'finished' : (elapsed ?? '—')}
-      </span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={`fl-arow${action.tone === 'need' ? ' is-need' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          openAgent(agent);
+        }}
+        title={`${agent.role} — ${STATUS_WORD[shown]}`}
+      >
+        <Dot status={shown} />
+        <span className="fl-arow-nm">{agent.role}</span>
+        <ProviderBadge provider={agent.provider} />
+        <span className="fl-arow-act">
+          {action.head && <>{action.head} </>}
+          {action.subject && <b>{action.subject}</b>}
+        </span>
+        <span className="fl-arow-el">
+          {agent.status === 'queued' ? 'queued' : agent.status === 'done' ? 'finished' : (elapsed ?? '—')}
+        </span>
+      </button>
+      {/* Held for not handing off (Amendment 120): the way to its card in Needs You. A button can't nest in the row. */}
+      <HandOffChip agent={agent} siblings={siblings} />
+    </>
   );
 }
 

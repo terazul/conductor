@@ -381,6 +381,7 @@ interface AgentRow {
   persona?: string | null;
   system_prompt?: string | null;
   skills?: string | null;
+  handoff_held?: number | null;
 }
 
 /** Used when a row predates a field, or carries unparseable JSON. */
@@ -413,6 +414,9 @@ const toAgent = (r: AgentRow): Agent => ({
   ...(r.parent_id ? { parentId: r.parent_id } : {}),
   // Only when it isn't Claude, so a Claude agent's shape is what it always was (Amendment 74).
   ...(r.provider && r.provider !== 'claude' ? { provider: r.provider } : {}),
+  // Only while it is done and held for not handing off (Amendment 120), so every other agent's
+  // shape is what it was. The same pair the alert and the daemon's refusals read (Amendment 104).
+  ...(r.status === 'done' && r.handoff_held === 1 ? { handoffHeld: true } : {}),
 });
 
 /** The engine an agent runs on (Amendment 74). `claude` for every agent from before. */
@@ -489,6 +493,23 @@ export function setHandoff(db: Db, id: string, h: Handoff): void {
     h.held && h.summary === null ? 1 : 0,
     id,
   );
+}
+
+/**
+ * The roles whose reply changed, for an agent "re-run from here" put back into its session and
+ * that has not started yet (Amendment 120); null when no note is waiting. Kept in the row, not
+ * in memory, so a daemon restart between the press and the start keeps it.
+ */
+export function getRerunPending(db: Db, id: string): string[] | null {
+  const r = row<{ rerun_pending: string | null }>(db.prepare('SELECT rerun_pending FROM agents WHERE id = ?').get(id));
+  if (r?.rerun_pending == null) return null;
+  const v = parse<unknown>(r.rerun_pending, null);
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null;
+}
+
+/** Leave a note waiting for `id`, or with null take it away. Names the roles that changed; may be empty. */
+export function setRerunPending(db: Db, id: string, changed: readonly string[] | null): void {
+  db.prepare('UPDATE agents SET rerun_pending = ? WHERE id = ?').run(changed === null ? null : JSON.stringify(changed), id);
 }
 
 /** Agents held for not handing off, by id. Derived into Needs You as `handoff_held`. */

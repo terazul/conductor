@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, handOffDraft, handOffProblem, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { alertActions, alertNotice, alertProject, handOffChip, handOffDraft, handOffProblem, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -452,6 +452,59 @@ console.log('\n6 · an agent that stopped without handing off (Amendment 104)');
   const rules = css.slice(css.indexOf('.atn-handoff {'), css.indexOf('.atn-ta {'));
   check('and its CSS is tokens only', rules.length > 100 && !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(rules) && /var\(--ink3\)/.test(rules) && /var\(--fail\)/.test(rules));
   check('the transcript names both ends of it', HANDOFF_BY_USER_NOTE === 'handed off by you' && /HANDOFF_HELD_NOTE/.test(readFileSync(new URL('../agent/transcript.tsx', import.meta.url), 'utf8')));
+}
+
+console.log('\n7 · "not handed off", on Fleet’s card and the Project lane (Amendment 120)');
+{
+  const ag = (id: string, role: string, over: Partial<Agent> = {}): Agent => ({
+    id,
+    jobId: 'j1',
+    projectId: 'p1',
+    role,
+    model: 'opus',
+    sdkSessionId: `s_${id}`,
+    status: 'done',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const held: Alert = { id: 'handoff_held:a1:12', kind: 'handoff_held', cause: HANDOFF_HELD_NOTE, projectId: 'p1', jobId: 'j1', agentIds: ['a1'], since: '2026-10-08T12:00:00Z' };
+  const arch = ag('a1', 'architect', { handoffHeld: true });
+  const dev = ag('a2', 'developer', { status: 'queued', sdkSessionId: null, dependsOn: ['a1'] });
+  const scr = ag('a3', 'scribe', { status: 'queued', sdkSessionId: null, dependsOn: ['a1', 'a2'] });
+
+  const chip = handOffChip(arch, [arch, dev, scr], [held]);
+  check('a held agent with agents waiting has a chip that says it is not handed off', chip?.label === 'not handed off', JSON.stringify(chip));
+  check('it names who has not started, and says where pressing it goes', /architect stopped without handing off, so developer and scribe haven't started\. Open its card in Needs You/.test(chip?.title ?? ''), chip?.title);
+  check('pressing it lands on that agent’s card in Needs You, by its alert', chip?.alertId === 'handoff_held:a1:12' && chip.action === 'hand off in Needs You');
+  check('one waiting is named alone, and is "hasn’t"', /so developer hasn't started/.test(handOffChip(arch, [arch, dev], [held])?.title ?? ''));
+  const putAway = handOffChip(arch, [arch, dev], []);
+  check('when its card was put away it goes to the agent instead, where a reply works it again', putAway?.alertId === null && putAway.action === 'open the agent' && /put away/.test(putAway.title) && /reply/.test(putAway.title), JSON.stringify(putAway));
+  check('another agent’s card is not its card', handOffChip(arch, [arch, dev], [{ ...held, id: 'handoff_held:a9:3', agentIds: ['a9'] }])?.alertId === null);
+  check('an agent that is not held has no chip', handOffChip({ ...arch, handoffHeld: undefined }, [arch, dev], [held]) === null && handOffChip(dev, [arch, dev], []) === null);
+  check('nor one that is held but not done: a hold is only a hold while it is done', handOffChip({ ...arch, status: 'working' }, [arch, dev], [held]) === null);
+  check('nor one with nobody left waiting for it, as Needs You clears its card then too', handOffChip(arch, [arch, { ...dev, status: 'working' }], [held]) === null && handOffChip(arch, [arch], [held]) === null);
+
+  // The wiring, as source checks: the card and the lane are not rendered in Node.
+  const src = (f: string): string => readFileSync(new URL(f, import.meta.url), 'utf8');
+  const chipSrc = src('../fleet/HandOffChip.tsx');
+  const chipCss = src('../fleet/handoffchip.css');
+  const cardSrc = src('../fleet/card.tsx');
+  const laneSrc = src('../fleet/lane.tsx');
+  const navSrc = src('../shell/nav.ts');
+  check('Fleet’s agent row and the Project lane both show it', /<HandOffChip agent=\{agent\} siblings=\{siblings\} \/>/.test(cardSrc) && /<HandOffChip agent=\{agent\} siblings=\{siblings\} \/>/.test(laneSrc));
+  check('it sits beside the row, not inside it: a button does not nest in a button', cardSrc.indexOf('</button>') < cardSrc.indexOf('<HandOffChip') && /<>\s*<button/.test(cardSrc));
+  check('pressing it does not also open the card or the lane it is on: clicks and keys stop here', /e\.stopPropagation\(\);/.test(chipSrc) && /onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/.test(chipSrc));
+  check('it goes to the alert’s card, else to the agent, through the named destinations', /openAlert\(chip\.alertId\)/.test(chipSrc) && /openAgent\(agent\)/.test(chipSrc) && /export function openAlert\(alertId: string\): void \{\s*navigate\(SCREEN\.attention, \{ alertId \}\);/.test(navSrc));
+  check('openAttention is as it was: the top bar passes it as a click handler', /export function openAttention\(\): void \{\s*navigate\(SCREEN\.attention\);/.test(navSrc));
+  check('what it says and when it is there is the pure function, asked of the store’s alerts', /handOffChip\(agent, siblings, useAlerts\(\)\)/.test(chipSrc));
+  check('both themes read: tokens only, amber like every waiting-for-you state', !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(chipCss) && /var\(--need\)/.test(chipCss) && /color-mix\(in srgb, var\(--need\)/.test(chipCss) && !/style=/.test(chipSrc));
 }
 
 console.log(

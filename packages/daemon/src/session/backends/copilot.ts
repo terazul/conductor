@@ -60,6 +60,7 @@ import { budgetRefusal } from '../budget.js';
 import { openRouterKey } from '../secrets.js';
 import { finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setAgentUsage, startRun } from '../store.js';
 import { copilotToolsFor, isWriteTool, normaliseTool } from '../translate.js';
+import { recordWindows } from '../windows.js';
 import { CUT_SHORT } from './claude.js';
 import { CopilotEvents, askFromPermission, type TurnEnd } from './copilot-events.js';
 
@@ -220,6 +221,8 @@ export function forgetCopilotState(): void {
 /** Copilot's own list (Q11). Needs a login; the SDK caches it after the first call. */
 export async function copilotModels(): Promise<ProviderModel[]> {
   const list = await (await clientFor('copilot')).listModels();
+  // The window each model has under Copilot, for the handoff cap (Amendment 120).
+  recordWindows('copilot', list.map((m) => ({ id: m.id, tokens: m.capabilities?.limits?.max_context_window_tokens })));
   return list.map((m) => ({
     id: m.id,
     displayName: m.name || m.id,
@@ -235,10 +238,14 @@ export async function openRouterModels(fresh = false): Promise<ProviderModel[]> 
   const body = (await copilotSdk.fetchOpenRouterModels()) as { data?: unknown } | null;
   const data = Array.isArray(body?.data) ? body.data : [];
   const models: ProviderModel[] = [];
-  for (const m of data as Array<{ id?: unknown; name?: unknown }>) {
+  const windows: { id: string; tokens: unknown }[] = [];
+  for (const m of data as Array<{ id?: unknown; name?: unknown; context_length?: unknown }>) {
     if (typeof m?.id !== 'string' || !m.id) continue;
     models.push({ id: m.id, displayName: typeof m.name === 'string' && m.name ? m.name : m.id });
+    // OpenRouter says each model's window; the handoff cap is a quarter of it (Amendment 120).
+    windows.push({ id: m.id, tokens: m.context_length });
   }
+  recordWindows('openrouter', windows);
   openRouterList = { at: Date.now(), models };
   return models;
 }

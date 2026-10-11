@@ -92,6 +92,8 @@ import {
   getAgentProvider,
   getAgentPersona,
   getHandoff,
+  getRerunPending,
+  setRerunPending,
   setAgentAutonomy,
   setAgentStatus,
   localDay,
@@ -101,13 +103,16 @@ import {
 } from './store.js';
 import { AgentRunner, CUT_SHORT, HELPER_TOOLS, sdk } from './runner.js';
 import { ClaudeBackend } from './backends/claude.js';
-import { copilotSdk, excludedFor, gateCall, type CopilotClientLike } from './backends/copilot.js';
+import { copilotModels, copilotSdk, excludedFor, gateCall, openRouterModels, type CopilotClientLike } from './backends/copilot.js';
 import { CopilotEvents, askFromPermission } from './backends/copilot-events.js';
-import { forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
+import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
+import { forgetWindows, recordWindows, reportedWindow } from './windows.js';
 import {
   HAND_OFF_LINE,
+  REPEAT_MARKER,
   STACK_ASK_LINE,
   contextWindow,
+  dropRepeats,
   fitTurns,
   handoffCap,
   handoffSection,
@@ -117,13 +122,14 @@ import {
   stackLine,
   turnsFromEvents,
   type Turn,
+  type Upstream,
 } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
-import { HANDOFF_ASK, RESTART_NUDGE, SLOTS_KEY, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { HANDOFF_ASK, RESTART_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
-import { rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
+import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
 
 /*
@@ -2423,12 +2429,21 @@ async function main(): Promise<void> {
   );
   check('a failed one says so, over what it said (Amendments 51, 101)', unfinished.includes('[helper — failed, so it may not have finished its part]\nAgent: half done'), unfinished);
   check(
-    "an orchestrator's helper report is as it was: each last reply, a failed helper marked, a long one cut at 8,000 (Amendment 51)",
-    helperReport([
-      { role: 'h1', status: 'failed', reply: null },
-      { role: 'h2', status: 'done', reply: 'x'.repeat(9_000) },
-    ]).includes('[h1 — failed, so it may not have finished its part]\n(It finished without a written reply.)') &&
-      helperReport([{ role: 'h2', status: 'done', reply: 'x'.repeat(9_000) }]).includes('cut at 8,000 of 9,000 characters'),
+    "an orchestrator's helper report still marks a failed helper and says it wrote nothing (Amendments 51, 120)",
+    helperReport(
+      [
+        { role: 'h1', status: 'failed', reply: null },
+        { role: 'h2', status: 'done', reply: 'x'.repeat(9_000) },
+      ],
+      100_000,
+    ).includes('[h1 — failed, so it may not have finished its part]\n(It finished without a written reply.)'),
+  );
+  check(
+    'and a long reply is no longer cut at 8,000 characters: it is whole, as the next agent in a stack is given one (Amendment 120)',
+    (() => {
+      const long = helperReport([{ role: 'h2', status: 'done', reply: 'x'.repeat(9_000) }], 100_000);
+      return long.includes('[h2]\nAgent: ' + 'x'.repeat(9_000)) && !long.includes('cut at');
+    })(),
   );
 
   // The seam for hand_off: a summary goes on top of an upstream's text, whole, and the cap does not touch it.
@@ -2470,6 +2485,138 @@ async function main(): Promise<void> {
     'blank prose, and the end of a call it never saw start, are left out (Amendment 101)',
     turnsText([logEv({ kind: 'text', text: '  \n' }), logEv({ kind: 'tool_end', toolUseId: 'nope', ok: false, summary: 'x' })]) === '',
   );
+
+  // ── Amendment 120 ─────────────────────────────────────────────────────────
+
+  // The line about asking: since hand_off an agent that others wait for is held, not finished.
+  check(
+    'the line about asking no longer says the agents after it start without the answer: they are held (Amendment 120)',
+    !/start without the answer/.test(STACK_ASK_LINE) && !/starts? the agents/.test(STACK_ASK_LINE) &&
+      /held as not handed off/.test(STACK_ASK_LINE) && /Needs You/.test(STACK_ASK_LINE),
+    STACK_ASK_LINE,
+  );
+  check('and still names both engines’ question tools, and says the reply asks no one (Amendment 120)', /AskUserQuestion/.test(STACK_ASK_LINE) && /ask_user/.test(STACK_ASK_LINE) && /not put to anyone/.test(STACK_ASK_LINE));
+  const OLD_ASK =
+    'You are one agent in a stack, and some agents wait for others to finish. When you need an answer from the user, ask with the question tool (AskUserQuestion, or ask_user), not in your reply: a question in your reply ends your turn and the agents after you start without the answer, while the question tool holds you, and them, until the user has answered.';
+  check(
+    "an agent launched under Amendment 100's wording has that taken out of its prompt as well, not passed on as its brief (Amendment 120)",
+    turnsText([logEv({ kind: 'user_text', text: `JOB\n\n${OLD_ASK}\n\nYour role is x. Do y.` })]) === 'user:(the job instruction, as above)\n\nYour role is x. Do y.',
+  );
+
+  // The window an engine reported is the window, in whole tokens; anything else is the floor.
+  check(
+    'a window the engine reported is used as it is, in whole tokens, over the table (Amendment 120)',
+    contextWindow('anything', 8_192) === 8_192 && contextWindow('opus', 1_000_000) === 1_000_000 && contextWindow('opus', 8_192.9) === 8_192 && contextWindow('some-new-model', 1) === 1,
+  );
+  check(
+    'one that is not a window (zero, negative, not a number, infinite) falls back to the floor (Amendment 120)',
+    contextWindow('opus', 0) === 200_000 && contextWindow('opus', -5) === 200_000 && contextWindow('opus', Number.NaN) === 200_000 &&
+      contextWindow('gpt-5', undefined) === 128_000 && contextWindow('some-new-model', Number.POSITIVE_INFINITY) === 64_000,
+  );
+  check(
+    'the cap is a quarter of the real window at three characters a token — an estimate, not a count (Amendment 120)',
+    handoffCap('x', 8_192) === 6_144 && handoffCap('opus', 1_000_000) === 750_000 && handoffCap('opus') === 150_000 && handoffCap('opus', undefined) === 150_000,
+  );
+  forgetWindows();
+  check(
+    'recordWindows keeps a window by provider and exact id, and skips what is not one (Amendment 120)',
+    recordWindows('openrouter', [
+      { id: 'a/b', tokens: 32_768 },
+      { id: 'a/c', tokens: null },
+      { id: 'a/d', tokens: 0 },
+      { id: '', tokens: 5 },
+      { id: 'a/e', tokens: 'big' },
+      { id: 'a/f', tokens: 1_000.7 },
+      { id: 'a/g' },
+    ]) === 2 &&
+      reportedWindow('openrouter', 'a/b') === 32_768 && reportedWindow('openrouter', 'a/c') === undefined && reportedWindow('openrouter', 'a/f') === 1_000 &&
+      reportedWindow('claude', 'a/b') === undefined && reportedWindow('openrouter', 'a/zzz') === undefined,
+  );
+  recordWindows('claude', [{ id: 'claude-x', tokens: 200_000 }]);
+  check(
+    'a [1m] model is not looked up: the list gives the base model’s window, and [1m] is the 1,000,000 one the floor says (Amendment 120)',
+    reportedWindow('claude', 'claude-x') === 200_000 && reportedWindow('claude', 'claude-x[1m]') === undefined && contextWindow('claude-x[1m]', reportedWindow('claude', 'claude-x[1m]')) === 1_000_000,
+  );
+  forgetWindows();
+
+  // Text said twice: a part quoted inside another agent's launch prompt, seen by an agent that waits for several.
+  const PLAN = 'The plan: rotate the refresh tokens, keep the family id, and revoke the whole family on reuse.';
+  const arch: Upstream = {
+    role: 'architect',
+    reply: PLAN,
+    summary: 'Architect summary: sessions live in src/session.ts, nothing else changes.',
+    turns: [T('user', '(the job instruction, as above)\n\nYour role is architect. Plan the change before anyone touches the code.'), T('agent', PLAN), T('tool', 'Read src/auth.ts'), T('tool', 'Read src/session.ts')],
+  };
+  // What each of three agents that waited for the architect was given at launch: its section, then its own brief.
+  const launched = (role: string): Upstream => ({
+    role,
+    reply: `${role} finished its part and all of its checks pass.`,
+    turns: [
+      T('user', `(the job instruction, as above)\n\n${handoffSection([arch], 100_000)}\n\nYour role is ${role}. Do your part, and only your part, of the plan.`),
+      T('agent', `${role} finished its part and all of its checks pass.`),
+    ],
+  });
+  const three = [launched('developer'), launched('validator'), launched('analyst')];
+  const occurrences = (hay: string, needle: string): number => hay.split(needle).length - 1;
+  const raw = three.flatMap((u) => u.turns ?? []).map((t) => t.text).join('\n');
+  check('without dropping anything, the architect’s part is in all three launch prompts — the problem (Amendment 120)', occurrences(raw, PLAN) === 3, String(occurrences(raw, PLAN)));
+  const once = handoffSection(three, 1_000_000);
+  check('three agents that share a parent: the parent’s text is said once, in the first (Amendment 120)', occurrences(once, PLAN) === 1 && occurrences(once, 'Architect summary: sessions live') === 1 && once.indexOf(PLAN) < once.indexOf('[validator]'), once);
+  check('the second and the third say where it went, once each, and keep what is their own (Amendment 120)', occurrences(once, REPEAT_MARKER) === 2 && ['developer', 'validator', 'analyst'].every((r) => once.includes(`Your role is ${r}. Do your part`) && once.includes(`Agent: ${r} finished its part`)), once);
+  check('and the opening sentence of the quoted section and the tool lines the parent called are said once too — twice with the section’s own (Amendment 120)', occurrences(once, 'They worked in this same folder') === 2 && occurrences(once, 'Tool: Read src/auth.ts') === 1, `${occurrences(once, 'They worked in this same folder')}`);
+  // A cap the three would not fit in with every copy counted, and that they do fit in once the copies are gone.
+  const squeezed = handoffSection(three, raw.length - 2 * PLAN.length);
+  check('the cap is spent on what is left: a cap too small for the three as they were cuts nothing now (Amendment 120)', !squeezed.includes('left out to fit') && occurrences(squeezed, PLAN) === 1, squeezed.slice(0, 300));
+  const withParent = handoffSection([arch, ...three], 1_000_000);
+  check(
+    'the parent in the list as well, first: its text and its summary are still there once, in its own part (Amendment 120)',
+    occurrences(withParent, PLAN) === 1 && occurrences(withParent, 'Architect summary: sessions live') === 1 && withParent.indexOf(PLAN) < withParent.indexOf('[developer]'),
+    withParent,
+  );
+  const parentLast = handoffSection([...three, arch], 1_000_000);
+  check('and last: still once, whichever way the agents are listed (Amendment 120)', occurrences(parentLast, PLAN) === 1 && occurrences(parentLast, 'Architect summary: sessions live') === 1, parentLast);
+  check(
+    'a chain A, B, C where the third waits only for the second has nothing to drop: A’s part is there once, inside B’s (Amendment 120)',
+    (() => {
+      const chain = handoffSection([launched('developer')], 1_000_000);
+      return occurrences(chain, PLAN) === 1 && !chain.includes(REPEAT_MARKER);
+    })(),
+  );
+  const twinA: Upstream = { role: 'a', reply: null, turns: [T('user', 'q'), T('agent', 'x'.repeat(200))] };
+  const twinB: Upstream = { role: 'b', reply: null, turns: [T('user', 'q'), T('agent', 'x'.repeat(200))] };
+  check('two agents that say the same long thing in their own voice both keep it: only quoting is dropped (Amendment 120)', occurrences(handoffSection([twinA, twinB], 1_000_000), 'x'.repeat(200)) === 2);
+  const shortSame = [{ role: 'a', reply: null, turns: [T('user', 'Please continue with the next step.'), T('agent', 'ok')] }, { role: 'b', reply: null, turns: [T('user', 'Please continue with the next step.'), T('agent', 'ok')] }];
+  check('and a short paragraph said by both is kept for both (Amendment 120)', occurrences(handoffSection(shortSame, 1_000_000), 'Please continue with the next step.') === 2);
+  check('dropRepeats changes nothing for upstreams with no turns or no quoting, and hands back the same objects (Amendment 120)', (() => {
+    const plain = [{ role: 'a', reply: 'r' }, twinA];
+    const out = dropRepeats(plain);
+    return out[0] === plain[0] && out[1] === plain[1];
+  })());
+
+  // The helper report: the same whole-conversation treatment, within the same share of the window.
+  const hr = helperReport(
+    [
+      { role: 'h1', status: 'done', reply: 'Routes are in api.ts.', turns: [T('user', '(the job instruction, as above)\n\nYour role is h1. Build the API.'), T('tool', 'Edit src/api.ts'), T('agent', 'Routes are in api.ts.')] },
+      { role: 'h2', status: 'failed', reply: 'Half of it.', turns: [T('user', 'Build the UI.'), T('agent', 'Half of it.')] },
+    ],
+    100_000,
+  );
+  check(
+    'a helper report is each helper’s whole conversation — its task, a line per tool, its replies — and marks the failed one (Amendment 120)',
+    hr.startsWith('Your helpers have finished. What each was told and said, in order') &&
+      hr.includes('[h1]\nUser: (the job instruction, as above)\n\nYour role is h1. Build the API.\n\nTool: Edit src/api.ts\n\nAgent: Routes are in api.ts.') &&
+      hr.includes('[h2 — failed, so it may not have finished its part]\nUser: Build the UI.\n\nAgent: Half of it.') &&
+      hr.endsWith('Start more helpers if something is left.'),
+    hr,
+  );
+  const many = (n: number): Turn[] => [T('user', 'task'), ...Array.from({ length: n }, (_, i) => T('agent', `#${String(i + 1).padStart(3, '0')}# ${'z'.repeat(90)}`))];
+  const capped2 = helperReport([{ role: 'h1', status: 'done', reply: null, turns: many(50) }, { role: 'h2', status: 'done', reply: null, turns: [T('agent', 'tiny')] }], 2_000);
+  check(
+    'over its share the oldest of a helper’s lines go and the last reply stays, and a small helper’s is whole (Amendment 120)',
+    capped2.includes('#050#') && !capped2.includes('#001#') && /the first \d+ of 51 entries are left out to fit/.test(capped2) && capped2.includes('[h2]\nAgent: tiny') && capped2.length < 3_500,
+    capped2.slice(0, 400),
+  );
+  check('and an 8,000-character reply is no longer cut: it is whole (Amendment 120)', helperReport([{ role: 'h', status: 'done', reply: 'q'.repeat(12_000) }], 100_000).includes('q'.repeat(12_000)));
   sdk.query = realQuery;
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -2622,7 +2769,7 @@ async function main(): Promise<void> {
     const woke = runs[start + 3];
     await until(() => (woke?.prompts.length ?? 0) > 0);
     check('in its own session', typeof woke?.options.resume === 'string' && woke.options.resume === getAgent(db, 'agt_orch')?.sdkSessionId, String(woke?.options.resume));
-    check('told what each helper said last', (woke?.prompts[0] ?? '').includes('[builder-api]\nAPI done: routes in api.ts.'), woke?.prompts[0]);
+    check('told what each helper said, as the next agent in a stack is (Amendment 120)', (woke?.prompts[0] ?? '').includes('[builder-api]') && (woke?.prompts[0] ?? '').includes('Agent: API done: routes in api.ts.'), woke?.prompts[0]);
     check('and which one did not finish', /\[builder-helper-2 — failed, so it may not have finished its part\]/.test(woke?.prompts[0] ?? ''), woke?.prompts[0]);
     check('it no longer waits on them, and they are marked reported', getAgent(db, 'agt_orch')!.dependsOn.length === 0 && unreportedHelpers(db, 'agt_orch').length === 0);
     woke?.finish({ cost: 0, reason: 'completed' });
@@ -4284,7 +4431,7 @@ async function main(): Promise<void> {
     check('the orchestrator resumes in its own session', (await until(() => runs.length === atOrch + 1)) && runs[atOrch]?.options.resume === 'sess_ro_orch');
     await until(() => (runs[atOrch]?.prompts.length ?? 0) > 0);
     const orchPrompt = runs[atOrch]?.prompts[0] ?? '';
-    check('told its input changed, and that the helper was stopped, with what it had said', orchPrompt.includes('Your input changed') && orchPrompt.includes('[developer-helper-1 — stopped, so it may not have finished its part]\nHalf of the tokens work.'), orchPrompt);
+    check('told its input changed, and that the helper was stopped, with what it had said', orchPrompt.includes('Your input changed') && orchPrompt.includes('[developer-helper-1 — stopped, so it may not have finished its part]\nAgent: Half of the tokens work.'), orchPrompt);
     runs[atOrch]?.finish({ cost: 0, reason: 'completed' });
     await until(() => getJob(db, 'job_rerun_orch')?.status === 'done');
 
@@ -4561,6 +4708,262 @@ async function main(): Promise<void> {
 
     // Nothing that is not a restart resume is asked: an ordinary turn that ends without it is held at once
     // (the first check in this section), and a person's reply to a held agent works it again as before.
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n21 · the hold on the wire, a re-run note that outlives a restart, real windows, and text said once (Amendment 120)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const lpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'l120' })).body.project.id;
+    const ljob = (id: string): void => {
+      insertJob(db, { id, projectId: lpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const lfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: lpid, autonomy: DEFAULT_AUTONOMY, ...a });
+    const sayL = (jobId: string, agentId: string, text: string): void => {
+      eventLog().emit({ projectId: lpid, jobId, agentId }, { kind: 'text', text });
+    };
+    const occurrences = (hay: string, needle: string): number => hay.split(needle).length - 1;
+
+    // A second Supervisor on this database pumps every queued agent in it: nothing else may be queued.
+    // (Queued behind a failed or a held agent, as 20's are, it is not started by anyone.)
+    const strangers = listAgents(db)
+      .filter((a) => a.status === 'queued' && a.dependsOn.every((d) => getAgent(db, d)?.status === 'done' && !getHandoff(db, d).held))
+      .map((a) => a.id);
+    check('nothing from the sections before is waiting to start, so a second Supervisor starts only what this one puts there (Amendment 120)', strangers.length === 0, strangers.join());
+
+    // ── the hold, on the wire; a restart that is a second Supervisor ──────────
+    const ws = await connect();
+    await settle(100); // the subscription is taken on the daemon's next turn, not when the socket opens
+    const jobH = 'job_l120_hold';
+    ljob(jobH);
+    lfix('l_arch', jobH, { role: 'architect', status: 'queued' });
+    lfix('l_dev', jobH, { role: 'developer', status: 'queued', dependsOn: ['l_arch'] });
+    const atH = runs.length;
+    sup.pump();
+    check('the architect starts, and only it', (await until(() => runs.length === atH + 1)) && getAgent(db, 'l_dev')?.status === 'queued');
+    check('an agent that is not held has no such field on it (Amendment 120)', !('handoffHeld' in getAgent(db, 'l_arch')!));
+    sayL(jobH, 'l_arch', 'Plan: sessions, not JWT.');
+    runs[atH]!.finish({ cost: 0, reason: 'completed' });
+    check('its turn ends without hand_off: done and held', await until(() => getAgent(db, 'l_arch')?.status === 'done' && getHandoff(db, 'l_arch').held));
+    check('the hold is on the agent the wire carries: handoffHeld, and only while it is true (Amendment 120)', getAgent(db, 'l_arch')?.handoffHeld === true && !('handoffHeld' in getAgent(db, 'l_dev')!));
+    check(
+      'a page that loads now is sent it',
+      (await get<Snapshot>('/api/snapshot')).body.agents.some((a) => a.id === 'l_arch' && a.handoffHeld === true),
+    );
+    await settle(100);
+    const pushedHeld = ws.frames.filter((f): f is Extract<ServerFrame, { type: 'entities' }> => f.type === 'entities').flatMap((f) => f.agents ?? []).filter((a) => a.id === 'l_arch');
+    check('and one that is open is pushed it, in the entities frame that carries the agent as it ends (Amendment 120)', pushedHeld.at(-1)?.status === 'done' && pushedHeld.at(-1)?.handoffHeld === true, JSON.stringify(pushedHeld.at(-1)));
+
+    // The one rule, in shared: what the button is disabled with is what the daemon says.
+    const heldPlan = rerunPlan(agentsForJob(db, jobH), 'l_arch', { hasReply: true });
+    check(
+      'rerunPlan refuses a held agent and still lists who is after it, so the button is there, disabled (Amendment 120)',
+      heldPlan.steps.map((s) => s.role).join() === 'developer' && /stopped without handing off, so the agents after it haven't started\. Hand it off in Needs You first\./.test(heldPlan.refusal ?? ''),
+      JSON.stringify(heldPlan),
+    );
+    const heldHttp = await send<{ detail?: string }>('POST', '/api/agents/l_arch/rerun', {});
+    check('the daemon answers 409 with that very sentence', heldHttp.status === 409 && heldHttp.body.detail === heldPlan.refusal, JSON.stringify(heldHttp.body));
+    check('nothing was stopped, queued or started', getAgent(db, 'l_dev')?.status === 'queued' && runs.length === atH + 1);
+    check(
+      'it is only for an agent that is done and held (Amendment 120)',
+      heldRefusal({ role: 'x', status: 'done' }) === null && heldRefusal({ role: 'x', status: 'working', handoffHeld: true }) === null && heldRefusal({ role: 'x', status: 'done', handoffHeld: true }) !== null,
+    );
+
+    // A restart: a second Supervisor, on a second connection to the file, knowing only what is stored.
+    const reopened = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    const sup2 = new Supervisor(reopened);
+    check('a daemon that opens the file afresh finds the hold on the agent it sends (Amendment 120)', getAgent(reopened, 'l_arch')?.handoffHeld === true && getHandoff(reopened, 'l_arch').held);
+    sup2.pump();
+    await settle(150);
+    check('a second Supervisor pumping starts nothing: a held agent does not count as done there either (Amendment 120)', runs.length === atH + 1 && getAgent(reopened, 'l_dev')?.status === 'queued');
+    const refusedBy2 = await sup2.rerunFrom('l_arch').then(() => null, (e: unknown) => (e instanceof Error ? e.message : String(e)));
+    check('and it refuses a re-run with the same sentence', refusedBy2 === heldPlan.refusal, String(refusedBy2));
+    const handed = sup2.handOffByUser('l_arch', '  Sessions, in src/session.ts.  ');
+    check('a hand-off through it clears the hold and starts the developer — in the second Supervisor (Amendment 120)', handed.status === 'done' && handed.handoffHeld === undefined && (await until(() => runs.length === atH + 2)));
+    const devRunL = runs[atH + 1]!;
+    await until(() => devRunL.prompts.length > 0);
+    check('with the summary the person sent, trimmed and first', (devRunL.prompts[0] ?? '').includes('[architect]\nIts summary of its work:\nSessions, in src/session.ts.'), devRunL.prompts[0]);
+    check('the first connection to the file sees it: the field is gone and the developer works', getAgent(db, 'l_arch')?.handoffHeld === undefined && getAgent(db, 'l_dev')?.status === 'working');
+    await settle(100);
+    const pushedFree = ws.frames.filter((f): f is Extract<ServerFrame, { type: 'entities' }> => f.type === 'entities').flatMap((f) => f.agents ?? []).filter((a) => a.id === 'l_arch');
+    check('and an open page is pushed the agent without it', pushedFree.at(-1)?.handoffHeld === undefined && pushedFree.at(-1)?.status === 'done', JSON.stringify(pushedFree.at(-1)));
+    devRunL.finish({ cost: 0, reason: 'completed' });
+    check('the developer, which nobody waits for, ends done', await until(() => getAgent(db, 'l_dev')?.status === 'done'));
+    reopened.close();
+    ws.close();
+
+    // ── the re-run note, in the row, so a restart between the press and the start keeps it ──
+    const jobN = 'job_l120_note';
+    ljob(jobN);
+    lfix('n_arch', jobN, { role: 'architect', status: 'done', sdkSessionId: 'sess_n_arch' });
+    lfix('n_dev', jobN, { role: 'developer', status: 'done', sdkSessionId: 'sess_n_dev', dependsOn: ['n_arch'] });
+    sayL(jobN, 'n_arch', 'Plan v1.');
+    sayL(jobN, 'n_arch', 'Plan v2: the tokens expire after an hour.');
+    check('no note waits for an agent that was never re-run', getRerunPending(db, 'n_dev') === null && getRerunPending(db, 'n_arch') === null);
+    // One Supervisor presses the button with everything held, so nothing starts before the "restart".
+    const supA = new Supervisor(db);
+    await supA.hold();
+    const atN = runs.length;
+    const pressed = await supA.rerunFrom('n_arch');
+    check('the button is pressed: the developer is queued, to go again', pressed.agents.length === 1 && pressed.agents[0]?.action === 'resume' && getAgent(db, 'n_dev')?.status === 'queued');
+    check('and nothing started, as this Supervisor is held', runs.length === atN);
+    check('the note is in the row, not in memory: the roles whose reply changed (Amendment 120)', JSON.stringify(getRerunPending(db, 'n_dev')) === '["architect"]', JSON.stringify(getRerunPending(db, 'n_dev')));
+    check('and the agent that was pressed from has none', getRerunPending(db, 'n_arch') === null);
+    const reopened2 = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    check('a daemon that opens the file afresh still finds it', JSON.stringify(getRerunPending(reopened2, 'n_dev')) === '["architect"]');
+    const supB = new Supervisor(reopened2);
+    supB.pump();
+    check('the new Supervisor resumes the developer in its own session', (await until(() => runs.length === atN + 1)) && runs[atN]?.options.resume === 'sess_n_dev', String(runs[atN]?.options.resume));
+    await until(() => (runs[atN]?.prompts.length ?? 0) > 0);
+    const noteL = runs[atN]?.prompts[0] ?? '';
+    check(
+      'with the note the press made, not the usual wake nudge: input changed, and the architect’s latest reply (Amendment 120)',
+      noteL.startsWith('Your input changed. architect has said something new') && noteL.includes('Agent: Plan v2: the tokens expire after an hour.') && noteL !== WAKE_NUDGE,
+      noteL,
+    );
+    check('it is taken: the column is empty again, so a second resume gets no stale note', getRerunPending(db, 'n_dev') === null);
+    runs[atN]?.finish({ cost: 0, reason: 'completed' });
+    check('and the developer ends done', await until(() => getAgent(db, 'n_dev')?.status === 'done'));
+    reopened2.close();
+    // Terminating an agent takes a waiting note away with it.
+    lfix('n_dev2', jobN, { role: 'validator', status: 'queued', sdkSessionId: 'sess_n_dev2', dependsOn: ['n_dev'] });
+    setRerunPending(db, 'n_dev2', ['developer']);
+    await sup.terminateAgent('n_dev2');
+    check('terminating an agent clears a note waiting for it', getRerunPending(db, 'n_dev2') === null && getAgent(db, 'n_dev2')?.status === 'stopped');
+
+    // ── real windows: where they come from, and a cap that follows them ──────
+    forgetWindows();
+    copilotSdk.fetchOpenRouterModels = async () => ({
+      data: [
+        { id: 'vendor/big', name: 'Big', context_length: 1_000_000 },
+        { id: 'vendor/small', name: 'Small', context_length: 8_192 },
+        { id: 'vendor/none', name: 'None' },
+        { id: 'vendor/zero', name: 'Zero', context_length: 0 },
+      ],
+    });
+    const orList = await openRouterModels(true);
+    copilotSdk.fetchOpenRouterModels = () => Promise.reject(new Error('verify asked OpenRouter'));
+    check('OpenRouter’s list is as it was (Amendment 120)', JSON.stringify(orList.map((m) => m.id)) === '["vendor/big","vendor/small","vendor/none","vendor/zero"]');
+    check(
+      'and its context_length is kept for each model that has one, by provider (Amendment 120)',
+      reportedWindow('openrouter', 'vendor/big') === 1_000_000 && reportedWindow('openrouter', 'vendor/small') === 8_192 && reportedWindow('openrouter', 'vendor/none') === undefined &&
+        reportedWindow('openrouter', 'vendor/zero') === undefined && reportedWindow('copilot', 'vendor/big') === undefined && reportedWindow('claude', 'vendor/big') === undefined,
+    );
+    const keptModels = fakeCopilot.models;
+    fakeCopilot.models = [
+      { id: 'gpt-win', name: 'GPT win', capabilities: { supports: { vision: false, reasoningEffort: false }, limits: { max_context_window_tokens: 64_000 } } },
+      { id: 'gpt-nowin', name: 'No window' },
+    ] as never;
+    const cpList = await copilotModels();
+    fakeCopilot.models = keptModels;
+    check('Copilot’s list is as it was, and its max_context_window_tokens is kept (Amendment 120)', cpList.map((m) => m.id).join() === 'gpt-win,gpt-nowin' && reportedWindow('copilot', 'gpt-win') === 64_000 && reportedWindow('copilot', 'gpt-nowin') === undefined);
+    const gwBefore = { gateway: modelSources.gateway, claudeCode: modelSources.claudeCode };
+    modelSources.gateway = async () => ({ host: 'gw.test', models: [{ id: 'claude-win-l120', contextTokens: 50_000 }, { id: 'claude-nowin-l120' }] });
+    modelSources.claudeCode = async () => [];
+    forgetCatalog();
+    await catalog(true);
+    modelSources.gateway = gwBefore.gateway;
+    modelSources.claudeCode = gwBefore.claudeCode;
+    forgetCatalog();
+    check('the gateway’s max_input_tokens is kept for Claude, and a model it does not say for has none (Amendment 120)', reportedWindow('claude', 'claude-win-l120') === 50_000 && reportedWindow('claude', 'claude-nowin-l120') === undefined);
+    // The gateway's answer as the Models API words it, read by the real asker from a local server.
+    const gw = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        data: [
+          { id: 'claude-opus-l120', display_name: 'Opus', type: 'model', max_input_tokens: 1_000_000, max_tokens: 64_000 },
+          { id: 'claude-null-l120', display_name: 'Null', type: 'model', max_input_tokens: null, max_tokens: null },
+          { id: 'claude-missing-l120', type: 'model' },
+        ],
+        has_more: false,
+        first_id: 'claude-opus-l120',
+        last_id: 'claude-missing-l120',
+      }));
+    });
+    await new Promise<void>((r) => gw.listen(0, '127.0.0.1', r));
+    const envWas = { base: process.env['ANTHROPIC_BASE_URL'], key: process.env['ANTHROPIC_API_KEY'] };
+    process.env['ANTHROPIC_BASE_URL'] = `http://127.0.0.1:${(gw.address() as { port: number }).port}`;
+    process.env['ANTHROPIC_API_KEY'] = 'verify-key-l120';
+    const served = await askGateway();
+    if (envWas.base === undefined) delete process.env['ANTHROPIC_BASE_URL']; else process.env['ANTHROPIC_BASE_URL'] = envWas.base;
+    if (envWas.key === undefined) delete process.env['ANTHROPIC_API_KEY']; else process.env['ANTHROPIC_API_KEY'] = envWas.key;
+    await new Promise<void>((r) => gw.close(() => r()));
+    check(
+      'read from the response as the Models API words it: max_input_tokens, and null or missing is no window (Amendment 120)',
+      served.models.find((m) => m.id === 'claude-opus-l120')?.contextTokens === 1_000_000 && served.models.find((m) => m.id === 'claude-null-l120')?.contextTokens === undefined &&
+        served.models.find((m) => m.id === 'claude-missing-l120')?.contextTokens === undefined && served.models.length === 3,
+      JSON.stringify(served),
+    );
+
+    // A downstream agent on a model with a small window is given a quarter of THAT, not of the floor.
+    const jobW = 'job_l120_win';
+    ljob(jobW);
+    lfix('w_up', jobW, { role: 'analyst', status: 'done', sdkSessionId: 'sess_w_up' });
+    for (let i = 1; i <= 40; i++) sayL(jobW, 'w_up', `#w${String(i).padStart(2, '0')}# ${'v'.repeat(100)}`);
+    recordWindows('claude', [{ id: 'claude-tiny-l120', tokens: 2_000 }]);
+    lfix('w_tiny', jobW, { role: 'builder', status: 'queued', dependsOn: ['w_up'], model: 'claude-tiny-l120' });
+    lfix('w_floor', jobW, { role: 'reviewer', status: 'queued', dependsOn: ['w_up'], model: 'claude-other-l120' });
+    const atW = runs.length;
+    sup.pump();
+    check('both start', await until(() => runs.length === atW + 2));
+    const tinyRun = runs.slice(atW).find((r) => r.options.model === 'claude-tiny-l120')!;
+    const floorRun = runs.slice(atW).find((r) => r.options.model === 'claude-other-l120')!;
+    await until(() => tinyRun.prompts.length > 0 && floorRun.prompts.length > 0);
+    const tiny = tinyRun.prompts[0] ?? '';
+    const floor = floorRun.prompts[0] ?? '';
+    check(
+      'a model whose engine reported 2,000 tokens is given about 1,500 characters: the newest, the rest said to be left out (Amendment 120)',
+      tiny.includes('#w40#') && !tiny.includes('#w01#') && /the first \d+ of 40 entries are left out to fit/.test(tiny) && tiny.length < 3_500,
+      `${tiny.length} characters`,
+    );
+    check('one with no reported window is given what the floor says — all 40 replies (Amendment 120)', floor.includes('#w01#') && floor.includes('#w40#') && !/left out to fit/.test(floor) && floor.length > 4_800, `${floor.length} characters`);
+    for (const r of [tinyRun, floorRun]) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'w_tiny')?.status === 'done' && getAgent(db, 'w_floor')?.status === 'done');
+    forgetWindows();
+
+    // ── text said once, through the real prompts ─────────────────────────────
+    const jobG = 'job_l120_diamond';
+    ljob(jobG);
+    const PLAN_L = 'The plan: rotate the refresh tokens, keep the family id, and revoke the whole family on reuse.';
+    const SUMMARY_L = 'Architect summary: sessions live in src/session.ts, nothing else changes.';
+    lfix('g_p', jobG, { role: 'architect', status: 'queued' });
+    lfix('g_x', jobG, { role: 'developer', status: 'queued', dependsOn: ['g_p'] });
+    lfix('g_y', jobG, { role: 'validator', status: 'queued', dependsOn: ['g_p'] });
+    lfix('g_z', jobG, { role: 'analyst', status: 'queued', dependsOn: ['g_p'] });
+    lfix('g_r', jobG, { role: 'scribe', status: 'queued', dependsOn: ['g_x', 'g_y', 'g_z'] });
+    const atG = runs.length;
+    sup.pump();
+    check('the architect starts', await until(() => runs.length === atG + 1));
+    sayL(jobG, 'g_p', PLAN_L);
+    handOffAs('g_p', SUMMARY_L);
+    runs[atG]!.finish({ cost: 0, reason: 'completed' });
+    check('and the three that wait for it start together', await until(() => runs.length === atG + 4));
+    await until(() => runs.slice(atG + 1).every((r) => r.prompts.length > 0));
+    check('each is given the architect’s part (this is what the scribe will see three times)', runs.slice(atG + 1).every((r) => (r.prompts[0] ?? '').includes(PLAN_L) && (r.prompts[0] ?? '').includes(SUMMARY_L)));
+    for (const [id, role] of [['g_x', 'developer'], ['g_y', 'validator'], ['g_z', 'analyst']] as const) {
+      sayL(jobG, id, `${role} finished its part and all of its checks pass.`);
+      handOffAs(id, `${role} summary: done, nothing left.`);
+    }
+    for (const r of runs.slice(atG + 1)) r.finish({ cost: 0, reason: 'completed' });
+    check('then the scribe, which waits for the three', await until(() => runs.length === atG + 5));
+    await until(() => (runs[atG + 4]?.prompts.length ?? 0) > 0);
+    const scribe = runs[atG + 4]?.prompts[0] ?? '';
+    check('the architect’s plan is in the scribe’s prompt once, not three times (Amendment 120)', occurrences(scribe, PLAN_L) === 1, `${occurrences(scribe, PLAN_L)} times`);
+    check('and so is the architect’s summary, which each of the three had been given', occurrences(scribe, SUMMARY_L) === 1, `${occurrences(scribe, SUMMARY_L)} times`);
+    check('the second and third of them say where it went (Amendment 120)', occurrences(scribe, REPEAT_MARKER) >= 2, `${occurrences(scribe, REPEAT_MARKER)} markers`);
+    check(
+      'and everything that is their own is there: each one’s reply and each one’s summary (Amendment 120)',
+      ['developer', 'validator', 'analyst'].every((r) => scribe.includes(`Agent: ${r} finished its part and all of its checks pass.`) && scribe.includes(`Its summary of its work:\n${r} summary: done, nothing left.`) && scribe.includes(`[${r}]`)),
+      scribe,
+    );
+    runs[atG + 4]?.finish({ cost: 0, reason: 'completed' });
+    check('and the job finishes', await until(() => getJob(db, jobG)?.status === 'done'), String(getJob(db, jobG)?.status));
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
