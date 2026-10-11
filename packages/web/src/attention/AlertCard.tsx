@@ -13,10 +13,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import type { Agent, Alert, AlertKind, Project } from '@conductor/shared';
+import { ceilingOf, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { alertTitle, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
+import { tokenWords } from '../lib/providers.js';
+import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { useNow } from './useNow.js';
 import { fmtMoney } from '../shell/ui.js';
 import { editNote } from '../fleet/endpoints.js';
@@ -29,6 +31,7 @@ import {
   restoreAndContinue,
   dismissAlert,
   raiseAndContinue,
+  raiseBudget,
   waitingRoles,
   type AlertAction,
 } from './alerts.js';
@@ -43,6 +46,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   blocked_dep: { label: 'Waiting', tone: 'var(--need)' },
   handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
   reconnecting: { label: 'Reconnecting', tone: 'var(--need)' },
+  budget_over: { label: 'Over budget', tone: 'var(--need)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -95,8 +99,11 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         return;
       }
       case 'raise': {
-        const agent = mine.find((m) => m.id === a.agentId);
-        if (agent) void cmd.run('Raising the budget', () => raiseAndContinue(agent, a.to), SENT);
+        // A job's warning raises an agent the card is not about, so look in all of them.
+        const agent = agents.find((m) => m.id === a.agentId);
+        if (!agent) return;
+        if (a.onlyRaise) void cmd.run('Raising the budget', () => raiseBudget(agent, a.to, a.unit), 'budget raised — the warning clears');
+        else void cmd.run('Raising the budget', () => raiseAndContinue(agent, a.to, a.unit), SENT);
         return;
       }
       case 'open':
@@ -130,7 +137,6 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
     }
   };
 
-  const cap = first?.autonomy.budgetUsd ?? null;
   const roles = mine.map((m) => m.role).join(' · ');
   const blocker = alert.blockedBy === undefined ? undefined : agents.find((a) => a.id === alert.blockedBy);
   // "Reconnecting in 30 s (3 of 5)", counted down from when the daemon will try (Amendment 123).
@@ -175,8 +181,14 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         )}
 
         {roles !== '' && <Kv k={mine.length > 1 ? 'agents' : 'agent'} v={roles} />}
-        {alert.kind === 'budget' && first && cap !== null && (
-          <Kv k="spent" v={`${fmtMoney(first.costUsd)} of ${fmtMoney(cap)}`} tone="var(--need)" />
+        {alert.kind === 'budget' && first && budgetOf(first) !== null && (
+          <Kv k="spent" v={spentOf(first)} tone="var(--need)" />
+        )}
+        {alert.kind === 'budget_over' && alert.spent !== undefined && alert.budget !== undefined && (
+          <>
+            <Kv k="spent" v={`${said(alert.spent, alert.unit)} of ${said(alert.budget, alert.unit)}`} tone="var(--need)" />
+            <Kv k="stops at" v={said(ceilingOf(alert.budget), alert.unit)} />
+          </>
         )}
         {alert.kind === 'failed' && <Kv k="reason" v={alert.cause} />}
         {alert.kind === 'blocked_dep' && blocker && <Kv k="waiting on" v={`${blocker.role} · ${alert.cause}`} />}
@@ -245,6 +257,13 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             It stopped without being asked to. The preview can start it again.
           </div>
         )}
+        {alert.kind === 'budget_over' && (
+          <div className="atn-note">
+            A warning only: {alert.cause === 'job_budget_over' ? 'the agents keep going' : 'it keeps working'}. Raise the budget to
+            quiet it, or leave it. {alert.cause === 'job_budget_over' ? 'Agents still to start are held' : 'It is paused'} at
+            twice the budget.
+          </div>
+        )}
         {alert.kind === 'daily_budget' && (
           <div className="atn-note">
             A warning only: agents keep going. Raise the budget on Settings (9), or stop agents yourself. It resets at
@@ -273,6 +292,17 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
   );
 }
 
+/** A figure in the alert's unit: dollars, or tokens as people say them. */
+function said(n: number, unit: Alert['unit']): string {
+  return budgetWords(unit === 'tokens' ? 'tokens' : 'usd', n);
+}
+
+/** What a stopped agent has spent against its budget, in its own unit. */
+function spentOf(agent: Agent): string {
+  const b = budgetOf(agent);
+  return b === null ? '' : `${budgetWords(b.unit, b.spent)} of ${budgetWords(b.unit, b.cap)}`;
+}
+
 /** Something that makes the problem go away, as opposed to looking at it. */
 function isFix(a: AlertAction): boolean {
   return (
@@ -285,8 +315,10 @@ function labelOf(a: AlertAction): string {
     case 'continue':
       if (a.role !== undefined) return `${a.label} ${a.role}`;
       return a.label === 'retry' && a.agentIds.length > 1 ? `retry ${a.agentIds.length} agents` : a.label;
-    case 'raise':
-      return `+$${a.by} and continue`;
+    case 'raise': {
+      const by = a.unit === 'tokens' ? `+${tokenWords(a.by)} tokens` : `+$${a.by}`;
+      return a.onlyRaise ? by : `${by} and continue`;
+    }
     case 'open':
       return a.role !== undefined ? `open ${a.role}` : 'open agent';
     case 'hand_off':
@@ -310,8 +342,10 @@ function labelOf(a: AlertAction): string {
 
 function titleOf(a: AlertAction): string | undefined {
   switch (a.id) {
-    case 'raise':
-      return `Raise the cap to ${fmtMoney(a.to)}, then continue`;
+    case 'raise': {
+      const to = a.unit === 'tokens' ? `${tokenWords(a.to)} tokens` : fmtMoney(a.to);
+      return a.onlyRaise ? `Raise the budget to ${to}` : `Raise the budget to ${to}, then continue`;
+    }
     case 'hand_off':
       return 'Edit the summary the agents after it are told, then send it';
     case 'restore':

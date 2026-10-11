@@ -24,7 +24,7 @@ import { useUnseenAgents } from '../lib/seen.js';
 import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
-import { budgetOf } from '../shell/autonomy.js';
+import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Dot, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
 import { useFileTree } from '../files/useWorkspace.js';
@@ -583,12 +583,14 @@ export function AgentScreen() {
 
   const elapsed = elapsedMs === null ? null : fmtElapsed(elapsedMs);
   /*
-   * Stopped on its cap. Amber, not red: nothing broke, and the next move is a person's
-   * — raise it in the composer below. Not while working (the run is still under it)
-   * and not once terminated (nothing is coming back to spend).
+   * Stopped on its ceiling, twice its budget (Amendment 124). Amber, not red: nothing
+   * broke, and the next move is a person's — raise it in the composer below. Not while
+   * working (the run is still under it) and not once terminated (nothing is coming back
+   * to spend). Between the budget and the ceiling it is only over it, and still works.
    */
-  const atBudget =
-    budgetOf(agent)?.over === true && agent.status !== 'working' && agent.status !== 'stopped';
+  const budgetNow = budgetOf(agent);
+  const atBudget = budgetNow?.state === 'ceiling' && agent.status !== 'working' && agent.status !== 'stopped';
+  const overBudget = budgetNow?.state === 'over' && agent.status !== 'stopped';
 
   const exportTranscript = () => {
     const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
@@ -680,6 +682,11 @@ export function AgentScreen() {
             </button>
           )}
           {atBudget && <Tag tone="need">budget reached</Tag>}
+          {overBudget && (
+            <Tag tone="need">
+              <span title={`A warning only: it stops at ${budgetWords(budgetNow.unit, budgetNow.ceiling)}`}>over budget</span>
+            </Tag>
+          )}
           <span className="ag-model" title={agent.model}>
             {agent.model.replace(/^claude-/, '')}
           </span>

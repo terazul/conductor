@@ -553,6 +553,11 @@ export interface SendConsoleToAgentResponse {
  *                   again (Amendment 123). `agentIds` is that agent, `cause` a RetryCause,
  *                   `attempt` of `maxRetries` this retry, and `retryAt` when it happens.
  *                   Held in memory, like a connection alert. It clears when the try starts.
+ *  - 'budget_over': an agent, or its job, is past its budget and still working
+ *                   (Amendment 124). A warning: nothing is paused, and it stops only at
+ *                   twice the budget. `cause` is 'budget_over' for an agent (`agentIds` is
+ *                   it) or 'job_budget_over' for a job (`jobId`, no `agentIds`), `spent`
+ *                   and `budget` are in `unit`.
  */
 export type AlertKind =
   | 'failed'
@@ -563,7 +568,8 @@ export type AlertKind =
   | 'note_due'
   | 'blocked_dep'
   | 'handoff_held'
-  | 'reconnecting';
+  | 'reconnecting'
+  | 'budget_over';
 
 /**
  * Not a PendingRequest: a pending request is a tool call waiting for approve or deny,
@@ -610,6 +616,8 @@ export interface Alert {
   blockedBy?: string;
   /** reconnecting (Amendment 123): when the next try starts, as an ISO time. */
   retryAt?: string;
+  /** budget_over (Amendment 124): what `spent` and `budget` count. Absent is dollars. */
+  unit?: 'usd' | 'tokens';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@
  *   handoff_held an agent others wait for ended its turn without calling `hand_off` (Amendment 104)
  *   reconnecting an agent whose run ended because the model couldn't be reached is waiting to
  *                be tried again (Amendment 123)
+ *   budget_over  an agent, or its job, is past its budget and still working: a warning (Amendment 124)
  *
  * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -26,13 +27,24 @@
  * reaches the log as ordinary `text` and can't be told apart there.
  */
 
-import { HANDOFF_HELD_NOTE, waitersOf, type Alert, type Event, type RetryCause, type StatusPayload } from '@conductor/shared';
+import {
+  HANDOFF_HELD_NOTE,
+  agentBudget,
+  capState,
+  waitersOf,
+  type Agent,
+  type AgentStatus,
+  type Alert,
+  type Event,
+  type RetryCause,
+  type StatusPayload,
+} from '@conductor/shared';
 import { row, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
-import { budgetStop } from './budget.js';
+import { budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
 import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
@@ -40,6 +52,16 @@ import { onSettingsChanged } from '../settings.js';
 
 /** Causes a person has to fix: the network or the login is broken, not busy. */
 const NEEDS_A_PERSON: ReadonlySet<RetryCause> = new Set(['unreachable', 'auth']);
+
+/**
+ * Where an agent past its budget is warned about it (Amendment 124). Not `paused` (a stop,
+ * or a pause of yours: nothing is spending), not `stopped` (for good), not `failed` (that
+ * has its own alert). `done` is in: a Claude agent's spend is known when its turn ends, so
+ * going over is seen as it finishes, and a message to it spends on.
+ */
+const WARN_OVER: ReadonlySet<AgentStatus> = new Set(['working', 'queued', 'blocked', 'done']);
+/** Where a job past its budget still has something that could spend. */
+const STILL_SPENDING: ReadonlySet<AgentStatus> = new Set(['working', 'queued', 'blocked']);
 
 /** One blip must not page anyone (§5.1: `--need` means a human is required). */
 export const ALERT_FROM_ATTEMPT = 2;
@@ -125,9 +147,13 @@ export class Alerts {
 
   /** Every open alert, connection alerts first, the rest oldest first. */
   list(now = Date.now()): Alert[] {
-    const derived = [...this.#agentAlerts(), ...this.#blockedDeps(), ...this.#heldHandoffs(), ...this.#serversDown()].sort(
-      (a, b) => a.since.localeCompare(b.since),
-    );
+    const derived = [
+      ...this.#agentAlerts(),
+      ...this.#budgetOver(),
+      ...this.#blockedDeps(),
+      ...this.#heldHandoffs(),
+      ...this.#serversDown(),
+    ].sort((a, b) => a.since.localeCompare(b.since));
     return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
       (a) => !this.#dismissed(a.id),
     );
@@ -268,6 +294,11 @@ export class Alerts {
         gaveUp: false,
       });
       this.refresh();
+    } else if (p.kind === 'usage') {
+      // An agent crossing its budget, or one past it that spends on (Amendment 124). The
+      // cost frame fires before the agent's row is written, so this is the one that sees it.
+      const was = this.#overActive;
+      if (this.#budgetOver().length > 0 || was) this.refresh();
     } else if (p.kind === 'status') {
       const r = e.agentId ? this.#retrying.get(e.agentId) : undefined;
       // Ending `failed` while still retrying is giving up. Anything else — a new run, a
@@ -420,6 +451,75 @@ export class Alerts {
     return out;
   }
 
+  /** Whether the last look found anything over its budget, so a usage event knows to refresh. */
+  #overActive = false;
+  /** When each warning was first seen, so `since` holds still while the spend grows. */
+  #overSince = new Map<string, string>();
+
+  /**
+   * Agents, and jobs, past their budget (Amendment 124). A warning: nothing is paused, the
+   * work goes on, and the agent stops only at twice the budget (then it is `budget`, above).
+   * Derived from what is stored, like the rest, so a reload or a restart keeps it. The id
+   * carries the budget, so a dismissal lasts until the budget is raised and passed again.
+   * It clears itself when the budget is raised past the spend, or the agent stops.
+   *
+   * A job's is the sum of its agents' budgets, and only for a job with more than one
+   * agent (one agent's is the job's, said once) that still has something that could spend.
+   */
+  #budgetOver(): Alert[] {
+    const all = listAgents(this.#db);
+    const out: Alert[] = [];
+    const standing = (id: string): string => {
+      if (!this.#overSince.has(id)) this.#overSince.set(id, new Date().toISOString());
+      return this.#overSince.get(id)!;
+    };
+
+    for (const agent of all) {
+      if (!WARN_OVER.has(agent.status)) continue;
+      const b = agentBudget(agent);
+      if (!b || capState(b.spent, b.budget) !== 'over') continue;
+      const id = `budget_over:${agent.id}:${b.budget}:${b.unit}`;
+      out.push({
+        id,
+        kind: 'budget_over',
+        cause: 'budget_over',
+        projectId: agent.projectId,
+        jobId: agent.jobId,
+        agentIds: [agent.id],
+        since: standing(id),
+        spent: b.spent,
+        budget: b.budget,
+        unit: b.unit,
+      });
+    }
+
+    const byJob = new Map<string, Agent[]>();
+    for (const a of all) byJob.set(a.jobId, [...(byJob.get(a.jobId) ?? []), a]);
+    for (const [jobId, agents] of byJob) {
+      const cap = agents.length > 1 ? jobCap(agents) : null;
+      if (cap === null || !agents.some((a) => STILL_SPENDING.has(a.status))) continue;
+      const spent = agents.reduce((n, a) => n + a.costUsd, 0);
+      if (capState(spent, cap) !== 'over') continue;
+      const id = `budget_over:job:${jobId}:${cap}`;
+      out.push({
+        id,
+        kind: 'budget_over',
+        cause: 'job_budget_over',
+        projectId: agents[0]!.projectId,
+        jobId,
+        agentIds: [],
+        since: standing(id),
+        spent,
+        budget: cap,
+        unit: 'usd',
+      });
+    }
+
+    for (const id of this.#overSince.keys()) if (!out.some((a) => a.id === id)) this.#overSince.delete(id);
+    this.#overActive = out.length > 0;
+    return out;
+  }
+
   /**
    * Queued agents waiting on one that failed or was stopped (Amendment 85). Before this
    * the reviewer after a failed developer sat `queued` with nothing saying why. Since
@@ -557,4 +657,9 @@ export function modelAnswered(agentId: string): void {
   // A real reply also starts the count of tries again from the first (Amendment 123).
   retryBook().answered(agentId);
   instance?.modelAnswered(agentId);
+}
+
+/** A budget was changed (Amendment 124): the warning may be over, with no status change to say so. */
+export function budgetChanged(): void {
+  instance?.refresh();
 }

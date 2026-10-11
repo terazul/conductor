@@ -4,7 +4,9 @@
  *
  * Grouped by job, newest job first — the one you just launched is the one you came to —
  * and in each job in the order its agents were made, which is the plan's order. A tab
- * that needs you says so, so a blocked agent isn't hidden behind the one in front.
+ * that needs you says so, so a blocked agent isn't hidden behind the one in front. An
+ * over-budget warning counts for its tab but does not stop it reading as it is: the agent
+ * is working, and only the budget needs you (Amendment 124).
  */
 
 import type { Agent, AgentStatus } from '@conductor/shared';
@@ -25,7 +27,7 @@ export function agentTabs(
   projectId: string,
   jobOrder: string[],
   pending: { agentId: string }[],
-  alerts: { agentIds: string[] }[],
+  alerts: { agentIds: string[]; kind?: string }[],
 ): AgentTab[] {
   const mine = agents.filter((a) => a.projectId === projectId);
   const rank = (jobId: string): number => {
@@ -43,12 +45,14 @@ export function agentTabs(
   return ordered.map((a, i) => {
     const n = (seen.get(a.role) ?? 0) + 1;
     seen.set(a.role, n);
-    const needs =
-      pending.filter((p) => p.agentId === a.id).length + alerts.filter((x) => x.agentIds.includes(a.id)).length;
+    const mine = alerts.filter((x) => x.agentIds.includes(a.id));
+    const needs = pending.filter((p) => p.agentId === a.id).length + mine.length;
+    // What stops it, as opposed to a warning that it is over its budget.
+    const stops = needs - mine.filter((x) => x.kind === 'budget_over').length;
     return {
       id: a.id,
       label: (total.get(a.role) ?? 1) > 1 ? `${a.role} ${n}` : a.role,
-      status: needs > 0 ? 'blocked' : a.status,
+      status: stops > 0 ? 'blocked' : a.status,
       needs,
       newJob: i > 0 && a.jobId !== ordered[i - 1]!.jobId,
     };

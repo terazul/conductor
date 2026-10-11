@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 124.
+  green `make test` (decided 30 Sep). The next amendment is 125.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -139,13 +139,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 
 ## Agents
 
-- [ ] **An agent's budget warns instead of stopping it.** Asked for (10 Oct). Today it is a hard
-  stop: the SDK is given what is left (`maxBudgetUsd`, `daemon/src/session/backends/claude.ts:231`), the
-  run ends at the cap, and the agent is paused (`budget_exhausted`). Wanted: the agent keeps working past
-  its budget, and once it goes over, Needs You raises a warning that asks to raise the budget (with
-  **+$10** / **+$25**). Settle: whether there is still a hard ceiling (for example 2× the budget) so a
-  runaway agent can't spend without limit; whether the job's budget, the sum of its agents', changes the
-  same way; and what the composer says while it is over.
 - [ ] **Colour an agent's budget as it fills, like the daily budget.** Asked for (10 Oct). The status
   bar's daily meter is green, yellow from 75% and red from 95% (`web/src/shell/spend.ts`,
   `dailyMeter`). Use the same thresholds and tokens for each agent's spend against its budget: in the

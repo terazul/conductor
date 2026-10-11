@@ -12,7 +12,7 @@
  */
 
 import type { Agent, Job } from '@conductor/shared';
-import { budgetOf, scopedRules, toolPolicy } from '../shell/autonomy.js';
+import { budgetOf, budgetWords, scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { filesTouched, latestTodo } from '../shell/describe.js';
 import { DiffNums, fmtElapsed, fmtMoney, fmtTokens } from '../shell/ui.js';
 import { CLAUDE, capabilitiesOf, providerLabel, providerOf, tokenWords, useProviders } from '../lib/providers.js';
@@ -103,8 +103,15 @@ export function Inspector({
                     ? `${tokenWords(budget.spent)} of ${tokenWords(budget.cap)} tokens`
                     : `${fmtMoney(budget.spent)} of ${fmtMoney(budget.cap)}`}
                 </span>
-                <span>{Math.round(budget.fraction * 100)}%</span>
+                <span>{budget.pct}%</span>
               </div>
+              {budget.state !== 'ok' && (
+                <p className="ag-isec-note">
+                  {budget.state === 'over'
+                    ? `Over budget, which only warns. It stops at ${budgetWords(budget.unit, budget.ceiling)}.`
+                    : `Stopped at ${budgetWords(budget.unit, budget.ceiling)}, twice its budget.`}
+                </p>
+              )}
             </>
           ) : (
             <div className="pj-kv">

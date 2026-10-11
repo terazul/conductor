@@ -11,7 +11,7 @@
 import { HANDOFF_SUMMARY_MAX, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
-import { BUDGET_RAISES } from '../shell/autonomy.js';
+import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
 import { alertTitle } from '../shell/describe.js';
 
 export type AlertAction =
@@ -21,8 +21,12 @@ export type AlertAction =
    * agent the card is about (Amendment 85).
    */
   | { id: 'continue'; label: 'continue' | 'retry' | 'resume'; agentIds: readonly string[]; role?: string }
-  /** Raise the cap to `to`, then continue. */
-  | { id: 'raise'; agentId: string; by: number; to: number }
+  /**
+   * Raise the budget to `to` (in `unit`, dollars when absent), then continue, unless
+   * `onlyRaise`: the warning for an agent that is over its budget but not stopped
+   * (Amendment 124) has nothing to continue.
+   */
+  | { id: 'raise'; agentId: string; by: number; to: number; unit?: 'tokens'; onlyRaise?: true }
   | { id: 'open'; agentId: string; role?: string }
   /**
    * Hand off for an agent that stopped without doing it (Amendment 104). Opens the summary
@@ -54,6 +58,27 @@ export function resumable(agent: Pick<Agent, 'status' | 'sdkSessionId'>): boolea
   return agent.status === 'paused' || (agent.status === 'failed' && agent.sdkSessionId !== null);
 }
 
+/** The raises on offer for an agent's budget, in its unit: +$10 / +$25, or +100k / +500k tokens. */
+function raisesFor(agent: Agent, b: Budget, onlyRaise: boolean): AlertAction[] {
+  const rest = onlyRaise ? { onlyRaise: true as const } : {};
+  return b.unit === 'tokens'
+    ? TOKEN_RAISES.map((n) => ({ id: 'raise', agentId: agent.id, by: n, to: b.cap + n, unit: 'tokens', ...rest }))
+    : BUDGET_RAISES.map((n) => ({ id: 'raise', agentId: agent.id, by: n, to: b.cap + n, ...rest }));
+}
+
+/**
+ * Whose budget a job's warning raises (Amendment 124). The job's budget is the sum of its
+ * agents', so raising any one raises it by as much: the one still spending that has spent
+ * the most, else the one that has spent the most. Only agents with a dollar budget count
+ * (the job's is in dollars). null when it has none this tab knows of.
+ */
+export function jobRaiseTarget(jobId: string | null, agents: readonly Agent[]): Agent | null {
+  const mine = agents.filter((a) => a.jobId === jobId && budgetOf(a)?.unit === 'usd');
+  const live = mine.filter((a) => a.status === 'working' || a.status === 'queued' || a.status === 'blocked');
+  const pool = live.length > 0 ? live : mine;
+  return pool.reduce<Agent | null>((best, a) => (best === null || a.costUsd > best.costUsd ? a : best), null);
+}
+
 /** The buttons for one alert, the one that fixes it first. */
 export function alertActions(alert: Alert, agents: readonly Agent[]): AlertAction[] {
   const mine = alert.agentIds.flatMap((id) => agents.filter((a) => a.id === id));
@@ -77,15 +102,26 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
 
     case 'budget': {
       if (!first) return [dismiss];
-      const cap = first.autonomy.budgetUsd;
-      // Still at its cap: continuing alone would be refused, so every way on raises it.
+      const b = budgetOf(first);
+      // Still at its ceiling (twice its budget): continuing alone would be refused, so every way on raises it.
       const fix: AlertAction[] =
-        cap !== null && first.costUsd >= cap
-          ? BUDGET_RAISES.map((n) => ({ id: 'raise', agentId: first.id, by: n, to: cap + n }))
+        b !== null && b.state === 'ceiling'
+          ? raisesFor(first, b, false)
           : resumable(first)
             ? [{ id: 'continue', label: 'continue', agentIds: [first.id] }]
             : [];
       return [...fix, ...open, dismiss];
+    }
+
+    case 'budget_over': {
+      // A warning (Amendment 124): the agent is still working or done, nothing is paused, so
+      // the fix is the budget alone. A job's has no agent of its own: it raises the one that fits.
+      const target = alert.cause === 'job_budget_over' ? jobRaiseTarget(alert.jobId, agents) : first;
+      if (!target) return [dismiss];
+      const b = budgetOf(target);
+      const raises = b !== null && b.state !== 'ceiling' ? raisesFor(target, b, true) : [];
+      const go: AlertAction[] = [{ id: 'open', agentId: target.id, ...(target === first ? {} : { role: target.role }) }];
+      return [...raises, ...go, dismiss];
     }
 
     case 'connection': {
@@ -167,6 +203,8 @@ export function alertNotice(
   if (alert.kind === 'budget' || alert.kind === 'failed' || alert.kind === 'blocked_dep' || alert.kind === 'handoff_held') {
     return { title: within(`${head} needs you`), body: `${head} ${subject}` };
   }
+  // A warning (Amendment 124): the agent is still working, so it is not asking for you.
+  if (alert.kind === 'budget_over') return { title: within(`${head} is over its budget`), body: `${head} ${subject}` };
   return { title: within(head), body: subject };
 }
 
@@ -222,9 +260,13 @@ export async function restoreAndContinue(jobId: string, agent: Pick<Agent, 'id' 
   await continueAgent(agent);
 }
 
-/** Only the cap; the route merges it into the rest of the agent's autonomy. */
-export async function raiseAndContinue(agent: Pick<Agent, 'id' | 'status'>, to: number): Promise<void> {
-  await setAutonomy(agent.id, { autonomy: { budgetUsd: to } });
+/** Only the budget; the route merges it into the rest of the agent's autonomy. */
+export async function raiseBudget(agent: Pick<Agent, 'id'>, to: number, unit?: 'tokens'): Promise<void> {
+  await setAutonomy(agent.id, { autonomy: unit === 'tokens' ? { budgetTokens: to } : { budgetUsd: to } });
+}
+
+export async function raiseAndContinue(agent: Pick<Agent, 'id' | 'status'>, to: number, unit?: 'tokens'): Promise<void> {
+  await raiseBudget(agent, to, unit);
   await continueAgent(agent);
 }
 

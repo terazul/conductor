@@ -44,7 +44,7 @@ import { isMermaid, mermaidReason } from '../lib/mermaid.js';
 import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
 import { readFileSync } from 'node:fs';
-import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 import { sleepControl } from './sleep.js';
 import {
   TERM_TOKENS,
@@ -298,8 +298,10 @@ const agentAt = (costUsd: number, budgetUsd: number | null): Agent => ({
   startedAt: null,
   endedAt: null,
 });
-check('at the cap is over it — the daemon refuses at ≥', budgetOf(agentAt(25, 25))?.over === true);
-check('below it is not', budgetOf(agentAt(24.99, 25))?.over === false);
+// Amendment 124: `over` is the warning (from the budget); only twice it has stopped the agent.
+check('at the budget is over it — a warning, from ≥', budgetOf(agentAt(25, 25))?.over === true && budgetOf(agentAt(25, 25))?.state === 'over');
+check('below it is not', budgetOf(agentAt(24.99, 25))?.over === false && budgetOf(agentAt(24.99, 25))?.state === 'ok');
+check('and the daemon refuses only at twice it', budgetOf(agentAt(49.99, 25))?.state === 'over' && budgetOf(agentAt(50, 25))?.state === 'ceiling');
 check(
   "an uncapped agent has no bar — no job figure ever pauses it, so none is measured",
   budgetOf(agentAt(6, null)) === null,
@@ -606,9 +608,9 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   });
   const b = budgetOf(tokenAgent(184_000, 500_000));
   check('a token cap is a bar, in tokens, against input plus output', b?.unit === 'tokens' && b.spent === 184_000 && b.cap === 500_000 && Math.abs(b.fraction - 0.368) < 1e-9, JSON.stringify(b));
-  check('at the cap is over it, as the daemon counts', budgetOf(tokenAgent(500_000, 500_000))?.over === true && budgetOf(tokenAgent(499_999, 500_000))?.over === false);
+  check('at the budget is over it, as the daemon counts; twice it is the ceiling', budgetOf(tokenAgent(500_000, 500_000))?.over === true && budgetOf(tokenAgent(499_999, 500_000))?.over === false && budgetOf(tokenAgent(999_999, 500_000))?.state === 'over' && budgetOf(tokenAgent(1_000_000, 500_000))?.state === 'ceiling');
   check('no token cap is no bar', budgetOf(tokenAgent(9_000, null)) === null);
-  check("a Claude agent's dollar bar is what it was, and says dollars", JSON.stringify(budgetOf(agentAt(5, 25))) === JSON.stringify({ spent: 5, cap: 25, fraction: 0.2, over: false, unit: 'usd' }));
+  check("a Claude agent's dollar bar is what it was, and says dollars", JSON.stringify(budgetOf(agentAt(5, 25))) === JSON.stringify({ spent: 5, cap: 25, ceiling: 50, fraction: 0.2, pct: 20, state: 'ok', over: false, unit: 'usd' }));
 
   const copilot = { defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true };
   check('Claude has every control', JSON.stringify(controlsFor(capabilitiesOf(agentAt(0, 25), null))) === JSON.stringify({ effort: true, helpers: true, budget: 'usd' }));
@@ -888,6 +890,31 @@ console.log('\n· an agent waiting to be tried again says so, with retry now and
   check('they call the two routes through useCommand, and nothing removes the banner but the daemon starting the try', /retryNowAgent\(agent\.id\)/.test(comp) && /stopRetryingAgent\(agent\.id\)/.test(comp) && /disabled=\{cmd\.busy\}/.test(comp));
   const rules = css.slice(css.indexOf('.ag-reconnect {'), css.indexOf('/* ── crumb as a button'));
   check('both themes read: its CSS is tokens only', rules.length > 200 && !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(rules) && /var\(--need\)/.test(rules) && !/#[0-9a-fA-F]{3,8}\b|style=|rgb\(/.test(comp));
+}
+
+console.log("\n· over its budget it warns, and says where it stops (Amendment 124)");
+{
+  const cap = (spent: number) => budgetOf(agentAt(spent, 25))!;
+  check('over, the bar reads past 100% while the fill stays full', cap(27).pct === 108 && cap(27).fraction === 1 && cap(27).ceiling === 50);
+  check('only twice the budget has stopped it', cap(27).state === 'over' && cap(49.99).state === 'over' && cap(50).state === 'ceiling');
+
+  check('the folded line says over, and where it stops', dollarsLine('$27.00', '$25.00', { state: 'over', ceiling: '$50.00' }) === 'over budget: $27.00 of $25.00, stops at $50.00');
+  check('at the ceiling it says the budget was reached', dollarsLine('$50.00', '$25.00', { state: 'ceiling', ceiling: '$50.00' }) === 'budget reached: $50.00 of $25.00');
+  check('in tokens the same', tokensLine('612k', '500k', { state: 'over', ceiling: '1M' }) === 'over budget: 612k of 500k tokens, stops at 1M' && tokensLine('1.2M', '500k', { state: 'ceiling', ceiling: '1M' }) === 'budget reached: 1.2M of 500k tokens');
+  check('under the budget the line is what it was', dollarsLine('$4.10', '$25') === '$4.10 of $25' && tokensLine('184k', '500k') === '184k of 500k tokens');
+  check('the open composer says it is only a warning, and where it stops', overSays('$27', '$25', '$50') === 'over budget: $27 of $25 — a warning only; stops at $50' && overSays('612k', '500k', '1M', true) === 'over budget: 612k of 500k tokens — a warning only; stops at 1M tokens');
+
+  // A warning does not make the tab look blocked: the agent is working. A stop still does.
+  const tab = (kind: string) =>
+    agentTabs([{ id: 'a', projectId: 'p', jobId: 'j', role: 'builder', status: 'working' }], 'p', ['j'], [], [{ agentIds: ['a'], kind }])[0]!;
+  check("an over-budget warning counts for its tab but doesn't turn it blocked", tab('budget_over').needs === 1 && tab('budget_over').status === 'working');
+  check('a stop still does', tab('budget').needs === 1 && tab('budget').status === 'blocked');
+
+  const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  const head = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('the composer asks to raise only when stopped: its placeholder is for the ceiling', /const atCap = spend\?\.state === 'ceiling' && agent\.status !== 'working';/.test(comp));
+  check('the sentence shows when the settings are open and the agent is over', /\{open && budgetSays && \(/.test(comp) && /spend\?\.state === 'over'/.test(comp));
+  check('the header says over budget while it works, and budget reached only at the ceiling', /budgetNow\?\.state === 'ceiling'/.test(head) && /budgetNow\?\.state === 'over'/.test(head) && />over budget</.test(head));
 }
 
 console.log(

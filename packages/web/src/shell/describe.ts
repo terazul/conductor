@@ -11,7 +11,8 @@
  * have never seen); a card must degrade to a plainer sentence, never throw.
  */
 
-import { HANDOFF_HELD_NOTE } from '@conductor/shared';
+import { HANDOFF_HELD_NOTE, budgetState } from '@conductor/shared';
+import { tokenWords } from '../lib/providers.js';
 import type {
   Agent,
   Alert,
@@ -298,15 +299,19 @@ const FAILURES: Record<string, string> = {
  */
 export function failureSentence(
   reason: string | undefined,
-  agent?: Pick<Agent, 'autonomy' | 'costUsd'>,
+  agent?: Pick<Agent, 'autonomy' | 'costUsd' | 'inputTokens' | 'outputTokens'>,
 ): string {
   if (reason === 'budget_exhausted') {
     const cap = agent?.autonomy.budgetUsd;
-    if (!cap) return 'reached its budget';
+    const capTokens = agent?.autonomy.budgetTokens ?? null;
+    if (!agent || (!cap && !capTokens)) return 'reached its budget';
     // Raised since it stopped: the old figure would be wrong, and continuing is all that's left.
-    return agent.costUsd >= cap
-      ? `spent its ${usd(cap)} budget`
-      : `stopped on its budget, now raised to ${usd(cap)}`;
+    const stopped = budgetState(agent) === 'ceiling';
+    // It stops at twice the budget, not at it (Amendment 124), and says so.
+    if (cap) return stopped ? `stopped at twice its ${usd(cap)} budget` : `stopped on its budget, now raised to ${usd(cap)}`;
+    return stopped
+      ? `stopped at twice its ${tokenWords(capTokens!)}-token budget`
+      : `stopped on its budget, now raised to ${tokenWords(capTokens!)} tokens`;
   }
   if (!reason || reason === 'error') return 'ended with an error — see the transcript';
   return FAILURES[reason] ?? `${reason} — see the transcript`;
@@ -314,6 +319,16 @@ export function failureSentence(
 
 function usd(n: number): string {
   return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+
+/**
+ * What an over-budget alert says after its subject (Amendment 124): past the budget, and
+ * that it is only a warning. The ceiling is twice the budget.
+ */
+export function overBudgetSentence(alert: Pick<Alert, 'budget' | 'unit'>): string {
+  const budget = alert.budget ?? 0;
+  const said = alert.unit === 'tokens' ? `${tokenWords(budget)}-token` : usd(budget);
+  return `is over its ${said} budget — a warning only`;
 }
 
 type Retry = Extract<Event['payload'], { kind: 'api_retry' }>;
@@ -461,6 +476,12 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
     case 'handoff_held':
       // Done, and the agents after it are waiting for it to say it is ready (Amendment 104).
       return { head: who[0] ?? 'an agent', subject: 'stopped without handing off, so the agents after it have not started' };
+    case 'budget_over': {
+      if (alert.cause !== 'job_budget_over') return { head: who[0] ?? 'an agent', subject: overBudgetSentence(alert) };
+      // A job's: named by the agents in it, since it has no name of its own on the wire.
+      const roles = agents.filter((a) => a.jobId === alert.jobId).map((a) => a.role);
+      return { head: roles.length > 0 ? `the ${roles.join(' · ')} job` : 'a job', subject: overBudgetSentence(alert) };
+    }
     case 'budget':
     case 'failed':
       return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one) };
@@ -474,6 +495,8 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
       return 'failed';
     case 'budget':
       return 'at its budget';
+    case 'budget_over':
+      return alert.cause === 'job_budget_over' ? 'job over its budget' : 'over its budget';
     case 'server_down':
       return 'server down';
     case 'daily_budget':

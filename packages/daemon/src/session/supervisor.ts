@@ -6,9 +6,10 @@
  *     and `parked` agents do not. That asymmetry is the whole point of parking:
  *     a human who wanders off stops costing us a slot (PLAN.md §1 finding B).
  *   • dependsOn gating — the mockup's "starts now / parallel / after both".
- *   • budget caps. An agent's is a lifetime cap, checked before every launch and
- *     resume; a job's is the sum of its agents' caps, checked before a queued agent
- *     starts (session/budget.ts).
+ *   • budgets. An agent's is a lifetime figure that warns when passed and stops it at
+ *     twice the budget, checked before every launch and resume; a job's is the sum of its
+ *     agents' budgets, with the same ceiling, checked before a queued agent starts
+ *     (session/budget.ts, Amendment 124).
  *
  * ISOLATION is delegated, not reimplemented. Track C's WorkspaceService owns
  * worktree lifecycle, so this calls `workspace().open(...)` IN-PROCESS for all
@@ -59,7 +60,8 @@ import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
-import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
+import { budgetChanged } from './alerts.js';
+import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobBudgetState } from './budget.js';
 import {
   handOffLine,
   handoffCap,
@@ -951,13 +953,13 @@ export class Supervisor implements AgentControl {
   }
 
   /**
-   * Against the sum of the agents' CURRENT caps, not `job.budgetUsd`, which stays the
-   * figure Spawn launched with. Comparing against that meant raising one agent's cap
-   * still left its queued siblings paused at the old total.
+   * At the job's CEILING: twice the sum of the agents' CURRENT budgets, not `job.budgetUsd`,
+   * which stays the figure Spawn launched with. Comparing against that meant raising one
+   * agent's budget still left its queued siblings paused at the old total. Between the sum
+   * and twice it, the job is over its budget and only warned (Amendment 124): see Alerts.
    */
   #overBudget(job: Job): boolean {
-    const cap = jobCap(agentsForJob(this.#db, job.id));
-    return cap !== null && jobCost(this.#db, job.id) >= cap;
+    return jobBudgetState(agentsForJob(this.#db, job.id), jobCost(this.#db, job.id)) === 'ceiling';
   }
 
   #pause(agentId: string, note: string): void {
@@ -1036,8 +1038,9 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!job) return;
 
-    // At its cap: stop here and say so, rather than start a run the SDK would end on
-    // its first turn. Reached from pump() and from answering a parked request.
+    // At its ceiling (twice its budget, Amendment 124): stop here and say so, rather than
+    // start a run the SDK would end on its first turn. Reached from pump() and from
+    // answering a parked request. Over the budget but under the ceiling it runs.
     if (budgetRefusal(agent)) {
       this.#pause(agentId, budgetNote(agent));
       return;
@@ -1927,6 +1930,8 @@ export class Supervisor implements AgentControl {
     setAgentAutonomy(this.#db, agentId, autonomy);
     const agent = getAgent(this.#db, agentId);
     if (agent) this.#pushEntities({ agents: [agent] });
+    // A raised budget clears the "over budget" warning, with no status change to say so (Amendment 124).
+    budgetChanged();
     return agent;
   }
 

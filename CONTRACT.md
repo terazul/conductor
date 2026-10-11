@@ -196,6 +196,97 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 124 — post-merge, applied. **An agent's budget warns instead of stopping it, and a ceiling at twice the budget stops it.**
+
+Daemon, shared and web (`shared/src/budget.ts` new, `session/budget.ts`, `session/alerts.ts`,
+`session/backends/claude.ts`, `session/supervisor.ts`, `attention/*`, the composer). A TODO.md
+item (10 Oct): "the agent keeps working past its budget, and once it goes over, Needs You raises a
+warning that asks to raise the budget (with +$10 / +$25)". Its open questions are taken as the TODO
+itself suggested, since the user said to execute all of it:
+- **There is a hard ceiling, at 2× the budget**, so a runaway agent can't spend without limit.
+- **The job's budget changes the same way**: it warns at the sum of its agents' budgets and holds
+  agents still to start at twice the sum.
+- **While over, the composer says** `over budget: $27 of $25 - a warning only; stops at $50`
+  (tokens, for an engine that reports no dollars).
+
+What changed:
+- **The thresholds are one pure copy, in `@conductor/shared` (`budget.ts`).** `BUDGET_CEILING = 2`,
+  `ceilingOf`, `capState(spent, budget)` and `budgetState(agent)` give `'ok'` under the budget,
+  `'over'` from it (a warning) and `'ceiling'` from twice it (the stop), for dollars and for
+  tokens alike (Amendment 77). `agentBudget(agent)` is the budget an agent has, in its unit.
+  `session/budget.ts` re-exports them and applies them; the web reads the same functions
+  (`shell/autonomy.ts` `budgetOf` now carries `ceiling`, `state`, `pct`), so the daemon and the
+  screens cannot disagree about where the line is.
+- **What stops an agent is the ceiling.** The SDK is given what is left of it
+  (`runLimit`: `maxBudgetUsd` = twice the budget minus the lifetime spend, where it was the budget
+  minus the spend). `budgetRefusal` (every launch, resume and message, and the Copilot/OpenRouter
+  backend after each usage update) refuses at the ceiling, not the budget. Between the two a
+  message is accepted and the agent works on. The stop is exactly as before: `budget_exhausted`,
+  paused, not failed, the **Budget reached** card, the sentence on a 409. Only the figures moved,
+  and the note and the sentence now say where it stops: `budget reached — spent $50.20 of its
+  $25 budget, which stops it at $50`; `The Builder has spent 1.2M of its 500k-token budget, which
+  stops it at 1M — raise it to continue.` The prefix `budget reached` is unchanged, so
+  `budgetStop` and the alert still read it.
+- **A new alert kind, `budget_over`** (additive, at the end of `AlertKind`; `Alert.unit?` at the end
+  of `Alert`; `spent` and `budget` are reused from `daily_budget`). `Alerts.#budgetOver()` derives
+  it from what is stored: an agent that is `working`, `queued`, `blocked` or `done` and between its
+  budget and its ceiling. A `paused`, `stopped` or `failed` agent has none (nothing is spending, or
+  it has its own card). Its id is `budget_over:<agent>:<budget>:<unit>`: one warning per budget, so
+  a dismissal (stored, as for every alert) lasts until the budget is raised and passed again, and
+  `since` holds still while the spend grows. It is re-checked on every `usage` event and when an
+  agent's autonomy changes (`budgetChanged()`, called from `Supervisor.setAutonomy`), so raising the
+  budget clears it with no status change to say so. For a job (`cause: 'job_budget_over'`, `jobId`,
+  no `agentIds`): the sum of its agents' budgets (dollars, so only when every agent has one), for a
+  job with more than one agent that still has something working, queued or blocked.
+- **The job's hard stop moved to twice the sum.** `#overBudget` (the pump's check before a queued
+  agent starts, and the re-run's) is `jobBudgetState(...) === 'ceiling'`. Agents that are already
+  running were never stopped by the job's budget, only by their own, and still aren't.
+- **Claude's spend is known at the end of a turn**, so a Claude agent's warning arrives with the
+  `result` that crossed the budget (the agent is then `done`, and a message to it works on). The
+  ceiling still stops it mid-turn, through the SDK. A token budget is counted on every model call,
+  so its warning can come while the agent works.
+- **Web.** The Over budget card (label `Over budget`, amber, no "needs you" notification wording)
+  offers **+$10** and **+$25** (**+100k tokens** and **+500k tokens** for a token budget) that raise
+  the budget and nothing else (`AlertAction` `raise` has `onlyRaise`); a job's raises the working
+  agent that has spent the most (`jobRaiseTarget`). The **Budget reached** card raises when the agent
+  is at its ceiling, and now does so in tokens too: before, a token-capped agent's card offered only
+  a continue that the daemon refused. The Agent screen's header says **over budget** while it works
+  and **budget reached** only at the ceiling; the composer's placeholder, its folded line and its
+  open line (`over budget: ...`) say where it stops; the details panel's percentage reads past 100%
+  and says so. An agent's tab counts the warning but does not turn blocked for it.
+
+**Existing tests changed, deliberately** (each used the budget as the stop; they now use the
+ceiling): `session/verify.ts` §11 (the SDK limit 30, then 26, not 5 and 1; the pause at $50.20 not
+$25.20; the note, the 409 sentence and the raise to $60 not $35; `agt_spent` at $50; a running
+total of $51, since a smaller one would read as a restart from zero; §12's `26.5` is `51.5` for the
+same reason); §17d's restart fixture at $50; §17m (token figures: refused at 1M, the fake engine
+ends at 1.25M, the notes and sentences in tokens); §19's re-run fixture at $50 and its sentence.
+`attention/verify.ts` (the stopped card raises at a cost of $10 on a $5 budget, `$0.02` on `$0.01`;
+the notification text), `agent/verify.ts` (`over` is from the budget, `state` is the stop; the
+exact shape of `budgetOf`), `lib/verify.ts` (`stopped at twice its $5 budget`).
+
+**Verified:** `session/verify.ts` ends with a section for this amendment: the thresholds at their
+edges in both units; over at 1× keeps working and raises the warning once (the SDK given the
+remainder under the ceiling, a message accepted, one alert with a stable id and time, every tab
+told, the snapshot); the raise clears it with no status change; a new budget is a new alert and a
+dismissal lasts; the ceiling pauses as before with the note and the 409; a paused, stopped or failed
+agent has no warning; a token budget warned mid-run, then stopped at 1M, then raised; the job warned
+at 52 of 50 while its queued agent still starts, and held at 100 of 50 until one budget is raised.
+Mutations caught: the SDK given the budget (10 checks fail); refusing at the budget (20); no
+`budget_over` alerts (7); the job held at its budget (7). `pnpm -r typecheck`, the web verify files
+for what changed, and `verify-schedule.ts` and `verify-folder.ts` pass.
+
+**Not done:**
+- **Spawn still says "stop each agent after $"** (`spawn/route.tsx`, and `spawn/verify.ts` asserts the
+  label). The figure it sets is the budget, which now only warns. The pill and the MANUAL's name for it
+  were left, since Spawn is another lane's; rename it ("warn each agent after") with its test.
+- **The ceiling is fixed at twice the budget.** Nothing sets another multiple, per agent or
+  globally.
+- **The warning for Claude is at the end of the turn that crossed the budget**, not during it: the
+  SDK reports a turn's cost only in its `result`. A single turn can run from under the budget to the
+  ceiling with no warning in between.
+- **The status bar's daily meter, and Settings, are unchanged.**
+
 ### Amendment 123 — post-merge, applied. **When the model can't be reached, the agent waits 5 s, 15 s, 30 s, 60 s and 5 min and tries again, then fails as it did.**
 
 Daemon (`session/retry.ts`, new; `session/supervisor.ts`, `session/alerts.ts`, `session/backend.ts`,

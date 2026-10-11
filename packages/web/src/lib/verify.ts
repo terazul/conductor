@@ -595,13 +595,14 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
     failureSentence('sdk_new_thing'),
   );
   check('no reason at all points at the transcript', failureSentence(undefined) === 'ended with an error — see the transcript');
-  check('at its cap, the budget names the cap', failureSentence('budget_exhausted', capped(5, 5)) === 'spent its $5 budget');
+  // Amendment 124: it stops at twice its budget, so the sentence says that, not "spent its budget".
+  check('at its ceiling, it says it stopped at twice its budget', failureSentence('budget_exhausted', capped(5, 10)) === 'stopped at twice its $5 budget');
   check(
     'raised since it stopped, it says so instead of the old figure',
     failureSentence('budget_exhausted', capped(15, 5)) === 'stopped on its budget, now raised to $15',
     failureSentence('budget_exhausted', capped(15, 5)),
   );
-  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'spent its $0.01 budget');
+  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'stopped at twice its $0.01 budget');
   check('no cap known, no figure', failureSentence('budget_exhausted') === 'reached its budget');
 
   const T = Date.parse('2026-09-26T12:00:00Z');
@@ -671,8 +672,8 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   const reviewer = who({ id: 'agt_r', role: 'reviewer' });
   const t1 = alertTitle(alert({}), [working]);
   check('a failure alert reads like the agent line', `${t1.head} ${t1.subject}` === 'builder ran out of turns');
-  const t2 = alertTitle(alert({ kind: 'budget', cause: 'budget_exhausted' }), [working]);
-  check('a budget alert names the cap', t2.subject === 'spent its $5 budget', t2.subject);
+  const t2 = alertTitle(alert({ kind: 'budget', cause: 'budget_exhausted' }), [{ ...working, costUsd: 10 }]);
+  check('a budget alert says it stopped at twice its budget', t2.subject === 'stopped at twice its $5 budget', t2.subject);
   const t3 = alertTitle(
     alert({ kind: 'connection', cause: 'unreachable', agentIds: ['agt_s', 'agt_r'], attempt: 3, maxRetries: 10 }),
     [working, reviewer],
@@ -1379,6 +1380,49 @@ console.log('\n35 · an agent waiting to be tried again reads "Reconnecting in 3
   const t = alertTitle(rc(), [ag()]);
   check('its alert reads as what is wrong and which retry, with the role', t.head === 'the model API is busy' && t.subject === 'retry 3 of 5 · builder', `${t.head} / ${t.subject}`);
   check('and in the top bar, a word', alertWord(rc()) === 'reconnecting');
+}
+
+console.log("\n36 · an agent's budget warns, in words (Amendment 124)");
+{
+  const A = (over: Partial<Agent> = {}): Agent => ({
+    id: 'agt_o',
+    jobId: 'job_o',
+    projectId: 'p',
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 's',
+    status: 'working',
+    blockMode: null,
+    costUsd: 6,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const warn = (over: Partial<Alert> = {}): Alert => ({
+    id: 'al_o',
+    kind: 'budget_over',
+    cause: 'budget_over',
+    projectId: 'p',
+    jobId: 'job_o',
+    agentIds: ['agt_o'],
+    since: '2026-10-10T12:00:00Z',
+    spent: 6,
+    budget: 5,
+    unit: 'usd',
+    ...over,
+  });
+  const t = alertTitle(warn(), [A()]);
+  check('an over-budget alert names the agent, the budget, and that it only warns', t.head === 'builder' && t.subject === 'is over its $5 budget — a warning only', `${t.head} ${t.subject}`);
+  check('in tokens it says tokens', alertTitle(warn({ unit: 'tokens', budget: 500_000 }), [A()]).subject === 'is over its 500k-token budget — a warning only');
+  const j = alertTitle(warn({ cause: 'job_budget_over', agentIds: [], budget: 50 }), [A({ role: 'architect' }), A({ id: 'agt_p', role: 'developer' }), A({ id: 'agt_q', role: 'tester', jobId: 'other' })]);
+  check("a job's names the agents in it, since the job has no name on the wire", j.head === 'the architect · developer job' && j.subject === 'is over its $50 budget — a warning only', `${j.head} ${j.subject}`);
+  check('the top bar has a word or two for each', alertWord(warn()) === 'over its budget' && alertWord(warn({ cause: 'job_budget_over' })) === 'job over its budget');
+  check('a stop at twice a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'stopped at twice its 500k-token budget');
+  check('raised since, it says so in tokens too', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 2_000_000 } })) === 'stopped on its budget, now raised to 2M tokens');
 }
 
 console.log(

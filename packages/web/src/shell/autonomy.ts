@@ -7,7 +7,8 @@
  * actually do, and what spend will actually pause the agent.
  */
 
-import type { Agent, Autonomy } from '@conductor/shared';
+import { agentBudget, capState, ceilingOf, type Agent, type Autonomy, type BudgetState } from '@conductor/shared';
+import { tokenWords } from '../lib/providers.js';
 
 export type ToolPolicy = 'denied' | 'asks' | 'allowed';
 
@@ -51,8 +52,17 @@ export function toolPolicy(autonomy: Autonomy, tool: string): ToolPolicy {
 
 export interface Budget {
   spent: number;
+  /** The budget: what the agent may spend before it is warned (Amendment 124). */
   cap: number;
+  /** What stops it: twice the budget. */
+  ceiling: number;
+  /** `spent / cap`, held at 1 once it is full: the bar never overflows. */
   fraction: number;
+  /** `spent / cap` as a whole percent, past 100 when it is over. */
+  pct: number;
+  /** ok under the budget, over from it, ceiling from twice it. */
+  state: BudgetState;
+  /** At or past the budget. A warning, not a stop: only `state === 'ceiling'` has stopped it. */
   over: boolean;
   /**
    * What `spent` and `cap` count (Amendment 80): dollars, or input plus output tokens for
@@ -62,32 +72,45 @@ export interface Budget {
 }
 
 /**
- * Spend against the cap that will actually pause this agent.
+ * Spend against the budget that will warn about this agent, and the ceiling that will
+ * stop it (Amendment 124).
  *
  * Deliberately NOT a context-window percentage: CONTRACT §8 leaves that open
  * because it cannot yet be derived honestly, and "a misleading percentage is
  * worse than none". Budget is a real number with a real consequence, so the
  * meter measures that and the tokens are reported as tokens.
  *
- * The agent's own cap only. It used to fall back to the job's, but an uncapped agent
+ * The agent's own budget only. It used to fall back to the job's, but an uncapped agent
  * also uncaps its job (the daemon's `jobCap`), so no job figure ever pauses it and a
  * bar measuring one would be measuring nothing.
  */
 export function budgetOf(agent: Agent): Budget | null {
-  const cap = agent.autonomy.budgetUsd;
-  if (cap !== null && cap > 0) {
-    const fraction = Math.min(1, agent.costUsd / cap);
-    return { spent: agent.costUsd, cap, fraction, over: agent.costUsd >= cap, unit: 'usd' };
-  }
-  // A token cap is the daemon's count too: input plus output, reached at ≥.
-  const tokens = agent.autonomy.budgetTokens ?? null;
-  if (tokens === null || tokens <= 0) return null;
-  const spent = agent.inputTokens + agent.outputTokens;
-  return { spent, cap: tokens, fraction: Math.min(1, spent / tokens), over: spent >= tokens, unit: 'tokens' };
+  const b = agentBudget(agent);
+  if (b === null || b.budget <= 0) return null;
+  const ratio = b.spent / b.budget;
+  const state = capState(b.spent, b.budget);
+  return {
+    spent: b.spent,
+    cap: b.budget,
+    ceiling: ceilingOf(b.budget),
+    fraction: Math.min(1, ratio),
+    pct: Math.round(ratio * 100),
+    state,
+    over: state !== 'ok',
+    unit: b.unit,
+  };
+}
+
+/** A budget figure in its own unit: `$50.00`, `1M tokens`. Tokens never read as dollars. */
+export function budgetWords(unit: Budget['unit'], n: number): string {
+  return unit === 'tokens' ? `${tokenWords(n)} tokens` : `$${n.toFixed(2)}`;
 }
 
 /** The one-click raises beside the budget field. Raising is the common case. */
 export const BUDGET_RAISES: readonly number[] = [10, 25];
+
+/** The same for a budget in tokens (Amendment 124): the engines that can't say dollars have no +$10. */
+export const TOKEN_RAISES: readonly number[] = [100_000, 500_000];
 
 /**
  * What was typed in the budget field. Empty is "no cap"; `$` is allowed because people

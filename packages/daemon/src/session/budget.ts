@@ -1,7 +1,7 @@
 /**
  * Budgets — what an agent may still spend, and what to say when it may not.
  *
- * A budget is a LIFETIME cap per agent. It used to be passed straight to the SDK as
+ * A budget is a LIFETIME figure per agent. It used to be passed straight to the SDK as
  * `maxBudgetUsd`, which counts only "the spend since this query() call started"
  * (sdk.d.ts, `total_cost_usd`), so every message you sent bought a fresh cap and
  * "stop each agent after $5" was not what happened. The rules are here, apart from
@@ -11,9 +11,24 @@
  * An engine that can't say what a run cost in dollars is capped in tokens instead —
  * input plus output, never converted into dollars (Amendment 77). Each agent has one
  * unit: the one its engine reports.
+ *
+ * It WARNS, and a ceiling stops (Amendment 124). Past its budget an agent keeps working
+ * and Needs You asks to raise it (session/alerts.ts); it is stopped, paused, at twice the
+ * budget so a runaway can't spend without limit. Where those two lines are is in
+ * `@conductor/shared` (`budgetState`), the one copy the screens read too. Everything here
+ * that REFUSES, or hands the SDK a limit, is about the ceiling.
  */
 
-import type { Agent, Autonomy } from '@conductor/shared';
+import {
+  capState,
+  ceilingOf,
+  tokensSpent,
+  type Agent,
+  type Autonomy,
+  type BudgetState,
+} from '@conductor/shared';
+
+export { BUDGET_CEILING, budgetState, capState, ceilingOf, tokensSpent } from '@conductor/shared';
 
 /** `$25`, `$25.10`. Whole dollars stay whole, because that is how people type caps. */
 export function money(usd: number): string {
@@ -29,14 +44,18 @@ export function tokens(n: number): string {
   return n < 1_000_000 ? short(1_000, 'k') : short(1_000_000, 'M');
 }
 
-/** Input plus output: what a token cap counts. Cache reads are the backend's business. */
-export function tokensSpent(agent: Pick<Agent, 'inputTokens' | 'outputTokens'>): number {
-  return agent.inputTokens + agent.outputTokens;
-}
-
 /** What is left of a cap after `spent`. null = uncapped. Never negative. */
 export function budgetLeft(cap: number | null, spent: number): number | null {
   return cap === null ? null : Math.max(0, cap - spent);
+}
+
+/**
+ * What the SDK may still spend in this run: what is left of the CEILING, twice the budget
+ * (Amendment 124), since its own `maxBudgetUsd` is the one hard stop. null = no budget.
+ * The budget itself is only a warning and reaches the SDK not at all.
+ */
+export function runLimit(budgetUsd: number | null, spentUsd: number): number | null {
+  return budgetLeft(budgetUsd === null ? null : ceilingOf(budgetUsd), spentUsd);
 }
 
 /**
@@ -53,14 +72,20 @@ export function lifetimeCost(stored: number, reported: number): number {
 
 type Spend = Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy'>;
 
-/** Stopped on its cap, as the note on the status event and the header say it. */
+/**
+ * Stopped on its ceiling, as the note on the status event and the header say it: what it
+ * spent, its budget, and that the budget alone would not have stopped it (Amendment 124).
+ * The prefix is what `budgetStop` reads.
+ */
 export function budgetNote(agent: Spend): string {
   const cap = agent.autonomy.budgetUsd;
-  if (cap !== null) return `budget reached — spent ${money(agent.costUsd)} of its ${money(cap)} budget`;
+  if (cap !== null) {
+    return `budget reached — spent ${money(agent.costUsd)} of its ${money(cap)} budget, which stops it at ${money(ceilingOf(cap))}`;
+  }
   const capTokens = agent.autonomy.budgetTokens ?? null;
   return capTokens === null
     ? 'budget reached'
-    : `budget reached — spent ${tokens(tokensSpent(agent))} of its ${tokens(capTokens)}-token budget`;
+    : `budget reached — spent ${tokens(tokensSpent(agent))} of its ${tokens(capTokens)}-token budget, which stops it at ${tokens(ceilingOf(capTokens))}`;
 }
 
 /** Held before it started, because its job's agents had spent the job's cap. */
@@ -77,19 +102,20 @@ export function budgetStop(note: string | undefined): 'budget_exhausted' | 'job_
 
 /**
  * Why this agent may not run again, or null if it may. Checked before every launch
- * and every resume, so being at the cap refuses with a sentence rather than starting
- * a run the SDK would end immediately.
+ * and every resume, so being at the ceiling refuses with a sentence rather than starting
+ * a run the SDK would end immediately. Past the budget but under the ceiling it may run:
+ * that is the warning (Amendment 124).
  */
 export function budgetRefusal(agent: Pick<Agent, 'role'> & Spend): string | null {
   const who = agent.role.charAt(0).toUpperCase() + agent.role.slice(1);
   const cap = agent.autonomy.budgetUsd;
-  if (cap !== null && agent.costUsd >= cap) {
-    return `The ${who} has spent ${money(agent.costUsd)} of its ${money(cap)} budget — raise it to continue.`;
+  if (cap !== null && agent.costUsd >= ceilingOf(cap)) {
+    return `The ${who} has spent ${money(agent.costUsd)} of its ${money(cap)} budget, which stops it at ${money(ceilingOf(cap))} — raise it to continue.`;
   }
   const capTokens = agent.autonomy.budgetTokens ?? null;
   const spent = tokensSpent(agent);
-  if (capTokens !== null && spent >= capTokens) {
-    return `The ${who} has spent ${tokens(spent)} of its ${tokens(capTokens)}-token budget — raise it to continue.`;
+  if (capTokens !== null && spent >= ceilingOf(capTokens)) {
+    return `The ${who} has spent ${tokens(spent)} of its ${tokens(capTokens)}-token budget, which stops it at ${tokens(ceilingOf(capTokens))} — raise it to continue.`;
   }
   return null;
 }
@@ -110,8 +136,8 @@ export function budgetUnitRefusal(provider: string, costUsd: boolean, autonomy: 
 }
 
 /**
- * A job's cap is the sum of its agents' CURRENT caps, not the figure Spawn launched
- * with. Otherwise raising one agent's cap would leave its queued siblings paused at
+ * A job's budget is the sum of its agents' CURRENT budgets, not the figure Spawn launched
+ * with. Otherwise raising one agent's budget would leave its queued siblings paused at
  * the old total. One uncapped agent uncaps the job, since its spend has no bound.
  *
  * It stays in dollars. An agent capped in tokens has no dollar cap, and its dollars are
@@ -126,4 +152,14 @@ export function jobCap(agents: readonly Pick<Agent, 'autonomy'>[]): number | nul
     sum += a.autonomy.budgetUsd;
   }
   return agents.length === 0 ? null : sum;
+}
+
+/**
+ * Where a job stands against its budget, the sum of its agents' (Amendment 124): `over`
+ * warns, `ceiling` is twice it, past which agents still waiting to start are held. The
+ * ones already running are stopped by their own budgets and nothing else. ok when the job
+ * has no dollar budget (`jobCap` is null).
+ */
+export function jobBudgetState(agents: readonly Pick<Agent, 'autonomy'>[], spentUsd: number): BudgetState {
+  return capState(spentUsd, jobCap(agents));
 }

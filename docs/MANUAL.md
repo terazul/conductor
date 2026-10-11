@@ -368,7 +368,9 @@ launches and saved setups get. A running or sleeping agent keeps what it launche
   tool it called, within the same share of the model's window an agent in a stack is given
   (below). It can then check, combine, or start more.
 
-The job's budget is the sum of its agents' caps, so each helper adds one agent's cap.
+The job's budget is the sum of its agents' budgets, so each helper adds one agent's budget. It
+works as an agent's does: Needs You warns when the job passes it, and agents still to start
+are held only at twice it (§6).
 
 Each row gets its model in the plan preview, like the presets. Each role can appear only
 once, and a role that only reads (`reviewer`, `analyst`, …) stays read-only here too. Name
@@ -476,7 +478,8 @@ screen names the engine. Some things are different:
 
 - **Budgets are in tokens, not dollars.** Neither engine reports what a run cost, and
   Conductor won't estimate it. The budget pill reads **stop each agent after 5M tokens**
-  and counts input plus output tokens. The agent's details say spend **not reported**.
+  and counts input plus output tokens. Like a dollar budget it warns at that figure and
+  stops the agent at twice it (§6). The agent's details say spend **not reported**.
   Fleet's **spend today** stays Claude's dollars only. OpenRouter still bills you, so
   watch its dashboard.
 - **No plan mode.** **plan first** is hidden, and a preset that plans first asks you
@@ -520,7 +523,7 @@ from then on, for the project; a different command still asks.
 | **allow git push** | Off adds a deny rule on `git push` that survives every mode. |
 | **allow network** | Off blocks WebFetch and WebSearch. |
 | **allow MCP tools** | Off (the default) means every MCP tool call waits for you. |
-| **⏱ stop each agent after $** | A lifetime budget for each agent, $25 by default. Leave it empty for no limit. See §6. |
+| **⏱ stop each agent after $** | A lifetime budget for each agent, $25 by default. Leave it empty for no limit. Past it the agent keeps working and Needs You warns; it stops at twice the figure. See §6. |
 
 Whether file edits go ahead unattended is now set by the interaction mode above
 (**auto-accept edits**), not by a pill.
@@ -549,8 +552,8 @@ that was stopped). Under it:
   agent too, which puts the new one in the middle. Add a tester that waits for the developer
   and feeds the reviewer, and the reviewer now hears the tester as well.
 - **model**: the model picker on Claude, a model id on another engine.
-- **budget**: the new agent's own cap, in dollars, or in tokens on an engine that reports no
-  dollars. It is required, as on Spawn, and the job's cap grows by it.
+- **budget**: the new agent's own budget, in dollars, or in tokens on an engine that reports no
+  dollars. It is required, as on Spawn, and the job's budget grows by it.
 
 It runs on the job's engine, with the job's permissions (taken from an agent in it that
 writes, or reads, as this one will), plus its persona's tool rules. A reading role, or a
@@ -626,8 +629,8 @@ The button is greyed out, with the reason as its hover text, when the agent is s
 working or waiting for you (re-run once it has finished its reply), is paused or failed, or
 has written nothing, or is held for not handing off (hand it off in Needs You first), or when
 an agent after it was stopped (remove it from the stack first)
-or is only just starting. If an agent after it has reached its budget, or the job has, the
-daemon refuses when you press it and says so (raise the cap first). The sentence shows in
+or is only just starting. If an agent after it has reached twice its budget, or the job has,
+the daemon refuses when you press it and says so (raise the budget first). The sentence shows in
 the same place. Nothing is stopped or started on a refusal.
 
 Pressing it is kept: if the daemon restarts before an agent starts again, that agent still
@@ -676,7 +679,8 @@ below the requests, one card each, and each card's first button is the one that 
 | Alert | When | What you can do |
 |---|---|---|
 | **Agent failed** | An agent ended with an error. The card says why, in words. | **continue** (when its session can be resumed), open it, or dismiss. |
-| **Budget reached** | An agent spent its budget and was paused. | **+$10 and continue** or **+$25 and continue**, which raise its cap and wake it, or open it. |
+| **Over budget** | An agent, or its job, has spent more than its budget and is still going. A warning only: nothing is paused, and it stops at twice the budget. The card says what it spent, the budget, and where it stops. For a job, the card names the agents in it. | **+$10** or **+$25** (**+100k tokens** or **+500k tokens** on an engine that reports no dollars), which raise the budget and clear the warning, or open it, or dismiss it. Dismissing lasts until you raise the budget and it is passed again. |
+| **Budget reached** | An agent spent twice its budget and was paused. | **+$10 and continue** or **+$25 and continue**, which raise its budget and wake it, or open it. |
 | **Model API** | The model API isn't answering: the network, your login, or an outage. | Nothing while Claude Code is still retrying. The alert clears itself once the model answers. If it gives up, **retry** wakes the agents it stopped. |
 | **Reconnecting** | The model couldn't be reached and Conductor is going to try again for you: *Reconnecting in 30 s (3 of 5)*. It appears from the second try (see "When the model can't be reached", §7). | **retry now** tries at once. **stop retrying** gives up and the agent ends failed. Open the agent. It goes away by itself when the try starts. |
 | **Dev server down** | A dev server an agent started has stopped answering. | Open its preview, or dismiss. |
@@ -766,7 +770,7 @@ waiting forty seconds, and the oldest is always first.
 |---|---|---|
 | **`1`** | **Fleet** | Everything at once. One card per project, coloured by its unhappiest agent. Glance here. A card says **finished** when one of its jobs has ended and you haven't opened the project since (see [When a job finishes](#when-a-job-finishes)). **▦ density** in the header fits more cards on screen, until you leave Fleet. **Sort by** in the header orders the cards by **needs you first**, **my order**, **name**, **working** (most agents working now), **recently active**, **spend** or **newest**. Drag a card onto another to put it there, or use **← move earlier** / **→ move later** in its **…** menu; either switches to **my order**, starting from what you see. Your order is kept in Settings, so it's the same in every browser, and a new project goes at the end. **Notes:** each card shows your newest note on the project under its path, and a count (**✎ 3 notes**, or **+ note**) in its footer. Click it to add a note (**⌘⏎** adds), and **⧉ copy**, **✎ edit** or **✕ delete** one; newest first. **⧉** beside the card's note line copies it without opening the project. Copy puts the note's text on the clipboard as written, and needs Conductor open on localhost (or https). A note can be **due**: **due today**, or pick a date, when adding or editing it. Due today is amber, late is red, on the card, its count, and in the list, and the card shows the most urgent due note rather than the newest. A due or late note also shows in **Needs You** (**✓ mark done**, **open project**, or dismiss it for the day). Tick a note's box to mark it done: it stays, greyed, and stops nagging. Notes are yours: agents don't see them, and removing the project forgets them. The same notes, with the same add, copy, edit and delete, are in the Project screen's column and the Agent screen's inspector (that agent's project's). |
 | **`2`** | **Project** | One project's agents as lanes, each streaming its recent actions with a spend meter, grouped by job. A job that finished since you last looked says **finished** on its group while you're here. Each job's header has **+ agent**, to add one to that job ([Add an agent to a running job](#add-an-agent-to-a-running-job)). The left column has the project's facts, its notes and its actions: **+ spawn agent**, **▤ open files** and **◈ open preview**. The dock along the bottom can be dragged taller. |
-| **`3`** | **Agent** | The project and agent you're on are the label at the top, on its own coloured backdrop; click it to go back to the project. A tab for every agent in the project across the top, newest job first. A tab turns amber, with a count, when that agent needs you, so a blocked agent isn't hidden behind the one you're reading. The full transcript. Your turns are marked so you can scan a long conversation for what you actually said: what you typed, its **you** label and the bar beside it are violet, a colour no status uses (a turn Conductor sent for you, labelled **auto**, stays plain), and the last thing you asked stays pinned at the top while you scroll. Agent output renders as markdown — headings, tables, lists nested to any depth with their numbering kept, task boxes, quotes, code blocks and diagrams. Every tool call collapses to one line, diffs included — click to expand; any reply folds to one line too, by clicking the agent's name beside it, and **⌃ fold all** in the header folds every reply there is so far. Replies always arrive open, and folds are remembered per agent. Reply, switch interaction mode, set guardrails (allow bash / write / web / MCP tools / git push), change its effort, model or budget, or interrupt, from the bottom panel, which you can drag taller by its top edge. The **▸ agent** header at the start of the row under the message box folds the guardrails and the interaction, effort, model and budget rows away, like any other fold: click it and they close, leaving one line of what they're set to beside it (red when the budget is reached or the mode is unsafe); click that line to open them again. It applies to every agent. **⏎** sends a reply and **⇧⏎** starts a new line. Raising the budget is how an agent that reached its cap carries on. The details panel on the right (**details**, or `i`) shows its usage, with the budget as a bar, tokens in and out, its todo list, the files it touched and its project's notes. What you type there is kept, per agent, if you switch to the terminal, another agent, another screen or reload the page, until you send it or close the browser tab; Spawn's prompt is kept the same way. Its **›_ terminal** tab is a full terminal in this agent's folder (its worktree): a real shell (your `$SHELL`, as a login shell, else bash, else sh) with colour, your keys, tab completion and your shell's own history, so `vim`, `less`, `top`, `ssh`, REPLs and `git add -p` work, and `cd` and `export` last. It runs as you. Opening the tab for the first time opens one terminal; **+** opens another, in tabs, up to 16 live at once, and **×** on a tab closes it and ends the shell and anything running in it. Leaving the tab, switching screens or reloading the page does *not* end a shell: coming back reattaches to it and draws the last 512 KB it printed, so a build you started is still going. A shell ends when you type `exit`, when you close its tab, when its agent, job or project is removed, or when the daemon stops (a daemon restart does not bring shells back). A tab whose shell ended says so, with its exit code, and **↻ new terminal** opens a fresh one. If the terminal library can't load on this machine (or on Windows, which isn't built), the tab shows the old command runner under a banner that says why: **⏎** runs one command at a time with no input, **↑ ↓** go back through what you typed, **■ stop** sends Ctrl-C, and its output is kept until **clear** or a daemon restart. **Waiting on you · answer →**, or **needs you · N** in the header, opens a side panel with everything waiting for this agent (its permission requests, its questions and the alerts that name it), so you can answer without leaving; the amber count on another agent's tab opens that agent with its panel. `i` or ✕ brings the details back. |
+| **`3`** | **Agent** | The project and agent you're on are the label at the top, on its own coloured backdrop; click it to go back to the project. A tab for every agent in the project across the top, newest job first. A tab turns amber, with a count, when that agent needs you, so a blocked agent isn't hidden behind the one you're reading. The full transcript. Your turns are marked so you can scan a long conversation for what you actually said: what you typed, its **you** label and the bar beside it are violet, a colour no status uses (a turn Conductor sent for you, labelled **auto**, stays plain), and the last thing you asked stays pinned at the top while you scroll. Agent output renders as markdown — headings, tables, lists nested to any depth with their numbering kept, task boxes, quotes, code blocks and diagrams. Every tool call collapses to one line, diffs included — click to expand; any reply folds to one line too, by clicking the agent's name beside it, and **⌃ fold all** in the header folds every reply there is so far. Replies always arrive open, and folds are remembered per agent. Reply, switch interaction mode, set guardrails (allow bash / write / web / MCP tools / git push), change its effort, model or budget, or interrupt, from the bottom panel, which you can drag taller by its top edge. The **▸ agent** header at the start of the row under the message box folds the guardrails and the interaction, effort, model and budget rows away, like any other fold: click it and they close, leaving one line of what they're set to beside it (red when the budget is passed or the mode is unsafe, and it then says where the agent stops); click that line to open them again. It applies to every agent. **⏎** sends a reply and **⇧⏎** starts a new line. Past its budget an agent keeps working: the line under the budget says **over budget: $27 of $25 - a warning only; stops at $50**, and raising the budget is how an agent that reached twice it carries on. The details panel on the right (**details**, or `i`) shows its usage, with the budget as a bar, tokens in and out, its todo list, the files it touched and its project's notes. What you type there is kept, per agent, if you switch to the terminal, another agent, another screen or reload the page, until you send it or close the browser tab; Spawn's prompt is kept the same way. Its **›_ terminal** tab is a full terminal in this agent's folder (its worktree): a real shell (your `$SHELL`, as a login shell, else bash, else sh) with colour, your keys, tab completion and your shell's own history, so `vim`, `less`, `top`, `ssh`, REPLs and `git add -p` work, and `cd` and `export` last. It runs as you. Opening the tab for the first time opens one terminal; **+** opens another, in tabs, up to 16 live at once, and **×** on a tab closes it and ends the shell and anything running in it. Leaving the tab, switching screens or reloading the page does *not* end a shell: coming back reattaches to it and draws the last 512 KB it printed, so a build you started is still going. A shell ends when you type `exit`, when you close its tab, when its agent, job or project is removed, or when the daemon stops (a daemon restart does not bring shells back). A tab whose shell ended says so, with its exit code, and **↻ new terminal** opens a fresh one. If the terminal library can't load on this machine (or on Windows, which isn't built), the tab shows the old command runner under a banner that says why: **⏎** runs one command at a time with no input, **↑ ↓** go back through what you typed, **■ stop** sends Ctrl-C, and its output is kept until **clear** or a daemon restart. **Waiting on you · answer →**, or **needs you · N** in the header, opens a side panel with everything waiting for this agent (its permission requests, its questions and the alerts that name it), so you can answer without leaving; the amber count on another agent's tab opens that agent with its panel. `i` or ✕ brings the details back. |
 | **`4`** | **Needs you** | The attention queue. §3. Its header label, like Preview's and Files', sits on the same backdrop as the Agent screen's, so where you are reads the same everywhere. |
 | **`5`** | **Files** | Pick a project and see **its directories and nothing else** — one tree each, plus a job's worktree if you pick a job. Files opens on the project you're in: the one a link named, else the one the route itself names, else the last one you had open anywhere — including the one an agent's screen just showed you, even if you got there by a reload. See [A project's directories](#a-projects-directories). Each tree has badges showing which agent touched what and how recently. Markdown renders properly, so this is where you read `PLAN.md` while it's being written. A ` ```mermaid ` block is drawn as its diagram (flowcharts, sequence diagrams and the rest), with **source** to see the code; one that can't be drawn shows its code and why. Agent replies draw them too. Images open in the pane too — PNG, JPEG, GIF, WebP, AVIF, SVG and favicons, on a checkerboard so transparency reads as transparency. You can edit text in place — if an agent rewrites the file under you, you're told rather than overwritten. Every file you open gets a **tab**, from any job, and each tab keeps its view, scroll position and unsaved edit when you go to another screen and come back. See [Files tabs](#files-tabs). A **`+`** on a folder row, or on a tree's heading, makes a new file there and opens it ready to type in. See [Making a new file](#making-a-new-file). |
 | **`6`** | **Preview** | The dev server the agent started, embedded. Device widths for responsive checks, and console errors you can send straight back to the agent as a new instruction instead of copy-pasting. |
@@ -1014,10 +1018,19 @@ Each agent is a live Claude Code session billed at normal API rates. Several at
 once adds up quickly.
 
 - **Set a budget per agent** in Spawn: **⏱ stop each agent after $**, $25 by default.
-  It's a lifetime cap for each agent, across all its runs, and the job's cap is the sum
-  of its agents' caps. An agent that reaches its cap is **paused**, not failed. Needs
-  you then offers **+$10 and continue** or **+$25 and continue**, or you can raise it
-  in the agent's composer.
+  It's a lifetime figure for each agent, across all its runs, and the job's budget is the
+  sum of its agents' budgets. **It warns; it doesn't stop.** Past its budget an agent keeps
+  working, the composer says **over budget: $27 of $25 - a warning only; stops at $50**,
+  and Needs You raises an **Over budget** card with **+$10** and **+$25**. What stops a
+  runaway agent is a ceiling at **twice the budget**: an agent that reaches it is **paused**,
+  not failed, and Needs You then offers **+$10 and continue** or **+$25 and continue**, or
+  you can raise it in the agent's composer. Raising the budget raises the ceiling with it.
+  A budget in tokens works the same way (the ceiling is twice the tokens). Claude's spend
+  is known when a turn ends, so the warning for a Claude agent arrives with the turn that
+  crossed the budget; the ceiling still stops it in the middle of a turn.
+- **A job's budget works the same way.** When the job passes the sum of its agents' budgets
+  Needs You warns, and agents still to start go ahead. At twice the sum they are held
+  (**job budget reached**) until you raise a budget.
 - **Today's spend is in the status bar**, and in `make status`. It counts dollars only, so
   Copilot and OpenRouter agents, capped in tokens (§2, "Choose the engine"), add nothing
   to it.
@@ -1153,7 +1166,7 @@ first line, with ✕ to cancel it. At its time it goes to the agent exactly as i
 pressed send then: into a run that is going, or waking an agent that had finished. It is
 then in the transcript, and gone from the list. It goes out at most a few seconds late,
 and if the daemon was off at its time, as soon as it starts. An agent that hasn't started
-yet gets it once it has. One that can't take it (it has reached its budget, say) shows
+yet gets it once it has. One that can't take it (it has reached twice its budget, say) shows
 **couldn't send** with the reason, in red, until you clear it; it isn't tried again.
 Removing the agent removes its scheduled messages.
 
@@ -1235,7 +1248,7 @@ What cannot survive is a **running process**. So on startup:
 - Agents **mid-work** resume on their own, in their own sessions. The transcript says
   "the daemon restarted mid-run — resuming it", and each one is told the restart happened
   and to check any tool call that was cut short. They wait for free slots like any
-  agent. One already at its budget is paused instead, and one that had no session yet
+  agent. One already at twice its budget is paused instead, and one that had no session yet
   starts from its prompt.
 - Agents **waiting to be tried again** because the model couldn't be reached (§7) resume the
   same way, told the restart happened, with five tries again if they fail.

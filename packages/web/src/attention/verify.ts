@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, handOffChip, handOffDraft, handOffProblem, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { alertActions, alertNotice, alertProject, handOffChip, handOffDraft, handOffProblem, jobRaiseTarget, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -263,13 +263,14 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   check('and no continue when there is no session to continue', lost === 'open dismiss', lost);
 
   const budget = alert({ kind: 'budget', cause: 'budget_exhausted' });
-  const atCap = ids(alertActions(budget, [agent()]));
+  // Amendment 124: the stop is at twice the budget ($10 of a $5 budget), so that is where the card raises.
+  const atCap = ids(alertActions(budget, [agent({ costUsd: 10 })]));
   check(
-    'at its cap, every way on raises it — continue alone would be refused',
+    'at its ceiling, every way on raises it — continue alone would be refused',
     atCap === 'raise:10->15 raise:25->30 open dismiss',
     atCap,
   );
-  const cents = alertActions(budget, [agent({ costUsd: 0.012, autonomy: { ...agent().autonomy, budgetUsd: 0.01 } })]);
+  const cents = alertActions(budget, [agent({ costUsd: 0.02, autonomy: { ...agent().autonomy, budgetUsd: 0.01 } })]);
   check('the raise starts from the cap, not from what was spent', cents[0]?.id === 'raise' && cents[0].to === 10.01);
   const raised = ids(alertActions(budget, [agent({ autonomy: { ...agent().autonomy, budgetUsd: 15 } })]));
   check('raised already, it just continues', raised === 'continue:a1 open dismiss', raised);
@@ -351,10 +352,10 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   );
 
   const projects: Project[] = [{ id: 'p1', name: 'demo' } as Project];
-  const note = alertNotice(budget, [agent()], projects);
+  const note = alertNotice(budget, [agent({ costUsd: 10 })], projects);
   check(
     'a budget notification reads like a request one',
-    note.title === 'demo · builder needs you' && note.body === 'builder spent its $5 budget',
+    note.title === 'demo · builder needs you' && note.body === 'builder stopped at twice its $5 budget',
     JSON.stringify(note),
   );
   const net = alertNotice(outage, both, projects);
@@ -559,6 +560,83 @@ console.log('\n8 · an agent waiting to be tried again (Amendment 123)');
   check('the buttons call the two routes, and a refusal stays on the card with its reason', /cmd\.run\('Retrying now', \(\) => retryNowAgent\(a\.agentId\)/.test(card) && /cmd\.run\('Stopping the retries', \(\) => stopRetryingAgent\(a\.agentId\)/.test(card) && !/case 'retry_now':[^}]*dismissAlert/.test(card));
   check('the calls are POST /api/agents/:id/retry-now and /stop-retrying', /agentPath\(agentId, 'retry-now'\), \{ method: 'POST'/.test(ep) && /agentPath\(agentId, 'stop-retrying'\), \{ method: 'POST'/.test(ep));
   check('both themes read: the card adds no colour of its own', !/#[0-9a-fA-F]{3,8}\b|rgb\(/.test(card));
+}
+
+console.log("\n9 · an agent's budget warns: the card for it, and the one that stops (Amendment 124)");
+{
+  const agent = (over: Partial<Agent> = {}): Agent => ({
+    id: 'a1',
+    jobId: 'j1',
+    projectId: 'p1',
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status: 'working',
+    blockMode: null,
+    costUsd: 6,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const alert = (over: Partial<Alert> = {}): Alert => ({
+    id: 'al_over',
+    kind: 'budget_over',
+    cause: 'budget_over',
+    projectId: 'p1',
+    jobId: 'j1',
+    agentIds: ['a1'],
+    since: '2026-09-26T12:00:00Z',
+    spent: 6,
+    budget: 5,
+    unit: 'usd',
+    ...over,
+  });
+  const ids = (xs: AlertAction[]) =>
+    xs.map((a) => (a.id === 'raise' ? `raise:${a.by}->${a.to}${a.unit ? a.unit : ''}${a.onlyRaise ? ' only' : ''}` : a.id)).join(' ');
+
+  const over = alertActions(alert(), [agent()]);
+  check('over its budget, the card raises it by $10 or $25 and does nothing else to the agent', ids(over) === 'raise:10->15 only raise:25->30 only open dismiss', ids(over));
+  check('a raise from the warning only raises: there is nothing paused to continue', over.every((a) => a.id !== 'continue' && (a.id !== 'raise' || a.onlyRaise === true)));
+  check('the raise starts from the budget, not the spend', over[0]?.id === 'raise' && over[0].to === 15);
+  const tokenAgent = agent({ costUsd: 0, inputTokens: 400_000, outputTokens: 150_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } });
+  const tokens = ids(alertActions(alert({ unit: 'tokens', spent: 550_000, budget: 500_000 }), [tokenAgent]));
+  check('a token budget raises in tokens: +100k and +500k', tokens === 'raise:100000->600000tokens only raise:500000->1000000tokens only open dismiss', tokens);
+  check('at its ceiling the warning offers no raise: the budget-reached card has them', ids(alertActions(alert(), [agent({ costUsd: 10 })])) === 'open dismiss');
+  check('an agent this tab has not heard of can only be put away', ids(alertActions(alert(), [])) === 'dismiss');
+
+  // A job's warning has no agent of its own: it raises the one still spending that has spent the most.
+  const jobAlert = alert({ cause: 'job_budget_over', agentIds: [], spent: 52, budget: 50 });
+  const team = [
+    agent({ id: 'a1', role: 'architect', status: 'done', costUsd: 40 }),
+    agent({ id: 'a2', role: 'developer', status: 'working', costUsd: 9 }),
+    agent({ id: 'a3', role: 'reviewer', status: 'working', costUsd: 3 }),
+    agent({ id: 'a4', role: 'tester', jobId: 'other', status: 'working', costUsd: 99 }),
+  ];
+  check("a job's warning raises the working agent that has spent the most, in that job", jobRaiseTarget('j1', team)?.id === 'a2');
+  check('with none working, the one that spent the most', jobRaiseTarget('j1', team.filter((a) => a.status === 'done'))?.id === 'a1');
+  check('with none that has a dollar budget, none', jobRaiseTarget('j1', [tokenAgent]) === null);
+  const jobActions = alertActions(jobAlert, team);
+  check('and names it, since the card is about the job', jobActions.at(-2)?.id === 'open' && (jobActions.at(-2) as { role?: string }).role === 'developer' && jobActions[0]?.id === 'raise' && jobActions[0].agentId === 'a2', ids(jobActions));
+
+  // The card that stops (kind 'budget') raises at twice the budget, in the agent's unit.
+  const stopped = alert({ kind: 'budget', cause: 'budget_exhausted' });
+  check('the stop at twice a token budget raises in tokens (it used to offer only a continue that is refused)', ids(alertActions(stopped, [{ ...tokenAgent, status: 'paused', inputTokens: 600_000, outputTokens: 400_000 }])) === 'raise:100000->600000tokens raise:500000->1000000tokens open dismiss');
+  check('and between the budget and the ceiling a stopped agent only continues', ids(alertActions(stopped, [agent({ status: 'paused', costUsd: 7 })])) === 'continue open dismiss');
+
+  const projects: Project[] = [{ id: 'p1', name: 'demo' } as Project];
+  const note = alertNotice(alert(), [agent()], projects);
+  check('the notification says over budget, not that it needs you', note.title === 'demo · builder is over its budget' && note.body === 'builder is over its $5 budget — a warning only', JSON.stringify(note));
+
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
+  check('the card has a label for the kind, in amber like a stop', /budget_over: \{ label: 'Over budget', tone: 'var\(--need\)' \}/.test(card));
+  check('a raise that only raises does not continue; one that continues still does', /if \(a\.onlyRaise\) void cmd\.run\('Raising the budget', \(\) => raiseBudget\(agent, a\.to, a\.unit\)/.test(card) && /raiseAndContinue\(agent, a\.to, a\.unit\)/.test(card));
+  check('a token raise sends budgetTokens, a dollar one budgetUsd', /unit === 'tokens' \? \{ budgetTokens: to \} : \{ budgetUsd: to \}/.test(api));
+  check('the card says it is only a warning, and the ceiling', /A warning only:/.test(card) && /twice the budget/.test(card) && /k="stops at"/.test(card));
 }
 
 console.log(

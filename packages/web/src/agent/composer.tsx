@@ -42,7 +42,7 @@ import { DEFAULT_EFFORT, EFFORTS } from '../spawn/autonomy.js';
 import { scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
-import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
   id: string;
@@ -421,7 +421,8 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const closed = agent.status === 'done' || agent.status === 'failed';
-  const atCap = spend?.over === true && agent.status !== 'working';
+  // Stopped on its ceiling, twice its budget (Amendment 124); only over it, it still works.
+  const atCap = spend?.state === 'ceiling' && agent.status !== 'working';
   const current = MODES.find((m) => m.id === autonomy.mode) ?? null;
   const notice: Notice | null =
     send.notice ?? policy.notice ?? (budgetWhy ? { tone: 'warn', text: budgetWhy } : null);
@@ -430,6 +431,11 @@ export function Composer({ agent }: { agent: Agent }) {
   const open = settingsShown(useSetting(SETTINGS_KEY));
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
+  // Past the budget it says so, and where that stops it (Amendment 124).
+  const pastBudget =
+    spend !== null && spend.state !== 'ok'
+      ? { state: spend.state, ceiling: spend.unit === 'tokens' ? tokenWords(spend.ceiling) : fmtMoney(spend.ceiling) }
+      : undefined;
   const summary = settingsSummary({
     mode: current?.label ?? autonomy.mode,
     effort: has.effort ? effortLabel : null,
@@ -439,9 +445,17 @@ export function Composer({ agent }: { agent: Agent }) {
         ? tokensLine(
             tokenWords(agent.inputTokens + agent.outputTokens),
             autonomy.budgetTokens ? tokenWords(autonomy.budgetTokens) : null,
+            pastBudget,
           )
-        : dollarsLine(fmtMoney(agent.costUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd)),
+        : dollarsLine(fmtMoney(agent.costUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd), pastBudget),
   });
+  // The longer sentence, for the open composer: only a warning, and where it stops.
+  const budgetSays =
+    spend?.state === 'over'
+      ? spend.unit === 'tokens'
+        ? overSays(tokenWords(spend.spent), tokenWords(spend.cap), tokenWords(spend.ceiling), true)
+        : overSays(fmtMoney(spend.spent), fmtMoney(spend.cap), fmtMoney(spend.ceiling))
+      : null;
   const summaryAlarm = spend?.over === true || current?.danger === true;
 
   return (
@@ -759,6 +773,12 @@ export function Composer({ agent }: { agent: Agent }) {
         )}
 
         {modelWarning && <div className="ag-modesays is-danger">{modelWarning}</div>}
+
+        {open && budgetSays && (
+          <div className="ag-modesays ag-budgetsays" role="status">
+            {budgetSays}
+          </div>
+        )}
 
         {notice && (
           <div

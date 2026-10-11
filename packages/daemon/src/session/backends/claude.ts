@@ -47,7 +47,7 @@ import { eventLog } from '../../eventlog.js';
 import type { ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
 import { classifyRetry } from '../retry.js';
-import { budgetLeft, lifetimeCost } from '../budget.js';
+import { lifetimeCost, runLimit } from '../budget.js';
 import { costChanged } from '../../daily.js';
 import { hub } from '../../hub.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
@@ -199,7 +199,7 @@ export class ClaudeBackend implements AgentBackend {
 
   #buildOptions(resume: string | null): Options {
     const { autonomy, worktreePath, model, spentUsd, extraDirs, helperCap, handOff, systemPrompt, skills } = this.#scope;
-    const left = budgetLeft(autonomy.budgetUsd, spentUsd);
+    const left = runLimit(autonomy.budgetUsd, spentUsd);
     const tools = helperCap || handOff ? helperTools(this.#scope.agentId, { helperCap, handOff }) : null;
 
     return {
@@ -229,7 +229,8 @@ export class ClaudeBackend implements AgentBackend {
       allowedTools: tools ? [...autonomy.allowedTools, ...tools.allowed] : autonomy.allowedTools,
       ...(tools ? { mcpServers: tools.servers } : {}),
       disallowedTools: autonomy.disallowedTools,
-      // What is LEFT of the lifetime cap, since the SDK counts from this query's start.
+      // What is LEFT of the lifetime CEILING, twice the budget (Amendment 124): the budget
+      // only warns, and the SDK counts from this query's start, so it is given the remainder.
       ...(left !== null ? { maxBudgetUsd: left } : {}),
       // Omitted when unset, so the SDK's own default applies rather than ours.
       ...(autonomy.effort ? { effort: autonomy.effort } : {}),

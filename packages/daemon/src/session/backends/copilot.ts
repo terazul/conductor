@@ -522,8 +522,10 @@ export class CopilotBackend implements AgentBackend {
   /**
    * One model call's tokens, added to the lifetime totals the moment they arrive — the
    * event is ephemeral, and a run cut short would otherwise count nothing. The dollar
-   * spend is the stored one, untouched. Then the cap: an agent past it is stopped the
-   * way Claude's budget stop ends a run, and the supervisor pauses it with the note.
+   * spend is the stored one, untouched. Then the ceiling, twice the token budget
+   * (Amendment 124): an agent past it is stopped the way Claude's budget stop ends a run,
+   * and the supervisor pauses it with the note. Between the budget and the ceiling it goes
+   * on, and Needs You warns (session/alerts.ts, which hears the usage event just emitted).
    */
   #count(
     u: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
