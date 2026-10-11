@@ -971,7 +971,7 @@ console.log('\n18 · move rows in Spawn to set who each agent waits for (Amendme
       /refocus\.current = \{ row:/.test(grip) && /draggable/.test(grip) && /e\.dataTransfer\.setData\(/.test(grip) && /disabled=\{i === 0\}/.test(grip),
   );
   const web = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { dependencies: Record<string, string> };
-  check('no drag library: React, shared, mermaid, as before', Object.keys(web.dependencies).sort().join() === '@conductor/shared,mermaid,react,react-dom');
+  check('no drag library: React, shared, mermaid as before, and xterm for the terminal (Amendment 112)', Object.keys(web.dependencies).sort().join() === '@conductor/shared,@xterm/addon-fit,@xterm/xterm,mermaid,react,react-dom');
 
   // Both themes: the new rules use the measured tokens, and no colour of their own.
   const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');

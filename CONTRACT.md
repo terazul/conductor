@@ -326,9 +326,84 @@ history with it, ahead 0, and the rail was empty. Other projects had feature bra
   every local branch; beside it, where an automatic one came from (`targetFromWords`).
 - **Verify:** daemon `verify-branches.ts` §11; web `branches/verify.ts` §8.
 
-### Amendment 112 — in progress. **A full terminal on macOS and Ubuntu.**
+### Amendment 112 — post-merge, applied. **A full terminal on macOS and Ubuntu.**
 
-Placeholder laid out by wave 9; lane T fills it in. ADR 0009 §2; docs/plans/full-terminal.md.
+Daemon (`terminal/pty.ts`, `ring.ts`, `shell.ts`, `service.ts`, `routes/term.ts`, a one-line close in `session/supervisor.ts`), shared (`wire.ts`), web
+(`agent/Xterm.tsx`, `TermPanel.tsx`, `term.ts`, `agent.css`, `agent.tsx`) and `docs/MANUAL.md`. Asked for on 9 Oct: "a full terminal
+capability… the terminal is lack luster." Design accepted by default on 9 Oct (ADR 0009 §2, cut down from `docs/plans/full-terminal.md`).
+**Windows was dropped on 10 Oct:** nothing is built or tested for it.
+- **Dependencies (§3), pinned, no others:** `@lydell/node-pty` 1.2.0-beta.15 (daemon); `@xterm/xterm` 6.0.0 and `@xterm/addon-fit`
+  0.11.0 (web). The first native module Conductor ships: prebuilt for darwin and linux on x64 and arm64 (its optional per-platform
+  packages), so nothing is compiled and no `onlyBuiltDependencies` entry is needed. Added from the lockfile edits of the abandoned wave 9 attempt.
+- **`terminal/pty.ts`**, the only file that names the library. `ptyStatus()` and `loadPty()` load it lazily with `createRequire` and
+  return "unavailable", with a one-line reason, if it will not load or the platform is not darwin or linux. Output is delivered as
+  bytes (`encoding: null`), so a UTF-8 character split between two reads stays whole in the browser.
+- **The shell** (`shell.ts`): `$SHELL` if it exists, else `/bin/bash`, else `/bin/sh`, always with `-l` (the daemon is often started
+  from the dock launcher without your profile's PATH). Environment: the daemon's own, `TERM=xterm-256color`, `COLORTERM=truecolor`,
+  `NO_COLOR` removed, and `CONDUCTOR_TOKEN` removed as the command runner does. `cwd` is the job's worktree; a missing folder is 410.
+- **Limits and lifetime** (`service.ts`): at most **16 live** terminals (an ended shell does not count); the 17th is 409, "16 terminals
+  are open already. Close one first." The last **512 KB** of each terminal's output is kept (`ring.ts`, raw bytes, realigned to a UTF-8
+  character boundary when trimmed) and replayed first to a page that attaches, with nothing lost between the replay and the live
+  output. A terminal ends when its shell exits (it stays listed as `exited`, with its code and output, for 10 minutes, or until
+  closed), when it is closed (SIGHUP, then SIGKILL after 3 s; the shell's foreground command goes with it), when its **agent**, **job**
+  or **project** is removed (`deleteAgent`, `deleteJob` and `deleteProject` each call `terminals().closeAgent` or `closeJob`), or when
+  the daemon stops (the route's `onClose` waits for every shell to go). It is **not** ended when the page closes or reloads.
+- **Back-pressure.** A page whose socket is more than 1 MB behind pauses the shell (`pty.pause()`) until it is down to 256 KB, so a
+  `cat` of a huge file cannot grow the daemon without bound. The buffer is written either way.
+- **Routes** (`routes/term.ts`, auto-registered): `POST /api/agents/:agentId/terminals` → 201 `{ id }` (optional body `{ cols, rows }`, so the
+  prompt is drawn at the panel's size; 404 no such agent, 409 at the cap, 410 folder gone, 503 no PTY); `GET /api/agents/:agentId/terminals` →
+  `{ available, reason?, terminals: [{ id, cwd, startedAt, exited, exitCode }] }`; `DELETE /api/terminals/:id` → `{ closed: true }`, 404
+  for an unknown id, and it returns once the shell has gone.
+- **The socket**, `GET /ws/term/:id`. Server to page: **binary** frames, the replay first; the socket closes with 1000 when the shell
+  ends or the terminal is closed, and 4404 for an id nobody has. Page to server, JSON: `{ t: 'in', d }` (at most 1 MB) or
+  `{ t: 'resize', cols, rows }`; anything else is ignored. More than one page may attach to a terminal; input from any is taken, and
+  the size is the last resize. It is registered on the same app as `/ws`, so the same `onRequest` hooks and the plugin's `verifyClient`
+  stand in front of it: a non-local Host or Origin is turned away before the route (`guard.ts`), and with `CONDUCTOR_TOKEN` set it
+  needs what `/ws` needs. Nothing is re-implemented.
+- **Wire** (`shared/src/wire.ts`, at the end): `TermInfo`, `TermListResponse`, `TermCreateRequest`, `TermCreateResponse`,
+  `TermClientFrame`, `TERM_WS_PREFIX`.
+- **Web.** The Agent screen's **›_ terminal** tab is now `TermPanel`: tabs, one per terminal, **+** to open another, **×** to close one;
+  the first visit to an agent with none open opens one (a terminal closed on purpose stays closed, for as long as the page is open).
+  `XtermView` draws the selected one with `@xterm/xterm` and `addon-fit`: it fits the panel (a `ResizeObserver`, 50 ms debounce), sends
+  the size when the socket opens and on every change, resets the screen on each attach (the replay brings it back), and on a dropped
+  connection retries at 0.5 s doubling to 10 s with a "reconnecting…" note. Leaving the tab only lets go of the socket. A tab whose
+  shell ended says so, with the exit code, and offers **↻ new terminal**. Ctrl-Shift-C copies on Linux; the app's single-key hotkeys
+  already skip a textarea, which is what xterm types into.
+- **The runner is the fallback.** When `GET` says `available: false`, the tab shows the old command runner (`agent/Terminal.tsx`,
+  `session/terminal.ts`, unchanged) under a banner with the daemon's reason. Fallback cases: the library does not load, or the platform is
+  not macOS or Linux.
+- **Both themes.** The xterm palette is made from the existing tokens (`xtermTheme`): the well as background, `--ink` as text,
+  `--live` as the cursor, the status tokens as the six ANSI colours, and each bright colour is that colour a quarter of the way to
+  `--ink`. ANSI black is dark and white is light in both themes. Every colour a program prints in is 4.5:1 or better on the well,
+  checked in verify; the new CSS uses tokens only.
+- **Not done.** The project-level Terminal dock (plan D8b) and any terminal outside an agent; shells that survive a daemon restart
+  (a restart ends them and the screen is not saved); the plan's headless mirror (a raw 512 KB replay is used, so a full-screen program
+  that ran longer than the buffer may redraw only after its next update); WebGL rendering, search, link and clipboard addons; a
+  Settings entry for shell, font size or scrollback (13 px and 5,000 lines are fixed); the plan's `terminals` hub frame, so a
+  terminal opened in one browser tab shows in another only on its next refresh; **Windows** (dropped). `onBinary` (mouse reports above
+  column 223 in legacy mode) is not forwarded. Not looked at: the terminal was driven in headless Chrome (a command, colour, resize,
+  reload and replay, a second tab, exit, close, the fallback banner, both themes) but not with `vim`, `htop` or `less`, and not on Ubuntu.
+- **Also changed in passing:** `spawn/verify.ts`'s "no drag library" check pinned the whole dependency list; it now expects the two xterm
+  packages as well.
+- **Known, not from this change:** with `CONDUCTOR_TOKEN` set, `/ws` (and so `/ws/term`) is refused to a browser even with `?token=`
+  right, because the `Authorization` header check in `index.ts` also runs on the upgrade and a browser cannot set that header on a
+  WebSocket. The terminal behaves exactly as `/ws` does.
+**Verified:** `terminal/verify.ts` (84 checks, a real PTY on macOS, `/bin/sh` with a home of its own): the ring, shell choice, environment,
+frame parsing and size clamp; with the PTY forced off, GET says `available: false` with the reason, POST is 503, and the runner
+still runs a command; echo of a command and its output; `TERM`, `COLORTERM`, and `NO_COLOR` and the token absent; the shell's cwd
+and its creation size; `stty size` follows a resize; a frame that is not JSON is ignored; closing the page leaves the shell running and
+a new page is replayed what it missed, then goes live; a second page sees the same stream; the replay is at most 512 KB and is the
+end of the output; DELETE ends the shell and a foreground `sleep` under it, the page's socket closes 1000, a second DELETE is 404;
+unknown id is 404 (DELETE, GET and POST by agent) and 4404 on the socket; `exit 3` closes the socket 1000, stays listed as
+exited with code 3, does not count against the cap, and a later page gets its output; 16 open, the 17th is 409, closing one makes
+room; a socket with a foreign Origin or `Origin: null` is refused and sees no byte, a local Origin attaches, and a foreign Origin is 403
+on GET and POST; removing an agent, a job and a project each end their shells and nothing else's; a page 8 MB behind pauses `yes`
+(under 1 MB received) and resumes when it drains; closing the daemon ends a shell and the command under it; and a child daemon with
+`CONDUCTOR_TOKEN` set refuses the socket without the right `?token=` and the credential, exactly as `/ws` does. If no PTY loads, the run
+prints a `SKIP:` line and checks only the fallback. Web `agent/verify.ts` (the tab mounts `Xterm` when available and the runner
+otherwise, the runner is not mounted beside a working terminal, tabs, first-visit open, URL, frames, reconnect delay, close codes, copy
+key, palette in both themes at 4.5:1 with sixteen distinct colours, tokens-only CSS, the hotkey guard, the Vite `/ws` proxy, the two pinned
+packages) and `spawn/verify.ts`. `vite build` passes.
 
 ### Amendment 111 — post-merge, applied. **Pause everything until a time; send a message to an agent at a time.**
 

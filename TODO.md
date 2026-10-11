@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 119.
+  green `make test` (decided 30 Sep). The next amendment is 120.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -89,39 +89,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   or more agents; one agent needs no orchestrator.*
 
 ## Wave 9: decided, not yet built
-
-- [ ] **A full terminal on macOS and Ubuntu (Amendment 112).** Asked for (9 Oct): "a full
-  terminal capability... the terminal is lack luster." **Windows is dropped (10 Oct):** nothing is
-  built or tested for it, and the plan's Windows parts (§8, phase 4, D9, question 4) no longer
-  apply.
-  - **Today:** the Agent screen's **›_ terminal** tab is a command runner (Amendment 58): it runs
-    `$SHELL -c <command>` with no stdin, `TERM=dumb`, no colour and the escape codes stripped, so
-    nothing interactive works (`daemon/src/session/terminal.ts:77-79`,
-    `web/src/agent/Terminal.tsx`). Its output goes to every tab as JSON frames through the hub.
-  - **Design, accepted by default on 9 Oct** (you declined the question round and said
-    "continue"): [ADR 0009](docs/adr/0009-default-branch-terminal-methodology.md) §2, cut down from
-    [docs/plans/full-terminal.md](docs/plans/full-terminal.md).
-    - `@lydell/node-pty` behind `daemon/src/terminal/pty.ts`, which returns null if it fails to
-      load. xterm.js (`@xterm/xterm`, `addon-fit`) in a new `web/src/agent/Xterm.tsx`, on the
-      terminal tab, with `cwd` set to the job's worktree.
-    - Routes `POST` and `GET /api/agents/:agentId/terminals` and `DELETE /api/terminals/:id`,
-      and a socket `/ws/term/:id` with the same local-only guard and `?token=` check as `/ws`.
-      On attach the last 512 KB is replayed.
-    - Shell `$SHELL`, else `/bin/bash`, else `/bin/sh`, with `-l`; `TERM=xterm-256color`. At most
-      16 live terminals. A terminal ends when its shell exits, when it's closed, when its agent or
-      job is removed, or when the daemon stops. It is not killed when the page closes.
-    - The real terminal replaces the runner. The runner stays only as the fallback when no PTY
-      loads, with a banner saying why.
-  - **Started, not built.** The `w9/t` worktree (under `.conductor/wt/job_07af774e-eb6/.claude/
-    worktrees/w9-t`) has three uncommitted dependency edits (`@lydell/node-pty` 1.2.0-beta.15,
-    `@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0) and no code. `daemon/src/terminal/verify.ts`
-    is a stub already in `make test`.
-  - **A native module ships for the first time.** If it fails to load, the runner still works.
-  - **Later, not planned:** a Terminal dock under every screen (the plan's D8b), and shells that
-    survive a daemon restart.
-  Tests in `terminal/verify.ts`: DELETE kills the process, the cap of 16 holds, an unknown id gives
-  404, and a non-local Origin on the socket is refused. Web source checks in `agent/verify.ts`: the
-  tab mounts `Xterm` when available and the runner otherwise.
 
 - [ ] **Pick a git methodology per launch (Amendment 115).** Asked for (9 Oct): "let me specify
   what git branch methodology you should use." Spawn's isolation pills become three choices

@@ -21,7 +21,7 @@ import { useNavParams } from '../lib/nav.js';
 import { SCREEN, highlight, openAgent, openProject, recall } from '../shell/nav.js';
 import { agentTabs } from './tabs.js';
 import { useUnseenAgents } from '../lib/seen.js';
-import { TerminalPanel } from './Terminal.js';
+import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
 import { budgetOf } from '../shell/autonomy.js';
@@ -800,7 +800,7 @@ export function AgentScreen() {
           label="Resize the composer"
         />
 
-        {/* Reply, or run a command in this agent's folder (Amendment 58). */}
+        {/* Reply, or a terminal in this agent's folder (Amendments 58, 112). */}
         <div className="ag-bottom-tabs" role="tablist">
           <button type="button" role="tab" className="ag-bottom-tab" aria-selected={bottomTab !== 'terminal'} onClick={() => setBottomTab('reply')}>
             reply
@@ -810,7 +810,7 @@ export function AgentScreen() {
           </button>
         </div>
         <div className="ag-composer-wrap" style={{ height: `${composerH}px` }}>
-          {bottomTab === 'terminal' ? <TerminalPanel agent={agent} /> : <Composer agent={agent} />}
+          {bottomTab === 'terminal' ? <TermPanel agent={agent} /> : <Composer agent={agent} />}
         </div>
       </div>
 

@@ -57,6 +57,7 @@ import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
+import { terminals } from '../terminal/service.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
 import {
   handOffLine,
@@ -617,6 +618,7 @@ export class Supervisor implements AgentControl {
 
     const keptOnDisk: string[] = [];
     for (const job of jobs) {
+      terminals().closeJob(job.id); // Amendment 112
       const { path } = await workspace().forget(job.id);
       keptOnDisk.push(path ?? job.worktreePath);
       // Track D may not be initialised in a harness that builds only some
@@ -2053,6 +2055,7 @@ export class Supervisor implements AgentControl {
 
     await this.terminateAgent(agentId);
     this.#resumeWanted.delete(agentId);
+    terminals().closeAgent(agentId); // its shells go with it (Amendment 112)
     deleteAgent(this.#db, agentId);
 
     // Paused only because this one was stopped: removing it is the say-so to go on.
@@ -2093,6 +2096,7 @@ export class Supervisor implements AgentControl {
 
     await this.terminateJob(jobId);
     for (const agent of agentsForJob(this.#db, jobId)) this.#resumeWanted.delete(agent.id);
+    terminals().closeJob(jobId); // and its agents' shells (Amendment 112)
 
     /*
      * THE OTHER TRACKS' ROWS GO TOO, and leaving this out was a real bug rather than an

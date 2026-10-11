@@ -19,6 +19,7 @@
     "@fastify/static": "^8.0.4",
     "@fastify/websocket": "^11.0.2",
     "@github/copilot-sdk": "1.0.16",
+    "@lydell/node-pty": "1.2.0-beta.15",
     "chokidar": "^4.0.3",
     "fastify": "^5.2.0",
     "marked": "^15.0.6",

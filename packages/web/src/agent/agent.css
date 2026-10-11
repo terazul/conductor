@@ -1504,6 +1504,153 @@ a.ag-files-p:focus-visible {
   font-family: var(--sans);
 }
 
+/* ── the full terminal (Amendment 112) ─────────────────────────────────────── */
+
+.ag-termx {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--well);
+}
+
+/* The command runner under the banner takes what is left, not the whole panel. */
+.ag-termx > .ag-term {
+  height: auto;
+  flex: 1;
+}
+
+.ag-termx-banner {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surf2);
+  color: var(--ink2);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.ag-termx-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+}
+
+.ag-termx-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.ag-termx-tab[data-on='true'] {
+  background: var(--surf2);
+  border-color: var(--line);
+}
+
+.ag-termx-tab button,
+.ag-termx-new {
+  font: inherit;
+  background: none;
+  border: none;
+  color: var(--ink3);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.ag-termx-tab[data-on='true'] button[role='tab'] {
+  color: var(--ink);
+}
+
+.ag-termx-tab .ag-termx-x {
+  padding: 2px 6px;
+}
+
+.ag-termx-tab button:hover,
+.ag-termx-new:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surf3);
+}
+
+.ag-termx-new:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ag-termx-note {
+  margin-left: auto;
+  padding-left: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.ag-termx-note code {
+  font-family: var(--mono);
+  color: var(--ink2);
+}
+
+.ag-termx-wait {
+  padding: 10px;
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+}
+
+.ag-termx-ended {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+}
+
+.ag-xterm-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The terminal fills the panel; fit works out how many cells that is. */
+.ag-xterm {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0 0 8px;
+  overflow: hidden;
+}
+
+.ag-xterm[data-state='reconnecting'],
+.ag-xterm[data-state='gone'] {
+  opacity: 0.6;
+}
+
+.ag-xterm-bar {
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surf3);
+  color: var(--ink2);
+  font-size: var(--fs-2xs);
+}
+
+.ag-xterm-bar.is-fail {
+  color: var(--fail);
+}
+
 /*
  * A model id on an engine that isn't Claude (Amendment 80): typed or picked from what
  * the engine lists, so a text field rather than the Claude picker.

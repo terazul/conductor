@@ -46,6 +46,23 @@ import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib
 import { readFileSync } from 'node:fs';
 import { SETTINGS_KEY, dollarsLine, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 import { sleepControl } from './sleep.js';
+import {
+  TERM_TOKENS,
+  endedLine,
+  fallbackBanner,
+  inputFrame,
+  mix,
+  nextSelected,
+  reconnectDelay,
+  resizeFrame,
+  socketEnd,
+  tabLabel,
+  tabTitle,
+  termSocketUrl,
+  wantsCopy,
+  xtermTheme,
+  type Tokens,
+} from './term.js';
 import { rerunControl, rerunDone, rerunSentence, roleList } from './rerun.js';
 import { ALL_ON, NONE, capabilitiesOf, controlsFor, offersMode, parseTokens, providerModelProblem, tokenWords } from '../lib/providers.js';
 
@@ -524,7 +541,7 @@ console.log('\nTerminal · a command runner in the agent\'s folder (Amendment 58
   );
   check('and a click in the output goes back to it', /input\.current\?\.focus\(\)/.test(term));
   const src = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
-  check('the Agent screen offers it beside reply', /bottomTab === 'terminal' \? <TerminalPanel agent=\{agent\} \/>/.test(src));
+  check('the Agent screen offers it beside reply, through the panel that falls back to it (Amendment 112)', /bottomTab === 'terminal' \? <TermPanel agent=\{agent\} \/>/.test(src));
 }
 
 console.log('\nMermaid · a diagram in a reply is drawn, its source kept (Amendment 60)');
@@ -717,6 +734,94 @@ console.log('\n· a scheduled message opens to its whole text (Amendment 118)');
   check('open, it shows the whole message, when it goes and when it was scheduled', /\{open\.has\(m\.id\) && \(/.test(sched) && /<div className="ag-sched-body">\{m\.text\}<\/div>/.test(sched) && /m\.createdAt/.test(sched));
   check('the whole text keeps its line breaks and scrolls when long', /\.ag-sched-body \{[^}]*white-space: pre-wrap;[^}]*overflow-y: auto;/.test(css));
   check('cancel stays its own button beside it', /className="ag-sched-x"/.test(sched));
+}
+
+console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
+{
+  const id = 'term_ab12';
+  check('the socket is on the page\'s host, ws or wss by its protocol', termSocketUrl(id, { protocol: 'http:', host: 'localhost:5173' }) === 'ws://localhost:5173/ws/term/term_ab12' && termSocketUrl(id, { protocol: 'https:', host: 'c.example' }) === 'wss://c.example/ws/term/term_ab12');
+  check('and carries ?token= when the build has one, encoded', termSocketUrl(id, { protocol: 'http:', host: 'h' }, 'a b&c') === 'ws://h/ws/term/term_ab12?token=a%20b%26c');
+  check('keys and the size go down as the two JSON frames the daemon reads', inputFrame('ls\r') === '{"t":"in","d":"ls\\r"}' && resizeFrame(120, 33) === '{"t":"resize","cols":120,"rows":33}');
+  check('a dropped socket retries at 0.5, 1, 2, 4, 8 s, then every 10', [0, 1, 2, 3, 4, 5, 9].map(reconnectDelay).join(',') === '500,1000,2000,4000,8000,10000,10000');
+  check('1000 is the shell ending, 4404 a terminal that is gone, anything else a dropped line', socketEnd(1000) === 'ended' && socketEnd(4404) === 'gone' && socketEnd(1006) === 'dropped' && socketEnd(1001) === 'dropped');
+
+  const t = (n: string, o: Partial<{ exited: boolean; exitCode: number | null }> = {}) => ({ id: n, cwd: '/w', startedAt: '2026-10-10T10:00:00Z', exited: false, exitCode: null, ...o });
+  const three = [t('a'), t('b', { exited: true, exitCode: 3 }), t('c')];
+  check('tabs read "terminal 1", "terminal 2 (exited)"', tabLabel(three[0]!, 0) === 'terminal 1' && tabLabel(three[1]!, 1) === 'terminal 2 (exited)');
+  check('a tab says its folder and when it started, and how it ended', tabTitle(three[0]!) === '/w · started 2026-10-10T10:00:00Z' && /exited with 3/.test(tabTitle(three[1]!)));
+  check('the tab chosen stays chosen; if it is gone, the newest; with none, none', nextSelected(three, 'b') === 'b' && nextSelected(three, 'zzz') === 'c' && nextSelected(three, null) === 'c' && nextSelected([], 'a') === null);
+  check('an ended shell says so, and its code when it was not 0', endedLine({ exitCode: 0 }) === 'The shell ended.' && endedLine({ exitCode: null }) === 'The shell ended.' && endedLine({ exitCode: 3 }) === 'The shell ended with exit code 3.');
+  const banner = fallbackBanner('The terminal library (@lydell/node-pty) did not load on linux-x64: boom.');
+  check('the banner gives the reason, then what is shown instead', banner === 'The terminal library (@lydell/node-pty) did not load on linux-x64: boom. This is the command runner instead: one command at a time, with no input.', banner);
+  check('and has words even when the daemon gave none', /^It is not available on this machine\. This is the command runner/.test(fallbackBanner(undefined)));
+
+  const key = (o: Partial<{ type: string; key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }>) => ({ type: 'keydown', key: 'C', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, ...o });
+  check('Ctrl-Shift-C copies on Linux; Ctrl-C alone is the shell\'s interrupt, and ⌘C is the browser\'s', wantsCopy(key({}), false) && !wantsCopy(key({ shiftKey: false, key: 'c' }), false) && !wantsCopy(key({ ctrlKey: false, metaKey: true }), true) && !wantsCopy(key({}), true) && !wantsCopy(key({ type: 'keyup' }), false));
+
+  // ── colour, from the tokens, in both themes ──
+  check('mix moves one colour toward another', mix('#000000', '#ffffff', 0.5) === '#808080' && mix('#102030', '#102030', 0.7) === '#102030' && mix('#ff0000', '#0000ff', 0) === '#ff0000');
+  const css = readFileSync(new URL('../../../shared/src/tokens.css', import.meta.url), 'utf8');
+  const block = (selector: string): Map<string, string> => {
+    const at = css.indexOf(`${selector} {`);
+    const body = at === -1 ? '' : css.slice(at, css.indexOf('}', at));
+    return new Map([...body.matchAll(/--([a-z0-9-]+):\s*(#[0-9a-f]{6})\s*;/gi)].map((m) => [m[1]!, m[2]!]));
+  };
+  const darkTokens = block(':root');
+  const lightTokens = new Map([...darkTokens, ...block(":root[data-theme='light'], [data-theme='light']")]);
+  const lum = (hex: string): number => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const ratio = (a: string, b: string): number => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+  for (const [name, tokens] of [['dark', darkTokens], ['light', lightTokens]] as const) {
+    const have = Object.fromEntries(TERM_TOKENS.map((n) => [n, tokens.get(n)])) as Record<string, string | undefined>;
+    check(`${name}: every token the palette is made from is in tokens.css`, TERM_TOKENS.every((n) => have[n] !== undefined), TERM_TOKENS.filter((n) => have[n] === undefined).join(', '));
+    const theme = xtermTheme(have as Tokens, name) as Record<string, string>;
+    const bg = theme['background']!;
+    check(`${name}: the background is the well, the text colour is --ink`, bg === tokens.get('well') && theme['foreground'] === tokens.get('ink'));
+    // Black in a dark theme and white in a light one sit near the background on purpose.
+    const nearBg = name === 'dark' ? 'black' : 'white';
+    const colours = ['foreground', 'cursor', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite', name === 'dark' ? 'white' : 'black'];
+    const low = colours.filter((c) => ratio(theme[c]!, bg) < 4.5).map((c) => `${c} ${ratio(theme[c]!, bg).toFixed(2)}`);
+    check(`${name}: every colour a program prints in reads at 4.5:1 or better on the background`, low.length === 0, low.join('; '));
+    check(`${name}: ${nearBg} stays near the background, the way ANSI ${nearBg} is meant to`, ratio(theme[nearBg]!, bg) < 2, ratio(theme[nearBg]!, bg).toFixed(2));
+    const sixteen = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'].map((c) => theme[c]!);
+    check(`${name}: sixteen colours, each different, all #rrggbb`, new Set(sixteen).size === 16 && sixteen.every((c) => /^#[0-9a-f]{6}$/.test(c)), sixteen.join(' '));
+    check(`${name}: the selection is visible against the text and the background`, ratio(theme['selectionBackground']!, bg) > 1.2 && ratio(theme['foreground']!, theme['selectionBackground']!) >= 4.5, `${ratio(theme['selectionBackground']!, bg).toFixed(2)} / ${ratio(theme['foreground']!, theme['selectionBackground']!).toFixed(2)}`);
+  }
+
+  // ── the tab, from the source ──
+  const panel = readFileSync(new URL('./TermPanel.tsx', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('./Xterm.tsx', import.meta.url), 'utf8');
+  const agentCss = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('when the daemon says available, the tab mounts Xterm on the terminal chosen', /<XtermView key=\{shown\.id\} termId=\{shown\.id\}/.test(panel) && /const shown = list\.terminals\.find\(\(t\) => t\.id === selected\)/.test(panel));
+  check('when it says not, the tab shows the old command runner under a banner with the reason', /if \(!list\.available\) \{[\s\S]*?\{fallbackBanner\(list\.reason\)\}[\s\S]*?<TerminalPanel agent=\{agent\} \/>/.test(panel));
+  check('the runner is not shown beside a working terminal', (panel.match(/<TerminalPanel /g) ?? []).length === 1);
+  check('the Agent screen mounts the panel on its terminal tab, not the runner', /bottomTab === 'terminal' \? <TermPanel agent=\{agent\} \/>/.test(screen) && !/<TerminalPanel/.test(screen));
+  check('tabs: one per terminal, a + to open another, a × to close one, and the first visit opens one', /list\.terminals\.map\(\(t, i\) =>/.test(panel) && /className="ag-termx-new"/.test(panel) && /className="ag-termx-x"/.test(panel) && /!autoOpened\.has\(agent\.id\)/.test(panel));
+  check('a terminal closed on purpose stays closed: the first-visit open is once per agent, and not at all where one was already open', /autoOpened\.add\(agent\.id\)/.test(panel) && /if \(r\.terminals\.length > 0\) autoOpened\.add\(asked\)/.test(panel));
+  check('the exited one says how, and offers a new terminal', /shown\?\.exited &&/.test(panel) && /↻ new terminal/.test(panel));
+  check('Xterm draws with xterm.js and fits the panel', /import \{ Terminal \} from '@xterm\/xterm'/.test(view) && /import \{ FitAddon \} from '@xterm\/addon-fit'/.test(view) && /new ResizeObserver/.test(view) && /import '@xterm\/xterm\/css\/xterm\.css'/.test(view));
+  check('output is binary into the terminal; keys and size go down as frames', /t\.write\(new Uint8Array\(e\.data\)\)/.test(view) && /binaryType = 'arraybuffer'/.test(view) && /t\.onData\(\(d\) => send\(inputFrame\(d\)\)\)/.test(view) && /t\.onResize\(/.test(view) && /send\(resizeFrame\(t\.cols, t\.rows\)\)/.test(view));
+  check('each attach starts from a clean screen, since the daemon replays the whole buffer', /s\.onopen = \(\) => \{[\s\S]*?t\.reset\(\)/.test(view));
+  check('a dropped line retries; a close the daemon meant does not', /socketEnd\(e\.code\)/.test(view) && /reconnectDelay\(attempt\)/.test(view) && /if \(why !== 'dropped'\)/.test(view));
+  check('leaving the tab lets go of the socket but does not end the shell: Xterm never closes one', !/closeTerminal/.test(view) && /socket\?\.close\(\)/.test(view) && /t\.dispose\(\)/.test(view));
+  check('the theme follows the app: tokens read from CSS, and re-applied when it changes', /getPropertyValue\(`--\$\{n\}`\)/.test(view) && /\}, \[theme\]\)/.test(view) && /term\.current\.options\.theme = xtermTheme\(readTokens\(\), theme\)/.test(view));
+  const termCss = agentCss.slice(agentCss.indexOf('the full terminal (Amendment 112)'));
+  check('both themes read: the new styles use tokens only, no colour of their own', termCss.length > 200 && !/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(termCss) && !/#[0-9a-fA-F]{3,8}\b|style=\{/.test(panel));
+  const main = readFileSync(new URL('../main.tsx', import.meta.url), 'utf8');
+  check('the app\'s single-key hotkeys stay out of the terminal: xterm types into a textarea, which they skip', /\/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test\(target\.tagName\)\) return;/.test(main) && /\/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test\(target\.tagName\)/.test(screen));
+  const vite = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8');
+  check('and in development /ws/term goes through the proxy that /ws does, upgraded', /'\/ws': \{ target: DAEMON, ws: true/.test(vite));
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { dependencies: Record<string, string> };
+  check('the two packages are declared, pinned', pkg.dependencies['@xterm/xterm'] === '6.0.0' && pkg.dependencies['@xterm/addon-fit'] === '0.11.0');
 }
 
 console.log(

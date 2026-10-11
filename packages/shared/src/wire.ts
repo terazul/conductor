@@ -911,3 +911,39 @@ export interface ApiError {
 
 export const WS_PATH = '/ws';
 export const DEFAULT_PORT = 7777;
+
+// ── A full terminal (Amendment 112) ──────────────────────────────────────────
+
+/** A terminal in an agent's folder: a real shell on a pseudo-terminal, kept by the daemon. */
+export interface TermInfo {
+  id: string;
+  /** Where its shell started: the agent's job folder. */
+  cwd: string;
+  startedAt: string;
+  /** The shell has ended. It stays listed, with its last output, until closed. */
+  exited: boolean;
+  exitCode: number | null;
+}
+
+/** `GET /api/agents/:agentId/terminals`. `available: false` says why, and the runner is shown instead. */
+export interface TermListResponse {
+  available: boolean;
+  reason?: string;
+  terminals: TermInfo[];
+}
+
+/** `POST /api/agents/:agentId/terminals`. The size is the panel's, so the prompt is drawn at it. */
+export interface TermCreateRequest {
+  cols?: number;
+  rows?: number;
+}
+
+export interface TermCreateResponse {
+  id: string;
+}
+
+/** What the page sends down `/ws/term/:id`: keys and paste, and the panel's size. Output comes back as binary. */
+export type TermClientFrame = { t: 'in'; d: string } | { t: 'resize'; cols: number; rows: number };
+
+/** `/ws/term/:id`, the socket for one terminal. */
+export const TERM_WS_PREFIX = '/ws/term/';
