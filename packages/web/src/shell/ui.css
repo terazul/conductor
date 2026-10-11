@@ -21,16 +21,28 @@
 
 /* ── crumb ─────────────────────────────────────────────────────────────────── */
 
-/* Where you are (Amendment 97), the same on every screen (Amendment 107). */
+/* Where you are (Amendment 97), the same on every screen (Amendment 107). `--crumb` is its
+   backdrop, and the border is mixed from it: `--here` unless the screen has its own. */
 .ui-crumb {
+  --crumb: var(--here);
   font-family: var(--mono);
   font-size: var(--fs-md);
   color: var(--ink2);
   white-space: nowrap;
-  background: var(--here);
-  border: 1px solid color-mix(in srgb, var(--here) 60%, var(--ink3));
+  background: var(--crumb);
+  border: 1px solid color-mix(in srgb, var(--crumb) 60%, var(--ink3));
   border-radius: 5px;
   padding: 3px 10px;
+}
+
+/* The Project and Agent screens each have their own backdrop (Amendment 127), so the label
+   reads differently on each at a glance. Fleet and every other screen stay on `--here`. */
+.ui-crumb.is-project {
+  --crumb: var(--here-project);
+}
+
+.ui-crumb.is-agent {
+  --crumb: var(--here-agent);
 }
 
 .ui-crumb b {

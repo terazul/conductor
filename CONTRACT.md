@@ -196,6 +196,55 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 127 — post-merge, applied. **The Project and Agent screens each have their own backdrop for the label at the top.**
+
+Shared (`tokens.css`) and web (`shell/ui.css`, `fleet/project.tsx`, `agent/agent.tsx`,
+`agent/agent.css` (a comment), `lib/verify.ts`, `lib/verify-crumb.ts`), and `docs/MANUAL.md`.
+No behaviour, wire or daemon change, no migration. A TODO.md item (7 Oct, "Project and Agent,
+beyond the label"; its one remaining bullet): "one backdrop colour per screen, so you can tell
+Project from Agent at a glance." It finishes Amendments 97 and 107, which put the label on one
+backdrop, `--here`, on every screen.
+- **Two new tokens, both themes**, next to `--here`: `--here-project` (`#002a35` dark, `#c4ecf9`
+  light; a petrol blue) and `--here-agent` (`#4d283e` dark, `#f5cfe3` light; a wine rose).
+  Neither hue is a status colour (§5.1), nor `--you`'s violet: the status hues are red (`--fail`),
+  amber (`--need`), green (`--done`), teal (`--live`), `--queue`'s blue-grey and `--idle`'s grey, and
+  the two sit at about 220° and 345° on the colour wheel (OKLCH), clear of all of them. They
+  are not equal to any of them either, and a check says so.
+- **`--here` stays** for Fleet, Needs You, Preview, Files and Branches, unchanged (`#1f3047` /
+  `#d6e0f0`). Only the Project and Agent labels moved.
+- **One class still draws the label.** `.ui-crumb` (`shell/ui.css`) now reads its backdrop from
+  `--crumb`, which is `--here` by default, and mixes its border from `--crumb` the way Amendment
+  97 did (60% of the backdrop, 40% `--ink3`). `.ui-crumb.is-project` and `.ui-crumb.is-agent`
+  each set `--crumb` and nothing else, so the Agent button's hover border (`.ag-crumb:hover`,
+  `agent.css`) still wins as before. `project.tsx` is `ui-crumb is-project` and `agent.tsx` is
+  `ui-crumb ag-crumb is-agent`. The text cue (`project / role`, `project / ⑂ branch`) is unchanged.
+- **Apart without colour vision.** The hues differ, and so does the lightness, as far as the
+  contrast floor lets it (below). Luminance ratio between each pair, dark then light: `--here`
+  and `--here-project` 1.14 / 1.06; `--here` and `--here-agent` 1.07 / 1.06; `--here-project`
+  and `--here-agent` 1.22 / 1.12. In both themes the Agent backdrop sits on the prominent side
+  of `--here` (lighter in dark, darker in light) and the Project backdrop on the quiet side.
+- **Checked**: `lib/verify.ts` fails unless `--ink`, `--ink2` and `--ink3` are at least 4.5:1 on
+  each of the three backdrops in both themes (Amendment 97's check, now over `--here-project`
+  and `--here-agent` too), that the three backdrops are three different colours, that none is
+  a status colour or `--you`, and that any two differ in lightness by at least 1.04:1. The
+  inks on `--here-project` are 12.3, 7.5 and 5.6 in dark and 13.9, 7.7 and 5.1 in light; on
+  `--here-agent` they are 10.1, 6.1 and 4.6 in dark and 12.4, 6.9 and 4.6 in light. A token
+  missing from the light theme fails the existing "none leaks through" check.
+  `lib/verify-crumb.ts` section A now reads `--crumb`, E reads `is-agent`, and a new section F
+  checks the border mix, the two modifier rules, that the hover rule is not outranked, that
+  Project and Agent carry their class, and that no other screen does.
+- **Why the lightness spread is small.** The label's `/` and `project` text use `--ink3`,
+  which must stay 4.5:1 on the backdrop. In the dark theme that caps a backdrop at about 3.6% of
+  white's luminance, and `--here` is already at 2.9%; in the light theme the floor is about 68%
+  and `--here` is at 74%. So the three can only be a few percent apart in lightness, and the
+  hue carries most of the difference.
+- **Not done**: the screens were not looked at in a browser, in either theme (nobody could from
+  here). The colours were only rendered as flat swatches, to see the hues. Needs You's third header
+  (`project / role` for the request in focus) stays on `--here`, so it no longer matches the
+  Agent screen it came from, as Amendment 107 said it would; if it should, it is one class
+  (`is-agent`) on `attention/route.tsx`, with one line in `verify-crumb.ts` F. Other screens
+  that name a project (Preview, Files, Branches) stay on `--here`.
+
 ### Amendment 126 — post-merge, applied. **The built-in roles are told how to work, and how to close.**
 
 Web only (`spawn/personas.ts`, the three briefs in `spawn/presets.ts`, `spawn/verify.ts`), and

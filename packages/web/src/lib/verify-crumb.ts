@@ -26,9 +26,10 @@ const src = (path: string): string => readFileSync(new URL(path, import.meta.url
 console.log('\nA · one shared crumb, on `--here`, in shell/ui.css');
 {
   const ui = src('../shell/ui.css');
+  // Amendment 127: the backdrop is `--crumb`, which is `--here` unless the screen has its own.
   check(
-    '.ui-crumb exists with background: var(--here)',
-    /\.ui-crumb\s*\{[^}]*background:\s*var\(--here\)[^}]*\}/.test(ui),
+    '.ui-crumb exists with background: var(--crumb), and --crumb is var(--here) by default',
+    /\.ui-crumb\s*\{[^}]*--crumb:\s*var\(--here\)\s*;[^}]*background:\s*var\(--crumb\)[^}]*\}/.test(ui),
   );
 }
 
@@ -89,7 +90,31 @@ console.log('\nD · every crumb in the markup carries the shared class');
 console.log('\nE · the Agent crumb-as-button keeps ag-crumb alongside the shared class');
 {
   const agent = src('../agent/agent.tsx');
-  check('agent.tsx:611 is "ui-crumb ag-crumb"', /className="ui-crumb ag-crumb"/.test(agent));
+  check('agent.tsx has "ui-crumb ag-crumb is-agent"', /className="ui-crumb ag-crumb is-agent"/.test(agent));
+}
+
+console.log('\nF · the Project and Agent screens have their own backdrop; every other screen stays on `--here` (Amendment 127)');
+{
+  const ui = src('../shell/ui.css');
+  check(
+    'the border is still mixed 60% from the backdrop and 40% --ink3, as Amendment 97 had it',
+    /\.ui-crumb\s*\{[^}]*border:\s*1px solid color-mix\(in srgb, var\(--crumb\) 60%, var\(--ink3\)\)[^}]*\}/.test(ui),
+  );
+  const rule = (cls: string): string => ui.match(new RegExp(`\\.ui-crumb\\.${cls}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+  check('.ui-crumb.is-project sets --crumb to --here-project', /--crumb:\s*var\(--here-project\)\s*;/.test(rule('is-project')), rule('is-project'));
+  check('.ui-crumb.is-agent sets --crumb to --here-agent', /--crumb:\s*var\(--here-agent\)\s*;/.test(rule('is-agent')), rule('is-agent'));
+  check(
+    'and they set nothing else, so the agent button\'s hover border (agent.css) is not outranked',
+    rule('is-project').trim().split(';').filter(Boolean).length === 1 && rule('is-agent').trim().split(';').filter(Boolean).length === 1,
+  );
+  check('the hover border on the agent button is still there', /\.ag-crumb:hover\s*\{[^}]*border-color:/.test(src('../agent/agent.css')));
+
+  const crumbs = (path: string): string[] => src(path).match(/className="[^"]*crumb[^"]*"/g) ?? [];
+  check('Project\'s label is "ui-crumb is-project"', crumbs('../fleet/project.tsx').join('|') === 'className="ui-crumb is-project"', crumbs('../fleet/project.tsx').join('|'));
+  check('Agent\'s label is "ui-crumb ag-crumb is-agent"', crumbs('../agent/agent.tsx').join('|') === 'className="ui-crumb ag-crumb is-agent"', crumbs('../agent/agent.tsx').join('|'));
+  const others = ['../fleet/fleet.tsx', '../attention/route.tsx', '../preview/route.tsx', '../files/route.tsx', '../files/FilePane.tsx', '../branches/route.tsx'];
+  const strays = others.filter((p) => /\bis-(project|agent)\b/.test(crumbs(p).join(' ')));
+  check('Fleet, Needs You, Preview, Files and Branches keep --here', strays.length === 0, strays.join(', '));
 }
 
 console.log(failures === 0 ? '\ncrumb verify: PASS\n' : `\ncrumb verify: FAIL — ${failures} check(s) failed.\n`);

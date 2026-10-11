@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 127.
+  green `make test` (decided 30 Sep). The next amendment is 128.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -118,12 +118,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 ## Files
 
 ## Seeing what's happening
-
-- [ ] **Project and Agent, beyond the label.** Asked for (7 Oct). The label at the top has its
-  own backdrop now (Amendment 97), and the top bar's **Project** and **Agent** tabs read
-  louder (Amendment 95). Still open:
-  - one backdrop colour per screen, so you can tell Project from Agent at a glance. Today
-    both use `--here` (`packages/shared/src/tokens.css`).
 
 - [ ] **An agent's own cap doesn't go back to zero at midnight.** Asked for (8 Oct), with
   the status bar's "$N today", which is fixed (Amendment 103: the daemon now tells open pages

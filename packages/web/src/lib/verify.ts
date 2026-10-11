@@ -444,6 +444,31 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
     // The project / agent label's backdrop (Amendment 97): its text, and the "/" between.
     const onHere = ['ink', 'ink2', 'ink3'].filter((t) => ratio(theme.get(t)!, theme.get('here')!) < 4.5);
     check(`${name}: the project / agent label is ≥ 4.5:1 on its backdrop`, theme.has('here') && onHere.length === 0, onHere.join(', '));
+    // The Project and Agent screens' own backdrops (Amendment 127): the same three inks on each.
+    for (const bd of ['here-project', 'here-agent']) {
+      const onIt = ['ink', 'ink2', 'ink3'].filter((t) => ratio(theme.get(t)!, theme.get(bd)!) < 4.5);
+      check(
+        `${name}: the label is ≥ 4.5:1 on --${bd}, its screen's backdrop`,
+        theme.has(bd) && onIt.length === 0,
+        onIt.map((t) => `--${t} ${ratio(theme.get(t)!, theme.get(bd)!).toFixed(2)}`).join(', '),
+      );
+    }
+    // Three screens, three backdrops: --here (Fleet and the rest), --here-project, --here-agent.
+    // Different colours, none a status colour (§5.1: those mean one thing and are never
+    // decoration), and apart in lightness as well as hue so they tell apart without colour vision.
+    const BACKDROPS = ['here', 'here-project', 'here-agent'];
+    const hexes = BACKDROPS.map((b) => (theme.get(b) ?? '').toLowerCase());
+    check(`${name}: the three label backdrops are three different colours`, new Set(hexes).size === 3, hexes.join(' '));
+    const clash = BACKDROPS.flatMap((b) =>
+      ['live', 'need', 'fail', 'done', 'queue', 'idle', 'you']
+        .filter((st) => (theme.get(st) ?? '').toLowerCase() === (theme.get(b) ?? '').toLowerCase())
+        .map((st) => `--${b} is --${st}`),
+    );
+    check(`${name}: no label backdrop is a status colour (or --you)`, clash.length === 0, clash.join(', '));
+    const close = [[0, 1], [0, 2], [1, 2]]
+      .filter(([i, j]) => ratio(hexes[i!]!, hexes[j!]!) < 1.04)
+      .map(([i, j]) => `--${BACKDROPS[i!]} and --${BACKDROPS[j!]} ${ratio(hexes[i!]!, hexes[j!]!).toFixed(3)}`);
+    check(`${name}: any two label backdrops differ in lightness by at least 1.04:1`, close.length === 0, close.join('; '));
   }
 
   // The filled `live`/`done` tags (Amendment 93): named on their own so a

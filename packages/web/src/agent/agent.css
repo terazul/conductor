@@ -1004,7 +1004,8 @@ a.ag-tool-subj:focus-visible {
 
 /* ── crumb as a button ─────────────────────────────────────────────────────── */
 
-/* A button back to the project, drawn as the label (.ui-crumb): its backdrop, border and size. */
+/* A button back to the project, drawn as the label (.ui-crumb): its backdrop (--here-agent, from
+   `.is-agent`, Amendment 127), border and size. */
 .ag-crumb {
   cursor: pointer;
   font-family: var(--mono);

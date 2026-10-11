@@ -665,7 +665,7 @@ export function AgentScreen() {
         <div className="fl-panehead">
           <button
             type="button"
-            className="ui-crumb ag-crumb"
+            className="ui-crumb ag-crumb is-agent"
             onClick={() => openProject(agent.projectId)}
           >
             {project?.name ?? agent.projectId}

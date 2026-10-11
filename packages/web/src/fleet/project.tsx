@@ -419,7 +419,7 @@ export function ProjectScreen() {
       {/* ── lanes + dock ── */}
       <div className="fl-pane">
         <div className="fl-panehead">
-          <span className="ui-crumb">
+          <span className="ui-crumb is-project">
             <b>{project.name}</b>
             {job && (
               <>
