@@ -196,6 +196,99 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 126 — post-merge, applied. **The built-in roles are told how to work, and how to close.**
+
+Web only (`spawn/personas.ts`, the three briefs in `spawn/presets.ts`, `spawn/verify.ts`), and
+`docs/MANUAL.md` and `docs/plans/role-definitions.md`. The daemon and `packages/shared` are not
+touched, and there is no migration. A TODO.md item (asked 8 Oct, decided 10 Oct: all seven at
+once): "Better instructions for the built-in roles". It builds option B of
+[docs/plans/role-definitions.md](docs/plans/role-definitions.md), which is refreshed (it numbered
+itself Amendment 96, its line numbers predated the merge) and marked built.
+- **What changed.** The developer, validator, reviewer, scribe, debugger and analyst each have a new
+  `description`, `brief` and `systemPrompt`; before, only the architect had a system prompt and the
+  other six had a one-sentence brief. The architect keeps its prompt and gains one rule. Each system
+  prompt is a line of purpose, five or six rules about *how* to work, and a closing line "End with:"
+  and the headings of its reply. A prompt is 830 to 1,340 characters, about 300 tokens.
+- **Why the system prompt.** A preset keeps its own brief and takes only the persona's system
+  prompt, skills and tool rules, so the system prompt is the one field that reaches every stack
+  (Claude appends it to Claude Code's, `backends/claude.ts`; Copilot and OpenRouter send it as an
+  appended system message, `backends/copilot.ts`).
+- **The closing headings are the hand-off.** Since Amendment 104 an agent that others wait for calls
+  `hand_off` with a `summary`, and since Amendment 101 the next agent is given that summary first,
+  whole and outside the cap, above the whole conversation. So every closing line ends "If you have
+  the `hand_off` tool, that is its `summary`; otherwise it is your last reply" (one helper,
+  `endWith`). The agent that nobody waits for has no tool, and the headings are its last reply.
+  The headings: architect Context, Options, Decision, Consequences, Plan, Risks and open
+  questions; developer Changed, How I checked, Departures from the plan, Left undone; validator
+  Verdict, Checks, Failures, Not covered; reviewer Verdict, Findings (ranked), What I checked; scribe
+  Updated, Corrected, Not documented and why; debugger Symptom, Reproduction, Root cause, Evidence,
+  Fix belongs at, Regression test, Confidence; analyst Overview, Map, Flows, Decisions encoded, Open
+  questions, Not read.
+- **`HANDOFF_CAP` is gone** (Amendment 101 replaced it with about a quarter of the next model's
+  window). A `summary` is printed whole, up to `HANDOFF_SUMMARY_MAX` (20,000 characters), outside
+  that cap, and the last reply is never cut or dropped, so a reviewer's ranked findings are not cut.
+- **The architect.** Its added rule is about its hand-off, not "your last reply" as the proposal
+  said: "The developer starts from your hand-off, so make the plan stand alone: name every file, and
+  don't refer to 'above'." Its last line, "Write the result as: …", is now "End with: …" with the
+  same six headings (bold now), so that all seven end the same way. This is the one edit to the
+  architect beyond the one rule.
+- **Commits.** Checked, not assumed: nothing in Conductor commits for an agent or asks one to. A
+  job's worktree is cut with `git worktree add -B <branch>`; the Changes list and the Files badges
+  are what differs from `HEAD` (`workspace/changes.ts`, `git status` and `numstat`), so a commit by
+  an agent would empty them; the Branches screen (Amendment 109) merges commits only ("Uncommitted
+  work in the branch's worktree isn't merged"), and its **Commit…** commits a branch's uncommitted
+  work with the user's message. So the developer's rule stays: "Don't commit, push or rewrite git
+  history unless the job says to", and now says why (the changes stay in the working tree, for the
+  user to review and commit and for the agents after it to read).
+- **The reviewer reads the working tree.** Because the developer leaves its work uncommitted, the
+  proposal's "read the diff against the base branch" would miss it (and a new file is not in
+  `git diff`). The reviewer is told to read `git status` and `git diff`, and any commits on the
+  branch since it forked.
+- **The question tool.** The developer's rule names it for both engines, "AskUserQuestion, or
+  ask_user", as Amendment 100's line does. The architect's existing line still says AskUserQuestion.
+- **Three preset briefs are aligned**: the full stack's validator ("Change tests, not the code under
+  test."), its reviewer ("Report findings with file and line, most severe first. Change no files."
+  for "Report findings; do not rewrite."), and the bug fix's developer ("Fix the root cause the
+  debugger identified. Add the regression test it describes, and check that it fails before your
+  fix and passes after."). Every other preset brief is as it was. Tools and model tiers are
+  unchanged for all seven, and `push` is left to the launch: only the architect says anything
+  about it (`push: false`, as before).
+- **Decided, where the item did not settle it**: the validator reports and does not fix the code;
+  nothing gates on the reviewer's verdict (the scribe waits for the reviewer finishing, not for it
+  approving); the model tiers stay; all seven at once, not four first; the `hand_off` and
+  whole-context items were already built (Amendments 101 and 104), so the closing headings are the
+  summary.
+- **No migration.** Only edits that differ from a built-in are stored (`withPersona`), so someone
+  who never edited a built-in gets the new text at once, and someone who did keeps their edit.
+  **Reset** gives them the new text. Checked in `spawn/verify.ts` §19: a validator whose brief was
+  edited keeps the brief and gets the new system prompt; a replaced system prompt is kept, and
+  Reset gives the new one.
+- **Checked** (`spawn/verify.ts` §19): every built-in has a non-empty `systemPrompt` whose last
+  line starts "End with: " and ends with the `hand_off`/last reply sentence; each role's headings
+  are in its closing line, in bold and in order; a prompt is under 3,000 characters; the architect
+  keeps its rules and has the new one, and the stale "last reply is handed to" is gone; every
+  description is one short line; the limits that are words are in the words (developer: no commit,
+  push or rewrite; validator: tests and fixtures only; reviewer, debugger, analyst: change no files;
+  scribe: documentation only); tiers and tool rules are as they were and no built-in but the
+  architect sets `push`; the three aligned preset briefs, and the others as they were; every
+  preset, and a Custom row, sends the persona's system prompt; a reading role is still pinned
+  read-only; the edit and Reset cases above. Two older checks quoted what changed and were updated:
+  §16's validator description, and §13's "a persona with nothing to append sends no system prompt"
+  (which used the validator as its example of a persona without one; it now edits the validator's
+  prompt down to nothing first).
+- **Docs.** `docs/MANUAL.md` has a table of what each built-in is told and what it ends with, after
+  the Personas paragraph. `docs/plans/role-definitions.md` is the text as built, with a "Changes
+  from the first draft" section.
+- **Not done**: the comparison the TODO item asked for before keeping the text, running the bug fix
+  and full stacks on one known bug with the old prompts and the new and comparing the hand-offs. It
+  needs real agent runs and spend, so there is still no evidence that the new text does better.
+  Nothing enforces "tests only" or "docs only" (option C of the proposal): they are words, and the
+  diff is where to check. Whether an agent really puts the headings in its `hand_off` summary is up
+  to the model; nothing checks it. The paragraph of `docs/MANUAL.md` that says "only the final reply
+  is passed on … a reply over 8,000 characters is cut" (under "You'll see the agent plan before
+  launching") was already stale after Amendment 101 and is not changed here. Not run by this lane:
+  `make test`, the daemon smoke test, the daemon's `session/verify.ts` (nothing daemon-side changed).
+
 ### Amendment 125 — post-merge, applied. **An agent's budget is coloured as it fills, like the daily budget.**
 
 Web only (`shell/spend.ts`, `shell/autonomy.ts`, the details panel, the composer, the Agent

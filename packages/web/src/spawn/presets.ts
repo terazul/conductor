@@ -72,7 +72,7 @@ export const PRESETS: Preset[] = [
         does: 'tests what was built',
         brief:
           "Write tests for the behaviour described above and in the architect's plan, run them " +
-          'against what the developer built, and report what fails.',
+          'against what the developer built, and report what fails. Change tests, not the code under test.',
         dependsOnRoles: ['developer'],
       },
       {
@@ -81,7 +81,7 @@ export const PRESETS: Preset[] = [
         does: 'spec + quality review',
         brief:
           "Review the change against the instruction and against the architect's plan for correctness " +
-          'and quality. Report findings; do not rewrite.',
+          'and quality. Report findings with file and line, most severe first. Change no files.',
         dependsOnRoles: ['architect', 'developer', 'validator'],
       },
       {
@@ -108,7 +108,9 @@ export const PRESETS: Preset[] = [
         role: 'developer',
         model: 'sonnet',
         does: 'fixes at the source',
-        brief: 'Fix the root cause the debugger identified. Add a regression test.',
+        brief:
+          'Fix the root cause the debugger identified. Add the regression test it describes, and check that it ' +
+          'fails before your fix and passes after.',
         dependsOnRoles: ['debugger'],
       },
     ],

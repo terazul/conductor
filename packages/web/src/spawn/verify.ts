@@ -628,7 +628,9 @@ console.log('\n13 · presets and Custom rows take their personas (Amendment 68)'
   check('a preset role carries its persona: id, system prompt, skills', developer.persona === 'developer' && developer.systemPrompt === 'Prefer pure functions.' && developer.skills?.join() === 'tdd', JSON.stringify(developer));
   check("the persona's tool rules go over the pills: MCP on", developer.autonomy.allowedTools.includes('mcp__*') && !defaultPills()['mcp']);
   check("and the preset keeps its own brief and tier, not the persona's", developer.brief === full.roles.find((r) => r.role === 'developer')!.brief && developer.model === tiersNow.sonnet);
-  check('a persona with nothing to append sends no system prompt or skills', specs.find((x) => x.role === 'validator')?.persona === 'validator' && !('systemPrompt' in specs.find((x) => x.role === 'validator')!) && !('skills' in specs.find((x) => x.role === 'validator')!));
+  // Every built-in has a system prompt since Amendment 126, so "nothing to append" is a validator edited down to none.
+  const quietSpecs = toAgentSpecs(full, defaultPills(), 5, undefined, {}, tiersNow, {}, undefined, personasFrom(withPersona(raw, { ...personaFor(personas, 'validator')!, systemPrompt: '' })));
+  check('a persona with nothing to append sends no system prompt or skills', quietSpecs.find((x) => x.role === 'validator')?.persona === 'validator' && !('systemPrompt' in quietSpecs.find((x) => x.role === 'validator')!) && !('skills' in quietSpecs.find((x) => x.role === 'validator')!));
   const reviewer = specs.find((x) => x.role === 'reviewer')!;
   check("a reading role's persona can't give it MCP or shell", !reviewer.autonomy.allowedTools.includes('mcp__*') && !reviewer.autonomy.allowedTools.includes('Bash') && reviewer.autonomy.disallowedTools.includes('Write'));
   const writer = personasFrom(withPersona(null, { ...personaFor(BUILT_IN_PERSONAS, 'reviewer')!, tools: { write: true, bash: true } }));
@@ -743,7 +745,7 @@ console.log('\n16 · fewer built-in personas, and the full pipeline reads the pl
   check('builder, documenter and uiux are no longer built-ins, nor offered as roles', ['builder', 'documenter', 'uiux'].every((id) => !ids.includes(id) && !KNOWN_ROLES.includes(id)));
   check("Custom's first row is a developer", FIRST_ROLE.role === 'developer');
   const dev = personaFor(BUILT_IN_PERSONAS, 'developer')!;
-  check('the developer persona is on sonnet; the validator persona tests what was built', dev.model === 'sonnet' && personaFor(BUILT_IN_PERSONAS, 'validator')?.description === 'Tests what was built and reports what fails.');
+  check('the developer persona is on sonnet; the validator persona tests what was built', dev.model === 'sonnet' && personaFor(BUILT_IN_PERSONAS, 'validator')?.description === 'Proves the change works: writes the missing tests, runs them all, reports what fails.');
 
   const old = JSON.stringify({ edits: { builder: { systemPrompt: 'Old builder.' }, documenter: { brief: 'Old docs.', name: 'documenter' }, uiux: { brief: 'Old ui.' } } });
   const moved = personasFrom(old);
@@ -1096,6 +1098,96 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const ticked = toggleWait(full.roles, 2, 'architect');
   check('so does a tick, and taking it back does not', ticked[2]?.dependsOnRoles?.join() === 'architect,developer' && labelFor(ticked) === `${full.label} (changed)` && labelFor(toggleWait(ticked, 2, 'architect')) === full.label);
   check('what is sent is that label; a Custom setup keeps its own name (it has no preset to differ from)', /preset: presetLabel\(preset\.label, changed\),/.test(route) && /const changed = !isCustom && !sameStack\(preset\.roles, base\.roles\);/.test(route));
+}
+
+console.log('\n20 · better instructions for the built-in roles (Amendment 126)');
+{
+  const ids = ['architect', 'developer', 'validator', 'reviewer', 'scribe', 'debugger', 'analyst'];
+  const lastLine = (p: string): string => p.trimEnd().split('\n').at(-1) ?? '';
+  check('there are seven built-ins, in that order', BUILT_IN_PERSONAS.map((p) => p.id).join() === ids.join());
+  check(
+    'every one has a system prompt, and it ends in an "End with:" line',
+    BUILT_IN_PERSONAS.every((p) => p.systemPrompt.trim() !== '' && /^End with: /.test(lastLine(p.systemPrompt))),
+    BUILT_IN_PERSONAS.filter((p) => !/^End with: /.test(lastLine(p.systemPrompt))).map((p) => p.id).join(),
+  );
+  check(
+    'and that line says the headings are the summary of hand_off when the agent has the tool, and its last reply when it has not',
+    BUILT_IN_PERSONAS.every((p) => /`hand_off` tool, that is its `summary`; otherwise it is your last reply\.$/.test(lastLine(p.systemPrompt))),
+  );
+  const HEADINGS: Record<string, string[]> = {
+    architect: ['Context', 'Options', 'Decision', 'Consequences', 'Plan', 'Risks and open questions'],
+    developer: ['Changed', 'How I checked', 'Departures from the plan', 'Left undone'],
+    validator: ['Verdict', 'Checks', 'Failures', 'Not covered'],
+    reviewer: ['Verdict', 'Findings', 'What I checked'],
+    scribe: ['Updated', 'Corrected', 'Not documented, and why'],
+    debugger: ['Symptom', 'Reproduction', 'Root cause', 'Evidence', 'Fix belongs at', 'Regression test', 'Confidence'],
+    analyst: ['Overview', 'Map', 'Flows', 'Decisions encoded', 'Open questions', 'Not read'],
+  };
+  check(
+    'each closes with its own headings, in bold and in order',
+    ids.every((id) => {
+      const line = lastLine(personaFor(BUILT_IN_PERSONAS, id)!.systemPrompt);
+      const at = HEADINGS[id]!.map((h) => line.indexOf(`**${h}`));
+      return at.every((n) => n >= 0) && at.every((n, i) => i === 0 || n > at[i - 1]!);
+    }),
+  );
+  check('the reviewer ranks findings and the debugger names a regression test', /\*\*Findings\*\* \(ranked\)/.test(lastLine(personaFor(BUILT_IN_PERSONAS, 'reviewer')!.systemPrompt)) && /\*\*Regression test\*\* \(what it should assert\)/.test(lastLine(personaFor(BUILT_IN_PERSONAS, 'debugger')!.systemPrompt)));
+  check(
+    'a system prompt is a few hundred tokens, not a page',
+    BUILT_IN_PERSONAS.every((p) => p.systemPrompt.length > 600 && p.systemPrompt.length < 3_000),
+    BUILT_IN_PERSONAS.map((p) => `${p.id} ${p.systemPrompt.length}`).join(', '),
+  );
+
+  // The architect keeps what it had, plus one rule; its old rule about "your last reply" went with Amendment 101 and 104.
+  const arch = personaFor(BUILT_IN_PERSONAS, 'architect')!;
+  check('the architect keeps its rules and gains the one about its hand-off', /Evidence first/.test(arch.systemPrompt) && /AskUserQuestion/.test(arch.systemPrompt) && /don't write the implementation/.test(arch.systemPrompt) && /The developer starts from your hand-off, so make the plan stand alone: name every file/.test(arch.systemPrompt));
+  check('and says nothing that is no longer so: the next agent is not given only your last reply', !/last reply is handed/i.test(arch.systemPrompt) && !/8,000/.test(BUILT_IN_PERSONAS.map((p) => p.systemPrompt).join('')));
+
+  // Descriptions and briefs: said on screen, so short; and each limit that is only words is in the words.
+  check('every description is one short line, and every brief says what to do', BUILT_IN_PERSONAS.every((p) => p.description.length > 20 && p.description.length < 100 && !/\n/.test(p.description) && p.brief.trim().length > 40));
+  const sp = (id: string): string => personaFor(BUILT_IN_PERSONAS, id)!.systemPrompt;
+  const br = (id: string): string => personaFor(BUILT_IN_PERSONAS, id)!.brief;
+  check('the developer follows the plan, runs the checks, and does not commit, push or rewrite history unless told', /follow it/.test(br('developer')) && /Run the project's checks/.test(br('developer')) && /Don't commit, push or rewrite git history unless the job says to/.test(sp('developer')));
+  check('the validator changes tests, not the code under test, and reports a bug it finds', /Change tests, not the code under test/.test(br('validator')) && /Change test files and fixtures only/.test(sp('validator')) && /don't fix it/.test(sp('validator')));
+  check('the reviewer changes no files, reads the working tree as well as commits, and ranks', /Change no files/.test(br('reviewer')) && /Change no files/.test(sp('reviewer')) && /git status/.test(sp('reviewer')) && /git diff/.test(sp('reviewer')) && /blocker, should fix or nit/.test(sp('reviewer')));
+  check('the scribe changes documentation only, and the code wins over the plan', /Change documentation only/.test(br('scribe')) && /Change documentation only/.test(sp('scribe')) && /source of truth/.test(sp('scribe')));
+  check('the debugger and the analyst change no files; the debugger writes no fix, the analyst cites every claim', /Change no files/.test(br('debugger')) && /Don't change the project's files/.test(sp('debugger')) && /Don't write the fix/.test(sp('debugger')) && /Change no files/.test(sp('analyst')) && /Cite file and line for every claim/.test(sp('analyst')));
+
+  // Tools and tiers are as they were, and push is the launch's: only the architect says anything about it.
+  const shape = (id: string): string => { const p = personaFor(BUILT_IN_PERSONAS, id)!; return `${p.model} ${JSON.stringify(p.tools)}`; };
+  check(
+    'tiers and tool rules are unchanged: the reading roles write nothing, the rest leave it to the launch',
+    shape('architect') === 'opus {"bash":true,"write":true,"network":true,"push":false}' && shape('developer') === 'sonnet {}' && shape('validator') === 'sonnet {}' && shape('scribe') === 'sonnet {}' &&
+      shape('reviewer') === 'opus {"write":false}' && shape('debugger') === 'opus {"write":false}' && shape('analyst') === 'opus {"write":false}',
+    ids.map(shape).join(' | '),
+  );
+  check('no built-in but the architect sets push', BUILT_IN_PERSONAS.every((p) => p.id === 'architect' || p.tools.push === undefined));
+
+  // The three preset briefs that were aligned, and the ones that were not.
+  const brief = (preset: string, role: string): string => presetById(preset).roles.find((r) => r.role === role)!.brief;
+  check('the full stack\'s validator changes tests, not the code under test, and still tests against the plan', /Change tests, not the code under test/.test(brief('full', 'validator')) && /architect's plan/.test(brief('full', 'validator')) && /what the developer built/.test(brief('full', 'validator')));
+  check('its reviewer reports findings with file and line, most severe first, and changes no files', /Report findings with file and line, most severe first\. Change no files\./.test(brief('full', 'reviewer')) && !/do not rewrite/.test(brief('full', 'reviewer')) && /architect's plan/.test(brief('full', 'reviewer')));
+  check("the bug fix's developer adds the regression test the debugger describes, and shows it fails before the fix", /regression test it describes/.test(brief('bugfix', 'developer')) && /fails before your fix and passes after/.test(brief('bugfix', 'developer')) && /root cause the debugger identified/.test(brief('bugfix', 'developer')));
+  check('the other presets\' briefs are as they were', brief('bugfix', 'debugger') === 'Find the root cause before proposing any fix. Report the cause with file and line evidence.' && brief('review', 'reviewer') === 'Review only. Report findings with file and line references. Change no files.' && brief('single', 'developer') === '' && /Change documentation only/.test(brief('analysis', 'scribe')) && /Change documentation only/.test(brief('analysis-only', 'scribe')));
+
+  // The system prompt is the one field that reaches every stack, since a preset keeps its own brief.
+  const every = personasFrom(null);
+  check(
+    'every preset sends each of its roles the persona\'s system prompt, so every agent in every stack is told how to close',
+    PRESETS.every((p) => toAgentSpecs(p, PERMISSIVE, 5, undefined, {}, {}, {}, undefined, every).every((a) => a.systemPrompt === personaFor(every, a.persona ?? a.role)!.systemPrompt && /^End with: /.test(lastLine(a.systemPrompt ?? '')))),
+  );
+  check('and a Custom row of a built-in persona does too', toAgentSpecs(toPreset('custom', 'x', [{ role: 'reviewer', brief: '', dependsOnRoles: [] }], every), PERMISSIVE, 5, undefined, {}, {}, {}, undefined, every)[0]!.systemPrompt === sp('reviewer'));
+  check('a reading role is still pinned read-only with its new prompt', toAgentSpecs(presetById('full'), PERMISSIVE, 5, undefined, {}, {}, {}, undefined, every).find((a) => a.role === 'reviewer')!.autonomy.disallowedTools.includes('Write'));
+
+  // No migration: an edit is kept, a built-in nobody edited is the new text, Reset gives it.
+  const mine = withPersona(null, { ...personaFor(every, 'validator')!, brief: 'My own validator brief.' });
+  const kept = personasFrom(mine);
+  check(
+    'someone who edited the validator\'s brief keeps it and gets the new system prompt; a built-in they never edited is the new text',
+    personaFor(kept, 'validator')?.brief === 'My own validator brief.' && personaFor(kept, 'validator')?.systemPrompt === sp('validator') && personaFor(kept, 'reviewer')?.systemPrompt === sp('reviewer') && !isEdited(personaFor(kept, 'reviewer')!),
+  );
+  const theirs = withPersona(null, { ...personaFor(every, 'developer')!, systemPrompt: 'Prefer pure functions.' });
+  check('someone who replaced a system prompt keeps theirs, and Reset gives them the new one', personaFor(personasFrom(theirs), 'developer')?.systemPrompt === 'Prefer pure functions.' && personaFor(personasFrom(resetPersona(theirs, 'developer')), 'developer')?.systemPrompt === sp('developer') && JSON.parse(mine).edits.validator && Object.keys(JSON.parse(mine).edits.validator).join() === 'brief');
 }
 
 console.log(

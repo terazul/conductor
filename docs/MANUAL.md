@@ -354,6 +354,30 @@ model. A persona with **write: off** reads only, and a reading role (reviewer, d
 analyst) never writes, whatever its persona says. Editing a persona changes what new
 launches and saved setups get. A running or sleeping agent keeps what it launched with.
 
+**What the built-in roles are told** (since 10 Oct, each has a system prompt; the text is in
+Settings → **Personas**). Every one is a line of purpose, a few rules about *how* to work, and
+a fixed ending, so what the next agent reads has the same shape every time:
+
+| Role | Its job | Its reply ends with |
+|---|---|---|
+| architect | a design someone can build from: evidence with file and line, options and their cost, a decision, a plan | Context, Options, Decision, Consequences, Plan, Risks and open questions |
+| developer | the smallest change that does the job, following the plan and the code around it, run through the project's typecheck and tests | Changed, How I checked, Departures from the plan, Left undone |
+| validator | evidence: writes the missing tests, runs the whole suite, and **reports** a bug it finds rather than fixing it | Verdict, Checks, Failures, Not covered |
+| reviewer | a verdict you can act on: what was asked first, then correctness and quality, findings ranked blocker, should fix or nit; changes no files | Verdict, Findings, What I checked |
+| scribe | documentation that is true today: the code wins over the plan, citations kept; documentation only | Updated, Corrected, Not documented, and why |
+| debugger | the root cause, proved in four steps (reproduce, isolate, cause, confirm); writes no fix | Symptom, Reproduction, Root cause, Evidence, Fix belongs at, Regression test, Confidence |
+| analyst | a map you can check: starts from the entry points, cites file and line for every claim; changes no files | Overview, Map, Flows, Decisions encoded, Open questions, Not read |
+
+Those headings are the **summary** an agent gives `hand_off` when others wait for it (see
+"Handing off to the next agent"), and its last reply when none do. The developer does not
+commit, push or rewrite history unless the job says to: its changes stay in the working
+tree, where **Files** shows them and the agents after it read them, and you commit them from
+**Branches** (**Commit…**). The reviewer's verdict is words in a reply; nothing waits for it or
+stops on it. The tools and models of the built-ins are as they were, and only the architect
+says anything about pushing (it never does). A stack's preset keeps its own brief, so the
+system prompt is what reaches every stack. If you had edited a built-in, you keep your edit;
+**reset** puts back the new text.
+
 **Several agents on one role.** In the plan preview, each row's last picker reads
 **1 agent**. Change it to **+ up to N helpers**, and that agent orchestrates:
 

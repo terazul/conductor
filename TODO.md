@@ -11,7 +11,7 @@ the last of it on 8 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 126.
+  green `make test` (decided 30 Sep). The next amendment is 127.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
@@ -138,41 +138,3 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   `TZ`), so it is your machine's zone unless the daemon is started under another.
 
 ## Agents
-
-- [ ] **Better instructions for the built-in roles.** Asked for (8 Oct). The new text for all
-  seven is already written, as option B of [docs/plans/role-definitions.md](docs/plans/role-definitions.md).
-  This item is building it.
-  - **Today:** only the architect has a system prompt (`spawn/personas.ts:63`). The developer,
-    validator, reviewer, scribe, debugger and analyst have a one-sentence brief
-    (`personas.ts:87-92`). A preset keeps its own brief and takes only the persona's system
-    prompt, skills and tool rules, so the system prompt is the one field that reaches every
-    stack. It is appended to Claude Code's own (`session/backends/claude.ts:231`) or sent as
-    Copilot's system message (`backends/copilot.ts:398`). The brief goes into the prompt after
-    "Your role is …" (`#promptFor`, `session/supervisor.ts`).
-  - **What changes:** `description`, `brief` and `systemPrompt` for six roles, and one rule
-    added to the architect's, in `personas.ts`. Each system prompt ends with a fixed set of
-    headings for its last reply ("End with: …"), since that reply is what the next agent reads.
-    Three preset briefs in `spawn/presets.ts` are aligned with them: the full stack's
-    validator and reviewer, and the bug fix's developer. Tools and models stay as they are.
-  - **No migration.** Only edits that differ from a built-in are stored, so someone who never
-    edited one gets the new text at once, and someone who did keeps their edit. **Reset**
-    gives them the new text.
-  - **The proposal needs a refresh first.** It numbers itself Amendment 96, which the merge
-    used (the next is 99), and its `presets.ts` line numbers predate that merge.
-  Decide:
-  - whether to settle the `hand_off` and whole-context items first. The closing headings are
-    what the next agent reads, and `hand_off`'s `summary` changes that. Should the `summary`
-    be the closing block? Also check `HANDOFF_CAP` (8,000 characters, `session/handoff.ts:18`):
-    a reviewer's ranked findings could be cut.
-  - whether jobs expect agents to commit in their worktrees. The developer prompt says not to
-    commit, push or rewrite history unless the job says to. Not checked yet.
-  - the proposal's own open questions: should every built-in say `push: false`, or leave it to
-    the launch (its default)? May the validator fix the code (it says no)? Should anything
-    gate on the reviewer's verdict (nothing does)? Do the model tiers stay?
-  - all seven at once, or the developer, validator, reviewer and debugger first. The scribe and
-    analyst already have workable preset briefs.
-  Tests in `spawn/verify.ts`: every built-in has a non-empty `systemPrompt` ending in an
-  "End with:" line, and any check that quotes an old brief or description is updated (grep
-  first). There is no evidence yet that the new text does better. Before keeping it, run the
-  bug fix and full stacks on one known bug with the old prompts and the new, and compare the
-  hand-offs.
