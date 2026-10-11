@@ -1008,7 +1008,7 @@ function Spawn() {
           })}
           {has.budget === 'usd' ? (
           <span className="sp-pill" aria-pressed={budgetPerAgent !== null}>
-            ⏱ stop each agent after $
+            ⏱ budget per agent $
             <input
               className="sp-input"
               style={{ width: '3.6em', marginLeft: 4, padding: '1px 5px' }}
@@ -1020,7 +1020,7 @@ function Spawn() {
           ) : (
             /* No dollars from this engine, so its cap is tokens, input plus output (Amendment 77). */
             <span className="sp-pill" aria-pressed={tokenCap !== null}>
-              ⏱ stop each agent after
+              ⏱ budget per agent
               <input
                 className="sp-input"
                 style={{ width: '4.2em', marginLeft: 4, marginRight: 4, padding: '1px 5px' }}

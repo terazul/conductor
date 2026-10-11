@@ -551,7 +551,7 @@ under **bypass permissions**. Their badge on Fleet cards, Project lanes and the 
 screen names the engine. Some things are different:
 
 - **Budgets are in tokens, not dollars.** Neither engine reports what a run cost, and
-  Conductor won't estimate it. The budget pill reads **stop each agent after 5M tokens**
+  Conductor won't estimate it. The budget pill reads **budget per agent 5M tokens**
   and counts input plus output tokens. Like a dollar budget it warns at that figure and
   stops the agent at twice it (§6). The agent's details say spend **not reported**.
   Fleet's **spend today** stays Claude's dollars only. OpenRouter still bills you, so
@@ -597,7 +597,7 @@ from then on, for the project; a different command still asks.
 | **allow git push** | Off adds a deny rule on `git push` that survives every mode. |
 | **allow network** | Off blocks WebFetch and WebSearch. |
 | **allow MCP tools** | Off (the default) means every MCP tool call waits for you. |
-| **⏱ stop each agent after $** | A lifetime budget for each agent, $25 by default. Leave it empty for no limit. Past it the agent keeps working and Needs You warns; it stops at twice the figure. See §6. |
+| **⏱ budget per agent $** | A lifetime budget for each agent, $25 by default. Leave it empty for no limit. Past it the agent keeps working and Needs You warns; it stops at twice the figure. See §6. |
 
 Whether file edits go ahead unattended is now set by the interaction mode above
 (**auto-accept edits**), not by a pill.
@@ -1091,7 +1091,7 @@ says so under the mode row while an agent is working.
 Each agent is a live Claude Code session billed at normal API rates. Several at
 once adds up quickly.
 
-- **Set a budget per agent** in Spawn: **⏱ stop each agent after $**, $25 by default.
+- **Set a budget per agent** in Spawn: **⏱ budget per agent $**, $25 by default.
   It's a lifetime figure for each agent, across all its runs, and the job's budget is the
   sum of its agents' budgets. **It warns; it doesn't stop.** Past its budget an agent keeps
   working, the composer says **over budget: $27 of $25 - a warning only; stops at $50**,

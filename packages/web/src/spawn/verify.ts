@@ -739,7 +739,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
-  check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span className="sp-pill" aria-pressed=\{budgetPerAgent !== null\}>\s*⏱ stop each agent after \$/.test(src) && /value=\{budgetTok\}/.test(src));
+  check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span className="sp-pill" aria-pressed=\{budgetPerAgent !== null\}>\s*⏱ budget per agent \$/.test(src) && /value=\{budgetTok\}/.test(src));
   check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && !listsRoles && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 
