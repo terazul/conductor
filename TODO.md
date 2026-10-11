@@ -88,47 +88,42 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
   are shown (Spawn, its Fleet lane, the agent tabs). It appears only when the stack has two
   or more agents; one agent needs no orchestrator.*
 
-## Wave 9: decided, not yet built
+## Housekeeping
 
-- [ ] **Clear out wave 9's worktrees and branches once its lanes are merged.** Found (10 Oct). The
-  job `job_07af774e-eb6` is `done`, but its folder `.conductor/wt/job_07af774e-eb6` (with `w9/d`,
-  `w9/m`, `w9/t` under `.claude/worktrees/`) and branch `conductor/job_07af774e-eb6` are still
-  there, and `conductor/job_91cc23e2-9b7` is a recreated folder. `w9/d` is merged. `w9/m` and `w9/t`
-  hold the two lanes above, which aren't started. **Ask first** which folders are still in use: a
-  `done` job's agent can be messaged again, and its folder is needed then (Needs You → recreate
-  folder makes it again from its branch, or from `main`, without anything that wasn't committed).
+- [ ] **Clear out wave 9's worktrees and branches.** Found (10 Oct). The job `job_07af774e-eb6` is
+  `done`, but its folder `.conductor/wt/job_07af774e-eb6` (with `w9/d`, `w9/m`, `w9/t` under
+  `.claude/worktrees/`) and branch `conductor/job_07af774e-eb6` are still there, and
+  `conductor/job_91cc23e2-9b7` is a recreated folder. Everything on them is on `main` (the terminal
+  and methodology lanes were rebuilt on other branches as 112 and 115). **Ask first** which folders
+  are still in use: a `done` job's agent can be messaged again, and its folder is needed then
+  (Needs You → recreate folder makes it again from its branch, or from `main`, without anything that
+  wasn't committed).
 
-## Loose ends and checks from Amendments 99–104
+## Checks that need a person
 
-- [ ] **Look at Amendments 99–104 in a browser, in both themes.** Found (10 Oct). `make test` passes
-  and the colour checks hold, but nobody has seen these. Look at:
-  - Spawn: the ↑ ↓ buttons and the drag grip on a preset's rows and a Custom setup's rows, the
-    **waits for** ticks on preset rows, and **↺ back to …** (99).
-  - The Agent screen: **↻ re-run after this** on an agent with agents after it, its armed state and
-    its banner (102).
-  - Needs You: the **Not handed off** card, **hand off**, and the summary box (104).
-  - The status bar: a tab left open past midnight reads $0.00 today (103). Moving the system clock
-    forward is enough to see it.
+- [ ] **Look at what was built in Amendments 99-127 in a browser, in both themes.** Found (10 Oct).
+  `make test` passes and the colour checks hold, but nobody has seen most of it.
+  - Spawn: the ↑ ↓ buttons, the drag grip and the **waits for** ticks on preset and Custom rows, and
+    **↺ back to …** (99); the three branch pills and the name box (115); the label backdrops of
+    the Project, Agent and Fleet screens side by side (127).
+  - Files: the **+** on a folder row and on a tree's heading, the name box, and an empty file (121).
+  - The Agent screen: the terminal tab (112; checked in headless Chrome on macOS in both themes,
+    not on Ubuntu, and `vim`, `htop` and `less` were not tried), **↻ re-run after this** and its
+    disabled state for a held agent (102, 120), the reconnecting banner (123), the over-budget line,
+    the budget colours in the composer, details bar and tab (124, 125).
+  - Fleet and Project: the **not handed off** chip (120) and the budget meter on each agent row (125).
+  - Needs You: the **Not handed off**, **Reconnecting** and **Over budget** cards (104, 123, 124).
+  - Metrics, key `8` (122).
+  - The status bar after midnight (103): a tab left open past midnight reads $0.00 today. Moving the
+    system clock forward is enough to see it. If what you saw not resetting was an agent's own
+    budget (the composer's "$4.10 of $25"), say so: those are lifetime caps by design (Amendment 77)
+    and a per-day cap was never confirmed.
 
 - [ ] **A re-run of a parked agent, tried against the real SDK (Amendment 102).** Found (10 Oct).
   A re-run resumes a session that ended on `tool_deferred` with a prompt. `sendMessage` already does
   that for a message, but only a fake backend has run it, and a real run costs money and needs a
-  person watching. Try it once on a real parked agent. The other loose ends of Amendments 99-104
-  were built in 115 and 120.
-## Files
+  person watching. Try it once on a real parked agent.
 
-## Seeing what's happening
-
-- [ ] **An agent's own cap doesn't go back to zero at midnight.** Asked for (8 Oct), with
-  the status bar's "$N today", which is fixed (Amendment 103: the daemon now tells open pages
-  when the day changes). What's left is the other budget you might have meant: an agent's or
-  job's own cap, the composer's "$4.10 of $25" (`budgetUsd`, `budgetTokens`). These are
-  lifetime caps by design (Amendment 77), so they never reset.
-  Decide:
-  - whether this is what you saw not resetting.
-  - if so, whether it becomes a per-day cap (spend since midnight), which changes what
-    "budget reached" means for a long-running agent, or stays a lifetime cap.
-  The day is the daemon's own time zone (`localDay` uses local `Date` parts, and nothing sets
-  `TZ`), so it is your machine's zone unless the daemon is started under another.
-
-## Agents
+- [ ] **Compare the new built-in role instructions with the old on one real bug (Amendment 126).**
+  Found (10 Oct). Run the bug fix and full stacks on one known bug with the old prompts and the new,
+  and compare the hand-offs. It needs real agent runs and spend, so it was not done.
