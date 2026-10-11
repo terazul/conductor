@@ -37,7 +37,9 @@ import { scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.js';
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, pillsWith, resetPersona, withPersona, withoutPersona } from './personas.js';
 import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, toPreset, withSetup, withoutSetup, type CustomRole } from './custom.js';
-import { chain, moveRow, onDefault, recheckWaits, rolesAbove, sameStack, toggleWait } from './order.js';
+import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
+import { DEFAULT_METHOD, METHODS, branchProblem, isolationOf, launchBody, methodFrom, methodReady, presetLabel } from './launch.js';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { ALL_ON, CLAUDE, NONE, capabilitiesOf, type Capabilities } from '../lib/providers.js';
 import { DEFAULT_BUDGET_TOKENS, autonomyOn, jobBudgetUsd, modeOn, specsOn } from './engine.js';
@@ -490,14 +492,14 @@ console.log("\n7 · Spawn starts from the Settings tab's launch defaults (Amendm
   check('with nothing set, the built-in defaults', JSON.stringify(none) === JSON.stringify(BUILT_IN), JSON.stringify(none));
   const kept: Record<string, string> = {
     [LAUNCH_KEYS.preset]: 'analysis',
-    [LAUNCH_KEYS.isolation]: 'branch',
+    [LAUNCH_KEYS.isolation]: 'named',
     [LAUNCH_KEYS.pills]: JSON.stringify({ allowBash: true, nonsense: true, network: 'yes' }),
     [LAUNCH_KEYS.budget]: '',
     [LAUNCH_KEYS.effort]: 'low',
     [LAUNCH_KEYS.model]: ' us.anthropic.claude-sonnet-5 ',
   };
   const d = launchDefaults((k) => kept[k] ?? null);
-  check('each one set is read', d.preset === 'analysis' && d.isolation === 'branch' && d.effort === 'low' && d.budget === '' && d.model === 'us.anthropic.claude-sonnet-5', JSON.stringify(d));
+  check('each one set is read', d.preset === 'analysis' && d.method === 'named' && d.effort === 'low' && d.budget === '' && d.model === 'us.anthropic.claude-sonnet-5', JSON.stringify(d));
   check('only real pills, only as booleans; the rest keep their default', d.pills['allowBash'] === true && !('nonsense' in d.pills) && d.pills['network'] === false && d.pills['acceptEdits'] === true, JSON.stringify(d.pills));
   const bad = launchDefaults((k) => ({ [LAUNCH_KEYS.preset]: 'gone', [LAUNCH_KEYS.isolation]: 'moon', [LAUNCH_KEYS.effort]: 'huge', [LAUNCH_KEYS.budget]: '-3', [LAUNCH_KEYS.pills]: '{nope' } as Record<string, string>)[k] ?? null);
   check('a value that is not one reads as the default, so Spawn always opens', JSON.stringify(bad) === JSON.stringify(BUILT_IN), JSON.stringify(bad));
@@ -507,7 +509,7 @@ console.log("\n7 · Spawn starts from the Settings tab's launch defaults (Amendm
   const round = launchDefaults((k) => launchPatch(d)[k] ?? null);
   check('and what it writes reads back the same', JSON.stringify(round) === JSON.stringify(d), JSON.stringify(round));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn reads them when it opens', /useState\(\(\) => launchDefaults\(readSetting\)\)/.test(src) && /useState<Isolation>\(start\.isolation\)/.test(src));
+  check('Spawn reads them when it opens', /useState\(\(\) => launchDefaults\(readSetting\)\)/.test(src) && /useState<Method>\(start\.method\)/.test(src));
 }
 
 console.log('\n8 · custom setups, built by hand and saved by name (Amendment 50)');
@@ -982,8 +984,122 @@ console.log('\n18 · move rows in Spawn to set who each agent waits for (Amendme
   check('the grip and the note read as --ink3, which clears 4.5:1 in both themes', /\.sp-grip \{[^}]*color: var\(--ink3\)/.test(css) && /\.sp-plan-note \{[^}]*color: var\(--ink3\)/.test(css));
 }
 
+console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by Amendment 99 (Amendment 115)');
+{
+  // The three choices, in the order they are numbered.
+  check('three choices: the default branch in the folder, a branch you name, a new branch per launch', METHODS.map((m) => m.id).join() === 'in_place,named,worktree' && METHODS.length === 3);
+  check("'branch in place' is no longer offered", !METHODS.some((m) => (m.id as string) === 'branch'));
+  check('the git ones are marked as needing a repo; the folder as-is is not, and is the one drawn as a hazard', METHODS.filter((m) => m.requiresGit).map((m) => m.id).join() === 'named,worktree' && METHODS.find((m) => m.id === 'in_place')?.danger === true && !METHODS.some((m) => m.id !== 'in_place' && m.danger));
+  check('what each sends: (1) in_place, (2) and (3) a worktree', isolationOf('in_place') === 'in_place' && isolationOf('named') === 'worktree' && isolationOf('worktree') === 'worktree');
+
+  // The request body.
+  const agents = toAgentSpecs(presetById('full'), defaultPills(), 5, undefined, {}, { sonnet: 'us.anthropic.claude-sonnet-5', opus: 'us.anthropic.claude-opus-4-1', haiku: 'h' });
+  const base = { projectId: 'prj_1', prompt: '  do it \n', branch: '', preset: 'Full pipeline', agents, budgetUsd: 20 };
+  const one = launchBody({ ...base, method: 'in_place' });
+  check('(1) sends isolation in_place and no branch', one.isolation === 'in_place' && !('branch' in one), JSON.stringify(one).slice(0, 160));
+  const two = launchBody({ ...base, method: 'named', branch: '  feature/refresh-tokens ' });
+  check('(2) sends a worktree and the branch you named, trimmed', two.isolation === 'worktree' && two.branch === 'feature/refresh-tokens');
+  const three = launchBody({ ...base, method: 'worktree', branch: 'left/over' });
+  check('(3) sends a worktree and no branch, even with a name left in the field', three.isolation === 'worktree' && !('branch' in three));
+  check('the rest of the body is what it was: the project, the trimmed prompt, the preset, the agents and the cap', [one, two, three].every((b) => b.projectId === 'prj_1' && b.prompt === 'do it' && b.preset === 'Full pipeline' && b.agents === agents && b.budgetUsd === 20));
+  check('(1) and (3) are exactly the keys they were before this amendment', Object.keys(one).sort().join() === 'agents,budgetUsd,isolation,preset,projectId,prompt' && Object.keys(three).sort().join() === Object.keys(one).sort().join());
+
+  // (2) needs a name.
+  check('(2) cannot launch without a name, or with a blank one', !methodReady('named', '') && !methodReady('named', '   '));
+  check('or with one git would refuse', ['two words', 'a..b', '-x', 'x.lock', 'x/', '/x', '@{-1}', 'HEAD', 'a~b'].every((n) => !methodReady('named', n)));
+  check("or with the project's default branch", !methodReady('named', 'main', ['main']) && methodReady('named', 'main', ['develop']));
+  check('with a good name it can', methodReady('named', 'feature/refresh-tokens') && methodReady('named', ' fix/123 '));
+  check('(1) and (3) never wait for a name', methodReady('in_place', '') && methodReady('worktree', ''));
+  check('an empty name asks for one; a bad one says what is wrong with it', branchProblem('') === 'Name the branch.' && /spaces/.test(branchProblem('a b') ?? '') && /default branch/.test(branchProblem('main', ['main']) ?? ''));
+
+  // The same rule as git's, on a list of names. '@' and 'refs/…' pass git's own rule and are refused on purpose.
+  const names = ['feature/x', 'a', 'a-b_c.d', 'fix/123', 'ä/ö', 'x.y', 'x/y', 'v1.2.3', 'wip', 'main', 'conductor/job_1', '', 'two words', 'a..b', '-x', '--evil', '@{-1}', 'HEAD', 'x.lock', 'a/b.lock', 'x/', '/x', 'x//y', '.x', 'a/.b', 'a@{b', 'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a[b', 'a\\b', 'a\tb', 'a.', 'a/b.', '@/x'];
+  const git = (n: string): boolean => {
+    try {
+      return execFileSync('git', ['check-ref-format', '--branch', n], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() === n && n.length > 0;
+    } catch {
+      return false;
+    }
+  };
+  const disagree = names.filter((n) => git(n) !== (branchProblem(n) === null));
+  check("the screen's check agrees with `git check-ref-format --branch` on every name", disagree.length === 0, JSON.stringify(disagree));
+  check("'@' and a leading refs/ are refused here although git's rule lets them by", branchProblem('@') !== null && branchProblem('refs/heads/x') !== null);
+
+  // The setting.
+  check('the setting holds the values it always held for (1) and (3), and (2) is new', methodFrom('in_place') === 'in_place' && methodFrom('worktree') === 'worktree' && methodFrom('named') === 'named');
+  check("and 'branch', which is not offered, or anything else, or nothing, reads as the built-in default", ['branch', 'moon', '', null].every((v) => methodFrom(v) === DEFAULT_METHOD) && DEFAULT_METHOD === 'worktree' && BUILT_IN.method === 'worktree');
+  const dm = launchDefaults((k) => (k === LAUNCH_KEYS.isolation ? 'named' : null));
+  check('choosing (2) as the default is kept, with no name: Spawn starts with it empty and will not launch', dm.method === 'named' && launchPatch(dm)[LAUNCH_KEYS.isolation] === 'named' && !Object.keys(dm).some((k) => /branch|name/i.test(k)) && !methodReady(dm.method, ''));
+  check('the built-in default writes nothing', launchPatch({ ...BUILT_IN, method: 'worktree' })[LAUNCH_KEYS.isolation] === null && LAUNCH_KEYS.isolation === 'conductor.launch.isolation');
+
+  // The screens.
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const settings = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
+  const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
+  check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
+  check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
+  check('the launch waits for the name, and for nothing else new', /!customBad && methodOk;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
+  check('what is sent is launchBody, with the method and the name', /body: launchBody\(\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route));
+  check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
+  check('the name is cleared after a launch on it, as the prompt is: the branch is taken now', /if \(method === 'named'\) setBranchName\(''\);/.test(route));
+  check('Settings offers the same three, and keeps the choice under the same key', /METHODS\.map\(\(m\) => \(/.test(settings) && /put\(\{ method: m\.id \}\)/.test(settings) && !/ISOLATION_WORDS/.test(settings));
+  check('the wire already has the field, and says it goes with a worktree', /branch\?: string;/.test(wire) && /Only with `isolation: 'worktree'`/.test(wire));
+
+  // Gap 1: removing a Custom row re-chains the rows that waited for it.
+  const stack = [
+    { role: 'architect', dependsOnRoles: [] as string[] },
+    { role: 'developer', dependsOnRoles: ['architect'] },
+    { role: 'validator', dependsOnRoles: ['developer'] },
+    { role: 'reviewer', dependsOnRoles: ['validator'] },
+  ];
+  const waitsOf = (rows: { role: string; dependsOnRoles?: string[] }[]): string => rows.map((r) => `${r.role}<${(r.dependsOnRoles ?? []).join('+')}`).join(' ');
+  check('removing a row in a chain: what waited for it now waits for the row above it', waitsOf(removeRow(stack, 2)) === 'architect< developer<architect reviewer<developer', waitsOf(removeRow(stack, 2)));
+  check("removing the first row: what waited for it waits for no one, and the rest keep their chain", waitsOf(removeRow(stack, 0)) === 'developer< validator<developer reviewer<validator', waitsOf(removeRow(stack, 0)));
+  check('removing the last row changes nothing else', waitsOf(removeRow(stack, 3)) === 'architect< developer<architect validator<developer');
+  const fan = [
+    { role: 'a', dependsOnRoles: [] as string[] },
+    { role: 'b', dependsOnRoles: [] as string[] },
+    { role: 'c', dependsOnRoles: ['a', 'b'] },
+    { role: 'd', dependsOnRoles: ['b'] },
+    { role: 'e', dependsOnRoles: ['a'] },
+  ];
+  check('a row that waited for it and others keeps the others; one that waited for exactly it waits for the row above; one that did not wait for it is left alone', waitsOf(removeRow(fan, 1)) === 'a< c<a d<a e<a', waitsOf(removeRow(fan, 1)));
+  check('a row two above is untouched, and the removed row\'s own waits are not inherited', waitsOf(removeRow(stack, 1)) === 'architect< validator<architect reviewer<validator');
+  check('out of range gives the rows back, and the original is never changed', waitsOf(removeRow(stack, 9)) === waitsOf(stack) && waitsOf(removeRow(stack, -1)) === waitsOf(stack) && stack[2]!.dependsOnRoles.join() === 'developer' && removeRow(stack, 1) !== stack);
+  let bad = '';
+  for (const rows of [stack, fan, presetById('full').roles, presetById('analysis').roles] as { role: string; dependsOnRoles?: string[] }[][]) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const out = removeRow(rows, i);
+      out.forEach((r, k) => {
+        const above = out.slice(0, k).map((x) => x.role);
+        if (!(r.dependsOnRoles ?? []).every((d) => above.includes(d))) bad ||= `${i}: ${waitsOf(out)}`;
+      });
+    }
+  }
+  check('whichever row goes, every wait points at a row above it, so the daemon takes it (Amendment 98)', bad === '', bad);
+  const customStack: CustomRole[] = [
+    { role: 'architect', brief: '', dependsOnRoles: [] },
+    { role: 'developer', brief: '', dependsOnRoles: ['architect'] },
+    { role: 'validator', brief: '', dependsOnRoles: ['developer'] },
+  ];
+  const cut = removeRole(customStack, 1);
+  check('removeRole is that rule on a Custom setup, and the result still launches', cut.map((r) => `${r.role}<${r.dependsOnRoles.join()}`).join(' ') === 'architect< validator<architect' && customProblems(cut).length === 0 && customProblems(removeRole(customStack, 0)).length === 0);
+  check("the editor's remove button calls it", /onRemove=\{\(\) => onChange\(removeRole\(roles, i\)\)\}/.test(readFileSync(new URL('./CustomSetup.tsx', import.meta.url), 'utf8')));
+
+  // Gap 2: the preset label is honest.
+  check('a preset launched as it is keeps its own name; a changed one says so', presetLabel('Full pipeline', false) === 'Full pipeline' && presetLabel('Full pipeline', true) === 'Full pipeline (changed)');
+  const full = presetById('full');
+  const labelFor = (rows: typeof full.roles): string => presetLabel(full.label, !sameStack(rows, full.roles));
+  check('moving a row changes it, moving it back does not', labelFor(moveRow(full.roles, 0, 2)) === `${full.label} (changed)` && labelFor(moveRow(moveRow(full.roles, 0, 2), 2, 0)) === full.label);
+  // validator waits for developer; ticking architect as well is a change, and unticking it again is not.
+  const ticked = toggleWait(full.roles, 2, 'architect');
+  check('so does a tick, and taking it back does not', ticked[2]?.dependsOnRoles?.join() === 'architect,developer' && labelFor(ticked) === `${full.label} (changed)` && labelFor(toggleWait(ticked, 2, 'architect')) === full.label);
+  check('what is sent is that label; a Custom setup keeps its own name (it has no preset to differ from)', /preset: presetLabel\(preset\.label, changed\),/.test(route) && /const changed = !isCustom && !sameStack\(preset\.roles, base\.roles\);/.test(route));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

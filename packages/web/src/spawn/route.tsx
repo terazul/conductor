@@ -29,7 +29,6 @@ import type {
   Autonomy,
   CreateJobResponse,
   EffortLevel,
-  Isolation,
   Job,
   Project,
 } from '@conductor/shared';
@@ -86,6 +85,7 @@ import {
 } from './custom.js';
 import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
+import { METHODS, branchProblem, launchBody, methodReady, presetLabel, type Method } from './launch.js';
 import { useReorder } from './reorder.js';
 import { WaitsFor } from './RoleRow.js';
 import { PERSONAS_KEY, personasFrom } from './personas.js';
@@ -200,45 +200,6 @@ function PickerRow({
   );
 }
 
-interface IsolationDef {
-  id: Isolation;
-  label: string;
-  note?: string;
-  hint: string;
-  danger?: boolean;
-  /**
-   * This isolation creates a branch, so it cannot run in a folder with no git.
-   * Amendment 10 made that a real refusal in the daemon; without this flag the UI
-   * offers it anyway and the user finds out from a 400 at launch, five decisions
-   * after the one that caused it.
-   */
-  requiresGit?: boolean;
-}
-
-const ISOLATIONS: IsolationDef[] = [
-  {
-    id: 'worktree',
-    label: 'new worktree',
-    note: '.conductor/wt/<job>',
-    hint: 'A separate checkout on its own branch. Your working tree is untouched.',
-    requiresGit: true,
-  },
-  {
-    id: 'branch',
-    label: 'branch in place',
-    hint: 'A new branch in this checkout. Agents and you share the same files.',
-    requiresGit: true,
-  },
-  {
-    id: 'in_place',
-    label: 'this folder, as-is',
-    note: 'no branch, no undo',
-    hint:
-      "Agents edit your files where they are — on whatever branch you're on, or no branch at all when the folder isn't a repo. The only isolation that needs no git, and the only one with nothing to revert to.",
-    danger: true,
-  },
-];
-
 function Spawn() {
   const projects = useProjects();
   const { slots } = useStatusBar();
@@ -249,7 +210,9 @@ function Spawn() {
   // Outlives the screen: leaving Spawn or a reload keeps it (Amendment 64).
   const [prompt, setPrompt] = useDraft('spawn:prompt');
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [isolation, setIsolation] = useState<Isolation>(start.isolation);
+  /** Which git methodology this launch uses (Amendment 115), and (2)'s branch name. */
+  const [method, setMethod] = useState<Method>(start.method);
+  const [branchName, setBranchName] = useState('');
   const [presetId, setPresetId] = useState(start.preset);
   const [pills, setPills] = useState<PillState>(start.pills);
   const [budget, setBudget] = useState(start.budget);
@@ -372,24 +335,34 @@ function Spawn() {
   const needsGit = isRepo === false;
 
   /*
-   * Move off an isolation this project cannot run, and move back when it can.
+   * Move off a method this project cannot run, and move back when it can.
    *
    * The `forced` ref is what makes the second half safe. Without it, choosing a
    * non-repo project and then a repo one would leave `in_place` selected — the one
-   * isolation with nothing to revert to — because the user never chose it and has no
-   * reason to look. Restoring only what we changed avoids overriding a deliberate
-   * choice of `in_place` on a real repo.
+   * choice with nothing to revert to — because the user never chose it and has no
+   * reason to look. It holds what the user had, and restores that, only when we were the
+   * ones who changed it: a deliberate choice of `in_place` on a real repo is left alone.
    */
-  const forced = useRef(false);
+  const forced = useRef<Method | null>(null);
   useEffect(() => {
-    if (needsGit && isolation !== 'in_place') {
-      forced.current = true;
-      setIsolation('in_place');
-    } else if (isRepo === true && forced.current) {
-      forced.current = false;
-      setIsolation('worktree');
+    if (needsGit && method !== 'in_place') {
+      forced.current = method;
+      setMethod('in_place');
+    } else if (isRepo === true && forced.current !== null) {
+      const back = forced.current;
+      forced.current = null;
+      setMethod(back);
     }
-  }, [needsGit, isRepo, isolation]);
+  }, [needsGit, isRepo, method]);
+
+  /*
+   * (2) needs a name git will take, and the project's default branch is not one. The daemon
+   * has the last word (a branch checked out elsewhere is only known there); this spares the
+   * round trip for the rest.
+   */
+  const refused = useMemo(() => (selected ? [selected.defaultBranch] : []), [selected]);
+  const methodOk = methodReady(method, branchName, refused);
+  const nameProblem = method === 'named' && branchName.trim() !== '' ? branchProblem(branchName, refused) : null;
 
   const budgetPerAgent = useMemo(() => {
     const n = Number(budget);
@@ -435,7 +408,9 @@ function Spawn() {
 
   const free = Math.max(0, slots.total - slots.used);
   const willQueue = Math.max(0, specs.length - free);
-  const canLaunch = prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad;
+  const canLaunch = prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && methodOk;
+  /** This launch's rows are not the preset's own, so its label says so (Amendment 115). */
+  const changed = !isCustom && !sameStack(preset.roles, base.roles);
 
   const launch = useCallback(async () => {
     if (!canLaunch || projectId === null) return;
@@ -445,23 +420,26 @@ function Spawn() {
     try {
       const result = await api<CreateJobResponse>('/api/jobs', {
         method: 'POST',
-        body: {
+        body: launchBody({
           projectId,
-          prompt: prompt.trim(),
-          isolation,
-          preset: preset.label,
+          prompt,
+          method,
+          branch: branchName,
+          preset: presetLabel(preset.label, changed),
           agents: specs,
           budgetUsd: jobBudgetUsd(budgetPerAgent, specs.length, caps),
-        },
+        }),
       });
       setLaunched(result);
       setPrompt('');
+      // The branch is taken now, by the job just launched: naming it again would be a 409.
+      if (method === 'named') setBranchName('');
     } catch (err) {
       setError({ message: 'Launch failed', detail: errorText(err) });
     } finally {
       setBusy(false);
     }
-  }, [canLaunch, projectId, prompt, isolation, preset.label, specs, budgetPerAgent, caps]);
+  }, [canLaunch, projectId, prompt, method, branchName, preset.label, changed, specs, budgetPerAgent, caps]);
 
   // ⌘⏎ / ctrl+⏎ launches from anywhere on the screen, per the mockup.
   useEffect(() => {
@@ -536,29 +514,58 @@ function Spawn() {
 
       {/* ── 3 ─────────────────────────────────────────────────────────────── */}
       <div className="sp-section">
-        <span className="sp-lab">3 · isolation</span>
+        <span className="sp-lab">3 · git — which branch the agents work on</span>
+        {/*
+         * Three methodologies (Amendment 115), not three isolations: the folder on what's
+         * checked out, a branch you name, or a new one per launch. The old in-place
+         * branch isolation is not offered any more; the daemon still accepts it.
+         */}
         <div className="sp-pills">
-          {ISOLATIONS.map((iso) => {
-            const blocked = iso.requiresGit === true && needsGit;
+          {METHODS.map((m, i) => {
+            const blocked = m.requiresGit === true && needsGit;
             return (
               <button
-                key={iso.id}
-                className={`sp-pill${iso.danger ? ' sp-danger' : ''}`}
-                aria-pressed={iso.id === isolation}
+                key={m.id}
+                className={`sp-pill${m.danger ? ' sp-danger' : ''}`}
+                aria-pressed={m.id === method}
                 disabled={blocked}
-                onClick={() => setIsolation(iso.id)}
+                onClick={() => setMethod(m.id)}
                 onMouseEnter={() =>
-                  setIsoHint(blocked ? 'Needs a git repository — this folder has none.' : iso.hint)
+                  setIsoHint(blocked ? 'Needs a git repository — this folder has none.' : m.hint)
                 }
                 onMouseLeave={() => setIsoHint('')}
               >
-                {iso.danger ? '⚠ ' : '⑂ '}
-                {iso.label}
-                {iso.note && <span className="sp-pill-note">{iso.note}</span>}
+                {m.danger ? '⚠ ' : '⑂ '}
+                {i + 1} · {m.label}
+                {m.note && <span className="sp-pill-note">{m.note}</span>}
               </button>
             );
           })}
         </div>
+
+        {method === 'named' && (
+          <div className="sp-branchrow">
+            <label className="sp-branchlab" htmlFor="sp-branch">branch</label>
+            <input
+              id="sp-branch"
+              className="sp-input sp-branch"
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value)}
+              placeholder="feature/refresh-tokens"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              aria-invalid={nameProblem !== null}
+              aria-describedby="sp-branch-note"
+            />
+            <span id="sp-branch-note" className={`sp-branchnote${nameProblem ? ' is-bad' : ''}`}>
+              {nameProblem ??
+                (branchName.trim() === ''
+                  ? 'Name the branch to launch. One that exists is used as it is; a new one is cut from what the folder has checked out.'
+                  : 'In its own worktree. One that exists is used as it is, with its commits.')}
+            </span>
+          </div>
+        )}
 
         {/*
          * The sentence that would have saved a 400 at launch. Named after the folder,
@@ -567,7 +574,7 @@ function Spawn() {
          */}
         {needsGit && selected && (
           <div className="sp-isonote">
-            <b>{selected.name}</b> has no git in it, so only <b>this folder, as-is</b> can run
+            <b>{selected.name}</b> has no git in it, so only <b>default branch</b> can run
             here — the other two create a branch. Run <code>git init</code> in it if you want a
             worktree or a branch, and re-add it.
           </div>

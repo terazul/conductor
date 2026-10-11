@@ -90,32 +90,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 
 ## Wave 9: decided, not yet built
 
-- [ ] **Pick a git methodology per launch (Amendment 115).** Asked for (9 Oct): "let me specify
-  what git branch methodology you should use." Spawn's isolation pills become three choices
-  ([ADR 0009](docs/adr/0009-default-branch-terminal-methodology.md) §4, accepted by default on 9 Oct):
-  - **(1) Default branch, in the folder** sends `isolation: 'in_place'`: the agent works in the
-    project folder on what's checked out, normally the default branch (Amendment 117).
-  - **(2) New branch: [name]** sends `isolation: 'worktree', branch: <name>`: a worktree on the
-    branch you name.
-  - **(3) New branch per launch** sends `isolation: 'worktree'`: as now, `conductor/<jobId>`. A
-    "text input command" here means a launch from Spawn; a follow-up message stays on its job's
-    branch.
-  - **Wire:** `CreateJobRequest.branch?: string`, allowed only with `worktree`.
-  - **Daemon** (`workspace/worktree.ts`, `POST /api/jobs` in `routes/session.ts`, `createJob` in
-    `supervisor.ts`): check the name with `git check-ref-format --branch` (400 if invalid); refuse
-    (409) a branch that's checked out in another worktree or is the project's default branch; add an
-    existing branch with `worktree add <path> <branch>`, never `-B`, which would reset its commits;
-    add a new one with `worktree add -b <branch> <path> HEAD`.
-  - **Web:** the `branch` isolation ("branch in place") is no longer offered in Spawn, and the API
-    still accepts it, so existing jobs are unchanged. The setting `conductor.launch.isolation`
-    offers the same three. Choosing (2) as the default leaves the name empty, and Spawn won't launch
-    until you fill it in (`spawn/*`, `settings/route.tsx`).
-  - **Not started:** the `w9/m` worktree has no commits. `workspace/verify-methodology.ts` is a
-    stub already in `make test`.
-  Tests: a named new branch; a named existing branch keeps its commits; an invalid name gives 400;
-  a branch checked out elsewhere gives 409; `in_place` is unchanged. `spawn/verify.ts` covers the
-  three pills, (2) needing a name, and the request body.
-
 - [ ] **Clear out wave 9's worktrees and branches once its lanes are merged.** Found (10 Oct). The
   job `job_07af774e-eb6` is `done`, but its folder `.conductor/wt/job_07af774e-eb6` (with `w9/d`,
   `w9/m`, `w9/t` under `.claude/worktrees/`) and branch `conductor/job_07af774e-eb6` are still
@@ -152,8 +126,6 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
     a fake backend has run it.
   - **The restart test for `hand_off` isn't a real restart (104).** It uses a fresh `Alerts`
     instance and a second connection to the same file, not a second `Supervisor`.
-  - **Spawn (99).** Removing a Custom row doesn't re-chain the rows that waited for it, and a
-    job's `preset` label stays the preset's name even when its rows were moved.
 
 - [ ] **Tighten the whole-conversation handoff (Amendment 101).** Found (10 Oct).
   - **Real model windows, and tokens.** The cap is a quarter of a window taken from a small table

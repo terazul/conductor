@@ -236,7 +236,7 @@ know it from memory:
 
 `~` works, so `~/src/pro⇥` gets there in a few keystrokes. Folders that are git
 repositories are marked **⑂ git** in the list, and once you've typed a real folder
-the line underneath tells you whether it's a repo — which decides what isolation
+the line underneath tells you whether it's a repo — which decides which git choice
 you can use, so it's better to learn it here than at launch.
 
 The list only ever shows **folders**, never files, and hides dotfolders until you
@@ -245,11 +245,11 @@ type the dot yourself.
 Rules that matter:
 
 - The directory must exist.
-- For **worktree** or **branch** isolation it must be a **git repository**. If it
+- For **new branch:** or **new branch per launch** it must be a **git repository**. If it
   isn't, you'll get `not a git repository` when you launch, and no job is created
   — nothing half-made to clean up.
-- A non-git directory works with **in place** isolation — the `⚠ this folder, as-is`
-  pill. You keep the file tree,
+- A non-git directory works with **default branch** — the `⚠ 1 · default branch` pill, which
+  works in the folder as it is. You keep the file tree,
   the change badges and in-pane editing; what you lose is anything defined against
   a commit. The branch reads `(no git)`, every changed file counts as new, and
   there's nothing to revert to — so the badges tell you what an agent wrote, not
@@ -262,21 +262,40 @@ Write what you'd tell a colleague. Specific beats polite:
 > Refresh tokens aren't rotated — a replayed token stays valid until expiry.
 > Rotate on every exchange and revoke the ancestor chain. Tests first.
 
-### Choose isolation
+### Choose which branch the agents work on
+
+Step 3 is a git methodology, three choices:
 
 | | |
 |---|---|
-| **worktree** — `⑂ new worktree` *(default, recommended)* | A fresh git worktree at `<repo>/.conductor/wt/<jobId>` on a new branch. Your own checkout is never touched. |
-| **branch** — `⑂ branch in place` | A branch in your existing checkout. Convenient, but the agent edits the files you have open. Needs git. |
-| **in place** — `⚠ this folder, as-is` | No isolation at all: whatever branch you're on, or no branch when the folder isn't a repo. The only one that needs no git, and the only one with nothing to revert to. |
+| **1 · `⚠ default branch`** *(in the folder)* | The agents work in the project's own folder, on whatever is checked out there: normally the default branch (the Branches screen can set it and check it out), or no branch when the folder isn't a repo. Nothing is cut off from your own files, and there is nothing to revert to. The only choice that needs no git. |
+| **2 · `⑂ new branch:`** *(a name you give)* | A separate worktree on the branch you name. A branch that exists is used as it is, with its commits; a new one is cut from what the folder has checked out. Your folder and your other jobs are untouched. **A name field appears under the pills, and the launch waits until it has a name git accepts.** |
+| **3 · `⑂ new branch per launch`** *(default, recommended)* | A fresh git worktree at `<repo>/.conductor/wt/<jobId>` on a new branch `conductor/<jobId>`. Your own checkout is never touched. |
+
+A "text input command" here means a launch from Spawn. A follow-up message to an agent stays on
+its job's branch.
+
+**What choice 2 refuses.** A name git does not take (a space, `..`, a leading `-`, `.lock` at the
+end, `@{`, and so on) is a 400 with the reason. The project's **default branch** is refused, and so
+is a branch **checked out somewhere already**: in another job's worktree, in a worktree of your own,
+or in the project's folder. These are a 409, and the message says where. Nothing is made when a
+launch is refused. A branch that exists is never reset: its commits are kept.
+
+**The setting.** **Settings → What Spawn starts from → git branch** offers the same three. If you
+make choice 2 the default, Spawn opens on it with the name empty, and will not launch until you
+give one. Spawn clears the name after a launch on it, because that branch is taken by the job you
+just started.
 
 One worktree per **job**, not per agent — agents in a job share it and are
 coordinated, because worktree-per-agent would make merge conflicts the product.
 
-If the project you picked in step 2 has no git in it, the first two are **struck
-through** and `this folder, as-is` is selected for you, with a line saying which
+If the project you picked in step 2 has no git in it, choices 2 and 3 are **struck
+through** and `default branch` is selected for you, with a line saying which
 folder and why. Both of the others create a branch, so there is nothing to argue
 about — `git init` the folder and re-add it if you want them.
+
+The older **branch in place** isolation (a new branch in your own checkout) is no longer offered in
+Spawn. Jobs that were launched with it are unchanged.
 
 ### Choose who works on it
 
@@ -296,7 +315,8 @@ keyboard) or by dragging its **⋮⋮** grip onto another row, and it waits for 
 it in its new place. Under every row but the first, **waits for** has a box for each row above
 it: tick several to wait for more than one (the reviewer in the full pipeline waits for three).
 Moving a row keeps the ticks that still point above it and drops the rest, and a row that
-waited only for the one above it keeps doing that. This is for this launch only. It isn't
+waited only for the one above it keeps doing that. This is for this launch only. A job launched from a
+preset you moved or ticked is labelled **<preset> (changed)**, not the preset's own name. It isn't
 saved, and it doesn't turn the preset into a Custom setup. Click the preset again, or **↺ back
 to** it in the plan, to put it back. An agent can only wait for one above it.
 
@@ -312,6 +332,9 @@ to** it in the plan, to put it back. An agent can only wait for one above it.
 - Tick which agents above it it **waits for**. It's handed their conversations and the
   summary each handed off with, like any agent that waits. A new row waits for the one above it. Move a row with **↑ ↓** or by
   dragging its **⋮⋮**, as in the plan above; its ticks follow the same rule.
+- **Remove** a row and the rows that waited for it are re-chained: one that waited for exactly the
+  removed row now waits for the row that was above it (for no one, if the removed row was the
+  first), and one that waited for it and others keeps the others.
 
 **Personas** (Settings → **Personas**) are what each role is. Each one holds a name, a
 description, a brief, a **system prompt** (added to Claude Code's own, not replacing it),
@@ -726,7 +749,7 @@ waiting forty seconds, and the oldest is always first.
 | **`6`** | **Preview** | The dev server the agent started, embedded. Device widths for responsive checks, and console errors you can send straight back to the agent as a new instruction instead of copy-pasting. |
 | **`7`** | **Branches** | The project's local branches, drawn as a graph: main along the top (or the branch you pick in **compared with** — **automatic** is origin's default branch, else the one checked out when the project was added, else `main`), each branch forking off it with its commits, how far it is ahead of and behind main, its uncommitted files, where it stands against origin, and **live** while an agent works on it. **⟳ Fetch** refreshes origin. Pick a branch and choose where it goes in **merge into**: main to start with, or any other branch, such as main into a job's branch to bring it up to date. The branch it would go into is outlined in the graph, and a line under the picker says how many commits would move, which ones, and whether they would conflict, before you press **Merge N commits** (a merge commit; undo it with `git revert -m 1 <sha>`). Merging into a branch other than main runs in the worktree it is checked out in, so it needs one, with no uncommitted changes and no agent working there; one that would conflict is refused, with the files named. You can also **Commit…** its uncommitted work with your message, or **Push to origin** (confirmed, never forced). **⇉ Merge all into main** merges every branch that is ahead, oldest first, and stops at the first conflict. A merge runs only when main's checkout has no uncommitted changes, and a conflict is undone with its files listed. Nothing runs on a branch an agent is working on, and no branch is ever deleted. |
 | | **Spawn** | Start new work. It has no tab or key. Open it with **+ new work** on Fleet or **+** at the top of the navigator, or with **+ spawn agent** on the Project screen, which aims it at that project. |
-| **`9`** | **Settings** | **Personas**: what each role is (see below); where Conductor keeps its data; how many agents run at once; a **daily budget** (then the status bar shows today's spend as a bar: green, yellow from 75%, red from 95%, and reaching it is a warning in Needs You, though nothing is stopped; it resets at local midnight); what Spawn starts from (preset, model, isolation, interaction mode, the autonomy pills, effort, budget per agent); **Allowed always**, the rules you've granted (§10); theme (also switched from the right end of the status bar: system, light, dark); and resetting panel sizes and folds. Every setting is kept in `~/.conductor/settings.json`, so it's the same in every browser. |
+| **`9`** | **Settings** | **Personas**: what each role is (see below); where Conductor keeps its data; how many agents run at once; a **daily budget** (then the status bar shows today's spend as a bar: green, yellow from 75%, red from 95%, and reaching it is a warning in Needs You, though nothing is stopped; it resets at local midnight); what Spawn starts from (preset, model, git branch, interaction mode, the autonomy pills, effort, budget per agent); **Allowed always**, the rules you've granted (§10); theme (also switched from the right end of the status bar: system, light, dark); and resetting panel sizes and folds. Every setting is kept in `~/.conductor/settings.json`, so it's the same in every browser. |
 | **`0`** | **Diagnostics** | The raw feed. Your first stop when something looks wrong. |
 
 Across the top of every screen, the tab you're not on reads a little louder than it used
@@ -995,7 +1018,8 @@ started with. Conductor checks for this every minute and turns the tag amber wit
 | The model list says **not checked against the model API** | Conductor couldn't read a credential or reach `ANTHROPIC_BASE_URL/v1/models`; the note says which. A Claude.ai login isn't a credential Conductor can use for this. The list shown is Claude Code's. |
 | Browser won't connect | Use `http://localhost:5173`, **not** `127.0.0.1:5173`. Vite binds IPv6 loopback only; the IPv4 address refuses and looks exactly like a crash. |
 | Screens blank, feed says reconnecting | Daemon is down. `make start`. The browser holds its cursor and replays the gap, so you lose nothing. |
-| `not a git repository` on launch | Worktree and branch isolation need a git repo — they create a branch, so there is no way round it. Use the third pill, `⚠ this folder, as-is`, which doesn't, or `git init` the directory. |
+| `not a git repository` on launch | **New branch:** and **new branch per launch** need a git repo — they create a branch, so there is no way round it. Use the first pill, `⚠ default branch`, which doesn't, or `git init` the directory. |
+| A launch on **new branch:** is refused (409) | The branch you named is the project's default branch, or is checked out already (the message says where: another job's worktree, a worktree of yours, or the project's folder). Name another branch, or finish the work where it is checked out. |
 | The terminal tab shows a banner and a command runner | The terminal library (`@lydell/node-pty`, a native module) didn't load; the banner says why. Run `pnpm install` again without `--no-optional`, and not on a `node_modules` copied from another machine, then `make restart`. |
 | The terminal says **16 terminals are open already** | That's the most live shells at once. Close a tab you're done with (× ends its shell). |
 | Port already in use | `make stop` clears both ports, including children orphaned by a hard kill. |

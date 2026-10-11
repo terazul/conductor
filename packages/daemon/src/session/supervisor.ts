@@ -58,6 +58,7 @@ import { preview } from '../preview/index.js';
 import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
+import { LaunchBranchError } from '../workspace/worktree.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobCap } from './budget.js';
 import {
   handOffLine,
@@ -79,6 +80,7 @@ import {
   agentsForJob,
   DEFAULT_AUTONOMY,
   costToday,
+  defaultBranchIsSet,
   deleteAgent,
   deleteJob,
   deleteProject,
@@ -682,6 +684,13 @@ export class Supervisor implements AgentControl {
     // over its bootstrap HTTP endpoints, and it handles all three isolations —
     // including 'in_place', where it returns the repo root and still attaches
     // the watcher. It emits the `worktree` event itself, so this must not.
+    //
+    // Methodology (2), a branch you name (Amendment 115): only a worktree can be on one, and
+    // a refusal (an invalid name 400, the default branch or one checked out elsewhere 409)
+    // goes up as it is, so the route can answer with its status instead of a 400 for all.
+    if (req.branch !== undefined && req.isolation !== 'worktree') {
+      throw new LaunchBranchError(400, 'a branch can only be named for a worktree: it is the only isolation on a branch of its own');
+    }
     let worktreePath: string;
     let branch: string;
     try {
@@ -690,10 +699,18 @@ export class Supervisor implements AgentControl {
         projectId: project.id,
         repoPath: project.path,
         isolation: req.isolation,
+        ...(req.branch !== undefined
+          ? {
+              branch: req.branch,
+              named: true,
+              recordedDefault: { branch: project.defaultBranch, chosen: defaultBranchIsSet(this.#db, project.id) },
+            }
+          : {}),
       });
       worktreePath = ws.path;
       branch = ws.branch;
     } catch (err) {
+      if (err instanceof LaunchBranchError) throw err;
       throw new Error(`could not prepare a ${req.isolation} workspace: ${String(err)}`);
     }
 

@@ -282,9 +282,96 @@ live text), and its **You asked** label and text in `--you`. Hover lights the bo
 `--you`. `--you` is ≥ 6.6:1 on every surface (Amendment 106), and a 10% tint of it keeps that.
 **Verified:** `agent/verify.ts`, "You asked" is `--you`.
 
-### Amendment 115 — in progress. **Pick a git methodology per launch: the default branch in place, a branch you name, or a new branch per launch.**
+### Amendment 115 — post-merge, applied. **Pick a git methodology per launch: the default branch in place, a branch you name, or a new branch per launch.**
 
-Placeholder laid out by wave 9 (docs/plans/wave-9.md); lane M fills it in. ADR 0009 §4.
+ADR 0009 §4, accepted by default on 9 Oct ("let me specify what git branch methodology you should use"),
+built on 10 Oct as lane M of `docs/plans/todo-wave-10.md`. Spawn's three isolation pills are now three
+choices of what the agents do with git; the daemon takes a branch name and checks it. No migration.
+- **The three choices** (`web/src/spawn/launch.ts`, `METHODS`). (1) **default branch**, in the folder,
+  sends `isolation: 'in_place'`: the agents work in the project's folder on what is checked out there
+  (normally the default branch, Amendment 117), still drawn as a hazard in `--fail`. (2) **new branch:**
+  sends `isolation: 'worktree', branch: <name>`. (3) **new branch per launch** sends `isolation:
+  'worktree'` and nothing else, `conductor/<jobId>` as before, and is still the built-in default. A "text
+  input command" is a launch from Spawn; a follow-up message stays on its job's branch, as it always did.
+  The `branch` isolation ("branch in place") is not offered in Spawn any more; the API still accepts it
+  and the `branch` row of a job is unchanged.
+- **Daemon** (`workspace/worktree.ts`, `POST /api/jobs` in `routes/session.ts`, `createJob`).
+  `CreateJobRequest.branch` (already in `wire.ts`) is read by the route: an empty or non-string name, or
+  a name with an isolation other than `worktree`, is 400. `createJob` hands `WorktreeMgr.ensure` the name
+  with `named: true` and the project's recorded default (`recordedDefault`, with whether Amendment 117
+  chose it). `ensure` then, for a named branch only and only when it creates the worktree (a reuse skips
+  all of it):
+  - `branchNameProblem`: `git check-ref-format --branch`, and the name must come back unchanged (that
+    option also expands `@{-1}`); `@` alone and a leading `refs/` are refused as well. → **400** with the
+    reason.
+  - `branchRefusal` (pure): the project's default branch → **409**. "Default" is the recorded
+    `defaultBranch` and also what `resolveTarget` gives with no screen pick (chosen default, then
+    origin/HEAD, then the recorded one, then main/master); the Branches screen's compare-with pick is a
+    view, not a default, so it is not refused. A branch some worktree has checked out, including the
+    project's own folder → **409**, naming where.
+  - Under one lock per repo (`repo:<root>`), so two launches naming one branch at once cannot both pass
+    the check: an existing branch is added with `git worktree add -- <path> <branch>`, **never `-B`**
+    (it would reset the branch and lose its commits); a new one with `git worktree add -b <branch> --
+    <path> HEAD`. The old `-B` stays for the implicit `conductor/<jobId>` name only, and for the
+    bootstrap `POST /api/workspaces`, which does not pass `named`.
+  - A refusal is a `LaunchBranchError(status, message)`; `createJob` lets it through unwrapped and the
+    route answers `{ error: 'could not use that branch', detail: <the sentence> }` with its status.
+    Nothing is made: no job, no worktree, no branch.
+- **Web.** Spawn step 3 reads "git — which branch the agents work on", with the pills numbered 1 to 3.
+  Choosing (2) shows a name field under them (`aria-invalid`, the reason in words); the launch waits until
+  it holds a name `branchProblem` accepts. That check is `git`'s rule written out and the project's
+  default branch (`Project.defaultBranch`), so the common mistakes cost no round trip; the daemon has the
+  last word, and a 409 from it shows in the launch error. A project with no git moves the launch to (1)
+  and, on a repo again, back to whatever it had. The name is cleared after a launch on it: that branch is
+  taken by the job just started. `launchBody` builds the request; `branch` is sent for (2) only.
+  Settings → Spawn's defaults offers the same three, under the same key `conductor.launch.isolation`:
+  `in_place` and `worktree` keep their meaning, `named` is new, and a stored `branch`, or anything else,
+  reads as the built-in default. Choosing (2) as the default stores no name, so Spawn opens on it with
+  the field empty and will not launch until it is filled in. `LaunchDefaults.isolation` is now
+  `LaunchDefaults.method`.
+- **Spawn (99), removing a Custom row** (`spawn/order.ts`, `removeRow`, called by `custom.ts`'s
+  `removeRole`). Rows that waited for the removed row are re-chained, as a pure function: a row that
+  waited for **exactly** the removed row now waits for **the row that was above the removed one**
+  (for no one if it was the first); a row that waited for it **and others** keeps the others; a row that
+  did not wait for it is untouched. The removed row's own waits are not inherited: the row above is
+  always above every row that waited for the removed one, so every wait still points up and the daemon
+  takes it (Amendment 98), and it is what the "waits for the row above" default means. Before, the wait
+  was only dropped, so a row that waited for exactly it started with nothing.
+- **Spawn (99), the `preset` label.** It is sent in the launch body as `preset` and copied to
+  `CreateJobRequest.preset` by the route; **nothing reads it** (`createJob` ignores it, a job has no
+  preset column, `shared/src/stack.ts` says a launched job does not remember its preset). Its value was
+  the preset's own name even when its rows were moved or its ticks changed. It is now `presetLabel(label,
+  changed)`: `<Preset> (changed)` when this launch's rows are not the preset's (`!sameStack(preset.roles,
+  base.roles)`, so moving a row and moving it back is not a change), the plain name otherwise; a Custom
+  setup is sent under its own name, as before. Nothing else needed to change.
+- **Docs.** `docs/MANUAL.md`: "Choose which branch the agents work on", the Custom-row removal rule, the
+  `(changed)` label, the Settings wording, two troubleshooting rows.
+- **Not done.**
+  - A branch that exists only on a remote (`origin/feature/x`, no local branch) is treated as new and cut
+    from HEAD; git's own `worktree add` would have made a tracking branch from the remote. Nothing says
+    which the person means.
+  - There is no way to pick an existing branch from a list in Spawn; you type its name. The Branches
+    screen has the list.
+  - `restoreFolder` (Amendment 114) on a job whose named branch is checked out elsewhere by then fails
+    with git's message, not a sentence of ours.
+  - The bootstrap `POST /api/workspaces` still resets an explicitly named branch for `worktree`
+    isolation (`-B`), as before; it is "expected to be gated or removed". It would answer 500, not 400/409,
+    for the new refusals if it ever passed `named`, which it does not.
+  - Not looked at in a browser, in either theme: the three pills, the name field and its note, the
+    Settings row. The colours are tokens the contrast checks already measure (`--ink3`, `--fail`).
+**Verified:** `workspace/verify-methodology.ts` (was a stub; 79 checks), against a throwaway repo with the
+agents held and the SDK throwing if anything reaches it: the pure rules; (3) unchanged; a named new
+branch (worktree under `.conductor/wt`, cut from the folder's HEAD, folder untouched); a named existing
+branch keeps its tip and its commits (no `-B`); 400 for an invalid name, an empty or non-string `branch`
+and `branch` with another isolation, with no job, worktree or branch made; 409 for a branch a job's
+worktree has, a worktree of your own, the project's own folder, the recorded default (also with the
+folder on another branch) and a default chosen on the Branches screen; two launches on one branch at
+once give 201 and 409; `in_place` unchanged, with and without git; the `branch` isolation still accepted.
+`spawn/verify.ts` §19: the three choices, their bodies and keys, (2) needing a name, `branchProblem`
+against `git check-ref-format --branch` on a list of names, the setting's values and defaults, the screens'
+source, the re-chain on removal (chain, first row, last row, fan-in, every wait still above its row, a
+Custom setup still launches), the preset label. Also `workspace/verify-branches.ts`, `branches/verify.ts`
+and `pnpm --filter @conductor/web verify` unchanged and green.
 
 ### Amendment 114 — post-merge, applied. **An agent whose job's folder is gone is told so, and the folder can be recreated.**
 

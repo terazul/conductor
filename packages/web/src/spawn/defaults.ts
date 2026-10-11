@@ -6,8 +6,9 @@
  * default. Pure, so spawn/verify.ts checks the parsing under Node.
  */
 
-import type { Autonomy, EffortLevel, Isolation } from '@conductor/shared';
+import type { Autonomy, EffortLevel } from '@conductor/shared';
 import { DEFAULT_BUDGET_USD, DEFAULT_EFFORT, DEFAULT_MODE, EFFORTS, MODES, PILLS, defaultPills, type PillState } from './autonomy.js';
+import { DEFAULT_METHOD, methodFrom, type Method } from './launch.js';
 import { DEFAULT_PRESET, PRESETS } from './presets.js';
 
 export const LAUNCH_KEYS = {
@@ -20,11 +21,10 @@ export const LAUNCH_KEYS = {
   mode: 'conductor.launch.mode',
 } as const;
 
-const ISOLATIONS: Isolation[] = ['worktree', 'branch', 'in_place'];
-
 export interface LaunchDefaults {
   preset: string;
-  isolation: Isolation;
+  /** Which git methodology a launch starts on (Amendment 115), kept in `conductor.launch.isolation`. */
+  method: Method;
   pills: PillState;
   /** Dollars per agent, as the budget field holds it; '' for no cap. */
   budget: string;
@@ -37,7 +37,7 @@ export interface LaunchDefaults {
 
 export const BUILT_IN: LaunchDefaults = {
   preset: DEFAULT_PRESET,
-  isolation: 'worktree',
+  method: DEFAULT_METHOD,
   pills: defaultPills(),
   budget: String(DEFAULT_BUDGET_USD),
   effort: DEFAULT_EFFORT,
@@ -55,7 +55,7 @@ export function launchDefaults(read: (key: string) => string | null): LaunchDefa
   const mode = read(LAUNCH_KEYS.mode);
   return {
     preset: PRESETS.some((p) => p.id === preset) ? preset! : BUILT_IN.preset,
-    isolation: ISOLATIONS.includes(isolation as Isolation) ? (isolation as Isolation) : BUILT_IN.isolation,
+    method: methodFrom(isolation),
     pills: parsePills(read(LAUNCH_KEYS.pills)),
     budget: budget !== null && (budget === '' || (Number.isFinite(Number(budget)) && Number(budget) > 0)) ? budget : BUILT_IN.budget,
     effort: EFFORTS.some((e) => e.id === effort) ? (effort as EffortLevel) : BUILT_IN.effort,
@@ -87,7 +87,7 @@ export function launchPatch(d: LaunchDefaults): Record<string, string | null> {
   const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
   return {
     [LAUNCH_KEYS.preset]: d.preset === BUILT_IN.preset ? null : d.preset,
-    [LAUNCH_KEYS.isolation]: d.isolation === BUILT_IN.isolation ? null : d.isolation,
+    [LAUNCH_KEYS.isolation]: d.method === BUILT_IN.method ? null : d.method,
     [LAUNCH_KEYS.pills]: same(d.pills, BUILT_IN.pills) ? null : JSON.stringify(d.pills),
     [LAUNCH_KEYS.budget]: d.budget === BUILT_IN.budget ? null : d.budget,
     [LAUNCH_KEYS.effort]: d.effort === BUILT_IN.effort ? null : d.effort,

@@ -495,6 +495,46 @@
   color: var(--live);
 }
 
+/* ── the branch you name, method (2) (Amendment 115) ─────────────────────────── */
+
+.sp-branchrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 10px;
+  max-width: 80ch;
+}
+
+.sp-branchlab {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sp-input.sp-branch {
+  flex: none;
+  width: 36ch;
+  max-width: 100%;
+}
+
+.sp-input.sp-branch[aria-invalid='true'] {
+  border-color: var(--fail);
+}
+
+/* The rule it is held to, in words; the name's problem in --fail once something is typed. */
+.sp-branchnote {
+  flex: 1 1 24ch;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.4;
+}
+
+.sp-branchnote.is-bad {
+  color: var(--fail);
+}
+
 /* ── 4 · agent plan preview ─────────────────────────────────────────────── */
 
 .sp-plan {

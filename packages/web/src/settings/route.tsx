@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { EffortLevel, Isolation, ModelTier, RuleView } from '@conductor/shared';
+import type { EffortLevel, ModelTier, RuleView } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
 import { useProjects, useStatusBar } from '../lib/store.js';
 import { highlight, recall } from '../shell/nav.js';
@@ -23,6 +23,7 @@ import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOC
 import { EFFORTS, MODES, PILLS } from '../spawn/autonomy.js';
 import { PRESETS } from '../spawn/presets.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch, type LaunchDefaults } from '../spawn/defaults.js';
+import { METHODS } from '../spawn/launch.js';
 import {
   PERSONAS_KEY,
   isEdited,
@@ -49,12 +50,6 @@ import {
   type OpenRouterKeyState,
 } from '../lib/providers.js';
 import './settings.css';
-
-const ISOLATION_WORDS: Record<Isolation, string> = {
-  worktree: 'new worktree',
-  branch: 'new branch',
-  in_place: 'this folder, as-is',
-};
 
 /** The sizes and folds a reset puts back. Named here so nothing is missed by accident. */
 const LAYOUT_KEYS = [
@@ -348,14 +343,17 @@ function LaunchSection() {
         />
       </div>
       <div className="st-field">
-        <span>isolation</span>
+        <span>git branch</span>
         <div className="st-pills">
-          {(Object.keys(ISOLATION_WORDS) as Isolation[]).map((iso) => (
-            <button key={iso} type="button" className="st-pill" aria-pressed={d.isolation === iso} onClick={() => put({ isolation: iso })}>
-              {ISOLATION_WORDS[iso]}
+          {METHODS.map((m) => (
+            <button key={m.id} type="button" className="st-pill" title={m.hint} aria-pressed={d.method === m.id} onClick={() => put({ method: m.id })}>
+              {m.words}
             </button>
           ))}
         </div>
+        {d.method === 'named' && (
+          <p className="st-dim">A launch then waits for a branch name, which you give in Spawn; there is none to keep here.</p>
+        )}
       </div>
       <div className="st-field">
         <span>how the agents interact with you</span>

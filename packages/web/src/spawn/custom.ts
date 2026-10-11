@@ -16,6 +16,7 @@
 
 import type { AgentRole, ModelTier } from '@conductor/shared';
 import type { Preset, PresetRole, RoleModels } from './presets.js';
+import { removeRow } from './order.js';
 import { personaFor, renamedPersona, type Persona } from './personas.js';
 
 export interface CustomRole {
@@ -80,12 +81,12 @@ export function customProblems(roles: CustomRole[]): string[] {
   return out;
 }
 
-/** Drop a row, and any wait on it. */
+/**
+ * Drop a row. A row that waited for exactly it now waits for the row above it, and one that
+ * waited for it and others keeps the others (`removeRow`, Amendment 115).
+ */
 export function removeRole(roles: CustomRole[], i: number): CustomRole[] {
-  const gone = roles[i]?.role;
-  return roles
-    .filter((_, j) => j !== i)
-    .map((r) => ({ ...r, dependsOnRoles: r.dependsOnRoles.filter((d) => d !== gone) }));
+  return removeRow(roles, i);
 }
 
 /** Rename a row, and every wait on it with it. */

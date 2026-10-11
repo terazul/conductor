@@ -30,7 +30,9 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Isolation } from '@conductor/shared';
 import { eventLog } from '../eventlog.js';
+import { resolveTarget } from './branches.js';
 import {
+  GitError,
   branchExists,
   currentBranch,
   git,
@@ -38,6 +40,7 @@ import {
   isRepo,
   listWorktrees,
   repoRoot,
+  type WorktreeEntry,
 } from './git.js';
 import { KeyedLock } from './lock.js';
 import { canonicalRoot } from './paths.js';
@@ -68,6 +71,79 @@ export interface EnsureRequest {
   branch?: string;
   /** Commit-ish the worktree is cut from. Defaults to HEAD. */
   baseRef?: string;
+  /**
+   * `branch` is one the user named at launch — methodology (2) (Amendment 115), `worktree`
+   * only. The name is checked with git, a default branch or one checked out elsewhere is
+   * refused, an existing branch is added as it is and a new one is cut from `baseRef`
+   * (HEAD). Absent, `branch` keeps its old meaning: a name of Conductor's own, whose
+   * leftover from an earlier attempt `-B` resets.
+   */
+  named?: boolean;
+  /**
+   * The project's recorded default branch and whether it was chosen on purpose (Amendment
+   * 117), so a named branch can be refused when it is the default. Only read with `named`.
+   */
+  recordedDefault?: { branch: string; chosen: boolean };
+}
+
+/**
+ * A named branch was refused (Amendment 115): 400 when the name is not one git accepts, 409
+ * when it is the project's default branch or already checked out somewhere. `message` is the
+ * sentence the person sees.
+ */
+export class LaunchBranchError extends Error {
+  readonly status: 400 | 409;
+  constructor(status: 400 | 409, message: string) {
+    super(message);
+    this.name = 'LaunchBranchError';
+    this.status = status;
+  }
+}
+
+/**
+ * Whether `name` is a branch name git accepts, by git's own rule (`check-ref-format
+ * --branch`), or the sentence that says why not. The name must come back from git unchanged:
+ * `--branch` also expands `@{-1}` to the previous branch's name, which is not a name anyone
+ * typed on purpose. `@` alone and a leading `refs/` pass git's rule and are refused too:
+ * the first is the ref HEAD's shorthand and the second makes `refs/heads/refs/heads/…`.
+ */
+export async function branchNameProblem(cwd: string, name: string): Promise<string | null> {
+  if (name.trim().length === 0) return 'the branch needs a name';
+  if (name === '@' || name.startsWith('refs/')) return `"${name}" is not a branch name`;
+  try {
+    const out = (await git(cwd, ['check-ref-format', '--branch', name])).trim();
+    return out === name ? null : `"${name}" is not a branch name`;
+  } catch (err) {
+    if (err instanceof GitError && err.code === 128) return `"${name}" is not a branch name git accepts`;
+    throw err;
+  }
+}
+
+/**
+ * Why a named branch cannot get a worktree of its own, or null when it can (Amendment 115).
+ * Pure: `defaults` are the branches the project treats as its default, `worktrees` what
+ * `git worktree list` says, the project's own folder (`root`) included.
+ *
+ * The default branch is refused even when nothing has it checked out: a named launch is for
+ * work you want kept apart, and the default is what the folder is for (methodology 1). A
+ * branch some worktree has checked out is refused because git would refuse it anyway, but
+ * with a sentence that says where.
+ */
+export function branchRefusal(
+  branch: string,
+  defaults: readonly string[],
+  worktrees: readonly WorktreeEntry[],
+  root: string,
+): string | null {
+  if (defaults.includes(branch)) {
+    return `${branch} is this project's default branch. Choose "default branch, in the folder" to work on it, or name a different branch.`;
+  }
+  const taken = worktrees.find((w) => w.branch === branch);
+  if (taken) {
+    const where = canonicalRoot(taken.path) === root ? "the project's own folder" : taken.path;
+    return `${branch} is already checked out in ${where}. A branch can be checked out in one place at a time: name another, or finish the work there first.`;
+  }
+  return null;
 }
 
 export interface EnsureResult {
@@ -161,8 +237,12 @@ export class WorktreeMgr {
           `${root} has no commits yet — commit once before cutting a worktree from it`,
         );
       }
-      // -B so a leftover branch from a previous attempt is reset, not fatal.
-      await git(root, ['worktree', 'add', '-B', branch, path, baseRef]);
+      if (req.named) {
+        await this.#addNamed(req, root, branch, path, baseRef);
+      } else {
+        // -B so a leftover branch from a previous attempt is reset, not fatal.
+        await git(root, ['worktree', 'add', '-B', branch, path, baseRef]);
+      }
     }
 
     const real = canonicalRoot(path);
@@ -180,6 +260,48 @@ export class WorktreeMgr {
         removedAt: null,
       },
     };
+  }
+
+  /**
+   * A worktree on a branch the user named (Amendment 115, methodology 2). Refused first, in
+   * this order: a name git rejects (400), the project's default branch (409), a branch some
+   * worktree already has checked out (409). Then an existing branch is added as it is, and
+   * a new one is cut from `baseRef`.
+   *
+   * NEVER `-B`: it would move an existing branch to `baseRef` and lose its commits.
+   * `-b` refuses a name that exists, so a race with a branch created since the check fails
+   * loudly instead of resetting anything.
+   *
+   * The check and the add run under one lock for the repo, since two launches naming the
+   * same branch hold different job locks: the second one sees the first's worktree and is
+   * refused with the sentence, not with git's.
+   */
+  async #addNamed(
+    req: EnsureRequest,
+    root: string,
+    branch: string,
+    path: string,
+    baseRef: string,
+  ): Promise<void> {
+    const bad = await branchNameProblem(root, branch);
+    if (bad) throw new LaunchBranchError(400, bad);
+    await this.#lock.run(`repo:${root}`, async () => {
+      const defaults = new Set<string>();
+      if (req.recordedDefault) {
+        defaults.add(req.recordedDefault.branch);
+        defaults.add(
+          (await resolveTarget(root, req.recordedDefault.branch, null, req.recordedDefault.chosen))
+            .target,
+        );
+      }
+      const refusal = branchRefusal(branch, [...defaults], await listWorktrees(root), root);
+      if (refusal) throw new LaunchBranchError(409, refusal);
+      if (await branchExists(root, branch)) {
+        await git(root, ['worktree', 'add', '--', path, branch]);
+      } else {
+        await git(root, ['worktree', 'add', '-b', branch, '--', path, baseRef]);
+      }
+    });
   }
 
   async #ensureBranch(req: EnsureRequest, root: string, branch: string): Promise<EnsureResult> {

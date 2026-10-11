@@ -53,6 +53,7 @@ import {
 } from '../session/store.js';
 import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, updateNote } from '../session/store.js';
 import { describeRule } from '../session/rules.js';
+import { LaunchBranchError } from '../workspace/worktree.js';
 import {
   BudgetReachedError,
   FolderGoneError,
@@ -552,6 +553,18 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       return fail(reply, 400, 'invalid agents', String(err));
     }
 
+    // A branch you name (Amendment 115): a worktree on it. Its name is checked by git in
+    // `createJob`; here only its shape, and that it goes with a worktree.
+    const named = body['branch'];
+    if (named !== undefined && named !== null) {
+      if (typeof named !== 'string' || named.length === 0) {
+        return fail(reply, 400, 'branch must be the name of a branch', 'a non-empty string, or leave it out');
+      }
+      if (isolation !== 'worktree') {
+        return fail(reply, 400, 'branch goes with isolation "worktree"', 'only a worktree can be on a branch of its own');
+      }
+    }
+
     const budget = body['budgetUsd'];
     const request: CreateJobRequest = {
       projectId,
@@ -559,12 +572,16 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       isolation,
       agents,
       ...(typeof body['preset'] === 'string' ? { preset: body['preset'] } : {}),
+      ...(typeof named === 'string' ? { branch: named } : {}),
       budgetUsd: typeof budget === 'number' && budget > 0 ? budget : null,
     };
 
     try {
       return reply.code(201).send(await sup.createJob(request));
     } catch (err) {
+      // The name git rejects is 400 and a default branch or one checked out elsewhere is 409,
+      // each with its sentence (Amendment 115).
+      if (err instanceof LaunchBranchError) return fail(reply, err.status, 'could not use that branch', err.message);
       return fail(reply, 400, 'could not create job', String(err));
     }
   });

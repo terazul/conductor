@@ -108,6 +108,33 @@ export function moveRow<T extends Waiting>(rows: readonly T[], from: number, to:
   );
 }
 
+/**
+ * The rows with the one at `i` taken out, and the rows that waited for it re-chained
+ * (Amendment 115, closing a gap of Amendment 99): a row that waited for exactly the
+ * removed row now waits for the row that was above the removed one, so a chain stays a
+ * chain; if the removed row was the first there is no row above, and it waits for no one.
+ * A row that waited for the removed row and others keeps the others: it still waits for
+ * what it said it did, minus the row that is gone. Rows that did not wait for it are
+ * returned as they were. Out of range gives the rows back as they were.
+ *
+ * It is the row above the removed one, not the removed row's own waits: a row's place in
+ * the stack is what the "waits for" ticks default to (`chain`), and the row above is
+ * always above every row that waited for the removed one, as a wait has to be.
+ */
+export function removeRow<T extends Waiting>(rows: readonly T[], i: number): T[] {
+  const gone = rows[i];
+  if (!gone) return [...rows];
+  const above = i > 0 ? rows[i - 1]!.role : null;
+  return rows
+    .filter((_, j) => j !== i)
+    .map((r) => {
+      const had = waitsOf(r);
+      if (!had.includes(gone.role)) return r;
+      if (had.length === 1) return withWaits(r, above === null ? [] : [above]);
+      return withWaits(r, had.filter((d) => d !== gone.role));
+    });
+}
+
 /** Whether `rows` are `base`: the same roles in the same order, waiting for the same ones. */
 export function sameStack(rows: readonly Waiting[], base: readonly Waiting[]): boolean {
   return (
