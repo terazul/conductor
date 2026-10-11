@@ -57,6 +57,7 @@ import { eventLog } from '../../eventlog.js';
 import { callTool, toolsFor } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
 import { budgetRefusal } from '../budget.js';
+import { recordCall, type Recorded } from '../metrics.js';
 import { openRouterKey } from '../secrets.js';
 import { finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setAgentUsage, startRun } from '../store.js';
 import { copilotToolsFor, isWriteTool, normaliseTool } from '../translate.js';
@@ -514,7 +515,7 @@ export class CopilotBackend implements AgentBackend {
       this.#emit(p);
     }
     if (step.replied) modelAnswered(this.#scope.agentId);
-    if (step.usage) this.#count(step.usage, outcome);
+    if (step.usage) this.#count(step.usage, outcome, step.call);
     if (step.end) this.#finish(step.end);
   }
 
@@ -524,10 +525,30 @@ export class CopilotBackend implements AgentBackend {
    * spend is the stored one, untouched. Then the cap: an agent past it is stopped the
    * way Claude's budget stop ends a run, and the supervisor pauses it with the note.
    */
-  #count(u: { inputTokens: number; outputTokens: number; cacheReadTokens: number }, outcome: RunOutcome): void {
+  #count(
+    u: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
+    outcome: RunOutcome,
+    call?: { model?: string; durationMs?: number },
+  ): void {
     this.#tokens.input += u.inputTokens;
     this.#tokens.output += u.outputTokens;
     const costUsd = this.#scope.spentUsd;
+    // The Metrics tab (Amendment 122): this call, on the model it was made on. Before
+    // `setAgentUsage`, so a first sighting of the agent reads what its row held until now.
+    // Counting must never end a run.
+    let metrics: Recorded | null = null;
+    try {
+      metrics = recordCall(this.#db, {
+        agentId: this.#scope.agentId,
+        model: call?.model ?? this.#scope.model,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        cacheReadTokens: u.cacheReadTokens,
+        ...(call?.durationMs ? { durationMs: call.durationMs } : {}),
+      });
+    } catch (err) {
+      console.error(`[metrics] ${this.#scope.agentId} could not record a call`, err);
+    }
     setAgentUsage(this.#db, this.#scope.agentId, { costUsd, inputTokens: this.#tokens.input, outputTokens: this.#tokens.output });
     this.#emit({
       kind: 'usage',
@@ -535,6 +556,7 @@ export class CopilotBackend implements AgentBackend {
       inputTokens: this.#tokens.input,
       outputTokens: this.#tokens.output,
       ...(u.cacheReadTokens > 0 ? { cacheReadTokens: u.cacheReadTokens } : {}),
+      ...(metrics ? { model: metrics.model, calls: 1, ...(metrics.apiMs !== null ? { apiMs: metrics.apiMs } : {}) } : {}),
     });
     const agent = getAgent(this.#db, this.#scope.agentId);
     if (!this.#stopping && agent && budgetRefusal(agent)) {

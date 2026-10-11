@@ -1,0 +1,289 @@
+/**
+ * Screen 8 — Metrics (Amendment 122). Every colour is a token from tokens.css; no hex.
+ *
+ * Restraint: ink on the surfaces, and one colour with one job. --fail marks a failure, on
+ * the Errors tile and on a row or day that had one, and nothing else here uses it. The
+ * share bar under a model's name is --ink3 on --surf3: a fraction, not a status.
+ */
+
+.mt {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── head, like Branches' and Files' ───────────────────────────────────── */
+
+.mt-head {
+  height: var(--topbar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.mt-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mt-quiet {
+  color: var(--ink3);
+}
+
+.mt-btn {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: none;
+  border: 1px solid var(--line2);
+  color: var(--ink2);
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mt-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.mt-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* The range: three buttons that read as one control; the open one is filled. */
+.mt-range {
+  display: inline-flex;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.mt-range button {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line2);
+  color: var(--ink2);
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.mt-range button:last-child {
+  border-right: 0;
+}
+
+.mt-range button:hover {
+  color: var(--ink);
+}
+
+.mt-range button.on {
+  background: var(--surf3);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── body ──────────────────────────────────────────────────────────────── */
+
+.mt-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mt-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px 28px;
+  display: grid;
+  gap: 22px;
+  align-content: start;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.mt-note {
+  font-size: var(--fs-md);
+  color: var(--ink2);
+}
+
+.mt-note.fail {
+  color: var(--fail);
+}
+
+.mt-h {
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+/* ── the five figures ──────────────────────────────────────────────────── */
+
+.mt-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.mt-tile {
+  background: var(--surf);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px 12px;
+  min-width: 0;
+}
+
+.mt-tile-label {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
+
+.mt-tile-value {
+  margin-top: 2px;
+  font-size: var(--fs-3xl);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-tile.bad .mt-tile-value {
+  color: var(--fail);
+}
+
+.mt-tile-sub {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  overflow-wrap: anywhere;
+}
+
+/* ── the tables ────────────────────────────────────────────────────────── */
+
+.mt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-table th,
+.mt-table td {
+  padding: 6px 10px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.mt-table thead th {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink3);
+  border-bottom-color: var(--line2);
+}
+
+.mt-table td {
+  color: var(--ink);
+}
+
+.mt-table td.bad {
+  color: var(--fail);
+}
+
+.mt-table tbody tr:hover {
+  background: var(--bg2);
+}
+
+.mt-table .mt-name {
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.mt-table thead .mt-name {
+  font-weight: 600;
+  color: var(--ink3);
+}
+
+.mt-model {
+  font-weight: 600;
+}
+
+.mt-engine {
+  margin-left: 8px;
+  font-size: var(--fs-xs);
+  color: var(--ink3);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.mt-bar {
+  display: block;
+  margin-top: 4px;
+  height: 3px;
+  width: 160px;
+  max-width: 100%;
+  background: var(--surf3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mt-bar i {
+  display: block;
+  height: 100%;
+  background: var(--ink3);
+}
+
+/* ── before metrics, and how it is counted ─────────────────────────────── */
+
+.mt-before {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.mt-before-line {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.mt-before ul,
+.mt-how ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.mt-before .mt-quiet {
+  margin: 0;
+  max-width: 78ch;
+}
+
+.mt-how {
+  color: var(--ink3);
+  max-width: 90ch;
+}
+
+.mt-how summary {
+  cursor: pointer;
+  color: var(--ink2);
+  margin-bottom: 8px;
+}

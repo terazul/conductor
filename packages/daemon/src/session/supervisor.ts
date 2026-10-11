@@ -74,6 +74,7 @@ import {
 } from './handoff.js';
 import type { ToolAccess } from '../routes/helpers.js';
 import { rerunNote, rerunStatusNote } from './rerun.js';
+import { recordRunEnd } from './metrics.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
 import {
@@ -1030,6 +1031,7 @@ export class Supervisor implements AgentControl {
     this.#runners.set(agentId, runner);
 
     let outcome;
+    const began = Date.now();
     try {
       const resuming = resumeFrom !== undefined && resumeFrom !== null;
       // A resume prompt is ours, not the human's: shown as `auto`, and not sent again
@@ -1057,6 +1059,8 @@ export class Supervisor implements AgentControl {
       this.#runners.delete(agentId);
     }
 
+    // Counted for the Metrics tab (Amendment 122); whether it failed is `#settle`'s to say.
+    recordRunEnd(this.#db, agentId, Date.now() - began);
     this.#settle(agentId, outcome);
 
     // A decision that landed while this run was still unwinding.
@@ -1724,6 +1728,7 @@ export class Supervisor implements AgentControl {
     this.#runners.set(agentId, runner);
 
     let outcome;
+    const began = Date.now();
     try {
       outcome = await runner.run({ prompt, resume, synthetic });
     } catch (err) {
@@ -1741,6 +1746,7 @@ export class Supervisor implements AgentControl {
       this.#pushSlots();
       this.#runners.delete(agentId);
     }
+    recordRunEnd(this.#db, agentId, Date.now() - began);
     this.#settle(agentId, outcome);
     this.pump();
   }

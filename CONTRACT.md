@@ -196,6 +196,111 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 122 — post-merge, applied. **A Metrics tab (8): model usage, calls, time and errors, in total and per model.**
+
+Daemon (`session/metrics.ts` new, `routes/metrics.ts` new, `db/migrations/170_metrics.sql` new,
+`session/backends/claude.ts`, `session/backends/copilot.ts`, `session/backends/copilot-events.ts`,
+`session/supervisor.ts`, `session/verify.ts`). Wire (`UsagePayload` in `shared/src/events.ts`,
+`MetricsRange`, `MetricsCounts`, `MetricsModelRow`, `MetricsDay`, `MetricsBefore`, `MetricsResponse` at
+the end of `shared/src/wire.ts`). Web (`web/src/metrics/` new, `shell/nav.ts`, `shell/shell.tsx`,
+`lib/screens.ts`, `branches/verify.ts`). Asked 8 Oct: a tab reporting, in total and per model, input and
+output tokens, the number of calls, how long a call takes, and the error rate. Nothing showed them
+together: Diagnostics has counts and today's cost only.
+- **What is kept, and why not from the agents.** One table of its own, `metrics_daily`, a row per local
+  day, engine and model, added to as results arrive: input, output and cache-read tokens, dollars, calls,
+  retries, runs, failed runs, run time, model-call time, and the calls and output tokens that time
+  covers. It references nothing, so removing a job or an agent (which deletes its `agents` and
+  `agent_runs` rows) leaves it alone, and `agents.model` being overwritten by a model switch cannot
+  credit everything to the last model. Three small tables go with the agent (`ON DELETE CASCADE`):
+  `metrics_baseline` (the last cumulative figures per agent and model), `metrics_agent` (what the agent
+  had spent when metrics first saw it, and one running API-time total) and the one-row `metrics_meta`
+  (`since`, the instant recording began).
+- **The trap the item named, checked.** A Claude result carries CUMULATIVE `modelUsage` and
+  `total_cost_usd`, and "a resumed or forked session continues from the totals its transcript saved, when
+  it has them", so a resume's first result already includes the earlier runs. Its `usage`, which
+  `setAgentUsage` writes to the agent row, is the MAIN LOOP's and the LATEST TURN's only. So: **a Claude
+  agent's row holds its last run's main-loop tokens, while its dollars are lifetime**, and the tab reads
+  neither. What a result adds is the difference from the last one, per model (`resultDelta`). It is
+  "continued" when its dollars are at least what the agent had spent, the test `lifetimeCost` already
+  makes; a lower total started again from zero (the transcript kept none) and is wholly new, and the
+  baseline carries on as the sum. A total that went down on a continued session adds nothing, never a
+  negative. `duration_api_ms` is taken to be one running total for the session like the dollars (the SDK's types
+  do not say; its sibling fields are cumulative), so it is differenced the same way; a build that reports it per turn instead
+  reads as fresh each time, and the running total follows.
+- **An agent from before metrics.** Its first result since only sets the baseline (the running totals
+  include runs never seen), unless that result started again from zero. Its calls and run are counted.
+  Its tokens and dollars count from its second run on. Without this, its first resume would add its whole
+  history again.
+- **What the `usage` event gains** (additive, at the end of `UsagePayload`): `model` (Claude: the model
+  that did the most in the run; Copilot and OpenRouter: the model of the call), `calls` (a Claude
+  result's `num_turns`; 1 per Copilot call), `durationMs` (Claude's `duration_ms`) and `apiMs` (the
+  model-call time this event adds: Claude's `duration_api_ms` since the last result, or a Copilot call's
+  own `duration`). Absent where the engine did not say. `inputTokens`, `outputTokens` and `costUsd` keep
+  their meaning. Claude's per-model tokens are taken from `modelUsage` (folded by `canonicalModel`),
+  with the result's own `usage` used only when it has no `modelUsage`.
+- **A run is credited to one model.** Runs, failed runs, run time, calls and model-call time go to the
+  model that did the most in the run (Claude: most tokens added; Copilot: the first model called, which
+  is the agent's own, since a sub-agent's calls come after). Tokens and dollars are exact per model. An
+  alias such as `opus` is matched to the canonical name the SDK reported (`matchModel`), so a run's
+  counts and its tokens land on one row.
+- **Runs and errors.** The supervisor times every run itself, the same way for both engines
+  (`recordRunEnd`, in `#launch` and `#launchWithPrompt`, after `run()` returns and before `#settle`), and
+  counts it. A run FAILED is the `failed` status event that `#settle` writes right after a run's end:
+  there is no second copy of that rule, so a stop of your own, a pause and a budget stop are runs and not
+  failures, and a refused launch (folder gone) is not a run. Retried calls are `api_retry` events,
+  counted into the run that went through them (only Claude reports them). Both subscriptions are started
+  by `routes/metrics.ts`.
+- **Route.** `GET /api/metrics?range=today|7d|all` (default `today`; anything else 400) →
+  `MetricsResponse`: `total`, `models` (one per engine and model, biggest first), `days` (newest first,
+  only days with something), `from`/`to`/`since` as local days, and for `all` a `before` object. `today`
+  is the daemon's local day (`localDay`); `7d` is today and the six before it; `all` starts at the
+  earliest day recorded. Sums only; the screen makes every rate. `costUsd` is null on a row of an engine
+  whose backend does not report dollars (`capabilities.costUsd`), and on the total when none does.
+- **Before metrics were recorded.** `before` (range `all` only) sums, from the agent rows, every
+  agent still present that spent before metrics saw it: for an agent metrics has seen, what its row held
+  at that moment (`metrics_agent.pre_*`), otherwise what it holds. Each is credited to the model the agent
+  has now, and the screen says so, and that a Claude agent's row holds its last run's tokens only. Agents
+  already removed before this shipped are not there; nothing can recover them.
+- **Web.** `web/src/metrics/` registers screen 8 (`id: 'metrics'`, order 80, hotkey `8`): five figures
+  (tokens, calls, time per run, errors, cost), a table per model (in, out, cached, calls, per run, per
+  call, speed, failed, retried, cost, with a share bar under the name and the engine beside a non-Claude
+  model), a table per day for 7 days and all, the labelled "Before metrics were recorded (no per-call
+  data)" line with its caveat, and a fold-out "How these are counted". Range buttons Today / 7 days / All,
+  kept as the setting `conductor.metricsRange`. It re-reads on arrival, on focus, on a change of range and
+  700 ms after today's spend or any agent's status changes. Every rate is a division in `rules.ts` of two
+  sums the engine really reported: time per call divides only the timed calls, tokens per second only the
+  tokens of those calls, and an engine that gave no time has a dash, never 0 or NaN. A token engine's cost
+  is a dash. The only colour besides ink is `--fail`, on the Errors tile and a failed count. `shell.tsx`
+  says `1–8 screens`; `nav.ts` has `SCREEN.metrics` and `openMetrics`; `lib/screens.ts` reserves 8.
+  `branches/verify.ts`'s status-bar check reads `1–8` now.
+- **Not done.** (1) The Errors tile's "retried of calls" divides by every engine's calls although only
+  Claude reports a retry, so with Copilot agents in the range it reads lower than Claude's own; the
+  per-model rows are exact (another engine's retries show a dash). (2) A Claude run's model-call time
+  covers the whole query pipeline, subagents included, but `calls` is the main loop's turns, so per-call
+  time on a run with parallel subagents is an overestimate. (3) Tokens per second pairs a run's model-call
+  time with ALL the output tokens of the run, credited to its main model. (4) Agents already removed
+  before this shipped, and runs before it, have no per-call data and are not in the tables. (5) No
+  per-project or per-agent filter, and no chart over time beyond the day table. (6) Nothing was looked at
+  in a browser: not the layout, not either theme (the stylesheet is tokens only and a check holds it to
+  that); and `duration_api_ms` being cumulative was taken from the SDK's documentation of the other
+  cumulative fields and could not be confirmed against a real run.
+**Verified:** `session/verify.ts` §21, with a fake `query()` whose result carries `modelUsage`,
+`num_turns`, `duration_api_ms` and `duration_ms`: the arithmetic on plain values (canonical folding, a
+continued result, a fresh one, a baseline-only one, a falling total, model choice, alias matching, day
+maths); one run adds one set of rows and the `usage` event names the model with calls and time; the agent
+row holds the main-loop tokens, not the model's; a RESUMED run adds only the difference (1600 in, not
+2600) and today's spend still grows by the run's own $0.40; a session that started again from zero is
+wholly new; a model switch splits the totals and leaves model A as it was; a failed run is a run and a
+failed run, a budget stop and a stop of your own are runs and not failures; a result with no `modelUsage`
+still counts; an agent from before metrics is in the "before" line, its first resume only sets the
+baseline and its second adds the difference, and the line keeps what its row held then; a Copilot agent's
+calls, with and without a duration, a sub-agent's call on another model, no dollars, and its `usage`
+events; removing the job keeps every row and figure and drops only the agent's bookkeeping; the three
+ranges and their days on dates of their own, a 400 for another range, and `today` by default.
+`web/src/metrics/verify.ts` (in `make test`): the rates, durations, dollars and dashes, the tiles, the
+rows, the labelled line, the registration on 8, the status bar, `nav.ts`, the daemon's ranges matching,
+no two screens on a key, and the stylesheet tokens-only and set for both themes.
+
 ### Amendment 121 — post-merge, applied. **Make a new file from the Files tree, and open it ready to type.**
 
 Shared (`wire.ts`), daemon (`workspace/service.ts`, `routes/workspace.ts`, `workspace/verify.ts`) and web

@@ -49,6 +49,7 @@ import { classifyRetry, modelAnswered } from '../alerts.js';
 import { budgetLeft, lifetimeCost } from '../budget.js';
 import { costChanged } from '../../daily.js';
 import { hub } from '../../hub.js';
+import { recordClaudeResult, type Recorded } from '../metrics.js';
 import {
   addCostToday,
   costToday,
@@ -615,6 +616,13 @@ export class ClaudeBackend implements AgentBackend {
           costChanged();
         }
 
+        // The Metrics tab (Amendment 122). Before `setAgentUsage` below: that overwrites the
+        // row with this result's `usage`, which is the latest turn's main loop and not the
+        // session's, and the first thing recorded for an agent is what its row held until now.
+        // The per-model tokens are taken from `modelUsage` as differences from the last
+        // result, for the same reason `previous` is above.
+        const metrics = this.#record(m, usage, outcome.costUsd - previous);
+
         setAgentUsage(this.#db, this.#scope.agentId, { costUsd, inputTokens, outputTokens });
         this.#emit({
           kind: 'usage',
@@ -622,6 +630,14 @@ export class ClaudeBackend implements AgentBackend {
           inputTokens,
           outputTokens,
           ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+          ...(metrics
+            ? {
+                model: metrics.model,
+                calls: metrics.calls,
+                ...(typeof m['duration_ms'] === 'number' ? { durationMs: m['duration_ms'] } : {}),
+                ...(metrics.apiMs !== null ? { apiMs: metrics.apiMs } : {}),
+              }
+            : {}),
         });
         break;
       }
@@ -631,6 +647,33 @@ export class ClaudeBackend implements AgentBackend {
         // payload the frozen event union models. Deliberately dropped rather
         // than smuggled through as text.
         break;
+    }
+  }
+
+  /**
+   * Add this result to the Metrics tab's history (Amendment 122). Counting must never end a
+   * run, so a failure is logged and the result is handled as it was.
+   */
+  #record(m: Record<string, unknown>, usage: Record<string, unknown>, costDelta: number): Recorded | null {
+    try {
+      return recordClaudeResult(this.#db, {
+        agentId: this.#scope.agentId,
+        stored: this.#scope.spentUsd,
+        reportedCost: typeof m['total_cost_usd'] === 'number' ? m['total_cost_usd'] : 0,
+        costDelta,
+        modelUsage: m['modelUsage'],
+        usage: {
+          input: numberOr(usage['input_tokens'], 0),
+          output: numberOr(usage['output_tokens'], 0),
+          cacheRead: numberOr(usage['cache_read_input_tokens'], 0),
+        },
+        numTurns: numberOr(m['num_turns'], 0),
+        apiMs: typeof m['duration_api_ms'] === 'number' ? m['duration_api_ms'] : null,
+        model: this.#scope.model,
+      });
+    } catch (err) {
+      console.error(`[metrics] ${this.#scope.agentId} could not record a result`, err);
+      return null;
     }
   }
 

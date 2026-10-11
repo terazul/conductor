@@ -35,6 +35,8 @@ export interface Step {
   payloads: EventPayload[];
   /** One model call's tokens. `assistant.usage` is per call, so the backend adds them up. */
   usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+  /** Amendment 122: the model that call was made on, and how long it took, when the runtime says. */
+  call?: { model?: string; durationMs?: number };
   /** The model replied, which ends any outage it was retrying through. */
   replied?: boolean;
   end?: TurnEnd;
@@ -131,6 +133,10 @@ export class CopilotEvents {
             inputTokens: num(d['inputTokens']),
             outputTokens: num(d['outputTokens']),
             cacheReadTokens: num(d['cacheReadTokens']),
+          };
+          step.call = {
+            ...(typeof d['model'] === 'string' && d['model'] ? { model: d['model'] } : {}),
+            ...(num(d['duration']) > 0 ? { durationMs: num(d['duration']) } : {}),
           };
           break;
         }

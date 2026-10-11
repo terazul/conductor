@@ -962,3 +962,84 @@ export type TermClientFrame = { t: 'in'; d: string } | { t: 'resize'; cols: numb
 
 /** `/ws/term/:id`, the socket for one terminal. */
 export const TERM_WS_PREFIX = '/ws/term/';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Metrics  (Amendment 122)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/metrics?range=. `today` and `7d` count the daemon's local days, today included. */
+export type MetricsRange = 'today' | '7d' | 'all';
+
+/**
+ * What one row, one day or the whole range adds up to. Sums only: rates (an error rate,
+ * a time per call, tokens per second) are the reader's to divide, since only it knows
+ * which of two figures it has.
+ */
+export interface MetricsCounts {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  /** Dollars, where the engines counted here report them; null when none does. */
+  costUsd: number | null;
+  /** Model round-trips. */
+  calls: number;
+  /** Model calls the SDK retried (`api_retry` events). */
+  retries: number;
+  /** Runs that ended, however they ended. */
+  runs: number;
+  /** Runs that ended `failed`. Your own stop, a pause and a budget stop are not among them. */
+  failedRuns: number;
+  /** Wall time of those runs, in ms. */
+  runMs: number;
+  /** Time the engine spent in model calls, in ms, over `timedCalls` calls. */
+  apiMs: number;
+  timedCalls: number;
+  /** The output tokens of those timed calls, so tokens per second divides like by like. */
+  timedOutputTokens: number;
+}
+
+export interface MetricsModelRow extends MetricsCounts {
+  provider: string;
+  model: string;
+}
+
+export interface MetricsDay extends MetricsCounts {
+  /** The local day, YYYY-MM-DD. */
+  day: string;
+}
+
+/**
+ * Agents that spent before metrics were recorded. Their totals come from the agent rows
+ * (Claude's tokens there are from the agent's last run only) and have no calls or times;
+ * each is credited to the model the agent has now.
+ */
+export interface MetricsBefore {
+  agents: number;
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  models: Array<{
+    provider: string;
+    model: string;
+    agents: number;
+    costUsd: number | null;
+    inputTokens: number;
+    outputTokens: number;
+  }>;
+}
+
+export interface MetricsResponse {
+  range: MetricsRange;
+  /** The first and last local day the range covers. `all` starts when recording did. */
+  from: string;
+  to: string;
+  /** The local day recording began. Nothing earlier is in the rows below. */
+  since: string;
+  total: MetricsCounts;
+  /** Busiest first (by tokens). */
+  models: MetricsModelRow[];
+  /** Newest first; only days with something in them. */
+  days: MetricsDay[];
+  /** Present for `all`, when there is anything from before. */
+  before: MetricsBefore | null;
+}

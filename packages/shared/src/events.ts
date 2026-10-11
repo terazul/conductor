@@ -147,13 +147,37 @@ export interface StatusPayload {
   detail?: string;
 }
 
-/** Cumulative usage, from SDKResultMessage. */
+/**
+ * Usage, from SDKResultMessage (Claude, once per run) or an `assistant.usage` event
+ * (Copilot and OpenRouter, once per model call).
+ *
+ * `costUsd` is the agent's lifetime spend. `inputTokens` and `outputTokens` are lifetime
+ * for Copilot and OpenRouter, and the run's own main-loop tokens for Claude, whose result
+ * carries the latest turn's: the agent row holds the same. What the Metrics tab adds up
+ * is not these but the fields below and the per-model tokens Conductor takes from the
+ * result's `modelUsage` (Amendment 122).
+ */
 export interface UsagePayload {
   kind: 'usage';
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
+  /**
+   * Amendment 122. The model this usage is credited to: for Claude, the one that did the
+   * most work in the run; for Copilot and OpenRouter, the one the call was made on.
+   */
+  model?: string;
+  /** Model calls this event is for: a Claude run's `num_turns`, or 1. */
+  calls?: number;
+  /** Claude only: how long the run took, the result's `duration_ms`. */
+  durationMs?: number;
+  /**
+   * Time the engine spent in model calls this event adds: Claude's `duration_api_ms` since
+   * the last result, or the call's own `duration` for Copilot and OpenRouter. Absent where
+   * the engine did not say.
+   */
+  apiMs?: number;
 }
 
 /** Agent's own todo list, when available. */

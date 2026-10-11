@@ -41,6 +41,7 @@ export const SCREEN = {
   files: 'files',
   preview: 'preview',
   branches: 'branches',
+  metrics: 'metrics',
   spawn: 'spawn',
   diagnostics: 'diagnostics',
 } as const;
@@ -118,6 +119,11 @@ export function openPreview(server: DevServer): void {
 export function openBranches(projectId: string): void {
   remember({ projectId });
   navigate(SCREEN.branches, { projectId });
+}
+
+/** The Metrics screen (Amendment 122): model usage, calls, time and errors. Key `8`. */
+export function openMetrics(): void {
+  navigate(SCREEN.metrics);
 }
 
 /** Track E's queue. */

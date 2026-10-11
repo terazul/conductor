@@ -213,7 +213,7 @@ function StatusBar() {
   return (
     <footer className="sh-statusbar">
       <span>
-        <kbd>1</kbd>–<kbd>7</kbd> screens
+        <kbd>1</kbd>–<kbd>8</kbd> screens
       </span>
       <span>
         <kbd>⏎</kbd> answer next blocked agent

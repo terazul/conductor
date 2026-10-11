@@ -4971,6 +4971,412 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n22 · the Metrics tab: model usage, calls, time and errors (Amendment 122)');
+  {
+    type MR = import('@conductor/shared').MetricsResponse;
+    const mx = await import('./metrics.js');
+
+    // ── the arithmetic, on plain values ──
+    const tk = (input: number, output: number, cacheRead = 0, costUsd = 0) => ({ input, output, cacheRead, costUsd });
+    const folded = mx.foldModelUsage({
+      'claude-opus-4-7[1m]': { inputTokens: 100, outputTokens: 10, cacheReadInputTokens: 5, costUSD: 0.5, canonicalModel: 'claude-opus-4-7' },
+      'claude-opus-4-7': { inputTokens: 40, outputTokens: 4, cacheReadInputTokens: 0, costUSD: 0.1 },
+      'claude-haiku-4-5': { inputTokens: 7, outputTokens: 1, cacheReadInputTokens: 0, costUSD: 0.01 },
+      junk: 'not an object',
+    });
+    check(
+      "a model's raw keys that name one canonical model are one model; junk is skipped",
+      folded.size === 2 && folded.get('claude-opus-4-7')?.input === 140 && folded.get('claude-haiku-4-5')?.output === 1 && mx.foldModelUsage(undefined).size === 0 && mx.foldModelUsage([1]).size === 0,
+      JSON.stringify([...folded]),
+    );
+    const base = new Map([['m', tk(100, 20, 5, 0.5)]]);
+    const grown = new Map([['m', tk(160, 35, 9, 0.8)]]);
+    const asFacts = (over: Partial<Parameters<typeof mx.resultDelta>[0]> = {}): Parameters<typeof mx.resultDelta>[0] => ({
+      stored: 0.5, reportedCost: 0.8, reported: grown, baseline: base, baselined: true, reportedApiMs: 9000, storedApiMs: 6000, ...over,
+    });
+    const cont = mx.resultDelta(asFacts());
+    check(
+      'a result that continues the session adds the difference, not its running total',
+      cont.continued && cont.perModel.get('m')?.input === 60 && cont.perModel.get('m')?.output === 15 && cont.perModel.get('m')?.cacheRead === 4 && near(cont.perModel.get('m')?.costUsd, 0.3) && cont.apiMs === 3000 && cont.nextApiMs === 9000 && cont.nextBaseline.get('m')?.input === 160,
+      JSON.stringify([...cont.perModel]),
+    );
+    const fresh = mx.resultDelta(asFacts({ reportedCost: 0.2, reported: new Map([['m', tk(30, 5, 0, 0.2)]]) }));
+    check(
+      'one that started again from zero (a lower total than was spent) is wholly new, and the baseline carries on from the sum',
+      !fresh.continued && fresh.perModel.get('m')?.input === 30 && fresh.nextBaseline.get('m')?.input === 130 && fresh.apiMs === 9000 && fresh.nextApiMs === 15000,
+      JSON.stringify([fresh.perModel.get('m'), fresh.nextBaseline.get('m'), fresh.apiMs, fresh.nextApiMs]),
+    );
+    const first = mx.resultDelta(asFacts({ baselined: false, baseline: new Map() }));
+    check(
+      'the first result for an agent from before metrics only sets the baseline: its totals include runs never seen',
+      first.perModel.size === 0 && first.apiMs === null && first.nextBaseline.get('m')?.input === 160 && first.nextApiMs === 9000,
+    );
+    check(
+      'but if that result started again from zero, it is all new',
+      mx.resultDelta(asFacts({ baselined: false, baseline: new Map(), reportedCost: 0.1, reported: new Map([['m', tk(30, 5)]]) })).perModel.get('m')?.input === 30,
+    );
+    check('a total that went down on a continued session adds nothing, never a negative', mx.resultDelta(asFacts({ reported: new Map([['m', tk(90, 10, 1, 0.4)]]) })).perModel.get('m')?.input === 0);
+    check('a result with no API time adds none and leaves the running total', mx.resultDelta(asFacts({ reportedApiMs: null })).apiMs === null && mx.resultDelta(asFacts({ reportedApiMs: null })).nextApiMs === 6000);
+    const two = new Map([['claude-sonnet-4-6', tk(500, 100)], ['claude-haiku-4-5', tk(900, 20)]]);
+    check('the run is credited to the model that did most in it; a tie goes to the agent\'s own', mx.primaryModel(two, 'sonnet') === 'claude-haiku-4-5' && mx.primaryModel(new Map([['a', tk(5, 5)], ['b', tk(5, 5)]]), 'b') === 'b' && mx.primaryModel(new Map(), 'opus') === 'opus');
+    check(
+      'an alias finds its model by name: opus is claude-opus-4-7[1m]; one with no match stays as it is',
+      mx.matchModel('opus', ['claude-sonnet-4-6', 'claude-opus-4-7']) === 'claude-opus-4-7' && mx.matchModel('opus[1m]', ['claude-opus-4-7']) === 'claude-opus-4-7' && mx.matchModel('gpt-5', ['claude-opus-4-7']) === 'gpt-5' && mx.matchModel('default', ['x']) === 'default',
+    );
+    check('days are the daemon\'s local ones, across a month and a year', mx.addDays('2033-03-01', -1) === '2033-02-28' && mx.addDays('2033-01-02', -6) === '2032-12-27' && mx.rangeStart('7d', '2033-03-15', '2033-01-01') === '2033-03-09' && mx.rangeStart('today', '2033-03-15', '2033-01-01') === '2033-03-15' && mx.rangeStart('all', '2033-03-15', '2033-01-01') === '2033-01-01');
+
+    // ── a fake query whose result carries what a real one does ──
+    interface ModelFig { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; costUSD: number; canonicalModel?: string }
+    interface MResult {
+      cost: number;
+      models?: Record<string, ModelFig>;
+      turns?: number;
+      apiMs?: number;
+      durationMs?: number;
+      usage?: { input_tokens: number; output_tokens: number };
+      reason?: string;
+      subtype?: string;
+      isError?: boolean;
+    }
+    interface MRun { options: Options; finished: boolean; say(m: Record<string, unknown>): void; finish(r: MResult): void }
+    const mruns: MRun[] = [];
+    const metricsQuery = ({ prompt, options }: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }): Query => {
+      const inbox: Record<string, unknown>[] = [];
+      let result: MResult = { cost: 0 };
+      let wake: (() => void) | null = null;
+      const poke = (): void => {
+        wake?.();
+        wake = null;
+      };
+      const run: MRun = {
+        options: options ?? {},
+        finished: false,
+        say(m) {
+          if (!run.finished) {
+            inbox.push(m);
+            poke();
+          }
+        },
+        finish(r) {
+          if (run.finished) return;
+          run.finished = true;
+          result = r;
+          poke();
+        },
+      };
+      mruns.push(run);
+      const sessionId = options?.resume ?? `sess_metrics_${mruns.length}`;
+      void (async () => {
+        if (typeof prompt !== 'string') for await (const _ of prompt) void _;
+      })();
+      async function* messages(): AsyncGenerator<unknown> {
+        yield { type: 'system', subtype: 'init', session_id: sessionId };
+        for (;;) {
+          while (inbox.length > 0) yield { session_id: sessionId, ...inbox.shift() };
+          if (run.finished) break;
+          await new Promise<void>((r) => (wake = r));
+        }
+        const r = result;
+        yield {
+          type: 'result',
+          subtype: r.subtype ?? (r.isError ? 'error_during_execution' : 'success'),
+          is_error: r.isError ?? false,
+          total_cost_usd: r.cost,
+          ...(r.reason ? { terminal_reason: r.reason } : {}),
+          ...(r.models ? { modelUsage: r.models } : {}),
+          ...(r.turns !== undefined ? { num_turns: r.turns } : {}),
+          ...(r.apiMs !== undefined ? { duration_api_ms: r.apiMs } : {}),
+          ...(r.durationMs !== undefined ? { duration_ms: r.durationMs } : {}),
+          usage: r.usage ?? { input_tokens: 10, output_tokens: 5 },
+          session_id: sessionId,
+        };
+      }
+      return Object.assign(messages(), {
+        interrupt: async () => run.finish({ cost: 0, reason: 'aborted_streaming', isError: true, models: { 'claude-metrics-b': { inputTokens: 0, outputTokens: 0, costUSD: 0 } } }),
+        setModel: async () => undefined,
+      }) as unknown as Query;
+    };
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = metricsQuery as typeof sdk.query;
+
+    const A = 'claude-metrics-a';
+    const B = 'claude-metrics-b';
+    const fig = (inputTokens: number, outputTokens: number, costUSD: number, cacheReadInputTokens = 0): ModelFig => ({ inputTokens, outputTokens, cacheReadInputTokens, costUSD });
+    const report = async (range = 'all'): Promise<MR> => (await get<MR>(`/api/metrics?range=${range}`)).body;
+    const rowOf = (r: MR, model: string, provider = 'claude') => r.models.find((m) => m.model === model && m.provider === provider);
+    const usages = (id: string) => eventLog().forAgent(id).map((e) => e.payload).filter((p) => p.kind === 'usage');
+    // Section 18 removed the project the earlier sections used, so this one has its own.
+    const mpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'metrics' })).body.project.id;
+    const mjob = (id: string): void => {
+      insertJob(db, { id, projectId: mpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    };
+    const mfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: mpid, ...a });
+
+    // ── a run adds one set of rows ──
+    mjob('job_mt');
+    mfix('mt_a', 'job_mt', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'opus' });
+    sup.pump();
+    await until(() => mruns.length === 1);
+    const r1 = mruns[0]!;
+    r1.say({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 5, retry_delay_ms: 1000, error_status: 529, error: 'overloaded' });
+    r1.finish({
+      cost: 0.5, models: { [A]: fig(1000, 200, 0.5, 50) }, turns: 4, apiMs: 8000, durationMs: 12000,
+      usage: { input_tokens: 300, output_tokens: 60 }, reason: 'completed',
+    });
+    await until(() => getAgent(db, 'mt_a')?.status === 'done');
+    await settle(50);
+    let rep = await report();
+    let a = rowOf(rep, A);
+    check(
+      'one run adds its tokens, calls, time and the dollars the engine reported, to its model',
+      a?.inputTokens === 1000 && a.outputTokens === 200 && a.cacheReadTokens === 50 && near(a.costUsd ?? undefined, 0.5) && a.calls === 4 && a.apiMs === 8000 && a.timedCalls === 4 && a.timedOutputTokens === 200,
+      JSON.stringify(a),
+    );
+    check('and counts as a run that did not fail, with its wall time and the retry it went through', a?.runs === 1 && a.failedRuns === 0 && a.runMs >= 0 && a.retries === 1, JSON.stringify(a));
+    const u1 = usages('mt_a').at(-1);
+    check(
+      'the usage event names the model and carries calls and time (Amendment 122)',
+      u1?.kind === 'usage' && u1.model === A && u1.calls === 4 && u1.durationMs === 12000 && u1.apiMs === 8000 && u1.inputTokens === 300 && u1.outputTokens === 60,
+      JSON.stringify(u1),
+    );
+    check(
+      "and the agent row holds that run's main-loop tokens, not the model's: this is why the tab does not read the rows",
+      getAgent(db, 'mt_a')?.inputTokens === 300 && getAgent(db, 'mt_a')?.outputTokens === 60 && near(getAgent(db, 'mt_a')?.costUsd, 0.5),
+    );
+    check('the total has the dollars of an engine that reports them', near(rep.total.costUsd ?? undefined, rep.models.filter((m) => m.provider === 'claude').reduce((s, m) => s + (m.costUsd ?? 0), 0)) && rep.range === 'all');
+
+    // ── a resumed run adds only what is new ──
+    const sessionA = getAgent(db, 'mt_a')?.sdkSessionId;
+    await send('POST', '/api/agents/mt_a/message', { text: 'again' });
+    await until(() => mruns.length === 2);
+    const r2 = mruns[1]!;
+    check('the second run resumes the first one\'s session', r2.options.resume === sessionA, `${r2.options.resume} vs ${sessionA}`);
+    // A resumed session's first result already carries the earlier run: running totals.
+    const spent0 = costToday(db);
+    r2.finish({
+      cost: 0.9, models: { [A]: fig(1600, 350, 0.9, 80) }, turns: 3, apiMs: 14000, durationMs: 9000,
+      usage: { input_tokens: 150, output_tokens: 40 }, reason: 'completed',
+    });
+    await until(() => getAgent(db, 'mt_a')?.status === 'done' && (usages('mt_a').length === 2));
+    await settle(50);
+    a = rowOf(await report(), A);
+    check(
+      'a RESUMED run adds only the difference: not 2600 in and 550 out, as summing the results would',
+      a?.inputTokens === 1600 && a.outputTokens === 350 && a.cacheReadTokens === 80 && near(a.costUsd ?? undefined, 0.9),
+      JSON.stringify(a),
+    );
+    check('with its calls and API time added once each, and a second run', a?.calls === 7 && a.apiMs === 14000 && a.timedCalls === 7 && a.runs === 2, JSON.stringify(a));
+    check('today\'s spend still grew by the run\'s own $0.40, as before', near(getAgent(db, 'mt_a')?.costUsd, 0.9) && near(costToday(db) - spent0, 0.4), `${costToday(db) - spent0}`);
+
+    // A session whose transcript kept no totals starts again from zero: that is new.
+    await send('POST', '/api/agents/mt_a/message', { text: 'a third time' });
+    await until(() => mruns.length === 3);
+    mruns[2]!.finish({ cost: 0.2, models: { [A]: fig(100, 40, 0.2) }, turns: 2, apiMs: 3000, durationMs: 4000, reason: 'completed' });
+    await until(() => getAgent(db, 'mt_a')?.status === 'done' && usages('mt_a').length === 3);
+    await settle(50);
+    a = rowOf(await report(), A);
+    check(
+      'a resumed session that started again from zero (less than was spent) is wholly new',
+      a?.inputTokens === 1700 && a.outputTokens === 390 && near(a.costUsd ?? undefined, 1.1) && a.calls === 9 && a.apiMs === 17000 && a.runs === 3,
+      JSON.stringify(a),
+    );
+
+    // ── a model switch splits the totals ──
+    check('switching the model is for the next run', (await sup.setModel('mt_a', B)) === 'next run' && getAgent(db, 'mt_a')?.model === B);
+    await send('POST', '/api/agents/mt_a/message', { text: 'on the other model' });
+    await until(() => mruns.length === 4);
+    // Cumulative for the session: model A as it stood, model B new.
+    mruns[3]!.finish({
+      cost: 1.4, models: { [A]: fig(1700, 390, 1.1, 80), [B]: fig(500, 120, 0.3) }, turns: 2, apiMs: 18500, durationMs: 5000,
+      usage: { input_tokens: 500, output_tokens: 120 }, reason: 'completed',
+    });
+    await until(() => getAgent(db, 'mt_a')?.status === 'done' && usages('mt_a').length === 4);
+    await settle(50);
+    rep = await report();
+    a = rowOf(rep, A);
+    let b = rowOf(rep, B);
+    check('model A, which did nothing this run, is as it was', a?.inputTokens === 1700 && a.outputTokens === 390 && a.calls === 9 && a.runs === 3, JSON.stringify(a));
+    check(
+      'model B has its own row: its tokens, dollars, and the run\'s calls, time and run',
+      b?.inputTokens === 500 && b.outputTokens === 120 && near(b.costUsd ?? undefined, 0.3) && b.calls === 2 && b.apiMs === 1500 && b.runs === 1,
+      JSON.stringify(b),
+    );
+    check('the agent row, meanwhile, says only B: the history is not in it', getAgent(db, 'mt_a')?.model === B);
+    check('the usage event of that run names B', (usages('mt_a').at(-1) as { model?: string } | undefined)?.model === B);
+
+    // ── errors: a failed run counts, your stop and a budget stop do not ──
+    const total0 = (await report()).total;
+    mjob('job_mt_f');
+    mfix('mt_f', 'job_mt_f', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'opus' });
+    sup.pump();
+    await until(() => mruns.length === 5);
+    mruns[4]!.finish({ cost: 0.01, models: { [B]: fig(10, 2, 0.01) }, turns: 1, reason: 'error', isError: true });
+    await until(() => getAgent(db, 'mt_f')?.status === 'failed');
+    await settle(50);
+    rep = await report();
+    check('a run that ends failed is a run and a failed run, on its model', rowOf(rep, B)?.runs === 2 && rowOf(rep, B)?.failedRuns === 1 && rep.total.failedRuns === total0.failedRuns + 1, JSON.stringify(rowOf(rep, B)));
+
+    mjob('job_mt_cap');
+    mfix('mt_cap', 'job_mt_cap', { status: 'queued', autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 1 }, model: 'opus' });
+    sup.pump();
+    await until(() => mruns.length === 6);
+    mruns[5]!.finish({ cost: 1.2, models: { [B]: fig(20, 4, 1.2) }, turns: 1, subtype: 'error_max_budget_usd', isError: true });
+    await until(() => getAgent(db, 'mt_cap')?.status === 'paused');
+    await settle(50);
+    const afterCap = await report();
+    check('a budget stop is a run, and not a failure', rowOf(afterCap, B)?.runs === 3 && rowOf(afterCap, B)?.failedRuns === 1 && afterCap.total.failedRuns === total0.failedRuns + 1, JSON.stringify(rowOf(afterCap, B)));
+
+    mjob('job_mt_stop');
+    mfix('mt_stop', 'job_mt_stop', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'opus' });
+    sup.pump();
+    await until(() => mruns.length === 7 && getAgent(db, 'mt_stop')?.status === 'working');
+    await send('POST', '/api/agents/mt_stop/terminate');
+    await until(() => getAgent(db, 'mt_stop')?.status === 'stopped');
+    await settle(80);
+    const afterStop = await report();
+    check('stopping an agent yourself is a run, and not a failure', afterStop.total.runs === afterCap.total.runs + 1 && afterStop.total.failedRuns === afterCap.total.failedRuns && getAgent(db, 'mt_stop')?.status === 'stopped', JSON.stringify([afterStop.total.runs, afterCap.total.runs]));
+
+    // A result with no model breakdown: the main loop's own figures, on the agent's model.
+    const opus0 = rowOf(await report(), 'opus');
+    mjob('job_mt_n');
+    mfix('mt_n', 'job_mt_n', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'opus' });
+    sup.pump();
+    await until(() => mruns.length === 8);
+    mruns[7]!.finish({ cost: 0.1, turns: 1, usage: { input_tokens: 70, output_tokens: 9 }, reason: 'completed' });
+    await until(() => getAgent(db, 'mt_n')?.status === 'done');
+    await settle(50);
+    const opus1 = rowOf(await report(), 'opus');
+    check(
+      'a result with no modelUsage still counts: its own tokens and dollars, on the agent\'s model',
+      (opus1?.inputTokens ?? 0) - (opus0?.inputTokens ?? 0) === 70 && (opus1?.outputTokens ?? 0) - (opus0?.outputTokens ?? 0) === 9 && near((opus1?.costUsd ?? 0) - (opus0?.costUsd ?? 0), 0.1),
+      JSON.stringify([opus0, opus1]),
+    );
+
+    // ── before metrics were recorded ──
+    const before0 = (await report()).before;
+    mjob('job_mt_old');
+    mfix('mt_old', 'job_mt_old', { status: 'done', autonomy: DEFAULT_AUTONOMY, model: 'opus', sdkSessionId: 'sess_old', costUsd: 2, inputTokens: 800, outputTokens: 90 });
+    const before1 = (await report()).before;
+    check(
+      'an agent that spent before metrics, and never ran since, is in the "before" line from its row',
+      before1 !== null && before1.agents === (before0?.agents ?? 0) + 1 && near((before1.costUsd ?? 0) - (before0?.costUsd ?? 0), 2) && before1.inputTokens - (before0?.inputTokens ?? 0) === 800 && before1.outputTokens - (before0?.outputTokens ?? 0) === 90,
+      JSON.stringify([before0, before1]),
+    );
+    check('and the other ranges do not show it', (await report('today')).before === null && (await report('7d')).before === null);
+    const bBefore = rowOf(await report(), B)!;
+    await send('POST', '/api/agents/mt_old/message', { text: 'continue' });
+    await until(() => mruns.length === 9);
+    mruns[8]!.finish({ cost: 2.6, models: { [B]: fig(5000, 700, 2.6) }, turns: 3, apiMs: 9000, durationMs: 7000, reason: 'completed' });
+    await until(() => getAgent(db, 'mt_old')?.status === 'done' && usages('mt_old').length === 1);
+    await settle(50);
+    let repOld = await report();
+    let bOld = rowOf(repOld, B)!;
+    check(
+      'its first result since metrics began only sets the baseline: running totals that include runs never seen are not added',
+      bOld.inputTokens === bBefore.inputTokens && bOld.outputTokens === bBefore.outputTokens && near(bOld.costUsd ?? 0, bBefore.costUsd ?? 0) && bOld.apiMs === bBefore.apiMs,
+      JSON.stringify([bBefore, bOld]),
+    );
+    check('though its calls and its run are counted', bOld.calls === bBefore.calls + 3 && bOld.runs === bBefore.runs + 1);
+    check(
+      'and the "before" line keeps what the row held then, not what it holds now',
+      repOld.before?.agents === before1?.agents && near(repOld.before?.costUsd ?? 0, before1?.costUsd ?? 0) && repOld.before?.inputTokens === before1?.inputTokens && getAgent(db, 'mt_old')?.costUsd === 2.6,
+      JSON.stringify([repOld.before, before1]),
+    );
+    await send('POST', '/api/agents/mt_old/message', { text: 'and again' });
+    await until(() => mruns.length === 10);
+    mruns[9]!.finish({ cost: 2.9, models: { [B]: fig(5600, 780, 2.9) }, turns: 2, apiMs: 10000, durationMs: 3000, reason: 'completed' });
+    await until(() => getAgent(db, 'mt_old')?.status === 'done' && usages('mt_old').length === 2);
+    await settle(50);
+    repOld = await report();
+    const bNext = rowOf(repOld, B)!;
+    check(
+      'from its second run on, it adds the difference like any other',
+      bNext.inputTokens === bOld.inputTokens + 600 && bNext.outputTokens === bOld.outputTokens + 80 && near((bNext.costUsd ?? 0) - (bOld.costUsd ?? 0), 0.3) && bNext.apiMs === bOld.apiMs + 1000,
+      JSON.stringify([bOld, bNext]),
+    );
+    b = bNext;
+
+    // ── Copilot and OpenRouter: one event per call, no dollars ──
+    const copilotBefore = rowOf(await report(), 'gpt-5-mini', 'copilot');
+    mjob('job_mt_c');
+    mfix('mt_c', 'job_mt_c', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    sup.pump();
+    await until(() => copilotSessions.some((s) => s.id === 'mt_c'));
+    const cs = copilotSessions.filter((s) => s.id === 'mt_c').at(-1)!;
+    cs.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 100, outputTokens: 20, cacheReadTokens: 10, duration: 2000 });
+    cs.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 50, outputTokens: 5 });
+    cs.emit('assistant.usage', { model: 'gpt-4.1', inputTokens: 30, outputTokens: 3, duration: 500 }, { agentId: 'sub1' });
+    cs.emit('session.idle', {});
+    await until(() => getAgent(db, 'mt_c')?.status === 'done');
+    await settle(50);
+    rep = await report();
+    const g5 = rowOf(rep, 'gpt-5-mini', 'copilot');
+    const g41 = rowOf(rep, 'gpt-4.1', 'copilot');
+    check(
+      'each call is a call, on the model it was made on, with its own time where the runtime gave one',
+      g5 !== undefined && g5.calls === (copilotBefore?.calls ?? 0) + 2 && g5.inputTokens === (copilotBefore?.inputTokens ?? 0) + 150 && g5.outputTokens === (copilotBefore?.outputTokens ?? 0) + 25 && g5.cacheReadTokens === (copilotBefore?.cacheReadTokens ?? 0) + 10 && g5.apiMs === (copilotBefore?.apiMs ?? 0) + 2000 && g5.timedCalls === (copilotBefore?.timedCalls ?? 0) + 1 && g5.timedOutputTokens === (copilotBefore?.timedOutputTokens ?? 0) + 20,
+      JSON.stringify([copilotBefore, g5]),
+    );
+    check('a sub-agent\'s call on another model is that model\'s', g41?.calls === 1 && g41.inputTokens === 30 && g41.apiMs === 500);
+    check('the run is credited to the first model called, the agent\'s own', g5?.runs === (copilotBefore?.runs ?? 0) + 1 && (g41?.runs ?? 0) === 0);
+    check('an engine that reports no dollars shows none, not $0.00', g5?.costUsd === null && g41?.costUsd === null);
+    const cu = usages('mt_c');
+    check(
+      'its usage events carry the model, one call, and the call\'s time when it has one',
+      cu[0]?.kind === 'usage' && cu[0].model === 'gpt-5-mini' && cu[0].calls === 1 && cu[0].apiMs === 2000 && cu[1]?.kind === 'usage' && cu[1].apiMs === undefined && cu[2]?.kind === 'usage' && cu[2].model === 'gpt-4.1',
+      JSON.stringify(cu),
+    );
+    check('and the agent row is still its lifetime tokens', getAgent(db, 'mt_c')?.inputTokens === 180 && getAgent(db, 'mt_c')?.costUsd === 0);
+
+    // ── removing the job keeps the history ──
+    const keep = await report();
+    const baselinesOf = (id: string): number => count(db, 'SELECT COUNT(*) AS n FROM metrics_baseline WHERE agent_id = ?', id);
+    check('before the removal the agent has its running baselines', baselinesOf('mt_a') === 2);
+    const gone = await send('DELETE', '/api/jobs/job_mt');
+    check('the job and its agent are removed', gone.status === 200 && getAgent(db, 'mt_a') === undefined);
+    const kept = await report();
+    check(
+      'the history is untouched: every row, every figure',
+      JSON.stringify(rowOf(kept, A)) === JSON.stringify(rowOf(keep, A)) && JSON.stringify(rowOf(kept, B)) === JSON.stringify(rowOf(keep, B)) && JSON.stringify(kept.total) === JSON.stringify(keep.total) && kept.days.length === keep.days.length,
+    );
+    check('only the agent\'s own bookkeeping went with it', baselinesOf('mt_a') === 0 && count(db, 'SELECT COUNT(*) AS n FROM metrics_agent WHERE agent_id = ?', 'mt_a') === 0);
+
+    // ── the route's three ranges, on days of our own ──
+    const day = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)), d: Number(iso.slice(8, 10)) });
+    const put = (iso: string, input: number, extra: { calls?: number; cost?: number } = {}): void => {
+      db.prepare(
+        `INSERT INTO metrics_daily (day, provider, model, input_tokens, calls, runs, cost_usd) VALUES (?, 'claude', 'claude-range', ?, ?, 1, ?)`,
+      ).run(iso, input, extra.calls ?? 1, extra.cost ?? 0.1);
+    };
+    const t = day('2033-03-15');
+    setDayClock(() => new Date(t.y, t.m - 1, t.d, 12, 0, 0));
+    put('2033-03-15', 10);
+    put('2033-03-12', 20);
+    put('2033-03-09', 30);
+    put('2033-03-08', 40);
+    put('2033-03-01', 50);
+    const today = await report('today');
+    const week = await report('7d');
+    const all = await report('all');
+    const only = (r: MR) => rowOf(r, 'claude-range');
+    check('today is today only', only(today)?.inputTokens === 10 && today.from === '2033-03-15' && today.to === '2033-03-15' && today.days.map((d) => d.day).join() === '2033-03-15', JSON.stringify(today.days.map((d) => d.day)));
+    check('7 days is today and the six before it', only(week)?.inputTokens === 60 && week.from === '2033-03-09' && week.to === '2033-03-15' && week.days.map((d) => d.day).join() === '2033-03-15,2033-03-12,2033-03-09', JSON.stringify(week.days.map((d) => d.day)));
+    check('all is everything since recording began, newest day first', only(all)?.inputTokens === 150 && all.days.slice(0, 5).map((d) => d.day).join() === '2033-03-15,2033-03-12,2033-03-09,2033-03-08,2033-03-01' && all.from <= '2033-03-01', all.from);
+    check('the per-day rows add up to the total', all.days.reduce((s, d) => s + d.inputTokens, 0) === all.total.inputTokens && week.days.reduce((s, d) => s + d.runs, 0) === week.total.runs);
+    check('the day recording began is told, as a local day', /^\d{4}-\d{2}-\d{2}$/.test(all.since) && all.since === week.since);
+    check('a range that is not one of the three is a 400', (await get('/api/metrics?range=fortnight')).status === 400);
+    check('no range is today', (await get<MR>('/api/metrics')).body.range === 'today');
+    db.prepare("DELETE FROM metrics_daily WHERE model = 'claude-range'").run();
+    setDayClock();
+
+    // Everything these runs left is dated today, and the run before the last has finished.
+    for (const r of mruns) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });

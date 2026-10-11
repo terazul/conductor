@@ -296,7 +296,8 @@ console.log("\n9 · a project's default branch, and checking it out on it (Amend
 
 console.log('\n6 · the status bar and nav.ts');
 {
-  check('shell.tsx says 1–7 screens', /<kbd>1<\/kbd>–<kbd>7<\/kbd> screens/.test(src('../shell/shell.tsx')));
+  // 1–7 when Branches was the last screen; Metrics (8, Amendment 122) made it 1–8.
+  check('shell.tsx says 1–8 screens', /<kbd>1<\/kbd>–<kbd>8<\/kbd> screens/.test(src('../shell/shell.tsx')));
   const nav = src('../shell/nav.ts');
   check("nav.ts has SCREEN.branches = 'branches'", /branches:\s*'branches'/.test(nav));
   check('nav.ts has openBranches(projectId), going to the screen with the project', /export function openBranches\(projectId: string\)/.test(nav) && /navigate\(SCREEN\.branches, \{ projectId \}\)/.test(nav));
@@ -304,7 +305,7 @@ console.log('\n6 · the status bar and nav.ts');
 
 console.log(
   failures === 0
-    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–7; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117).'
+    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117).'
     : `\nAmendment 109 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);
