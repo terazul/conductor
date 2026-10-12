@@ -99,6 +99,18 @@ import { extractQuestions, reversibility, toolLabel } from '../session/translate
  */
 export const DEFER_AFTER_MS = Number(process.env.CONDUCTOR_DEFER_AFTER_MS ?? 90_000);
 
+/**
+ * How long a QUESTION is held before it is parked (Amendment 131). Longer than a permission:
+ * a question is something you think about, and parking it ends the agent's turn, which Claude
+ * Code records as "the user doesn't want to proceed … STOP" — the agent then reads its own
+ * question as rejected. A held question costs a slot and no tokens. Follows
+ * CONDUCTOR_DEFER_AFTER_MS when only that is set, so a check that shortens one shortens both.
+ */
+export const QUESTION_DEFER_AFTER_MS = Number(
+  process.env.CONDUCTOR_QUESTION_DEFER_AFTER_MS ??
+    (process.env.CONDUCTOR_DEFER_AFTER_MS !== undefined ? DEFER_AFTER_MS : 15 * 60_000),
+);
+
 /** What the runner's PreToolUse hook should do with a call. */
 export type PreToolVerdict =
   | { kind: 'observe' }
@@ -384,7 +396,7 @@ export class Arbiter {
     // cannot answer. Park it now and free the slot. Not on an engine that can't
     // defer: parking it would only end the run (Amendment 76), so it keeps holding.
     const watched = hub().clientCount > 0;
-    const holdFor = watched ? DEFER_AFTER_MS : 0;
+    const holdFor = watched ? (isQuestion ? QUESTION_DEFER_AFTER_MS : DEFER_AFTER_MS) : 0;
     const parks = this.#defers(agent.id);
 
     return new Promise<PermissionDecision>((resolve) => {

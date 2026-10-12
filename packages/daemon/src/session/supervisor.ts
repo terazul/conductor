@@ -103,6 +103,7 @@ import {
   getAgentBrief,
   getJob,
   getProject,
+  getRequest,
   getProjectByPath,
   addProjectDir,
   removeProjectDir,
@@ -236,6 +237,32 @@ export class FolderGoneError extends Error {}
 /** Whether a pause note is `strandNote`'s. */
 export const isStrandNote = (note: string | null): boolean =>
   note !== null && note.startsWith('waits for ') && note.includes('resume to run without it');
+
+/**
+ * What an agent is told when a question it asked was put aside and you have answered it
+ * since (Amendment 131). Parking ends the turn, and Claude Code records that as "the user
+ * doesn't want to proceed … STOP what you are doing": told only "make that call again", the
+ * agent read its question as rejected, or asked again after being told to stop. So it is
+ * told what happened, and your answers themselves. Pure, so verify checks the wording.
+ */
+export function answeredNudge(
+  questions: readonly { question: string }[],
+  answers: Readonly<Record<string, string | string[]>>,
+  response?: string,
+): string {
+  const lines: string[] = [];
+  const asked = new Set(questions.map((q) => q.question));
+  const say = (q: string, a: string | string[]) => lines.push(`- "${q}" → ${Array.isArray(a) ? a.join(', ') : a}`);
+  for (const q of questions) if (answers[q.question] !== undefined) say(q.question, answers[q.question]!);
+  for (const [q, a] of Object.entries(answers)) if (!asked.has(q)) say(q, a);
+  if (response?.trim()) lines.push(`- And they added: ${response.trim()}`);
+  return [
+    'The user has answered the question you asked. It waited a while, so it was put to one side: that is why it',
+    "came back as \"the user doesn't want to proceed\". Ignore that. Their answers:",
+    ...(lines.length > 0 ? lines : ['- (no answer was given to any of the questions)']),
+    'Carry on from where you stopped, with these answers. Do not ask this question again.',
+  ].join('\n');
+}
 
 /** Nudge text for a park that came from interrupt() rather than `defer`. */
 const RESUME_NUDGE =
@@ -1221,6 +1248,11 @@ export class Supervisor implements AgentControl {
     }
 
     const tool = staged.toolName;
+    // A question you answered while it was put aside: say the answers (Amendment 131).
+    if (staged.decision.type === 'answer') {
+      const request = getRequest(this.#db, staged.requestId);
+      return answeredNudge(request?.questions ?? [], staged.decision.answers, staged.decision.response);
+    }
     if (staged.decision.type === 'deny') {
       return (
         `Your ${tool} call was declined by the human` +

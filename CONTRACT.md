@@ -196,6 +196,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 131 — post-merge, applied. **A question you answer after a while comes back as your answer.**
+
+Reported 12 Oct: "when an Architect is waiting for an answer, if I take a while to respond it loses
+track of what it was doing. I give an answer and it still does not proceed." Cause, from the event log
+and the architect's own session file: a question was held 90 s (`DEFER_AFTER_MS`), then parked by
+`interrupt()`, which Claude Code records as the tool result *"The user doesn't want to proceed with
+this tool use … STOP what you are doing and wait for the user"*. On the answer, the agent was resumed
+with *"Your AskUserQuestion call was approved by the human. Make that exact call again now"*, with no
+answer in it: it had to re-ask to get it (PreToolUse applies the staged answer), against a transcript
+telling it to stop. Of 25 answered questions, 13 were parked; it recovered most of the time, and when
+it didn't the answer was lost.
+- **Hold questions longer.** `QUESTION_DEFER_AFTER_MS`, default 15 minutes
+  (`CONDUCTOR_QUESTION_DEFER_AFTER_MS`, else `CONDUCTOR_DEFER_AFTER_MS` when only that is set). A held
+  question costs a slot and no tokens, and answering it is the live path: no interrupt, nothing lost.
+  Permissions keep 90 s. With no page open a question still parks at once.
+- **Say the answer.** `#resumePrompt`, for a staged `answer`: `answeredNudge(questions, answers,
+  response)` — what happened ("put to one side … came back as 'the user doesn't want to proceed'.
+  Ignore that."), each question with its answer, anything you added, then "Carry on … Do not ask this
+  question again." The staged decision stays, so an agent that asks again anyway still gets your answer.
+- **Verify:** `session/verify-answer.ts` (port 7814, 15 checks, fake SDK). In `make test`.
+
 ### Amendment 130 — post-merge, applied. **Only a project you haven't looked at since it finished says FINISHED.**
 
 Web only (`fleet/rest.ts`, new; `fleet/card.tsx`, `fleet/project.tsx`, `lib/verify.ts`). Reported
