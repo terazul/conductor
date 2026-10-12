@@ -196,6 +196,36 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 133 — post-merge, applied. **An agent's turn ending ends its process, so nothing it starts is left to die in the background.**
+
+Daemon only (`session/background.ts` new, `session/backends/claude.ts`, `session/verify.ts`,
+`session/verify-background.ts` new). ADR 0010. Reported 12 Oct: an architect designed and
+executed a plan, then said the agents after it "exited when the session ended" without doing
+their work. The cause: a Claude run ends at its first `result` and closes its input
+(`claude.ts`), so the Claude Code process exits, and a subagent it started with
+`run_in_background: true` dies with it. A background subagent reports back by waking the main
+loop for another turn, and nothing can wake a process that has gone. It is not Conductor's
+stacks: those start on `hand_off`, after the turn.
+
+- **Every Claude agent is told** (`TURN_END_LINE`), appended to its system prompt after its
+  persona's own (Amendment 68), so an agent without a persona now carries a system prompt
+  `append` too: when its turn ends its process ends, and background subagents, workflows,
+  background shell commands and scheduled wake-ups die with it. Run subagents in the
+  foreground; several in one message still run in parallel.
+- **A background `Agent` (or `Task`) call runs in the foreground.** The PreToolUse hook returns
+  `updatedInput` with `run_in_background: false` and an `additionalContext` note saying why. On
+  the observe path it sends no permission decision, so the guardrails and `canUseTool` still
+  decide whether it runs; on the allow path the rewrite rides with the allow. Checked against
+  the real SDK (0.3.284) on 12 Oct: the call ran in the foreground and its answer came back as
+  its result, with and without an allow.
+- **`Workflow` is declined** with the reason and what to do instead, since it only runs in the
+  background.
+- **Left alone:** background `Bash` (a dev server for this turn's tests is meant to stop with
+  it; the line warns), and the Copilot engine, which has no background subagents.
+
+**Verified:** `session/verify-background.ts` (17 checks: the pure rules, then a real runner's own
+hook, as the SDK calls it) and `session/verify.ts`'s persona checks, which now expect the line.
+
 ### Amendment 132 — post-merge, applied. **A question is held until you answer it, and takes no slot meanwhile.**
 
 Asked 12 Oct, after 131: "when I finally answer, why can't it pick up where it left off", then "do never

@@ -25,6 +25,7 @@
  * agent; sending to a finished agent resumes its session instead.
  */
 
+import { declinedHere, foregroundInput, withTurnEndLine } from '../background.js';
 import type { AgentBackend, RunOpts, RunOutcome, RunnerScope } from '../backend.js';
 export type { RunOpts, RunOutcome, RunnerScope } from '../backend.js';
 import {
@@ -240,12 +241,10 @@ export class ClaudeBackend implements AgentBackend {
       // Omitted when unset, so the SDK's own default applies rather than ours.
       ...(autonomy.effort ? { effort: autonomy.effort } : {}),
       ...(resume ? { resume } : {}),
-      // A persona's own (Amendment 68). Appended to Claude Code's prompt rather than
-      // replacing it, so the agent keeps its tools' instructions; omitted when empty, so
-      // an agent without one launches exactly as before.
-      ...(systemPrompt?.trim()
-        ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: systemPrompt } }
-        : {}),
+      // A persona's own (Amendment 68), appended to Claude Code's prompt rather than
+      // replacing it, so the agent keeps its tools' instructions. Every agent is also told
+      // that its turn ending ends its process (Amendment 133).
+      systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: withTurnEndLine(systemPrompt) },
       ...(skills && skills.length > 0 ? { skills } : {}),
 
       // We are a browser, so Claude's option previews can render natively rather
@@ -324,6 +323,17 @@ export class ClaudeBackend implements AgentBackend {
         if (todo) this.#emit(todo);
       }
 
+      // A workflow only runs in the background, and would die with this process (Amendment 133).
+      const declined = declinedHere(tool);
+      if (declined) {
+        this.#startedAt.delete(toolUseId);
+        return {
+          hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: declined },
+        };
+      }
+      // A background subagent would too, so it runs in the foreground (Amendment 133).
+      const fg = foregroundInput(tool, toolInput);
+
       const verdict = arbiter().preToolUse({
         agentId: this.#scope.agentId,
         toolName: tool,
@@ -338,7 +348,11 @@ export class ClaudeBackend implements AgentBackend {
               hookEventName: 'PreToolUse',
               permissionDecision: 'allow',
               permissionDecisionReason: verdict.reason,
-              ...(verdict.updatedInput ? { updatedInput: verdict.updatedInput } : {}),
+              ...(verdict.updatedInput
+                ? { updatedInput: verdict.updatedInput }
+                : fg
+                  ? { updatedInput: fg.input, additionalContext: fg.note }
+                  : {}),
             },
           };
         case 'deny':
@@ -363,6 +377,13 @@ export class ClaudeBackend implements AgentBackend {
           };
         case 'observe':
         default:
+          // No decision, only the rewrite: whether it may run is still the agent's guardrails'
+          // and canUseTool's to say. The SDK applies `updatedInput` without one (checked 12 Oct).
+          if (fg) {
+            return {
+              hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: fg.input, additionalContext: fg.note },
+            };
+          }
           // Never block the agent on Conductor's bookkeeping.
           return { async: true, asyncTimeout: 30_000 };
       }

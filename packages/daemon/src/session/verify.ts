@@ -31,6 +31,7 @@
  *   lsof -ti :7802 | xargs kill -9
  */
 
+import { TURN_END_LINE } from './background.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -3063,11 +3064,11 @@ async function main(): Promise<void> {
     const plain = runFor('builder');
     check(
       "its system prompt is appended to Claude Code's own",
-      JSON.stringify(first?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: PROMPT68 }),
+      JSON.stringify(first?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${PROMPT68}\n\n${TURN_END_LINE}` }),
       JSON.stringify(first?.options.systemPrompt),
     );
     check('and its skills are the ones passed', JSON.stringify(first?.options.skills) === '["pdf","docx"]', JSON.stringify(first?.options.skills));
-    check('an agent without a persona launches as before: neither option', plain !== undefined && !('systemPrompt' in plain.options) && !('skills' in plain.options), JSON.stringify(Object.keys(plain?.options ?? {})));
+    check('an agent without a persona gets only the turn-end line (Amendment 133), and no skills', plain !== undefined && JSON.stringify(plain.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: TURN_END_LINE }) && !('skills' in plain.options), JSON.stringify(plain?.options.systemPrompt));
 
     first?.finish({ cost: 0, reason: 'completed' });
     plain?.finish({ cost: 0, reason: 'completed' });
@@ -3079,13 +3080,13 @@ async function main(): Promise<void> {
     check('in its own session', typeof resumed?.options.resume === 'string' && resumed.options.resume === getAgent(db, withId)?.sdkSessionId, String(resumed?.options.resume));
     check(
       'carrying its system prompt and skills again',
-      JSON.stringify(resumed?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: PROMPT68 }) && JSON.stringify(resumed?.options.skills) === '["pdf","docx"]',
+      JSON.stringify(resumed?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${PROMPT68}\n\n${TURN_END_LINE}` }) && JSON.stringify(resumed?.options.skills) === '["pdf","docx"]',
       JSON.stringify({ systemPrompt: resumed?.options.systemPrompt, skills: resumed?.options.skills }),
     );
     resumed?.finish({ cost: 0, reason: 'completed' });
     await until(() => getAgent(db, withId)?.status === 'done');
     await send('POST', `/api/agents/${plainId}/message`, { text: 'one more thing' });
-    check('and a resume of one without stays without', await until(() => runs.length === before + 2) && !('systemPrompt' in (runs.at(-1)?.options ?? {})) && !('skills' in (runs.at(-1)?.options ?? {})));
+    check('and a resume of one without stays without: only the turn-end line, and no skills', await until(() => runs.length === before + 2) && JSON.stringify(runs.at(-1)?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: TURN_END_LINE }) && !('skills' in (runs.at(-1)?.options ?? {})));
     runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
     await until(() => sup.slots.used === 0);
 
@@ -3102,7 +3103,7 @@ async function main(): Promise<void> {
     const helperRun = await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Check the API.')))
       ? runs.find((r) => (r.prompts[0] ?? '').includes('Check the API.'))
       : undefined;
-    check('and launches with it', JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: PROMPT68 }) && JSON.stringify(helperRun?.options.skills) === '["pdf"]');
+    check('and launches with it', JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${PROMPT68}\n\n${TURN_END_LINE}` }) && JSON.stringify(helperRun?.options.skills) === '["pdf"]');
     for (let i = 0; i < 4; i += 1) {
       for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
       await settle(100);
@@ -6213,7 +6214,7 @@ async function main(): Promise<void> {
     check('says to ask the user with the question tool when unsure', /ask the user with the question tool \(AskUserQuestion, or ask_user\)/.test(p0));
     check('says to send work back, at most twice a role', /send the work back/.test(p0) && /at most 2 times/.test(p0) && /started at most 3 times in all/.test(p0));
     check('and that its helpers have no hand_off', /no hand_off tool/.test(p0) && /up to 9 helpers in all/.test(p0));
-    check('it runs on its persona: the architect prompt', JSON.stringify(orchRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: 'ARCHITECT PROMPT o128' }));
+    check('it runs on its persona: the architect prompt', JSON.stringify(orchRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `ARCHITECT PROMPT o128\n\n${TURN_END_LINE}` }));
 
     const mcp = (agentId: string, method: string, params: Record<string, unknown> = {}) =>
       send<{ result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string; inputSchema: { properties?: Record<string, { enum?: string[] }>; required?: string[] } }[] } }>('POST', `/mcp/agents/${agentId}`, { jsonrpc: '2.0', id: 1, method, params });
@@ -6238,7 +6239,7 @@ async function main(): Promise<void> {
     })(), getAgentBrief(db, dev1.id) ?? '');
     await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Build the parser in src/parse.ts.')));
     const devRun = runs.find((r) => (r.prompts[0] ?? '').includes('Build the parser in src/parse.ts.'))!;
-    check('it launches on that model, with that persona and skills', devRun.options.model === O_SONNET && JSON.stringify(devRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: 'DEVELOPER PROMPT o128' }) && JSON.stringify(devRun.options.skills) === '["tdd"]', JSON.stringify([devRun.options.model, devRun.options.systemPrompt]));
+    check('it launches on that model, with that persona and skills', devRun.options.model === O_SONNET && JSON.stringify(devRun.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `DEVELOPER PROMPT o128\n\n${TURN_END_LINE}` }) && JSON.stringify(devRun.options.skills) === '["tdd"]', JSON.stringify([devRun.options.model, devRun.options.systemPrompt]));
     check('and is told the job, and its role — not that it works beside others', (devRun.prompts[0] ?? '').startsWith('the orchestrated prompt') && /Your role is developer\./.test(devRun.prompts[0] ?? '') && !/Other helpers are working/.test(devRun.prompts[0] ?? ''));
 
     const asRev = await startOver(orchId, { role: 'reviewer', task: 'Review src/parse.ts against the brief.', tier: 'haiku' });
