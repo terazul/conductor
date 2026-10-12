@@ -169,7 +169,7 @@ You don't need any of these. Set them before `make start`.
 | `CONDUCTOR_DB` | A database file to use instead, which also skips the first-start question. Settings then last only until the daemon stops. `:memory:` keeps nothing at all. |
 | `CONDUCTOR_SLOTS` | How many agents run at once, when Settings hasn't said. Default `7`. |
 | `CONDUCTOR_DEFER_AFTER_MS` | How long a request is held before it parks. Default `90000` (90 seconds). |
-| `CONDUCTOR_QUESTION_DEFER_AFTER_MS` | The same for an agent's question. Default `900000` (15 minutes), or `CONDUCTOR_DEFER_AFTER_MS` when only that is set. |
+| `CONDUCTOR_QUESTION_DEFER_AFTER_MS` | The same for an agent's question. Default `1800000` (30 minutes), or `CONDUCTOR_DEFER_AFTER_MS` when only that is set. |
 | `ANTHROPIC_BASE_URL` | Where Conductor asks which models are served. Agents use it too, through Claude Code. |
 | `OPENROUTER_API_KEY` | The OpenRouter key. It wins over one saved in Settings, and is never shown, logged or stored. |
 | `LOG_LEVEL` | How much the daemon logs. Default `info`. |
@@ -822,7 +822,7 @@ as seen.
 | | |
 |---|---|
 | **held** | The agent's process is alive, waiting. Its context stays warm. Answering is instant. |
-| **parked** | It waited longer than 90 seconds (a question: 15 minutes), so its session was written to disk and the process released. Answering resumes it — about 0.7 seconds plus one replayed turn. An answered question comes back to the agent as your answers, in words, so it carries on rather than asking again. |
+| **parked** | It waited longer than 90 seconds (a question: 30 minutes), so its session was written to disk and the process released. Answering resumes it — about 0.7 seconds plus one replayed turn. An answered question comes back to the agent as your answers, in words, so it carries on rather than asking again. |
 
 Two practical consequences:
 

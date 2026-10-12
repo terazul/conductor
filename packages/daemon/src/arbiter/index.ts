@@ -108,7 +108,7 @@ export const DEFER_AFTER_MS = Number(process.env.CONDUCTOR_DEFER_AFTER_MS ?? 90_
  */
 export const QUESTION_DEFER_AFTER_MS = Number(
   process.env.CONDUCTOR_QUESTION_DEFER_AFTER_MS ??
-    (process.env.CONDUCTOR_DEFER_AFTER_MS !== undefined ? DEFER_AFTER_MS : 15 * 60_000),
+    (process.env.CONDUCTOR_DEFER_AFTER_MS !== undefined ? DEFER_AFTER_MS : 30 * 60_000),
 );
 
 /** What the runner's PreToolUse hook should do with a call. */

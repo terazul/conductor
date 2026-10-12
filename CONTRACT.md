@@ -207,7 +207,7 @@ with *"Your AskUserQuestion call was approved by the human. Make that exact call
 answer in it: it had to re-ask to get it (PreToolUse applies the staged answer), against a transcript
 telling it to stop. Of 25 answered questions, 13 were parked; it recovered most of the time, and when
 it didn't the answer was lost.
-- **Hold questions longer.** `QUESTION_DEFER_AFTER_MS`, default 15 minutes
+- **Hold questions longer.** `QUESTION_DEFER_AFTER_MS`, default 30 minutes
   (`CONDUCTOR_QUESTION_DEFER_AFTER_MS`, else `CONDUCTOR_DEFER_AFTER_MS` when only that is set). A held
   question costs a slot and no tokens, and answering it is the live path: no interrupt, nothing lost.
   Permissions keep 90 s. With no page open a question still parks at once.

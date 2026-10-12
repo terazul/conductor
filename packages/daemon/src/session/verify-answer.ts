@@ -1,7 +1,7 @@
 /**
  * Validator checks for Amendment 131: a question you answer after a while is not lost.
  *
- * A question is held 15 minutes before it is put aside (a permission, 90 s). Put aside, the
+ * A question is held 30 minutes before it is put aside (a permission, 90 s). Put aside, the
  * agent's turn ends and Claude Code records "the user doesn't want to proceed … STOP"; when
  * you answer, the agent is resumed with your answers in words, not "make that call again".
  *
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n1 · how long a question is held, and what the agent is told');
   check('a permission is put aside after 90 s', DEFER_AFTER_MS === 90_000, String(DEFER_AFTER_MS));
-  check('a question after 15 minutes', QUESTION_DEFER_AFTER_MS === 15 * 60_000, String(QUESTION_DEFER_AFTER_MS));
+  check('a question after 30 minutes', QUESTION_DEFER_AFTER_MS === 30 * 60_000, String(QUESTION_DEFER_AFTER_MS));
   const qs = [{ question: 'Which database?' }, { question: 'Which features?' }];
   const said = answeredNudge(qs, { 'Which database?': 'postgres', 'Which features?': ['auth', 'search'] }, 'and keep it small');
   check('it says each question and its answer', said.includes('"Which database?" → postgres') && said.includes('"Which features?" → auth, search'), said);
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   rmSync(ROOT, { recursive: true, force: true });
   console.log(
     failures === 0
-      ? `\nAmendment 131 answer: PASS — ${checks} checks: a question is held 15 minutes, and one answered after it was put aside comes back to the agent as your answer.\n`
+      ? `\nAmendment 131 answer: PASS — ${checks} checks: a question is held 30 minutes, and one answered after it was put aside comes back to the agent as your answer.\n`
       : `\nAmendment 131 answer: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
