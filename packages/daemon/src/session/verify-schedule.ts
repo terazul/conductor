@@ -27,7 +27,7 @@ import { readSettings } from '../settings.js';
 import { modelSources } from './models.js';
 import { sdk } from './runner.js';
 import { Scheduler, listScheduled, pausedUntil, scheduler, timeProblem } from './schedule.js';
-import { DEFAULT_AUTONOMY, getAgent, insertAgent, insertJob, lastStatusNote, setAgentStatus } from './store.js';
+import { DEFAULT_AUTONOMY, addSpendToday, getAgent, insertAgent, insertJob, lastStatusNote, setAgentStatus } from './store.js';
 import { HOLD_NOTE, supervisor } from './supervisor.js';
 
 modelSources.gateway = () => Promise.reject(new Error('verify asked the real model API'));
@@ -179,6 +179,8 @@ async function main(): Promise<void> {
       autonomy: DEFAULT_AUTONOMY,
       ...o,
     });
+    // A budget counts what was spent TODAY (Amendment 129): an agent made with spend on it spent it today.
+    if (o.costUsd) addSpendToday(db, id, { usd: o.costUsd });
   };
   const status = (id: string) => getAgent(db, id)?.status;
   const future = (ms: number) => new Date(Date.now() + ms).toISOString();

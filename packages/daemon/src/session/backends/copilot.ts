@@ -59,7 +59,7 @@ import { modelAnswered } from '../alerts.js';
 import { budgetRefusal } from '../budget.js';
 import { recordCall, type Recorded } from '../metrics.js';
 import { openRouterKey } from '../secrets.js';
-import { finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setAgentUsage, startRun } from '../store.js';
+import { addSpendToday, finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setAgentUsage, startRun } from '../store.js';
 import { copilotToolsFor, isWriteTool, normaliseTool } from '../translate.js';
 import { recordWindows } from '../windows.js';
 import { CUT_SHORT } from './claude.js';
@@ -520,10 +520,10 @@ export class CopilotBackend implements AgentBackend {
   }
 
   /**
-   * One model call's tokens, added to the lifetime totals the moment they arrive — the
-   * event is ephemeral, and a run cut short would otherwise count nothing. The dollar
-   * spend is the stored one, untouched. Then the ceiling, twice the token budget
-   * (Amendment 124): an agent past it is stopped the way Claude's budget stop ends a run,
+   * One model call's tokens, added to the lifetime totals and to the agent's spend TODAY the
+   * moment they arrive — the event is ephemeral, and a run cut short would otherwise count
+   * nothing. The dollar spend is the stored one, untouched. Then the ceiling, twice the
+   * daily token budget (Amendments 124, 129): an agent past it is stopped the way Claude's budget stop ends a run,
    * and the supervisor pauses it with the note. Between the budget and the ceiling it goes
    * on, and Needs You warns (session/alerts.ts, which hears the usage event just emitted).
    */
@@ -552,6 +552,9 @@ export class CopilotBackend implements AgentBackend {
       console.error(`[metrics] ${this.#scope.agentId} could not record a call`, err);
     }
     setAgentUsage(this.#db, this.#scope.agentId, { costUsd, inputTokens: this.#tokens.input, outputTokens: this.#tokens.output });
+    // The token budget is per day (Amendment 129): this call's input plus output tokens are
+    // the agent's spend today, the day the call arrives, whatever the lifetime totals say.
+    const today = addSpendToday(this.#db, this.#scope.agentId, { tokens: u.inputTokens + u.outputTokens });
     this.#emit({
       kind: 'usage',
       costUsd,
@@ -559,6 +562,7 @@ export class CopilotBackend implements AgentBackend {
       outputTokens: this.#tokens.output,
       ...(u.cacheReadTokens > 0 ? { cacheReadTokens: u.cacheReadTokens } : {}),
       ...(metrics ? { model: metrics.model, calls: 1, ...(metrics.apiMs !== null ? { apiMs: metrics.apiMs } : {}) } : {}),
+      today,
     });
     const agent = getAgent(this.#db, this.#scope.agentId);
     if (!this.#stopping && agent && budgetRefusal(agent)) {

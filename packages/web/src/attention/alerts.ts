@@ -69,14 +69,16 @@ function raisesFor(agent: Agent, b: Budget, onlyRaise: boolean): AlertAction[] {
 /**
  * Whose budget a job's warning raises (Amendment 124). The job's budget is the sum of its
  * agents', so raising any one raises it by as much: the one still spending that has spent
- * the most, else the one that has spent the most. Only agents with a dollar budget count
+ * the most today, else the one that has spent the most today. Only agents with a dollar budget count
  * (the job's is in dollars). null when it has none this tab knows of.
  */
 export function jobRaiseTarget(jobId: string | null, agents: readonly Agent[]): Agent | null {
   const mine = agents.filter((a) => a.jobId === jobId && budgetOf(a)?.unit === 'usd');
   const live = mine.filter((a) => a.status === 'working' || a.status === 'queued' || a.status === 'blocked');
   const pool = live.length > 0 ? live : mine;
-  return pool.reduce<Agent | null>((best, a) => (best === null || a.costUsd > best.costUsd ? a : best), null);
+  // The most spent TODAY, which is what the job's budget is read against (Amendment 129).
+  const today = (a: Agent): number => budgetOf(a)?.spent ?? 0;
+  return pool.reduce<Agent | null>((best, a) => (best === null || today(a) > today(best) ? a : best), null);
 }
 
 /** The buttons for one alert, the one that fixes it first. */
@@ -204,7 +206,7 @@ export function alertNotice(
     return { title: within(`${head} needs you`), body: `${head} ${subject}` };
   }
   // A warning (Amendment 124): the agent is still working, so it is not asking for you.
-  if (alert.kind === 'budget_over') return { title: within(`${head} is over its budget`), body: `${head} ${subject}` };
+  if (alert.kind === 'budget_over') return { title: within(`${head} is over its daily budget`), body: `${head} ${subject}` };
   return { title: within(head), body: subject };
 }
 

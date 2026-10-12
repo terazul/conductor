@@ -233,7 +233,7 @@ function statusNote(
     // Not every pause is yours: a budget, the job's cap and a daemon restart pause too,
     // and saying "by you" for those sent people looking for a click they never made.
     if (!error || error === 'paused by the user') return { kind: 'note', text: 'paused by you', tone: 'idle' };
-    return { kind: 'note', text: `paused — ${error}`, tone: error.startsWith('budget') ? 'need' : 'idle' };
+    return { kind: 'note', text: `paused — ${error}`, tone: /^(job )?budget/.test(error) ? 'need' : 'idle' };
   }
   if (status === 'stopped') {
     // Distinct from 'finished' on purpose. This agent did not reach an end of its own;

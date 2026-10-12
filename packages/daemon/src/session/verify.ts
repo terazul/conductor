@@ -64,13 +64,17 @@ import { preview } from '../preview/index.js';
 import { workspace } from '../workspace/service.js';
 import type { WorkspaceRecord } from '../workspace/store.js';
 import { ALERT_AFTER_MS, Alerts, alerts, classifyRetry, initAlerts, retryNeedsYou } from './alerts.js';
-import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, budgetState, budgetStop, capState, ceilingOf, jobBudgetState, jobCap, runLimit, tokens } from './budget.js';
+import { JOB_BUDGET_NOTE, agentBudget, budgetNote, budgetRefusal, budgetState, budgetStop, capState, ceilingOf, isRenewedNote, jobBudgetState, jobCap, renewals, renewedNote, runLimit, tokens } from './budget.js';
 import { backendFor, providerRefusal, registerBackend } from './backends/index.js';
 import {
   DEFAULT_AUTONOMY,
   addCostToday,
+  addSpendToday,
+  agentsThatSpentOn,
   costToday,
   getAgent,
+  jobCostToday,
+  spentToday as agentSpentToday,
   getJob,
   insertAgent,
   insertJob,
@@ -1116,7 +1120,7 @@ async function main(): Promise<void> {
   );
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n11 · a budget is a lifetime figure, and it stops an agent at twice the budget (Amendment 124)');
+  console.log('\n11 · a budget is a figure per day (it was a lifetime one), and it stops an agent at twice the budget (Amendments 124, 129)');
   /*
    * The cap used to go to the SDK as `maxBudgetUsd` unchanged, and the SDK counts that
    * from the start of each query() — so every message bought a fresh $25, and the cap
@@ -1149,6 +1153,16 @@ async function main(): Promise<void> {
       autonomy: capped,
       ...a,
     });
+    /*
+     * Amendment 129. A budget counts what was spent TODAY, which the agent row can't say
+     * (`costUsd` is its lifetime). A fixture that is created with spend on it is an agent
+     * whose whole life happened today, so the same figures are put in `agent_spend_daily`:
+     * the dollars as they are, and the tokens as input plus output. Without this a fixture
+     * with `costUsd: 51` and a $25 budget would read as having spent nothing.
+     */
+    if (a.costUsd || a.inputTokens || a.outputTokens) {
+      addSpendToday(db, id, { usd: a.costUsd ?? 0, tokens: (a.inputTokens ?? 0) + (a.outputTokens ?? 0) });
+    }
   };
   const job = (id: string, budgetUsd: number | null): void => {
     insertJob(db, {
@@ -1210,12 +1224,12 @@ async function main(): Promise<void> {
   const stoppedFor = lastStatus('agt_capped');
   check(
     'and says what it spent against what budget, and where that stops it',
-    stoppedFor?.kind === 'status' && stoppedFor.error === 'budget reached — spent $50.20 of its $25 budget, which stops it at $50',
+    stoppedFor?.kind === 'status' && stoppedFor.error === 'budget reached for today — spent $50.20 of its $25 daily budget, which stops it at $50',
     JSON.stringify(stoppedFor),
   );
   check("and does not fail its job", getJob(db, 'job_budget')?.status !== 'failed', getJob(db, 'job_budget')?.status);
 
-  const sentence = 'The Builder has spent $50.20 of its $25 budget, which stops it at $50 — raise it to continue.';
+  const sentence = 'The Builder has spent $50.20 of its $25 daily budget today, which stops it at $50 — raise it to continue, or it renews at midnight.';
   const atCap = await send<{ error: string; detail?: string }>('POST', '/api/agents/agt_capped/message', {
     text: 'please carry on',
   });
@@ -1314,7 +1328,7 @@ async function main(): Promise<void> {
     'it is paused, saying so',
     getAgent(db, 'agt_spent')?.status === 'paused' &&
       spentNote?.kind === 'status' &&
-      spentNote.error === 'budget reached — spent $50 of its $25 budget, which stops it at $50',
+      spentNote.error === 'budget reached for today — spent $50 of its $25 daily budget, which stops it at $50',
     `${getAgent(db, 'agt_spent')?.status} ${JSON.stringify(spentNote)}`,
   );
   watching.close();
@@ -3395,7 +3409,7 @@ async function main(): Promise<void> {
     check(
       'over its cap after a model call: stopped and paused with the budget note, its spend unchanged',
       getAgent(db, 'agt_cp5')?.status === 'paused' && (s5?.aborts ?? 0) >= 1 && getAgent(db, 'agt_cp5')?.costUsd === 0.5 &&
-        payloads('agt_cp5').some((p) => p.kind === 'status' && p.status === 'paused' && /budget reached .*-token budget/.test(p.error ?? '')),
+        payloads('agt_cp5').some((p) => p.kind === 'status' && p.status === 'paused' && /budget reached .*-token daily budget/.test(p.error ?? '')),
       JSON.stringify(payloads('agt_cp5').filter((p) => p.kind === 'status')),
     );
 
@@ -3610,7 +3624,11 @@ async function main(): Promise<void> {
                 live = false;
                 const sid = `${provider}_sess_${scope.agentId}`;
                 setAgentSession(d, scope.agentId, sid);
+                // The real backend adds each call's tokens to the agent's day as they arrive (Amendment 129);
+                // this one reports lifetime totals at the end, so the day grows by the difference.
+                const had = getAgent(d, scope.agentId);
                 setAgentUsage(d, scope.agentId, { costUsd: 0, inputTokens: input, outputTokens: output });
+                addSpendToday(d, scope.agentId, { tokens: input + output - ((had?.inputTokens ?? 0) + (had?.outputTokens ?? 0)) });
                 resolve({ sessionId: sid, terminalReason: atCap ? 'budget_exhausted' : 'completed', deferredTool: null, isError: atCap === true, errorDetail: null, costUsd: 0 });
               },
             });
@@ -3628,17 +3646,19 @@ async function main(): Promise<void> {
 
     const shown = [tokens(950), tokens(12_550), tokens(412_999), tokens(500_000), tokens(1_250_000)].join();
     check('tokens read as people say them, rounded down', shown === '950,12.5k,412k,500k,1.2M', shown);
-    const tokenAgent = { role: 'builder', costUsd: 0, inputTokens: 300_000, outputTokens: 112_000, autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 500_000 } };
+    // Amendment 129: what a budget reads is what the agent spent TODAY (`spentToday`), in dollars or in tokens.
+    const todays = (usd: number, tokens: number) => ({ day: localDay(), usd, tokens });
+    const tokenAgent = { role: 'builder', spentToday: todays(0, 412_000), autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 500_000 } };
     check('under its token cap, a $0 agent may run', budgetRefusal(tokenAgent) === null);
     // Amendment 124: at the token budget (500k) it is only over; what refuses is twice it (1M).
-    check('at the budget itself a $0 agent may still run: that is the warning', budgetRefusal({ ...tokenAgent, outputTokens: 200_000 }) === null);
-    const atTokenCap = { ...tokenAgent, outputTokens: 700_000 };
-    check('at twice it, refused in tokens — no dollar figure', budgetRefusal(atTokenCap) === 'The Builder has spent 1M of its 500k-token budget, which stops it at 1M — raise it to continue.', String(budgetRefusal(atTokenCap)));
-    check('and its note says the same', budgetNote(atTokenCap) === 'budget reached — spent 1M of its 500k-token budget, which stops it at 1M', budgetNote(atTokenCap));
+    check('at the budget itself a $0 agent may still run: that is the warning', budgetRefusal({ ...tokenAgent, spentToday: todays(0, 500_000) }) === null);
+    const atTokenCap = { ...tokenAgent, spentToday: todays(0, 1_000_000) };
+    check('at twice it, refused in tokens — no dollar figure', budgetRefusal(atTokenCap) === 'The Builder has spent 1M of its 500k-token daily budget today, which stops it at 1M — raise it to continue, or it renews at midnight.', String(budgetRefusal(atTokenCap)));
+    check('and its note says the same', budgetNote(atTokenCap) === 'budget reached for today — spent 1M of its 500k-token daily budget, which stops it at 1M', budgetNote(atTokenCap));
     check('which still reads as a budget stop', budgetStop(budgetNote(atTokenCap)) === 'budget_exhausted');
-    const dollars = { role: 'builder', costUsd: 50, inputTokens: 9_000_000, outputTokens: 0, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } };
-    check('a dollar budget reads in dollars, whatever the tokens', budgetRefusal(dollars) === 'The Builder has spent $50 of its $25 budget, which stops it at $50 — raise it to continue.' && budgetNote(dollars) === 'budget reached — spent $50 of its $25 budget, which stops it at $50');
-    check('and tokens never stop an agent capped in dollars', budgetRefusal({ ...dollars, costUsd: 1 }) === null);
+    const dollars = { role: 'builder', spentToday: todays(50, 9_000_000), autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } };
+    check('a dollar budget reads in dollars, whatever the tokens', budgetRefusal(dollars) === 'The Builder has spent $50 of its $25 daily budget today, which stops it at $50 — raise it to continue, or it renews at midnight.' && budgetNote(dollars) === 'budget reached for today — spent $50 of its $25 daily budget, which stops it at $50');
+    check('and tokens never stop an agent capped in dollars', budgetRefusal({ ...dollars, spentToday: todays(1, 9_000_000) }) === null);
     check('a job with a token-capped agent has no dollar cap: its dollars are unknown, not zero', jobCap([{ autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 5 } }, { autonomy: tokenAgent.autonomy }]) === null);
 
     const agentsBefore = new Set(listAgents(db).map((a) => a.id));
@@ -3668,8 +3688,8 @@ async function main(): Promise<void> {
     tokenRuns[1]?.end({ input: 700_000, output: 550_000, atCap: true });
     await until(() => getAgent(db, tid)?.status === 'paused');
     const note = eventLog().forAgent(tid).map((e) => e.payload).filter((p) => p.kind === 'status').at(-1);
-    check('reaching the ceiling pauses the agent, in tokens', getAgent(db, tid)?.status === 'paused' && note?.kind === 'status' && note.error === 'budget reached — spent 1.2M of its 500k-token budget, which stops it at 1M', JSON.stringify(note));
-    const sentence = 'The Builder has spent 1.2M of its 500k-token budget, which stops it at 1M — raise it to continue.';
+    check('reaching the ceiling pauses the agent, in tokens', getAgent(db, tid)?.status === 'paused' && note?.kind === 'status' && note.error === 'budget reached for today — spent 1.2M of its 500k-token daily budget, which stops it at 1M', JSON.stringify(note));
+    const sentence = 'The Builder has spent 1.2M of its 500k-token daily budget today, which stops it at 1M — raise it to continue, or it renews at midnight.';
     const refusedMsg = await send<{ detail?: string }>('POST', `/api/agents/${tid}/message`, { text: 'go on' });
     check('then a message is refused with that sentence', refusedMsg.status === 409 && refusedMsg.body.detail === sentence, JSON.stringify(refusedMsg.body));
     const refusedResume = await send<{ detail?: string }>('POST', `/api/agents/${tid}/resume`);
@@ -4428,7 +4448,7 @@ async function main(): Promise<void> {
     });
     say('job_rerun_cap', 'rc_arch', 'The plan, revised.');
     const capped2 = await rerun('rc_arch');
-    check('one of them at its ceiling → 409, and the sentence says to raise it', capped2.status === 409 && /validator can't go again\. The Validator has spent \$50 of its \$25 budget, which stops it at \$50 — raise it to continue/.test(capped2.body.detail ?? ''), JSON.stringify(capped2.body));
+    check('one of them at its ceiling → 409, and the sentence says to raise it', capped2.status === 409 && /validator can't go again\. The Validator has spent \$50 of its \$25 daily budget today, which stops it at \$50 — raise it to continue/.test(capped2.body.detail ?? ''), JSON.stringify(capped2.body));
     check('all or nothing: the parked developer still has its question and was not queued', statusOf('rc_dev') === 'blocked' && openRequestsForAgent(db, 'rc_dev').length === 1 && statusOf('rc_val') === 'done');
     await settle(100);
     check('and nothing started', runs.length === refusedAt);
@@ -5913,10 +5933,9 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
 
     // The thresholds, pure: the one copy the screens read too.
-    const spend = (costUsd: number, budgetUsd: number | null, inputTokens = 0, outputTokens = 0, budgetTokens?: number) => ({
-      costUsd,
-      inputTokens,
-      outputTokens,
+    // What the budget reads is the agent's spend today (Amendment 129); the lifetime figures aren't in it.
+    const spend = (usd: number, budgetUsd: number | null, inputTokens = 0, outputTokens = 0, budgetTokens?: number) => ({
+      spentToday: { day: localDay(), usd, tokens: inputTokens + outputTokens },
       autonomy: { ...DEFAULT_AUTONOMY, budgetUsd, ...(budgetTokens !== undefined ? { budgetTokens } : {}) },
     });
     check('under the budget: ok', budgetState(spend(24.99, 25)) === 'ok');
@@ -6007,10 +6026,10 @@ async function main(): Promise<void> {
     runs[at]?.finish({ cost: 60.5, subtype: 'error_max_budget_usd', isError: true });
     await until(() => getAgent(db, 'b_over')?.status === 'paused');
     check('at the ceiling it is paused, not failed', getAgent(db, 'b_over')?.status === 'paused');
-    check('saying what it spent, against what budget, and where that stops it', statusNote('b_over') === 'budget reached — spent $60.50 of its $30 budget, which stops it at $60', String(statusNote('b_over')));
+    check('saying what it spent, against what budget, and where that stops it', statusNote('b_over') === 'budget reached for today — spent $60.50 of its $30 daily budget, which stops it at $60', String(statusNote('b_over')));
     check('and Needs You has the budget-reached card, not a warning', stops('b_over').length === 1 && stops('b_over')[0]!.cause === 'budget_exhausted' && warns('b_over').length === 0, JSON.stringify(alerts().list().filter((a) => a.agentIds.includes('b_over'))));
     const refused = await said('b_over', 'please');
-    check('a message is refused with 409, and the sentence', refused.status === 409 && refused.body.detail === 'The Builder has spent $60.50 of its $30 budget, which stops it at $60 — raise it to continue.', JSON.stringify(refused));
+    check('a message is refused with 409, and the sentence', refused.status === 409 && refused.body.detail === 'The Builder has spent $60.50 of its $30 daily budget today, which stops it at $60 — raise it to continue, or it renews at midnight.', JSON.stringify(refused));
     check('so is resume', (await send('POST', '/api/agents/b_over/resume')).status === 409);
     await send('POST', '/api/agents/b_over/autonomy', { autonomy: { budgetUsd: 40 } });
     at = runs.length;
@@ -6040,7 +6059,10 @@ async function main(): Promise<void> {
     check('a token-budget agent runs', await until(() => tokenRuns.length === t0 + 1 && getAgent(db, tid)?.status === 'working'), JSON.stringify(made.body).slice(0, 200));
     // What the real backend does on each model call: the totals, then the usage event.
     const usage = (inputTokens: number, outputTokens: number): void => {
+      // And the day's figure grows by the call's tokens, which is what the budget reads (Amendment 129).
+      const had = getAgent(db, tid)!;
       setAgentUsage(db, tid, { costUsd: 0, inputTokens, outputTokens });
+      addSpendToday(db, tid, { tokens: inputTokens + outputTokens - (had.inputTokens + had.outputTokens) });
       eventLog().emit({ projectId: bpid, jobId: getAgent(db, tid)!.jobId, agentId: tid }, { kind: 'usage', costUsd: 0, inputTokens, outputTokens });
     };
     usage(300_000, 150_000);
@@ -6055,7 +6077,7 @@ async function main(): Promise<void> {
     check('at 1M it is the ceiling, which the backend refuses at', budgetRefusal(getAgent(db, tid)!) !== null && budgetState(getAgent(db, tid)!) === 'ceiling');
     tokenRuns[t0]?.end({ input: 500_000, output: 500_000, atCap: true });
     await until(() => getAgent(db, tid)?.status === 'paused');
-    check('the run ends paused, with the note in tokens', getAgent(db, tid)?.status === 'paused' && statusNote(tid) === 'budget reached — spent 1M of its 500k-token budget, which stops it at 1M', String(statusNote(tid)));
+    check('the run ends paused, with the note in tokens', getAgent(db, tid)?.status === 'paused' && statusNote(tid) === 'budget reached for today — spent 1M of its 500k-token daily budget, which stops it at 1M', String(statusNote(tid)));
     check('Needs You has the budget-reached card for it, and no warning', stops(tid).length === 1 && warns(tid).length === 0);
     await send('POST', `/api/agents/${tid}/autonomy`, { autonomy: { budgetTokens: 1_000_000 } });
     check('raised to 1M (a ceiling of 2M), it may run again', budgetRefusal(getAgent(db, tid)!) === null);
@@ -6372,13 +6394,243 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n26 · an agent's and a job's budget count what was spent today (Amendment 129)");
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const D1 = '2032-06-10';
+    const D2 = '2032-06-11';
+    const D3 = '2032-06-12';
+    const D4 = '2032-06-13';
+
+    // The watch is the one Alerts started; its timer is ours to drive while the clock is fake (Amendment 103).
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2032, 5, 10, 23, 50, 0);
+    setDayClock(() => now);
+    watch?.check();
+    check('the fake clock sets today: day 1', localDay() === D1, localDay());
+    const goTo = (to: Date): boolean => {
+      now = to;
+      return watch?.check() === true;
+    };
+
+    const warns = (id: string): Alert[] => alerts().list().filter((a) => a.kind === 'budget_over' && a.agentIds.includes(id));
+    const stops = (id: string): Alert[] => alerts().list().filter((a) => a.kind === 'budget' && a.agentIds.includes(id));
+    const note = (id: string): string | null => {
+      const p = lastStatus(id);
+      return p?.kind === 'status' ? (p.error ?? null) : null;
+    };
+    const rowsOf = (id: string): Array<{ day: string; cost_usd: number; tokens: number }> =>
+      db.prepare('SELECT day, cost_usd, tokens FROM agent_spend_daily WHERE agent_id = ? ORDER BY day').all(id) as never;
+    /** An agent from before this amendment: it has a lifetime spend and no rows for any day. */
+    const before = (id: string, jobId: string, a: Partial<Agent>): void => {
+      dfix(id, jobId, a);
+      db.prepare('DELETE FROM agent_spend_daily WHERE agent_id = ?').run(id);
+    };
+    const usageOf = (id: string) => eventLog().forAgent(id).map((e) => e.payload).filter((p) => p.kind === 'usage').at(-1);
+
+    const dpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'daily129' })).body.project.id;
+    const djob = (id: string): void => {
+      insertJob(db, { id, projectId: dpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const dfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: dpid, ...a });
+    djob('job_d129');
+
+    // ── spend accrues per day, by the growth of the lifetime figure ─────────────
+    const runCost = async (id: string, cost: number, text = 'carry on'): Promise<void> => {
+      const at = runs.length;
+      await send('POST', `/api/agents/${id}/message`, { text });
+      await until(() => runs.length === at + 1);
+      runs[at]!.finish({ cost, reason: 'completed' });
+      await until(() => getAgent(db, id)?.status === 'done');
+    };
+    dfix('d_a', 'job_d129', { status: 'queued' });
+    let at = runs.length;
+    sup.pump();
+    await until(() => runs.length === at + 1);
+    check('a fresh agent has spent nothing today, stamped with today', JSON.stringify(getAgent(db, 'd_a')?.spentToday) === JSON.stringify({ day: D1, usd: 0, tokens: 0 }), JSON.stringify(getAgent(db, 'd_a')?.spentToday));
+    runs[at]!.finish({ cost: 4, reason: 'completed' });
+    await until(() => getAgent(db, 'd_a')?.status === 'done');
+    check("a run's cost is the agent's spend on that day", JSON.stringify(rowsOf('d_a')) === JSON.stringify([{ day: D1, cost_usd: 4, tokens: 0 }]), JSON.stringify(rowsOf('d_a')));
+    check('and it is on the wire, beside the lifetime figure', near(getAgent(db, 'd_a')?.spentToday?.usd, 4) && getAgent(db, 'd_a')?.spentToday?.day === D1 && near(getAgent(db, 'd_a')?.costUsd, 4));
+    const u1 = usageOf('d_a');
+    check('the usage event carries the day too, for a page that is watching', u1?.kind === 'usage' && u1.today?.day === D1 && near(u1.today.usd, 4), JSON.stringify(u1));
+    await runCost('d_a', 9);
+    check('a resumed run adds only the growth: 9 less the 4 it had, not 13', near(agentSpentToday(db, 'd_a').usd, 9) && near(getAgent(db, 'd_a')?.costUsd, 9), JSON.stringify(rowsOf('d_a')));
+    await runCost('d_a', 2, 'and again');
+    check('a session that saved no total starts again from zero: the 2 it reports are added', near(getAgent(db, 'd_a')?.costUsd, 11) && near(agentSpentToday(db, 'd_a').usd, 11), JSON.stringify(rowsOf('d_a')));
+    const day1Total = costToday(db);
+    goTo(new Date(2032, 5, 11, 0, 0, 20));
+    check('on the next day it has spent nothing, and yesterday\'s row is kept', agentSpentToday(db, 'd_a').day === D2 && agentSpentToday(db, 'd_a').usd === 0 && near(rowsOf('d_a')[0]?.cost_usd, 11), JSON.stringify(rowsOf('d_a')));
+    check('its lifetime figure did not move', near(getAgent(db, 'd_a')?.costUsd, 11));
+    await runCost('d_a', 14);
+    check('and the day it spends on is the day it arrives: 3 on day 2, 11 still on day 1', JSON.stringify(rowsOf('d_a').map((r) => [r.day, r.cost_usd])) === JSON.stringify([[D1, 11], [D2, 3]]), JSON.stringify(rowsOf('d_a')));
+    check("the machine's day total counts day 2's $3 and not the agent's whole $14", near(costToday(db), 3) && day1Total > 0, `${costToday(db)}`);
+    goTo(new Date(2032, 5, 10, 23, 55, 0));
+    check('a clock moved back reads the earlier day again, as the watch does', agentSpentToday(db, 'd_a').day === D1 && near(agentSpentToday(db, 'd_a').usd, 11));
+
+    // ── the cap reads today, not the lifetime ───────────────────────────────────
+    before('d_life', 'job_d129', { sdkSessionId: 'sess_life', costUsd: 80 });
+    check("an agent from before: $80 in its life, no rows, so nothing today", near(getAgent(db, 'd_life')?.costUsd, 80) && getAgent(db, 'd_life')?.spentToday?.usd === 0);
+    check('its $25 budget is not reached: no refusal, state ok', budgetRefusal(getAgent(db, 'd_life')!) === null && budgetState(getAgent(db, 'd_life')!) === 'ok');
+    at = runs.length;
+    const lifeMsg = await send<{ delivery?: string }>('POST', '/api/agents/d_life/message', { text: 'go' });
+    check('so a message is accepted', lifeMsg.status === 200 && lifeMsg.body.delivery === 'resumed' && (await until(() => runs.length === at + 1)), JSON.stringify(lifeMsg.body));
+    check('and the SDK is given the whole $50 ceiling of today, not what its lifetime would leave (nothing)', near(runs[at]?.options.maxBudgetUsd, 50), String(runs[at]?.options.maxBudgetUsd));
+    runs[at]?.finish({ cost: 83, reason: 'completed' });
+    await until(() => getAgent(db, 'd_life')?.status === 'done');
+    check('its $3 of growth is today\'s spend; the lifetime is $83', near(agentSpentToday(db, 'd_life').usd, 3) && near(getAgent(db, 'd_life')?.costUsd, 83));
+    check('the shared rule gives the same figure with the stamp it was given', JSON.stringify(agentBudget(getAgent(db, 'd_life')!)) === JSON.stringify({ unit: 'usd', spent: 3, budget: 25 }), JSON.stringify(agentBudget(getAgent(db, 'd_life')!)));
+
+    // ── what a budget does at the day change ────────────────────────────────────
+    // On day 1: one over its budget and working on, one at its ceiling, a job at its ceiling, one a person paused.
+    dfix('d_over', 'job_d129', { sdkSessionId: 'sess_over', costUsd: 27 });
+    dfix('d_pause', 'job_d129', { status: 'queued', sdkSessionId: 'sess_pause', costUsd: 55 });
+    dfix('d_flow', 'job_d129', { status: 'queued' });
+    djob('job_d129_job');
+    dfix('e_a', 'job_d129_job', { sdkSessionId: 'sess_e_a', costUsd: 55 });
+    dfix('e_b', 'job_d129_job', { role: 'reviewer', status: 'queued', dependsOn: ['e_a'], sdkSessionId: 'sess_e_b', costUsd: 45 });
+    dfix('d_user', 'job_d129', { status: 'paused', sdkSessionId: 'sess_user', costUsd: 60 });
+    eventLog().emit({ projectId: dpid, jobId: 'job_d129', agentId: 'd_user' }, { kind: 'status', status: 'paused', error: 'paused by the user' });
+    at = runs.length;
+    sup.pump();
+    await until(() => getAgent(db, 'd_pause')?.status === 'paused' && getAgent(db, 'e_b')?.status === 'paused' && runs.length === at + 1);
+    const flow = runs[at]!;
+    check('on day 1: d_over is over its budget and warned about, not stopped', warns('d_over').length === 1 && getAgent(db, 'd_over')?.status === 'done' && budgetState(getAgent(db, 'd_over')!) === 'over', JSON.stringify(warns('d_over')));
+    check("d_flow was launched with the whole $50 of day 1, and keeps that limit", near(flow.options.maxBudgetUsd, 50), String(flow.options.maxBudgetUsd));
+    check('d_pause is paused at its ceiling, the card says so and not that it is renewed', getAgent(db, 'd_pause')?.status === 'paused' && stops('d_pause').length === 1 && stops('d_pause')[0]!.renewed === undefined && /^budget reached for today/.test(note('d_pause') ?? ''), String(note('d_pause')));
+    check("and e_b is held for its job's: 100 of 50 across the job, today", jobBudgetState(agentsForJob(db, 'job_d129_job'), jobCostToday(db, 'job_d129_job')) === 'ceiling' && note('e_b') === JOB_BUDGET_NOTE && stops('e_b')[0]?.cause === 'job_budget_reached');
+
+    const dismissed = warns('d_over')[0]!;
+    check('the warning is put away for the day', (await fetch(`${BASE}/api/alerts/${encodeURIComponent(dismissed.id)}/dismiss`, { method: 'POST' })).status === 204 && warns('d_over').length === 0);
+
+    // ── midnight, with a run in flight ──────────────────────────────────────────
+    const mark = eyes.frames.length;
+    const runsAtTurn = runs.length;
+    const eventsOf = (id: string) => eventLog().forAgent(id).length;
+    const pauseEvents = eventsOf('d_pause');
+    check('the day turns once', goTo(new Date(2032, 5, 11, 0, 0, 20)) && localDay() === D2);
+    await settle(80);
+    check('d_over is under its budget again: its own spent is back at zero, and the lifetime $27 stays', getAgent(db, 'd_over')?.spentToday?.day === D2 && getAgent(db, 'd_over')?.spentToday?.usd === 0 && budgetState(getAgent(db, 'd_over')!) === 'ok' && near(getAgent(db, 'd_over')?.costUsd, 27));
+    check('the agents that spent yesterday are pushed afresh, so an open page redraws', eyes.frames.slice(mark).some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'd_over' && a.spentToday?.day === D2 && a.spentToday.usd === 0)), `${eyes.frames.length - mark} frames`);
+    check('and a stale day stamp reads as nothing spent, for a page that has not heard yet', JSON.stringify(agentBudget({ spentToday: { day: D1, usd: 99, tokens: 0 }, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } })) === JSON.stringify({ unit: 'usd', spent: 0, budget: 25 }));
+    check('nothing started by itself: not one new run at midnight', runs.length === runsAtTurn && getAgent(db, 'd_pause')?.status === 'paused' && getAgent(db, 'e_b')?.status === 'paused' && getAgent(db, 'd_user')?.status === 'paused');
+    check('the agent paused at its ceiling stays paused, and its pause now says its budget is renewed', budgetStop(note('d_pause') ?? '') === 'budget_exhausted' && isRenewedNote(note('d_pause') ?? '') && /renewed for 2032-06-11.*no raise needed/.test(note('d_pause') ?? ''), String(note('d_pause')));
+    check('the Budget reached card is the same single card, marked renewed', stops('d_pause').length === 1 && stops('d_pause')[0]!.renewed === true, JSON.stringify(stops('d_pause')));
+    check("the job's held agent too, with the job's own words", getAgent(db, 'e_b')?.status === 'paused' && budgetStop(note('e_b') ?? '') === 'job_budget_reached' && isRenewedNote(note('e_b') ?? '') && stops('e_b')[0]?.renewed === true, String(note('e_b')));
+    check("a pause that was not about a budget is left as it was", note('d_user') === 'paused by the user' && stops('d_user').length === 0);
+    check("the job's figure is back to zero", jobCostToday(db, 'job_d129_job') === 0 && jobBudgetState(agentsForJob(db, 'job_d129_job'), jobCostToday(db, 'job_d129_job')) === 'ok' && near(agentsForJob(db, 'job_d129_job').reduce((n, a) => n + a.costUsd, 0), 100));
+    check('every tab hears the budget cards change', eyes.frames.slice(mark).some((f) => f.type === 'alerts' && f.alerts.some((a) => a.kind === 'budget' && a.agentIds.includes('d_pause') && a.renewed === true)));
+    check('a second turn rewrites nothing: the notes already say it', sup.newDay(D2, D1) === 0 && eventsOf('d_pause') === pauseEvents + 1, `${eventsOf('d_pause') - pauseEvents} events`);
+    check('and a look on the same day does not turn it', watch?.check() === false);
+
+    // the run in flight when the day turned: its cost is today's, the limit it was given is what it was
+    flow.finish({ cost: 12, reason: 'completed' });
+    await until(() => getAgent(db, 'd_flow')?.status === 'done');
+    check("the run that crossed midnight is credited to the day its result arrived", JSON.stringify(rowsOf('d_flow').map((r) => [r.day, r.cost_usd])) === JSON.stringify([[D2, 12]]), JSON.stringify(rowsOf('d_flow')));
+    check("and it kept the SDK limit it was launched with", near(flow.options.maxBudgetUsd, 50));
+
+    // a new day's warning is a new warning, not hidden by yesterday's dismissal
+    addSpendToday(db, 'd_over', { usd: 26 });
+    alerts().refresh();
+    check("spending past the budget again on day 2 warns again, with day 2 in its id", warns('d_over').length === 1 && warns('d_over')[0]!.id !== dismissed.id && warns('d_over')[0]!.id.endsWith(`:${D2}`) && near(warns('d_over')[0]!.spent, 26), JSON.stringify(warns('d_over')));
+
+    // the pure rewrite, directly
+    const pausedAtCeiling = { agent: { id: 'x', spentToday: { day: D2, usd: 0, tokens: 0 }, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } }, note: 'budget reached for today — spent $50 of its $25 daily budget, which stops it at $50', jobAtCeiling: false };
+    const plan = renewals(
+      [
+        pausedAtCeiling,
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 'y', spentToday: { day: D2, usd: 50, tokens: 0 } } },
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 'z' }, note: 'paused by the user' },
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 'w' }, note: renewedNote('budget_exhausted', pausedAtCeiling.agent, D1) },
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 'j' }, note: JOB_BUDGET_NOTE, jobAtCeiling: false },
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 'k' }, note: JOB_BUDGET_NOTE, jobAtCeiling: true },
+        { ...pausedAtCeiling, agent: { ...pausedAtCeiling.agent, id: 't', autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: null, budgetTokens: 500_000 } }, note: 'budget reached for today — spent 1M of its 500k-token daily budget, which stops it at 1M' },
+      ],
+      D2,
+    );
+    check(
+      'the rewrite is pure: ceiling pauses and job holds with room today are renewed, in their own unit; the rest are left',
+      plan.map((p) => p.agentId).join() === 'x,j,t' && /^budget reached — its \$25 daily budget is renewed for 2032-06-11/.test(plan[0]!.note) && /^job budget reached — the job's daily budget is renewed/.test(plan[1]!.note) && /500k-token daily budget is renewed/.test(plan[2]!.note),
+      JSON.stringify(plan),
+    );
+
+    // ── continue needs no raise ─────────────────────────────────────────────────
+    at = runs.length;
+    const cont = await send<unknown>('POST', '/api/agents/d_pause/resume');
+    check('a plain continue is accepted for the agent paused at its ceiling', cont.status === 200 && (await until(() => runs.length === at + 1)), JSON.stringify(cont));
+    check('the SDK is given the whole $50 ceiling of the new day (it spent $55 in its life)', near(runs[at]?.options.maxBudgetUsd, 50), String(runs[at]?.options.maxBudgetUsd));
+    check('and the card clears with the pause', stops('d_pause').length === 0);
+    runs[at]?.finish({ cost: 56, reason: 'completed' });
+    await until(() => getAgent(db, 'd_pause')?.status === 'done');
+    check("its growth since is day 2's, the rest of its $56 is the past", near(agentSpentToday(db, 'd_pause').usd, 1) && near(getAgent(db, 'd_pause')?.costUsd, 56));
+    at = runs.length;
+    const contJob = await send<unknown>('POST', '/api/agents/e_b/resume');
+    check("the agent held for its job's budget starts on a plain continue too", contJob.status === 200 && (await until(() => runs.length === at + 1)), JSON.stringify(contJob));
+    runs[at]?.finish({ cost: 46, reason: 'completed' });
+    await until(() => getAgent(db, 'e_b')?.status === 'done');
+    // A message does the same for an agent whose pause is renewed.
+    const msgUser = await send<{ delivery?: string }>('POST', '/api/agents/d_user/message', { text: 'go' });
+    check('and a message to an agent over its lifetime figure is not refused', msgUser.status === 200, JSON.stringify(msgUser.body));
+    at = runs.length;
+    await until(() => runs.length >= at + 1 || getAgent(db, 'd_user')?.status === 'working');
+    for (const r of runs) if (!r.finished) r.finish({ cost: 60, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+
+    // ── a token budget, on an engine that reports no dollars ───────────────────
+    dfix('d_tok', 'job_d129', { status: 'queued', provider: 'copilot', model: 'gpt-5-mini', autonomy: { ...DEFAULT_AUTONOMY, budgetTokens: 100 } } as Partial<Agent>);
+    sup.pump();
+    await until(() => copilotSessions.some((x) => x.id === 'd_tok'));
+    const tokSession = copilotSessions.filter((x) => x.id === 'd_tok').at(-1)!;
+    tokSession.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 60, outputTokens: 60 });
+    check('on day 2, 120 tokens of a 100-token budget: over it, warned, still working', await until(() => warns('d_tok').length === 1) && getAgent(db, 'd_tok')?.status === 'working' && warns('d_tok')[0]?.unit === 'tokens' && warns('d_tok')[0]?.spent === 120, JSON.stringify(warns('d_tok')));
+    check("it is the call's tokens that went to the day: input plus output", JSON.stringify(rowsOf('d_tok').map((r) => [r.day, r.cost_usd, r.tokens])) === JSON.stringify([[D2, 0, 120]]), JSON.stringify(rowsOf('d_tok')));
+    goTo(new Date(2032, 5, 12, 0, 0, 20));
+    check('on day 3 the token budget is renewed: the warning clears and the day reads zero', warns('d_tok').length === 0 && getAgent(db, 'd_tok')?.spentToday?.tokens === 0 && getAgent(db, 'd_tok')?.inputTokens === 60);
+    tokSession.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 100, outputTokens: 10 });
+    check('110 tokens today is over the budget, and its 230 over its life is not what stops it: the ceiling is 200 today', await until(() => warns('d_tok').length === 1) && getAgent(db, 'd_tok')?.status === 'working' && getAgent(db, 'd_tok')?.inputTokens === 160 && getAgent(db, 'd_tok')?.outputTokens === 70 && warns('d_tok')[0]?.spent === 110, JSON.stringify(warns('d_tok')));
+    tokSession.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 100, outputTokens: 0 });
+    await until(() => getAgent(db, 'd_tok')?.status === 'paused');
+    check('210 today is twice the budget: stopped, with the note in tokens and for today', getAgent(db, 'd_tok')?.status === 'paused' && tokSession.aborts >= 1 && note('d_tok') === 'budget reached for today — spent 210 of its 100-token daily budget, which stops it at 200', String(note('d_tok')));
+    const tokRefused = await send<{ detail?: string }>('POST', '/api/agents/d_tok/resume');
+    check('a resume is refused with the daily sentence', tokRefused.status === 409 && /210 of its 100-token daily budget today.*renews at midnight/.test(tokRefused.body.detail ?? ''), JSON.stringify(tokRefused.body));
+    goTo(new Date(2032, 5, 13, 0, 0, 20));
+    check('on day 4 its pause says the token budget is renewed, and it is still paused', getAgent(db, 'd_tok')?.status === 'paused' && /100-token daily budget is renewed for 2032-06-13/.test(note('d_tok') ?? '') && stops('d_tok')[0]?.renewed === true, String(note('d_tok')));
+    const tokGo = await send<unknown>('POST', '/api/agents/d_tok/resume');
+    check('and it continues without a raise', tokGo.status === 200 && (await until(() => copilotSessions.filter((x) => x.id === 'd_tok').length === 2)), JSON.stringify(tokGo));
+    check('with nothing spent on day 4 yet', getAgent(db, 'd_tok')?.spentToday?.day === D4 && getAgent(db, 'd_tok')?.spentToday?.tokens === 0);
+    copilotSessions.filter((x) => x.id === 'd_tok').at(-1)?.emit('session.idle', {});
+    await until(() => getAgent(db, 'd_tok')?.status === 'done');
+
+    // ── removing an agent removes its days ──────────────────────────────────────
+    check('d_a has rows for two days before it is removed', rowsOf('d_a').length === 2);
+    const removed = await fetch(`${BASE}/api/agents/d_a`, { method: 'DELETE' });
+    check('removing it → 200', removed.status === 200, String(removed.status));
+    check('removes its rows with it', rowsOf('d_a').length === 0 && getAgent(db, 'd_a') === undefined);
+    check("but the machine's day totals keep the money that was spent", row<{ n: number }>(db.prepare("SELECT COUNT(*) AS n FROM cost_daily WHERE day >= '2032-01-01' AND cost_usd > 0").get())!.n >= 2);
+    check("and which agents spent on a day is read from the rows that are left", agentsThatSpentOn(db, D1).includes('d_over') && !agentsThatSpentOn(db, D1).includes('d_a'));
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2032-01-01'").run();
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are lifetime caps; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and nothing resumes by itself at midnight; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

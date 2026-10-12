@@ -6,10 +6,10 @@
  *     and `parked` agents do not. That asymmetry is the whole point of parking:
  *     a human who wanders off stops costing us a slot (PLAN.md §1 finding B).
  *   • dependsOn gating — the mockup's "starts now / parallel / after both".
- *   • budgets. An agent's is a lifetime figure that warns when passed and stops it at
- *     twice the budget, checked before every launch and resume; a job's is the sum of its
- *     agents' budgets, with the same ceiling, checked before a queued agent starts
- *     (session/budget.ts, Amendment 124).
+ *   • budgets. An agent's is a figure PER DAY (what it spent today, back to zero at midnight)
+ *     that warns when passed and stops it at twice the budget, checked before every launch and
+ *     resume; a job's is the sum of its agents' budgets, with the same ceiling, checked before
+ *     a queued agent starts (session/budget.ts, Amendments 124, 129).
  *
  * ISOLATION is delegated, not reimplemented. Track C's WorkspaceService owns
  * worktree lifecycle, so this calls `workspace().open(...)` IN-PROCESS for all
@@ -59,6 +59,7 @@ import {
 } from '@conductor/shared';
 import { arbiter, type AgentControl } from '../arbiter/index.js';
 import type { Db } from '../db/index.js';
+import { onDayTurn } from '../daily.js';
 import { eventLog } from '../eventlog.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
@@ -67,7 +68,7 @@ import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { budgetChanged } from './alerts.js';
-import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobBudgetState } from './budget.js';
+import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, jobBudgetState, renewals } from './budget.js';
 import {
   handOffLine,
   handoffCap,
@@ -91,6 +92,7 @@ import { createBackend } from './backends/index.js';
 import { decideRetry, onRetryDue, retryBook, retryNote, type ApiFailure } from './retry.js';
 import {
   agentsForJob,
+  agentsThatSpentOn,
   DEFAULT_AUTONOMY,
   costToday,
   defaultBranchIsSet,
@@ -110,7 +112,7 @@ import {
   getAgentProvider,
   insertJob,
   insertProject,
-  jobCost,
+  jobCostToday,
   jobsForProject,
   answeredSinceLastRun,
   lastDeferredTool,
@@ -970,9 +972,49 @@ export class Supervisor implements AgentControl {
    * which stays the figure Spawn launched with. Comparing against that meant raising one
    * agent's budget still left its queued siblings paused at the old total. Between the sum
    * and twice it, the job is over its budget and only warned (Amendment 124): see Alerts.
+   * Against what its agents spent TODAY, so it is under again at midnight (Amendment 129).
    */
   #overBudget(job: Job): boolean {
-    return jobBudgetState(agentsForJob(this.#db, job.id), jobCost(this.#db, job.id)) === 'ceiling';
+    return jobBudgetState(agentsForJob(this.#db, job.id), jobCostToday(this.#db, job.id)) === 'ceiling';
+  }
+
+  /**
+   * The day changed (Amendment 129; `onDayTurn`, from the watch of Amendment 103). Budgets are
+   * per day, so every agent's reads from zero now. This does three things, and resumes nothing:
+   *  • an agent paused at its ceiling, or held for its job's, STAYS paused. No spend happens
+   *    with no one watching. Its pause is rewritten to say its budget is renewed and that
+   *    continue needs no raise (`renewals`), which `budgetRefusal` now lets through;
+   *  • every agent that spent anything yesterday is pushed afresh, so an open page redraws its
+   *    bar at zero (the page also reads a stale day stamp as zero by itself);
+   *  • the alerts are checked again, so the "over budget" warnings of yesterday clear.
+   * Returns how many pauses were rewritten.
+   */
+  newDay(day: string, was: string): number {
+    const paused = listAgents(this.#db)
+      .filter((a) => a.status === 'paused')
+      .map((agent) => {
+        const job = getJob(this.#db, agent.jobId);
+        return { agent, note: lastStatusNote(this.#db, agent.id) ?? undefined, jobAtCeiling: job !== undefined && this.#overBudget(job) };
+      });
+    const rewrites = renewals(paused, day);
+    for (const r of rewrites) this.#pause(r.agentId, r.note);
+
+    const done = new Set(rewrites.map((r) => r.agentId));
+    const fresh = agentsThatSpentOn(this.#db, was)
+      .filter((id) => !done.has(id))
+      .flatMap((id) => getAgent(this.#db, id) ?? []);
+    if (fresh.length > 0) {
+      try {
+        this.#pushEntities({ agents: fresh });
+      } catch {
+        // No hub outside the daemon. Not fatal.
+      }
+    }
+    budgetChanged();
+    // Nothing paused is woken. A queued agent that was waiting on the job's figure goes, if
+    // the new day's figure allows it.
+    this.pump();
+    return rewrites.length;
   }
 
   #pause(agentId: string, note: string): void {
@@ -2472,10 +2514,15 @@ function thrown(err: unknown): string {
 }
 
 let instance: Supervisor | null = null;
+let offDay: (() => void) | null = null;
 
 export function initSupervisor(db: Db): Supervisor {
-  instance = new Supervisor(db);
-  return instance;
+  const made = new Supervisor(db);
+  instance = made;
+  // Budgets are per day: at the day change the new day's budgets are renewed (Amendment 129).
+  offDay?.();
+  offDay = onDayTurn((day, was) => made.newDay(day, was));
+  return made;
 }
 
 export function supervisor(): Supervisor {

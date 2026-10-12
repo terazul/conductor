@@ -19,7 +19,7 @@
  */
 
 import type { Agent, Alert, Event, EventPayload, Job, ServerFrame, Snapshot } from '@conductor/shared';
-import { diffstat, resolveFileEdits, sparkline } from '@conductor/shared';
+import { budgetState, diffstat, localDayOf, resolveFileEdits, sparkline } from '@conductor/shared';
 import { store } from './store.js';
 import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
@@ -609,10 +609,12 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
     autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
     startedAt: null,
     endedAt: null,
+    spentToday: { day: localDayOf(), usd: 5, tokens: 0 },
     ...over,
   });
+  // What a budget reads is what the agent spent today (Amendment 129), so these agents spent `cost` today.
   const capped = (cap: number | null, cost: number) =>
-    who({ costUsd: cost, autonomy: { ...who().autonomy, budgetUsd: cap } });
+    who({ costUsd: cost, spentToday: { day: localDayOf(), usd: cost, tokens: 0 }, autonomy: { ...who().autonomy, budgetUsd: cap } });
 
   check('a known reason has its sentence', failureSentence('max_turns') === 'ran out of turns');
   check(
@@ -622,13 +624,13 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   );
   check('no reason at all points at the transcript', failureSentence(undefined) === 'ended with an error — see the transcript');
   // Amendment 124: it stops at twice its budget, so the sentence says that, not "spent its budget".
-  check('at its ceiling, it says it stopped at twice its budget', failureSentence('budget_exhausted', capped(5, 10)) === 'stopped at twice its $5 budget');
+  check('at its ceiling, it says it stopped at twice its budget', failureSentence('budget_exhausted', capped(5, 10)) === 'stopped at twice its $5 daily budget');
   check(
     'raised since it stopped, it says so instead of the old figure',
-    failureSentence('budget_exhausted', capped(15, 5)) === 'stopped on its budget, now raised to $15',
+    failureSentence('budget_exhausted', capped(15, 5)) === 'stopped on its daily budget, now raised to $15',
     failureSentence('budget_exhausted', capped(15, 5)),
   );
-  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'stopped at twice its $0.01 budget');
+  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'stopped at twice its $0.01 daily budget');
   check('no cap known, no figure', failureSentence('budget_exhausted') === 'reached its budget');
 
   const T = Date.parse('2026-09-26T12:00:00Z');
@@ -698,8 +700,8 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   const reviewer = who({ id: 'agt_r', role: 'reviewer' });
   const t1 = alertTitle(alert({}), [working]);
   check('a failure alert reads like the agent line', `${t1.head} ${t1.subject}` === 'builder ran out of turns');
-  const t2 = alertTitle(alert({ kind: 'budget', cause: 'budget_exhausted' }), [{ ...working, costUsd: 10 }]);
-  check('a budget alert says it stopped at twice its budget', t2.subject === 'stopped at twice its $5 budget', t2.subject);
+  const t2 = alertTitle(alert({ kind: 'budget', cause: 'budget_exhausted' }), [{ ...working, costUsd: 10, spentToday: { day: localDayOf(), usd: 10, tokens: 0 } }]);
+  check('a budget alert says it stopped at twice its budget', t2.subject === 'stopped at twice its $5 daily budget', t2.subject);
   const t3 = alertTitle(
     alert({ kind: 'connection', cause: 'unreachable', agentIds: ['agt_s', 'agt_r'], attempt: 3, maxRetries: 10 }),
     [working, reviewer],
@@ -715,7 +717,7 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   check('an agent this tab has not heard of is shown by id', alertTitle(alert({ agentIds: ['agt_gone'] }), []).head === 'agt_gone');
 
   check('top bar: failed', alertWord({ kind: 'failed', cause: 'x' }) === 'failed');
-  check('top bar: budget', alertWord({ kind: 'budget', cause: 'budget_exhausted' }) === 'at its budget');
+  check('top bar: budget', alertWord({ kind: 'budget', cause: 'budget_exhausted' }) === 'at its daily budget');
   check('top bar: server', alertWord({ kind: 'server_down', cause: 'x' }) === 'server down');
   check('top bar: login', alertWord({ kind: 'connection', cause: 'auth' }) === 'model API login');
   check('top bar: no answer', alertWord({ kind: 'connection', cause: 'unreachable' }) === 'no model API');
@@ -1422,6 +1424,7 @@ console.log("\n36 · an agent's budget warns, in words (Amendment 124)");
     costUsd: 6,
     inputTokens: 0,
     outputTokens: 0,
+    spentToday: { day: localDayOf(), usd: 6, tokens: 0 },
     dependsOn: [],
     autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
     startedAt: null,
@@ -1442,13 +1445,13 @@ console.log("\n36 · an agent's budget warns, in words (Amendment 124)");
     ...over,
   });
   const t = alertTitle(warn(), [A()]);
-  check('an over-budget alert names the agent, the budget, and that it only warns', t.head === 'builder' && t.subject === 'is over its $5 budget — a warning only', `${t.head} ${t.subject}`);
-  check('in tokens it says tokens', alertTitle(warn({ unit: 'tokens', budget: 500_000 }), [A()]).subject === 'is over its 500k-token budget — a warning only');
+  check('an over-budget alert names the agent, the budget, and that it only warns', t.head === 'builder' && t.subject === 'is over its $5 daily budget — a warning only', `${t.head} ${t.subject}`);
+  check('in tokens it says tokens', alertTitle(warn({ unit: 'tokens', budget: 500_000 }), [A()]).subject === 'is over its 500k-token daily budget — a warning only');
   const j = alertTitle(warn({ cause: 'job_budget_over', agentIds: [], budget: 50 }), [A({ role: 'architect' }), A({ id: 'agt_p', role: 'developer' }), A({ id: 'agt_q', role: 'tester', jobId: 'other' })]);
-  check("a job's names the agents in it, since the job has no name on the wire", j.head === 'the architect · developer job' && j.subject === 'is over its $50 budget — a warning only', `${j.head} ${j.subject}`);
-  check('the top bar has a word or two for each', alertWord(warn()) === 'over its budget' && alertWord(warn({ cause: 'job_budget_over' })) === 'job over its budget');
-  check('a stop at twice a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'stopped at twice its 500k-token budget');
-  check('raised since, it says so in tokens too', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 2_000_000 } })) === 'stopped on its budget, now raised to 2M tokens');
+  check("a job's names the agents in it, since the job has no name on the wire", j.head === 'the architect · developer job' && j.subject === 'is over its $50 daily budget — a warning only', `${j.head} ${j.subject}`);
+  check('the top bar has a word or two for each', alertWord(warn()) === 'over its daily budget' && alertWord(warn({ cause: 'job_budget_over' })) === 'job over its daily budget');
+  check('a stop at twice a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'stopped at twice its 500k-token daily budget');
+  check('raised since, it says so in tokens too', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 2_000_000 } })) === 'stopped on its daily budget, now raised to 2M tokens');
 }
 
 console.log("\n· an agent's budget is coloured as it fills, like the daily budget (Amendment 125)");
@@ -1466,6 +1469,8 @@ console.log("\n· an agent's budget is coloured as it fills, like the daily budg
     costUsd,
     inputTokens: 0,
     outputTokens: 0,
+    // The colour is read from what it spent today (Amendment 129).
+    spentToday: { day: localDayOf(), usd: costUsd, tokens: 0 },
     dependsOn: [],
     autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd },
     startedAt: null,
@@ -1480,7 +1485,7 @@ console.log("\n· an agent's budget is coloured as it fills, like the daily budg
   check('the same thresholds and the same function as the status bar, at every step', Array.from({ length: 241 }, (_, i) => i / 100).every((f) => toneOf(f) === dailyMeter(f * 10, 10).tone && budgetOf(A(f * 10, 10))!.tone === toneOf(f)));
   check('the thresholds are the status bar\'s own: 75% and 95%', WARN_AT === 0.75 && OVER_AT === 0.95);
   check('it says over from 100%, not from 95%', budgetOf(A(96, 100))!.over === false && budgetOf(A(96, 100))!.tone === 'over' && budgetOf(A(100, 100))!.over === true);
-  const tok = (spent: number) => budgetOf(A(0, null, { inputTokens: spent - 1_000, outputTokens: 1_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }))!;
+  const tok = (spent: number) => budgetOf(A(0, null, { inputTokens: spent - 1_000, outputTokens: 1_000, spentToday: { day: localDayOf(), usd: 0, tokens: spent }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }))!;
   check('a token budget colours the same way', tok(300_000).tone === 'ok' && tok(375_000).tone === 'warn' && tok(475_000).tone === 'over' && tok(612_000).tone === 'over' && tok(612_000).over === true);
   check('an agent with no budget has no colour to show', budgetOf(A(40, null)) === null);
   check('the bar stays full past the budget; the percentage does not', budgetOf(A(120, 100))!.fraction === 1 && budgetOf(A(120, 100))!.pct === 120);
@@ -1566,6 +1571,81 @@ console.log('\n· the orchestrator of an orchestrated stack looks different, in 
   check('the Project lane and the Fleet card\'s row ask the one rule, marksOrchestrator, and wear the mark', /marksOrchestrator\(agent, siblings\)/.test(lane) && /marksOrchestrator\(agent, siblings\)/.test(card) && /\{orchestrator && <OrchestratorMark short \/>\}/.test(lane) && /\{orchestrator && <OrchestratorMark short \/>\}/.test(card));
   check('the lane and the row carry the edge only with it', /\$\{orchestrator \? ' is-orch' : ''\}/.test(lane) && /\$\{orchestrator \? ' is-orch' : ''\}/.test(card));
   check('the mark says orchestrator in the plan, and is the diamond alone in a lane, a row and a tab, where the name is beside it; it explains itself', /◆\{short \? '' : ' orchestrator'\}/.test(ui) && /Runs the others/.test(ui));
+}
+
+console.log("\n· a budget counts what was spent today, and goes back to zero at midnight (Amendment 129)");
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const today = localDayOf();
+  const yesterday = localDayOf(new Date(Date.now() - 86_400_000));
+  const near = (a: number | undefined, b: number): boolean => a !== undefined && Math.abs(a - b) < 1e-9;
+  const mk = (id: string, over: Partial<Agent> = {}): Agent => ({
+    id,
+    jobId: J,
+    projectId: P,
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 's',
+    status: 'working',
+    blockMode: null,
+    costUsd: 31.4,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 25 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+
+  // The rule itself, pure.
+  const four = mk('d1', { spentToday: { day: today, usd: 4.1, tokens: 0 } });
+  check('the bar is today\'s $4.10 of $25, not the $31.40 of its life', budgetOf(four)?.spent === 4.1 && budgetOf(four)?.cap === 25 && budgetOf(four)?.state === 'ok' && budgetOf(four)?.pct === 16);
+  const stale = mk('d2', { spentToday: { day: yesterday, usd: 99, tokens: 0 } });
+  check('a stamp from an earlier day reads 0: an open page is renewed at midnight before the daemon says anything', budgetOf(stale)?.spent === 0 && budgetOf(stale)?.state === 'ok' && budgetOf(stale)?.tone === 'ok' && budgetOf(stale)?.over === false);
+  check('the day it is asked about can be given: the same stamp is spent on that day, and nothing the day after', budgetOf(stale, yesterday)?.spent === 99 && budgetOf(stale, yesterday)?.state === 'ceiling' && budgetOf(stale, today)?.spent === 0);
+  check('an agent with no stamp has spent nothing today (a recording, or one from before)', budgetOf(mk('d3'))?.spent === 0 && budgetState(mk('d3')) === 'ok');
+  const tokensToday = mk('d4', { autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 }, spentToday: { day: today, usd: 0, tokens: 612_000 }, inputTokens: 9_000_000 });
+  check('a token budget reads today\'s tokens, not the lifetime ones', budgetOf(tokensToday)?.spent === 612_000 && budgetOf(tokensToday)?.state === 'over' && budgetOf(tokensToday)?.unit === 'tokens');
+  check('an uncapped agent still has no bar, whatever it spent', budgetOf(mk('d5', { autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null }, spentToday: { day: today, usd: 400, tokens: 0 } })) === null);
+  check('localDayOf is the local YYYY-MM-DD', localDayOf(new Date(2031, 2, 5, 23, 59)) === '2031-03-05' && localDayOf(new Date(2031, 11, 31, 0, 0)) === '2031-12-31');
+
+  // Folding a usage event into the agent.
+  const A9 = 'agt_d129';
+  send({ type: 'entities', agents: [mk(A9, { costUsd: 10, spentToday: { day: today, usd: 4, tokens: 0 } })] });
+  const evFor = (payload: EventPayload): Event => ({ ...ev(payload), agentId: A9 });
+  send({ type: 'events', events: [evFor({ kind: 'usage', costUsd: 13, inputTokens: 5, outputTokens: 5 })] });
+  let a9 = store.select('d129a', (st) => st.agents.find((a) => a.id === A9));
+  check("an event without the daemon's figure adds the growth of the lifetime one to what the tab had today", a9?.costUsd === 13 && near(a9?.spentToday?.usd, 7) && a9?.spentToday?.day === today, JSON.stringify(a9?.spentToday));
+  send({ type: 'events', events: [evFor({ kind: 'usage', costUsd: 15, inputTokens: 5, outputTokens: 5, today: { day: today, usd: 9, tokens: 0 } })] });
+  a9 = store.select('d129b', (st) => st.agents.find((a) => a.id === A9));
+  check("one with the daemon's figure takes it as it is", near(a9?.spentToday?.usd, 9) && a9?.costUsd === 15, JSON.stringify(a9?.spentToday));
+  send({ type: 'entities', agents: [mk(A9, { costUsd: 15, spentToday: { day: yesterday, usd: 20, tokens: 0 } })] });
+  send({ type: 'events', events: [evFor({ kind: 'usage', costUsd: 16, inputTokens: 5, outputTokens: 5 })] });
+  a9 = store.select('d129c', (st) => st.agents.find((a) => a.id === A9));
+  check("a tab left open past midnight: yesterday's $20 is not carried into today, only the $1 that arrived", a9?.spentToday?.day === today && near(a9?.spentToday?.usd, 1), JSON.stringify(a9?.spentToday));
+  send({ type: 'events', events: [evFor({ kind: 'usage', costUsd: 15, inputTokens: 5, outputTokens: 5 })] });
+  a9 = store.select('d129d', (st) => st.agents.find((a) => a.id === A9));
+  check('a figure that shrinks adds nothing', near(a9?.spentToday?.usd, 1));
+  check('the fold is the shared one', /spentToday: spentAfterUsage\(a, p\)/.test(src('./store.ts')));
+
+  // Words.
+  check('a renewed stop says so, and that continue needs no raise', /renewed for the new day, so continue needs no raise/.test(failureSentence('budget_exhausted', mk('d6'), true)) && /renewed for the new day, so continue needs no raise/.test(failureSentence('job_budget_reached', mk('d6'), true)));
+  check('the job\'s hold reads daily without it too', failureSentence('job_budget_reached') === "reached its job's daily budget");
+  const renewedCard = alertTitle({ id: 'b', kind: 'budget', cause: 'budget_exhausted', projectId: P, jobId: J, agentIds: ['d6'], since: new Date().toISOString(), renewed: true }, [mk('d6')]);
+  check("the Budget reached card of an agent whose budget was renewed says it", /renewed for the new day/.test(renewedCard.subject), renewedCard.subject);
+
+  // The screens say daily, and read today's figures.
+  const comp = src('../agent/composer.tsx');
+  const insp = src('../agent/inspector.tsx');
+  const card = src('../attention/AlertCard.tsx');
+  const spawn = src('../spawn/route.tsx');
+  check('the composer counts today: its spent figure and its folded line are today\'s, and the lifetime one is the tooltip', /spentOn\(agent\)/.test(comp) && /\{fmtMoney\(todayUsd\)\} spent today/.test(comp) && /Over its whole life: \$\{fmtMoney\(agent\.costUsd\)\}/.test(comp) && !/agent\.costUsd >= /.test(comp));
+  check('the composer\'s budget fields say per day', /Budget in dollars per day/.test(comp) && /Budget in tokens per day/.test(comp));
+  check('the details panel shows today against the budget, and the lifetime spend as a plain line', /`today \$\{fmtMoney\(budget\.spent\)\} of \$\{fmtMoney\(budget\.cap\)\}`/.test(insp) && />lifetime</.test(insp));
+  check('Needs You says daily on both cards and says nothing resumes by itself on a renewed one', /label: 'Budget reached for today'/.test(card) && /label: 'Over its daily budget'/.test(card) && /Nothing resumes by itself/.test(card));
+  check('Spawn\'s pill says per agent per day, with a tooltip that says it starts again at midnight', /⏱ budget per agent per day \$/.test(spawn) && /starts again at midnight/.test(spawn));
+  check('nothing on a screen decides from the lifetime figure: the budget is read through budgetOf', !/costUsd\s*>=\s*\w*(cap|budget)/i.test(comp + insp + src('./../fleet/lane.tsx') + src('./../fleet/card.tsx')));
 }
 
 console.log(

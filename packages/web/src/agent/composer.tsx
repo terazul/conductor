@@ -20,7 +20,7 @@
 
 import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
-import type { Agent, Autonomy, EffortLevel } from '@conductor/shared';
+import { ceilingOf, spentOn, type Agent, type Autonomy, type EffortLevel } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -255,6 +255,9 @@ export function Composer({ agent }: { agent: Agent }) {
     setBudgetText(null);
   }, [reported.budgetUsd, reported.budgetTokens]);
   const spend = budgetOf({ ...agent, autonomy });
+  // What it spent today, in both units: the budget counts these, and the lifetime `costUsd` is
+  // shown as information beside them (Amendment 129).
+  const { usd: todayUsd, tokens: todayTokens } = spentOn(agent);
 
   const submit = async () => {
     const body = text.trim();
@@ -339,8 +342,9 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   /*
-   * The cap, as a lifetime figure — what this agent may spend in total, across every
-   * reply. The patch carries only `budgetUsd`; the route merges it like `mode`.
+   * The cap, as a figure per day (Amendment 129) — what this agent may spend today, and every
+   * day after, across every reply. The patch carries only `budgetUsd`; the route merges it
+   * like `mode`.
    */
   const commitBudget = async (text: string) => {
     const parsed = parseBudget(text);
@@ -368,10 +372,15 @@ export function Composer({ agent }: { agent: Agent }) {
         if (agent.status === 'working' && was !== null) {
           return `From the next run — this one still stops at ${fmtMoney(was)}.`;
         }
-        if (cap !== null && agent.costUsd >= cap) {
-          return `That is below the ${fmtMoney(agent.costUsd)} already spent — it will not run again until raised.`;
+        // Against what it spent TODAY, which is what the budget counts (Amendment 129); it only
+        // stops at twice the figure, and between the two it is warned and works on.
+        if (cap !== null && todayUsd >= ceilingOf(cap)) {
+          return `Twice that is below the ${fmtMoney(todayUsd)} already spent today — it will not run again until raised, or tomorrow.`;
         }
-        if (agent.status === 'paused' && was !== null && agent.costUsd >= was) {
+        if (cap !== null && todayUsd >= cap) {
+          return `That is below the ${fmtMoney(todayUsd)} already spent today — a warning only; it stops at ${fmtMoney(ceilingOf(cap))}.`;
+        }
+        if (agent.status === 'paused' && was !== null && todayUsd >= ceilingOf(was)) {
           return 'Raised — resume or reply to carry on.';
         }
         return '';
@@ -401,16 +410,19 @@ export function Composer({ agent }: { agent: Agent }) {
       setBudgetText(null);
       return;
     }
-    const used = agent.inputTokens + agent.outputTokens;
+    const used = todayTokens;
     setDraft({ ...autonomy, budgetTokens: cap });
     const ok = await policy.run(
       cap === null ? 'Removing the budget' : `Setting the budget to ${tokenWords(cap)} tokens`,
       () => setAutonomy(agent.id, { autonomy: { budgetTokens: cap } }),
       () => {
-        if (cap !== null && used >= cap) {
-          return `That is below the ${tokenWords(used)} tokens already used — it will not run again until raised.`;
+        if (cap !== null && used >= ceilingOf(cap)) {
+          return `Twice that is below the ${tokenWords(used)} tokens already used today — it will not run again until raised, or tomorrow.`;
         }
-        if (agent.status === 'paused' && was !== null && used >= was) return 'Raised — resume or reply to carry on.';
+        if (cap !== null && used >= cap) {
+          return `That is below the ${tokenWords(used)} tokens already used today — a warning only; it stops at ${tokenWords(ceilingOf(cap))}.`;
+        }
+        if (agent.status === 'paused' && was !== null && used >= ceilingOf(was)) return 'Raised — resume or reply to carry on.';
         return '';
       },
     );
@@ -421,7 +433,7 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const closed = agent.status === 'done' || agent.status === 'failed';
-  // Stopped on its ceiling, twice its budget (Amendment 124); only over it, it still works.
+  // Stopped on its ceiling, twice its daily budget (Amendments 124, 129); only over it, it still works.
   const atCap = spend?.state === 'ceiling' && agent.status !== 'working';
   const current = MODES.find((m) => m.id === autonomy.mode) ?? null;
   const notice: Notice | null =
@@ -443,11 +455,11 @@ export function Composer({ agent }: { agent: Agent }) {
     budget:
       has.budget === 'tokens'
         ? tokensLine(
-            tokenWords(agent.inputTokens + agent.outputTokens),
+            tokenWords(todayTokens),
             autonomy.budgetTokens ? tokenWords(autonomy.budgetTokens) : null,
             pastBudget,
           )
-        : dollarsLine(fmtMoney(agent.costUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd), pastBudget),
+        : dollarsLine(fmtMoney(todayUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd), pastBudget),
   });
   // The longer sentence, for the open composer: only a warning, and where it stops.
   const budgetSays =
@@ -469,7 +481,7 @@ export function Composer({ agent }: { agent: Agent }) {
           rows={2}
           placeholder={
             atCap
-              ? `${agent.role} has reached its budget — raise it below to continue`
+              ? `${agent.role} has reached its budget for today — raise it below to continue`
               : closed
                 ? `${agent.role} has finished — a message will reopen the session`
                 : `Reply to ${agent.role} — it keeps working while you type…`
@@ -682,7 +694,7 @@ export function Composer({ agent }: { agent: Agent }) {
                 inputMode="numeric"
                 value={budgetText ?? (autonomy.budgetTokens ? tokenWords(autonomy.budgetTokens) : '')}
                 placeholder="none"
-                aria-label="Budget in tokens, input plus output, for this agent's whole life. Empty for no cap."
+                aria-label="Budget in tokens per day, input plus output, for this agent. It starts again at midnight. Empty for no cap."
                 disabled={policy.busy}
                 onChange={(e) => {
                   setBudgetText(e.target.value);
@@ -704,8 +716,8 @@ export function Composer({ agent }: { agent: Agent }) {
               tokens
             </label>
             {spend && <BudgetMeter spend={spend} />}
-            <span className="ag-budget-spent" data-tone={spend?.tone}>
-              {tokenWords(agent.inputTokens + agent.outputTokens)} used
+            <span className="ag-budget-spent" data-tone={spend?.tone} title="Spent today. It starts again at midnight.">
+              {tokenWords(todayTokens)} used today
             </span>
           </div>
           ) : (
@@ -718,7 +730,7 @@ export function Composer({ agent }: { agent: Agent }) {
                 inputMode="decimal"
                 value={budgetText ?? capText(autonomy.budgetUsd)}
                 placeholder="none"
-                aria-label="Budget in dollars, for this agent's whole life. Empty for no cap."
+                aria-label="Budget in dollars per day, for this agent. It starts again at midnight. Empty for no cap."
                 disabled={policy.busy}
                 onChange={(e) => {
                   setBudgetText(e.target.value);
@@ -739,8 +751,12 @@ export function Composer({ agent }: { agent: Agent }) {
               />
             </label>
             {spend && <BudgetMeter spend={spend} />}
-            <span className="ag-budget-spent" data-tone={spend?.tone}>
-              {fmtMoney(agent.costUsd)} spent
+            <span
+              className="ag-budget-spent"
+              data-tone={spend?.tone}
+              title={`Spent today. It starts again at midnight. Over its whole life: ${fmtMoney(agent.costUsd)}.`}
+            >
+              {fmtMoney(todayUsd)} spent today
             </span>
             {autonomy.budgetUsd !== null &&
               BUDGET_RAISES.map((n) => (
@@ -750,7 +766,7 @@ export function Composer({ agent }: { agent: Agent }) {
                   className="ag-mode"
                   disabled={policy.busy}
                   onClick={() => void commitBudget(String((autonomy.budgetUsd ?? 0) + n))}
-                  title={`Raise the cap to ${fmtMoney((autonomy.budgetUsd ?? 0) + n)}`}
+                  title={`Raise the daily budget to ${fmtMoney((autonomy.budgetUsd ?? 0) + n)}`}
                 >
                   +${n}
                 </button>
@@ -812,7 +828,7 @@ function BudgetMeter({ spend }: { spend: Budget }) {
       className="ag-meter"
       data-tone={spend.tone}
       aria-hidden="true"
-      title={`${spend.pct}% of the budget${spend.state === 'ok' ? '' : ' — over it'}`}
+      title={`${spend.pct}% of today's budget${spend.state === 'ok' ? '' : ' — over it'}`}
     >
       <i style={{ width: `${Math.round(spend.fraction * 100)}%` }} />
     </span>

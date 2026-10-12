@@ -75,7 +75,8 @@ export function Inspector({
             <span>{elapsedMs === null ? '—' : fmtElapsed(elapsedMs)}</span>
           </div>
           <div className="pj-kv">
-            <span>spend</span>
+            {/* Its whole life: information. What the budget counts is today's, in the bar below (Amendment 129). */}
+            <span title="Everything this agent has spent, over its whole life. The budget counts only today.">lifetime</span>
             {dollars ? (
               <span>{fmtMoney(agent.costUsd)}</span>
             ) : (
@@ -100,8 +101,8 @@ export function Inspector({
               <div className="pj-kv">
                 <span>
                   {budget.unit === 'tokens'
-                    ? `${tokenWords(budget.spent)} of ${tokenWords(budget.cap)} tokens`
-                    : `${fmtMoney(budget.spent)} of ${fmtMoney(budget.cap)}`}
+                    ? `today ${tokenWords(budget.spent)} of ${tokenWords(budget.cap)} tokens`
+                    : `today ${fmtMoney(budget.spent)} of ${fmtMoney(budget.cap)}`}
                 </span>
                 <span className="ag-bar-pct" data-tone={budget.tone}>
                   {budget.pct}%
@@ -110,8 +111,8 @@ export function Inspector({
               {budget.state !== 'ok' && (
                 <p className="ag-isec-note">
                   {budget.state === 'over'
-                    ? `Over budget, which only warns. It stops at ${budgetWords(budget.unit, budget.ceiling)}.`
-                    : `Stopped at ${budgetWords(budget.unit, budget.ceiling)}, twice its budget.`}
+                    ? `Over today's budget, which only warns. It stops at ${budgetWords(budget.unit, budget.ceiling)} today.`
+                    : `Stopped at ${budgetWords(budget.unit, budget.ceiling)} today, twice its daily budget. It starts again at midnight.`}
                 </p>
               )}
             </>

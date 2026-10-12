@@ -583,7 +583,7 @@ export function AgentScreen() {
 
   const elapsed = elapsedMs === null ? null : fmtElapsed(elapsedMs);
   /*
-   * Stopped on its ceiling, twice its budget (Amendment 124). Amber, not red: nothing
+   * Stopped on its ceiling, twice its daily budget (Amendments 124, 129). Amber, not red: nothing
    * broke, and the next move is a person's — raise it in the composer below. Not while
    * working (the run is still under it) and not once terminated (nothing is coming back
    * to spend). Between the budget and the ceiling it is only over it, and still works.
@@ -624,7 +624,7 @@ export function AgentScreen() {
                 className={`ag-tab${t.id === agent.id ? ' is-on' : ''}${t.needs > 0 ? ' is-need' : ''}${t.newJob ? ' is-newjob' : ''}${t.orchestrator ? ' is-orch' : ''}`}
                 title={`${
                   t.needs > 0 ? `${t.label} — ${t.needs === 1 ? 'needs you' : `${t.needs} things need you`}` : `${t.label} — ${STATUS_WORD[t.status]}`
-                }${t.orchestrator ? ' · orchestrator: starts the others' : ''}${t.budget ? ` · ${t.budget.pct}% of its budget${t.budget.state === 'ok' ? '' : ' — over'}` : ''}`}
+                }${t.orchestrator ? ' · orchestrator: starts the others' : ''}${t.budget ? ` · ${t.budget.pct}% of its daily budget${t.budget.state === 'ok' ? '' : ' — over'}` : ''}`}
                 onClick={() => {
                   const target = agents.find((a) => a.id === t.id);
                   if (target && t.id !== agent.id) openAgent(target);
@@ -691,10 +691,10 @@ export function AgentScreen() {
               needs you · {needsHere}
             </button>
           )}
-          {atBudget && <Tag tone="need">budget reached</Tag>}
+          {atBudget && <Tag tone="need">budget reached today</Tag>}
           {overBudget && (
             <Tag tone="need">
-              <span title={`A warning only: it stops at ${budgetWords(budgetNow.unit, budgetNow.ceiling)}`}>over budget</span>
+              <span title={`A warning only: it stops at ${budgetWords(budgetNow.unit, budgetNow.ceiling)} today`}>over today's budget</span>
             </Tag>
           )}
           <span className="ag-model" title={agent.model}>

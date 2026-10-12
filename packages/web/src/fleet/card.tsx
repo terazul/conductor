@@ -105,7 +105,7 @@ function AgentRow({
           e.stopPropagation();
           openAgent(agent);
         }}
-        title={`${agent.role} — ${STATUS_WORD[shown]}${budget ? ` · ${budget.pct}% of its budget${budget.over ? ' — over' : ''}` : ''}`}
+        title={`${agent.role} — ${STATUS_WORD[shown]}${budget ? ` · ${budget.pct}% of its daily budget${budget.over ? ' — over' : ''}` : ''}`}
       >
         <Dot status={shown} />
         <span className="fl-arow-nm">{agent.role}</span>

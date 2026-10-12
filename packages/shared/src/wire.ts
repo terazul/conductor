@@ -17,6 +17,7 @@ import type {
   AgentRole,
   AgentStatus,
   BlockMode,
+  DaySpend,
   Decision,
   Event,
   PendingRequest,
@@ -137,6 +138,15 @@ export interface Agent {
    * wire, as a persona's do.
    */
   pipelineRoles?: string[];
+  /**
+   * Amendment 129. What the agent has spent TODAY, stamped with the day it is for: the figure
+   * its budget (`autonomy.budgetUsd` or `budgetTokens`) is read against. `costUsd` stays the
+   * agent's lifetime spend and is no longer what the budget counts. `agentBudget` (budget.ts)
+   * reads this when the stamp is the day the caller passes and reads 0 when it is older, so
+   * a page left open past midnight shows a renewed budget before the daemon says a word.
+   * Absent reads as 0: an agent from before this, or a recording, has spent nothing today.
+   */
+  spentToday?: DaySpend;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,14 +167,18 @@ export interface Autonomy {
   allowedTools: string[];
   /** SDK disallowedTools. Survives every mode — the real safety net. */
   disallowedTools: string[];
-  /** Pause the agent when its own cost crosses this. */
+  /**
+   * The agent's budget in dollars, PER DAY (Amendment 129): what it may spend today before it
+   * is warned, and twice that stops it. It went back to zero at midnight; it was a lifetime
+   * cap before (Amendments 77, 124).
+   */
   budgetUsd: number | null;
   /**
-   * Amendment 77: pause the agent when its input plus output tokens reach this — a
-   * lifetime cap, like `budgetUsd`, for an engine that can't say what a run cost in
-   * dollars (`ProviderInfo.capabilities.costUsd` false). Such an agent takes this and
-   * not `budgetUsd`; a Claude agent takes `budgetUsd` and not this. Optional, so absent
-   * is uncapped and every agent from before it reads as it did.
+   * Amendment 77: the same budget in input plus output tokens, per day since Amendment 129
+   * (it was a lifetime cap), for an engine that can't say what a run cost in dollars
+   * (`ProviderInfo.capabilities.costUsd` false). Such an agent takes this and not `budgetUsd`;
+   * a Claude agent takes `budgetUsd` and not this. Optional, so absent is uncapped and every
+   * agent from before it reads as it did.
    */
   budgetTokens?: number | null;
   /**
@@ -583,7 +597,8 @@ export interface SendConsoleToAgentResponse {
 /**
  *  - 'failed':      an agent ended `failed`. `cause` is the terminal reason.
  *  - 'budget':      an agent stopped on its cap (`budget_exhausted`) or its job's
- *                   (`job_budget_reached`).
+ *                   (`job_budget_reached`). The caps are per day since Amendment 129, and
+ *                   `renewed` says a new day has renewed it.
  *  - 'connection':  the model API is unreachable or refusing the login, or the retries
  *                   ran out. `cause` is a RetryCause. One alert per outage, not per agent.
  *  - 'server_down': a dev server stopped answering and nobody asked it to stop.
@@ -664,6 +679,12 @@ export interface Alert {
   retryAt?: string;
   /** budget_over (Amendment 124): what `spent` and `budget` count. Absent is dollars. */
   unit?: 'usd' | 'tokens';
+  /**
+   * budget (Amendment 129): the new day renewed this agent's budget while it was paused at the
+   * ceiling. It is still paused, since nothing resumes by itself, and continue needs no raise.
+   * Present only when true.
+   */
+  renewed?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

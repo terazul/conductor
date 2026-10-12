@@ -53,11 +53,13 @@ import { hub } from '../../hub.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
 import {
   addCostToday,
+  addSpendToday,
   costToday,
   finishRun,
   openRequestsForAgent,
   setAgentSession,
   setAgentUsage,
+  spentToday,
   startRun,
   type DeferredTool,
 } from '../store.js';
@@ -198,8 +200,11 @@ export class ClaudeBackend implements AgentBackend {
   // ── options ───────────────────────────────────────────────────────────────
 
   #buildOptions(resume: string | null): Options {
-    const { autonomy, worktreePath, model, spentUsd, extraDirs, helperCap, handOff, systemPrompt, skills } = this.#scope;
-    const left = runLimit(autonomy.budgetUsd, spentUsd);
+    const { autonomy, worktreePath, model, extraDirs, helperCap, handOff, systemPrompt, skills } = this.#scope;
+    // What was spent TODAY when this query starts (Amendment 129), read from the store rather than
+    // the scope: a run moved past a call it can't make (`#runPast`) starts a second query after
+    // the first has spent, and the lifetime figure in the scope says nothing about the day.
+    const left = runLimit(autonomy.budgetUsd, spentToday(this.#db, this.#scope.agentId).usd);
     const tools = helperCap || handOff ? helperTools(this.#scope.agentId, { helperCap, handOff }) : null;
 
     return {
@@ -229,7 +234,7 @@ export class ClaudeBackend implements AgentBackend {
       allowedTools: tools ? [...autonomy.allowedTools, ...tools.allowed] : autonomy.allowedTools,
       ...(tools ? { mcpServers: tools.servers } : {}),
       disallowedTools: autonomy.disallowedTools,
-      // What is LEFT of the lifetime CEILING, twice the budget (Amendment 124): the budget
+      // What is LEFT of today's CEILING, twice the daily budget (Amendments 124, 129): the budget
       // only warns, and the SDK counts from this query's start, so it is given the remainder.
       ...(left !== null ? { maxBudgetUsd: left } : {}),
       // Omitted when unset, so the SDK's own default applies rather than ours.
@@ -620,7 +625,12 @@ export class ClaudeBackend implements AgentBackend {
         // whole earlier total to today again.
         const previous = outcome.costUsd;
         outcome.costUsd = costUsd;
-        addCostToday(this.#db, Math.max(0, costUsd - previous));
+        const grew = Math.max(0, costUsd - previous);
+        addCostToday(this.#db, grew);
+        // The same growth is the agent's own spend today, which its budget is read against
+        // (Amendment 129). Credited to the day this arrives, so a run that crosses midnight
+        // counts its later spend on the new day, and a resume adds only the difference.
+        const today = addSpendToday(this.#db, this.#scope.agentId, { usd: grew });
         // Every status bar shows today's spend as it grows, and the daily budget's alert
         // is checked against it (Amendment 59).
         if (costUsd > previous) {
@@ -654,6 +664,7 @@ export class ClaudeBackend implements AgentBackend {
                 ...(metrics.apiMs !== null ? { apiMs: metrics.apiMs } : {}),
               }
             : {}),
+          today,
         });
         break;
       }

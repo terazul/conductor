@@ -29,8 +29,8 @@
 
 import {
   HANDOFF_HELD_NOTE,
-  agentBudget,
   capState,
+  spentOn,
   waitersOf,
   type Agent,
   type AgentStatus,
@@ -44,7 +44,7 @@ import { eventLog } from '../eventlog.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
-import { budgetStop, jobCap } from './budget.js';
+import { agentBudget, budgetStop, isRenewedNote, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
 import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
@@ -446,6 +446,8 @@ export class Alerts {
         agentIds: [agent.id],
         since: (matches ? last?.ts : undefined) ?? agent.endedAt ?? agent.startedAt ?? '',
         ...(kind === 'failed' && matches && status?.detail ? { detail: status.detail } : {}),
+        // A new day renewed the budget it stopped on, and it waits for a continue (Amendment 129).
+        ...(kind === 'budget' && isRenewedNote(note) ? { renewed: true } : {}),
       });
     }
     return out;
@@ -459,15 +461,18 @@ export class Alerts {
   /**
    * Agents, and jobs, past their budget (Amendment 124). A warning: nothing is paused, the
    * work goes on, and the agent stops only at twice the budget (then it is `budget`, above).
-   * Derived from what is stored, like the rest, so a reload or a restart keeps it. The id
-   * carries the budget, so a dismissal lasts until the budget is raised and passed again.
-   * It clears itself when the budget is raised past the spend, or the agent stops.
+   * Derived from what is stored, like the rest, so a reload or a restart keeps it. The budget
+   * is per day (Amendment 129), so `spent` is today's, and the id carries the budget AND the
+   * day: a dismissal lasts until the budget is raised and passed again, or until midnight.
+   * It clears itself when the budget is raised past the spend, when the day changes and today's
+   * spend is under it, or when the agent stops.
    *
    * A job's is the sum of its agents' budgets, and only for a job with more than one
    * agent (one agent's is the job's, said once) that still has something that could spend.
    */
   #budgetOver(): Alert[] {
     const all = listAgents(this.#db);
+    const day = localDay();
     const out: Alert[] = [];
     const standing = (id: string): string => {
       if (!this.#overSince.has(id)) this.#overSince.set(id, new Date().toISOString());
@@ -478,7 +483,7 @@ export class Alerts {
       if (!WARN_OVER.has(agent.status)) continue;
       const b = agentBudget(agent);
       if (!b || capState(b.spent, b.budget) !== 'over') continue;
-      const id = `budget_over:${agent.id}:${b.budget}:${b.unit}`;
+      const id = `budget_over:${agent.id}:${b.budget}:${b.unit}:${day}`;
       out.push({
         id,
         kind: 'budget_over',
@@ -498,9 +503,9 @@ export class Alerts {
     for (const [jobId, agents] of byJob) {
       const cap = agents.length > 1 ? jobCap(agents) : null;
       if (cap === null || !agents.some((a) => STILL_SPENDING.has(a.status))) continue;
-      const spent = agents.reduce((n, a) => n + a.costUsd, 0);
+      const spent = agents.reduce((n, a) => n + spentOn(a, day).usd, 0);
       if (capState(spent, cap) !== 'over') continue;
-      const id = `budget_over:job:${jobId}:${cap}`;
+      const id = `budget_over:job:${jobId}:${cap}:${day}`;
       out.push({
         id,
         kind: 'budget_over',

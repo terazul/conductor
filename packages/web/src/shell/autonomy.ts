@@ -52,8 +52,9 @@ export function toolPolicy(autonomy: Autonomy, tool: string): ToolPolicy {
 }
 
 export interface Budget {
+  /** What it spent today, in `unit`. */
   spent: number;
-  /** The budget: what the agent may spend before it is warned (Amendment 124). */
+  /** The daily budget: what the agent may spend today before it is warned (Amendments 124, 129). */
   cap: number;
   /** What stops it: twice the budget. */
   ceiling: number;
@@ -78,8 +79,11 @@ export interface Budget {
 }
 
 /**
- * Spend against the budget that will warn about this agent, and the ceiling that will
- * stop it (Amendment 124).
+ * Today's spend against the daily budget that will warn about this agent, and the ceiling that
+ * will stop it (Amendments 124, 129). `spent` is what it spent on `today` (the local day of
+ * this browser unless the caller says): an agent whose day stamp is older reads 0, so a page
+ * left open past midnight shows the budget renewed before the daemon pushes anything. The
+ * agent's lifetime `costUsd` is not read here.
  *
  * Deliberately NOT a context-window percentage: CONTRACT §8 leaves that open
  * because it cannot yet be derived honestly, and "a misleading percentage is
@@ -90,8 +94,8 @@ export interface Budget {
  * also uncaps its job (the daemon's `jobCap`), so no job figure ever pauses it and a
  * bar measuring one would be measuring nothing.
  */
-export function budgetOf(agent: Pick<Agent, 'costUsd' | 'inputTokens' | 'outputTokens' | 'autonomy'>): Budget | null {
-  const b = agentBudget(agent);
+export function budgetOf(agent: Pick<Agent, 'spentToday' | 'autonomy'>, today?: string): Budget | null {
+  const b = agentBudget(agent, today);
   if (b === null || b.budget <= 0) return null;
   const ratio = b.spent / b.budget;
   const state = capState(b.spent, b.budget);

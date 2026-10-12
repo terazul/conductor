@@ -135,9 +135,10 @@ export const EFFORTS: { id: EffortLevel; label: string; hint: string }[] = [
 export const DEFAULT_EFFORT: EffortLevel = 'high';
 
 /**
- * What each agent may spend in its whole life, unless you say otherwise. $5 was the
- * default while the cap was per message, when it bought a fresh $5 every reply; now
- * that it is a lifetime cap, $5 stops a real job part-way through.
+ * What each agent may spend PER DAY, unless you say otherwise (Amendment 129). $5 was the
+ * default while the cap was per message, when it bought a fresh $5 every reply, and $5 stopped
+ * a real job part-way through once the cap was a lifetime one. It is a daily figure now, back
+ * to zero at midnight, and $25 stays.
  */
 export const DEFAULT_BUDGET_USD = 25;
 
@@ -200,8 +201,8 @@ export function describeAutonomy(a: Autonomy): string {
   bits.push(a.allowedTools.includes('Bash') || a.mode === 'bypassPermissions' ? 'runs shell unattended' : 'asks before shell');
   if (a.disallowedTools.length > 0) bits.push(`${a.disallowedTools.length} deny rule(s)`);
   if (a.effort) bits.push(`${a.effort} effort`);
-  if (a.budgetUsd !== null) bits.push(`stops at $${a.budgetUsd}`);
+  if (a.budgetUsd !== null) bits.push(`budget $${a.budgetUsd} a day`);
   // An engine without dollars is capped in tokens (Amendment 80). Claude's autonomy has none.
-  if (a.budgetTokens) bits.push(`stops at ${tokenWords(a.budgetTokens)} tokens`);
+  if (a.budgetTokens) bits.push(`budget ${tokenWords(a.budgetTokens)} tokens a day`);
   return bits.join(' · ');
 }

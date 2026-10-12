@@ -22,7 +22,7 @@
 
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
-import type { Agent, Event, FileNode } from '@conductor/shared';
+import { localDayOf, type Agent, type Event, type FileNode } from '@conductor/shared';
 import { hrefFor } from '../lib/nav.js';
 import { BUDGET_RAISES, budgetOf, parseBudget } from '../shell/autonomy.js';
 import { fileLinks, filesIn, linkablePath } from './links.js';
@@ -293,6 +293,8 @@ const agentAt = (costUsd: number, budgetUsd: number | null): Agent => ({
   costUsd,
   inputTokens: 0,
   outputTokens: 0,
+  // Amendment 129: a budget reads what was spent today, so this agent spent `costUsd` today.
+  spentToday: { day: localDayOf(), usd: costUsd, tokens: 0 },
   dependsOn: [],
   autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd },
   startedAt: null,
@@ -604,6 +606,7 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
     provider: 'openrouter',
     inputTokens: used - 1_000,
     outputTokens: 1_000,
+    spentToday: { day: localDayOf(), usd: 0, tokens: used },
     autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, ...(cap !== null ? { budgetTokens: cap } : {}) },
   });
   const b = budgetOf(tokenAgent(184_000, 500_000));
@@ -643,9 +646,9 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
 {
   check('open unless hidden, so a first visit shows everything', settingsShown(null) && settingsShown('shown') && !settingsShown('hidden'));
   check('the button flips it', settingsToggled(null) === 'hidden' && settingsToggled('hidden') === 'shown' && settingsToggled('shown') === 'hidden');
-  check('the folded line says what is set, in order', settingsSummary({ mode: 'ask me', effort: 'high', model: 'sonnet-5-5', budget: dollarsLine('$4.10', '$25') }) === 'ask me · high · sonnet-5-5 · $4.10 of $25');
-  check('an engine with no effort leaves it out, not a blank', settingsSummary({ mode: 'ask me', effort: null, model: 'gpt-x', budget: tokensLine('184k', '500k') }) === 'ask me · gpt-x · 184k of 500k tokens');
-  check('no cap says what was spent, not "of nothing"', dollarsLine('$4.10', null) === '$4.10 spent' && tokensLine('950', null) === '950 tokens used');
+  check('the folded line says what is set, in order', settingsSummary({ mode: 'ask me', effort: 'high', model: 'sonnet-5-5', budget: dollarsLine('$4.10', '$25') }) === 'ask me · high · sonnet-5-5 · $4.10 of $25 today');
+  check('an engine with no effort leaves it out, not a blank', settingsSummary({ mode: 'ask me', effort: null, model: 'gpt-x', budget: tokensLine('184k', '500k') }) === 'ask me · gpt-x · 184k of 500k tokens today');
+  check('no cap says what was spent, not "of nothing"', dollarsLine('$4.10', null) === '$4.10 spent today' && tokensLine('950', null) === '950 tokens used today');
 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('one setting for every agent, read the same way', /const open = settingsShown\(useSetting\(SETTINGS_KEY\)\);/.test(comp) && SETTINGS_KEY === 'conductor.agentSettings');
@@ -899,11 +902,11 @@ console.log("\n· over its budget it warns, and says where it stops (Amendment 1
   check('over, the bar reads past 100% while the fill stays full', cap(27).pct === 108 && cap(27).fraction === 1 && cap(27).ceiling === 50);
   check('only twice the budget has stopped it', cap(27).state === 'over' && cap(49.99).state === 'over' && cap(50).state === 'ceiling');
 
-  check('the folded line says over, and where it stops', dollarsLine('$27.00', '$25.00', { state: 'over', ceiling: '$50.00' }) === 'over budget: $27.00 of $25.00, stops at $50.00');
-  check('at the ceiling it says the budget was reached', dollarsLine('$50.00', '$25.00', { state: 'ceiling', ceiling: '$50.00' }) === 'budget reached: $50.00 of $25.00');
-  check('in tokens the same', tokensLine('612k', '500k', { state: 'over', ceiling: '1M' }) === 'over budget: 612k of 500k tokens, stops at 1M' && tokensLine('1.2M', '500k', { state: 'ceiling', ceiling: '1M' }) === 'budget reached: 1.2M of 500k tokens');
-  check('under the budget the line is what it was', dollarsLine('$4.10', '$25') === '$4.10 of $25' && tokensLine('184k', '500k') === '184k of 500k tokens');
-  check('the open composer says it is only a warning, and where it stops', overSays('$27', '$25', '$50') === 'over budget: $27 of $25 — a warning only; stops at $50' && overSays('612k', '500k', '1M', true) === 'over budget: 612k of 500k tokens — a warning only; stops at 1M tokens');
+  check('the folded line says over, and where it stops', dollarsLine('$27.00', '$25.00', { state: 'over', ceiling: '$50.00' }) === "over today's budget: $27.00 of $25.00, stops at $50.00");
+  check('at the ceiling it says the budget was reached', dollarsLine('$50.00', '$25.00', { state: 'ceiling', ceiling: '$50.00' }) === 'budget reached today: $50.00 of $25.00');
+  check('in tokens the same', tokensLine('612k', '500k', { state: 'over', ceiling: '1M' }) === "over today's budget: 612k of 500k tokens, stops at 1M" && tokensLine('1.2M', '500k', { state: 'ceiling', ceiling: '1M' }) === 'budget reached today: 1.2M of 500k tokens');
+  check('under the budget the line is what it was', dollarsLine('$4.10', '$25') === '$4.10 of $25 today' && tokensLine('184k', '500k') === '184k of 500k tokens today');
+  check('the open composer says it is only a warning, and where it stops', overSays('$27', '$25', '$50') === "over today's budget: $27 of $25 — a warning only; stops at $50" && overSays('612k', '500k', '1M', true) === "over today's budget: 612k of 500k tokens — a warning only; stops at 1M tokens");
 
   // A warning does not make the tab look blocked: the agent is working. A stop still does.
   const tab = (kind: string) =>
@@ -915,20 +918,19 @@ console.log("\n· over its budget it warns, and says where it stops (Amendment 1
   const head = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the composer asks to raise only when stopped: its placeholder is for the ceiling', /const atCap = spend\?\.state === 'ceiling' && agent\.status !== 'working';/.test(comp));
   check('the sentence shows when the settings are open and the agent is over', /\{open && budgetSays && \(/.test(comp) && /spend\?\.state === 'over'/.test(comp));
-  check('the header says over budget while it works, and budget reached only at the ceiling', /budgetNow\?\.state === 'ceiling'/.test(head) && /budgetNow\?\.state === 'over'/.test(head) && />over budget</.test(head));
+  check('the header says over budget while it works, and budget reached only at the ceiling', /budgetNow\?\.state === 'ceiling'/.test(head) && /budgetNow\?\.state === 'over'/.test(head) && />over today's budget</.test(head));
 }
 
 console.log("\n· its tab shows how full its budget is, in the daily meter's colours (Amendment 125)");
 {
-  const withSpend = (id: string, costUsd: number, budgetUsd: number | null) => ({
+  // Amendment 129: a tab reads what the agent spent TODAY, stamped with the day it is for.
+  const withSpend = (id: string, usd: number, budgetUsd: number | null) => ({
     id,
     projectId: 'p',
     jobId: 'j',
     role: id,
     status: 'working' as const,
-    costUsd,
-    inputTokens: 0,
-    outputTokens: 0,
+    spentToday: { day: localDayOf(), usd, tokens: 0 },
     autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd },
   });
   const tabs = agentTabs([withSpend('a', 5, 25), withSpend('b', 20, 25), withSpend('c', 30, 25), withSpend('d', 9, null)], 'p', ['j'], [], []);
@@ -939,7 +941,7 @@ console.log("\n· its tab shows how full its budget is, in the daily meter's col
   check('no budget, no bar', by('d').budget === null);
   const bare = agentTabs([{ id: 'x', projectId: 'p', jobId: 'j', role: 'x', status: 'working' }], 'p', ['j'], [], []);
   check("a caller that doesn't give the spend gets no bar, not a wrong one", bare[0]?.budget === null);
-  const tokenTab = agentTabs([{ ...withSpend('t', 0, null), inputTokens: 450_000, outputTokens: 40_000, autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }], 'p', ['j'], [], []);
+  const tokenTab = agentTabs([{ ...withSpend('t', 0, null), spentToday: { day: localDayOf(), usd: 0, tokens: 490_000 }, autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } }], 'p', ['j'], [], []);
   check('a token budget colours its tab the same way', tokenTab[0]?.budget?.tone === 'over' && tokenTab[0]?.budget?.pct === 98);
 }
 
@@ -961,6 +963,31 @@ console.log('\n· the orchestrator of an orchestrated stack wears its mark, and 
   check('a blocked orchestrator keeps its mark: it is a mark of what the agent is, not of its state', agentTabs(stack, 'p', ['j'], [{ agentId: 'orchestrator' }], []).find((t) => t.id === 'orchestrator')?.orchestrator === true);
   const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the screen draws it: the mark in the tab, and the edge on it', /t\.orchestrator && <OrchestratorMark short \/>/.test(screen) && /t\.orchestrator \? ' is-orch' : ''/.test(screen));
+}
+
+console.log("\n· the tab, the bar and the line read today's spend, and a new day starts them at zero (Amendment 129)");
+{
+  const today = localDayOf();
+  const yesterday = localDayOf(new Date(Date.now() - 86_400_000));
+  const lived = (stamp: string, usd: number) => ({
+    id: 'x',
+    projectId: 'p',
+    jobId: 'j',
+    role: 'builder',
+    status: 'working' as const,
+    costUsd: 80,
+    spentToday: { day: stamp, usd, tokens: 0 },
+    autonomy: { mode: 'default' as const, allowedTools: [], disallowedTools: [], budgetUsd: 25 },
+  });
+  check("a tab shows today's spend against the budget, not the $80 of its life", agentTabs([lived(today, 10)], 'p', ['j'], [], [])[0]?.budget?.pct === 40);
+  check('with a stamp from yesterday the same agent\'s tab is empty: an open page at midnight', agentTabs([lived(yesterday, 60)], 'p', ['j'], [], [])[0]?.budget?.pct === 0 && agentTabs([lived(yesterday, 60)], 'p', ['j'], [], [])[0]?.budget?.state === 'ok');
+  const full = budgetOf({ ...agentAt(0, 25), spentToday: { day: yesterday, usd: 60, tokens: 0 } });
+  check('and the bar, the line and the colour with it: zero, ok, green', full?.spent === 0 && full.pct === 0 && full.state === 'ok' && full.tone === 'ok' && full.over === false);
+  check('the lifetime figure is shown beside it, and not read by it: $80 spent in all, nothing over', agentAt(80, 25).costUsd === 80 && budgetOf({ ...agentAt(80, 25), spentToday: { day: today, usd: 0, tokens: 0 } })?.state === 'ok');
+  const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  const head = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('the composer names the day in the line that warns, and in the notice for a lowered budget', /over today's budget/.test(readFileSync(new URL('./settingsfold.ts', import.meta.url), 'utf8')) && /already spent today/.test(comp) && /it will not run again until raised, or tomorrow/.test(comp));
+  check('the header and tab say daily', />budget reached today</.test(head) && /of its daily budget/.test(head));
 }
 
 console.log(

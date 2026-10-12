@@ -18,6 +18,7 @@ import {
   diffstat,
   rollupStatus,
   sparkline,
+  spentAfterUsage,
   type Agent,
   type AgentStatus,
   type Alert,
@@ -320,6 +321,10 @@ class Store {
         a.id === e.agentId
           ? {
               ...a,
+              // What the budget is read against (Amendment 129): the daemon's figure for today, else
+              // the growth of the lifetime figures added to what this tab knew. Read from `a` before
+              // the lifetime ones below overwrite it.
+              spentToday: spentAfterUsage(a, p),
               costUsd: p.costUsd,
               inputTokens: p.inputTokens,
               outputTokens: p.outputTokens,

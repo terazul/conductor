@@ -27,11 +27,11 @@ export interface SettingsLine {
   effort: string | null;
   /** Short, e.g. `sonnet-5-5`. */
   model: string;
-  /** e.g. `$4.10 of $25`, `$4.10 spent`, `184k of 500k tokens`. */
+  /** e.g. `$4.10 of $25 today`, `$4.10 spent today`, `184k of 500k tokens today`. */
   budget: string;
 }
 
-/** The folded line: `ask me · high · sonnet-5-5 · $4.10 of $25`. */
+/** The folded line: `ask me · high · sonnet-5-5 · $4.10 of $25 today`. */
 export function settingsSummary(s: SettingsLine): string {
   return [s.mode, s.effort, s.model, s.budget].filter((x): x is string => Boolean(x)).join(' · ');
 }
@@ -44,26 +44,29 @@ export interface OverLine {
   ceiling: string;
 }
 
-/** The budget part, in dollars: spent, and the budget when there is one. Past it, says so. */
+/**
+ * The budget part, in dollars: spent TODAY, and the daily budget when there is one. Past it,
+ * says so (Amendment 129: the budget is per day, and back to zero at midnight).
+ */
 export function dollarsLine(spent: string, cap: string | null, over?: OverLine): string {
-  if (cap === null) return `${spent} spent`;
-  if (over?.state === 'ceiling') return `budget reached: ${spent} of ${cap}`;
-  return over ? `over budget: ${spent} of ${cap}, stops at ${over.ceiling}` : `${spent} of ${cap}`;
+  if (cap === null) return `${spent} spent today`;
+  if (over?.state === 'ceiling') return `budget reached today: ${spent} of ${cap}`;
+  return over ? `over today's budget: ${spent} of ${cap}, stops at ${over.ceiling}` : `${spent} of ${cap} today`;
 }
 
 /** The budget part, in tokens, for an engine that reports no dollars. */
 export function tokensLine(used: string, cap: string | null, over?: OverLine): string {
-  if (cap === null) return `${used} tokens used`;
-  if (over?.state === 'ceiling') return `budget reached: ${used} of ${cap} tokens`;
-  return over ? `over budget: ${used} of ${cap} tokens, stops at ${over.ceiling}` : `${used} of ${cap} tokens`;
+  if (cap === null) return `${used} tokens used today`;
+  if (over?.state === 'ceiling') return `budget reached today: ${used} of ${cap} tokens`;
+  return over ? `over today's budget: ${used} of ${cap} tokens, stops at ${over.ceiling}` : `${used} of ${cap} tokens today`;
 }
 
 /**
  * What the composer says under the budget while the agent is over it and not yet stopped
- * (Amendment 124): that it is only a warning, and where it stops. Figures as the line says
- * them; `tokens` adds the unit after each.
+ * (Amendments 124, 129): that it is today's budget, only a warning, and where it stops. Figures
+ * as the line says them; `tokens` adds the unit after each.
  */
 export function overSays(spent: string, budget: string, ceiling: string, tokens = false): string {
   const unit = tokens ? ' tokens' : '';
-  return `over budget: ${spent} of ${budget}${unit} — a warning only; stops at ${ceiling}${unit}`;
+  return `over today's budget: ${spent} of ${budget}${unit} — a warning only; stops at ${ceiling}${unit}`;
 }

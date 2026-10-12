@@ -185,6 +185,25 @@ export interface UsagePayload {
    * the engine did not say.
    */
   apiMs?: number;
+  /**
+   * Amendment 129. What this agent has spent on `today.day`, the daemon's local day, once this
+   * usage is counted: the figure its budget is read against. `costUsd` above is the agent's
+   * lifetime, which is no longer what a budget counts. Absent from an event written before this.
+   */
+  today?: DaySpend;
+}
+
+/**
+ * What one agent spent on one local day (Amendment 129): dollars for an engine that reports
+ * them (Claude), input plus output tokens for one that doesn't (Copilot, OpenRouter). The
+ * `day` stamp is what lets a page that stays open past midnight read it as zero (`agentBudget`
+ * in budget.ts) before the daemon has said anything.
+ */
+export interface DaySpend {
+  /** `YYYY-MM-DD`, in the local time of the daemon that counted it. */
+  day: string;
+  usd: number;
+  tokens: number;
 }
 
 /** Agent's own todo list, when available. */

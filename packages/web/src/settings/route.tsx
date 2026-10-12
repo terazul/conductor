@@ -395,7 +395,7 @@ function LaunchSection() {
         </div>
       </div>
       <label className="st-field">
-        <span>budget per agent, in dollars — empty for no cap</span>
+        <span>budget per agent per day, in dollars — empty for no cap</span>
         <input
           inputMode="decimal"
           defaultValue={d.budget}

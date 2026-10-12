@@ -196,6 +196,115 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 129 — post-merge, applied. **An agent's budget, and a job's, count what was spent today and go back to zero at midnight.**
+
+Shared (`budget.ts`, `events.ts`, `wire.ts`), daemon (migration `210_spend_daily.sql`, `session/store.ts`,
+`session/budget.ts`, `session/supervisor.ts`, `session/alerts.ts`, `session/backends/claude.ts`,
+`session/backends/copilot.ts`, `daily.ts`, `session/verify.ts`) and web (`shell/autonomy.ts`,
+`shell/describe.ts`, `lib/store.ts`, `agent/*`, `attention/*`, `fleet/*`, `spawn/*`, `settings/route.tsx`).
+A TODO.md item (10 Oct, under "Look at what was built in Amendments 99-128"), and the user's decision of 12 Oct:
+"the caps should be per day". **This replaces the lifetime rule of Amendment 77 and the lifetime figures of
+Amendment 124**; the rest of 124 (a budget warns at 1x, a ceiling at 2x stops, the colours of 125) stands, now
+read against today's spend. The daily budget of Amendment 59 (the whole machine's day total, a separate warn-only
+figure in Settings and the status bar) is unchanged.
+
+- **What an agent spent today is its own record.** Migration 210 adds `agent_spend_daily(agent_id, day, cost_usd,
+  tokens)`, keyed by the daemon's local day (`localDay()`, the day `cost_daily` and the status bar use, and which
+  `setDayClock` moves in tests), with `ON DELETE CASCADE` to `agents`. It grows by DELTAS as usage arrives, the way
+  `addCostToday` does for the machine's day: Claude by the growth of the lifetime dollar cost at each result
+  (`outcome.costUsd - previous`, never negative, from `lifetimeCost`, so a resumed run adds only the difference and
+  a session that saved no total adds what it reports); Copilot and OpenRouter by the input plus output tokens each
+  model call adds (`#count`). Nothing is derived from the agent row: `agents.cost_usd` stays the LIFETIME figure,
+  Claude's `input_tokens` and `output_tokens` still hold only the last run's main loop, and Metrics
+  (`session/metrics.ts`) is untouched.
+- **It is on the wire, with its day.** `Agent.spentToday?: { day, usd, tokens }` (`DaySpend`, `events.ts`), added
+  at the end of the interface. Every agent the daemon reads carries it, stamped with the day it was read for
+  (`listAgents`, `getAgent`, `agentsForJob`, `helpersOf` and `unreportedHelpers` join the table). The `usage` event
+  carries the same figure as `today?: DaySpend`, so an open page folds it without waiting for the agent to be
+  pushed; one without it (a recording, an event from before) adds the growth of the lifetime figures to what the
+  tab had (`spentAfterUsage`, shared).
+- **One rule, in `@conductor/shared`.** `agentBudget(agent, today = localDayOf())` and `budgetState(agent, today)`
+  read `spentToday` when its day is the day asked about and read 0 when the stamp is older or absent. The daemon's
+  `session/budget.ts` wraps them with its own `localDay()`; the web's `budgetOf(agent, today?)` calls the shared one
+  with the browser's. So **a page left open past midnight draws its bars at zero at its next render**, before the
+  daemon says anything. `tokensSpent` (the lifetime tokens) is gone; `spentOn(agent, today)` replaces it.
+- **Every cap reads today's spend.** `budgetRefusal` (every launch, resume, message and re-run), `budgetNote` and the
+  pause note, `runLimit` (the SDK's `maxBudgetUsd` is the ceiling less what was spent TODAY when the query starts,
+  read from the store when each query starts, so a run moved past a call it can't make gets a fresh figure), the
+  Copilot/OpenRouter token stop, the `budget_over` alerts (agent and job), the job budget (`jobCostToday`, the sum
+  of its agents' spend today, against `jobCap`, the sum of their budgets) and the web's `budgetOf`. Past the budget
+  an agent still only warns; twice it stops, as before.
+- **The lifetime number stays, as information.** The details panel's bar reads **today $4.10 of $25**, and the
+  Agent section's *spend* row is now **lifetime $31.40** (title: "Everything this agent has spent, over its whole
+  life. The budget counts only today."). The composer's spent figure reads **$4.10 spent today** with the lifetime
+  figure in its tooltip; the Fleet lane's right-hand dollar figure is the lifetime one and says so in its title.
+- **Wording says daily everywhere.** Spawn: **⏱ budget per agent per day $** (and in tokens) with a tooltip,
+  `$25` default unchanged, the "resulting SDK options" line (`budget $25 a day`), Settings' default field. Composer:
+  `over today's budget: $27 of $25 — a warning only; stops at $50`; folded line `$4.10 of $25 today`,
+  `over today's budget: …, stops at $50`, `budget reached today: …`; the budget fields' labels say per day; the
+  notice for a lowered budget compares with today's spend and with the ceiling (it used to compare lifetime spend
+  with the budget, and said "will not run again" at the budget although only the ceiling stops). Agent screen:
+  tags `budget reached today` and `over today's budget`, the tab's tooltip `of its daily budget`. Needs You: the
+  cards are **Over its daily budget** and **Budget reached for today**; the notification texts say daily; failure
+  sentences `stopped at twice its $25 daily budget`, `stopped on its daily budget, now raised to $35`. The daemon's
+  notes: `budget reached for today — spent $50.20 of its $25 daily budget, which stops it at $50`; the refusal
+  `The Builder has spent $50.20 of its $25 daily budget today, which stops it at $50 — raise it to continue, or it
+  renews at midnight.`; the job's hold is `job budget reached for today`. All keep the prefix `budget reached` /
+  `job budget reached`, which is what `budgetStop` reads, so older pauses are still recognised.
+- **A `budget_over` warning's id now carries the day** (`budget_over:<agent>:<budget>:<unit>:<day>`, and the job's
+  likewise): a warning put away today does not hide tomorrow's.
+- **Midnight.** `daily.ts` gains `onDayTurn(fn)`, another listener on the watch of Amendment 103 (which still
+  broadcasts the status bar's total and refreshes the alerts, unchanged); the supervisor registers
+  `Supervisor.newDay(day, was)` in `initSupervisor`. On a turn it:
+  - rewrites the pause of an agent paused at its ceiling (`budgetStop` = `budget_exhausted`), and of one held for
+    its job's (`job_budget_reached`), when it is no longer at the ceiling today, to say its budget is **renewed
+    for the new day** and that continue needs no raise (`renewals`, a pure function in `session/budget.ts`, with
+    `renewedNote` and `isRenewedNote`). **Nothing is resumed by itself**: that would spend with no one watching.
+    `budgetRefusal` reads today, so a plain **continue**, **resume** or message goes through and the agent runs
+    against the new day's ceiling. The pause is rewritten with the usual `#pause`, so it is a new status event, a
+    new Needs You card id, and a dismissal of yesterday's does not hide it; the alert carries `renewed: true`
+    (`Alert.renewed?`), and the card says "Nothing resumes by itself".
+  - leaves alone any pause that is not a budget pause, one that already says renewed (so a second turn rewrites
+    nothing), and one still at the ceiling on the new day (a clock moved back to a day it had spent on);
+  - pushes the agents that spent on the day before, so open pages redraw at zero;
+  - calls `budgetChanged()` (the over-budget warnings of yesterday clear) and `pump()`.
+- **Existing data.** An agent that existed before migration 210 has no rows, so it has spent nothing today and a
+  budget it had reached is renewed the first time it starts. Its lifetime figure is kept as it was.
+- **A run in flight across midnight.** Its delta is credited to the day its result arrives (the usage that comes in
+  after midnight is the new day's); the `maxBudgetUsd` it was launched with stays what it was. Claude's spend is known
+  only when a turn ends, so a run that crosses midnight is counted whole on the new day.
+- **Removing an agent removes its days** (the cascade). The machine's `cost_daily` keeps the money, as before.
+- **Checked** (`session/verify.ts` §26, `lib/verify.ts`, `agent/verify.ts`, `attention/verify.ts`): spend accrues per
+  day, by the growth of the lifetime figure; a resume adds only the difference, and a session with no saved total
+  adds what it reports; the cap reads today and not the lifetime (an agent with $80 in its life and nothing today
+  runs, with the whole $50 ceiling); a day change takes an over-budget agent under its budget and clears the warning;
+  an agent paused at the ceiling and an agent held for the job's stay paused with the renewed wording and continue
+  with no raise; a person's pause is not touched; a second turn rewrites nothing; the job's figure resets; a run
+  that crosses midnight is credited to the new day with its launch limit; a token budget (a real Copilot backend
+  on the fake client) renews, is not stopped by its lifetime tokens, stops at twice the day's and continues the
+  next day; removing an agent removes its rows; the pure rewrite; the web's `budgetOf` reads 0 for a stale stamp;
+  the store folds a usage event with and without the daemon's figure and does not carry yesterday's into today.
+- **Existing asserts changed, deliberately.** Fixture agents made with `costUsd` / tokens in `session/verify.ts`
+  are agents whose whole life was today: `fixture()` also records the same figures in `agent_spend_daily`. The
+  fake token engine and `usage()` in §24 add each call's tokens to the day as the real backend does. Plain-object
+  agents given to `budgetRefusal`/`budgetState` carry `spentToday`. The expected sentences and notes changed to the
+  daily wording above, in `session/verify.ts`, `lib/verify.ts`, `agent/verify.ts`, `attention/verify.ts` and
+  `spawn/verify.ts`; the folded-line, `overSays`, `describeAutonomy` (`budget $25 a day`) and the Spawn-pill
+  source checks changed with their text.
+- **Not done.**
+  - **Nothing resumes by itself at midnight**, by design (above); a person presses continue.
+  - **A daemon that restarts after midnight does not rewrite the pauses** (there was no turn to see). The card still
+    offers a plain continue, because the web reads the state, but it does not carry the "renewed" wording until the
+    next turn.
+  - **`agent_spend_daily` is never pruned**: one small row per agent per day it spent.
+  - **A Claude run's spend is counted when its turn ends**, as before, so mid-turn the bar does not move; the SDK
+    ceiling still stops it.
+  - **The job's budget is in dollars only**, and its spend today is the sum of its agents' dollars (Claude); a
+    token-capped agent still uncaps the job's dollar cap (Amendment 77).
+  - **The time zone is the daemon's local one** (Amendment 103); an open page in another zone reads the stamp against
+    its own day, so it can show a renewal a few hours before or after the daemon's.
+  - **Nobody has looked at it in a browser, in both themes**, and nothing ran on a real model.
+
 ### Amendment 128 — post-merge, applied. **Orchestrated stacks: one agent runs the others, with the roles it may start listed before launch.**
 
 Shared (`wire.ts`, `stack.ts`), daemon (`routes/helpers.ts`, `routes/session.ts`, `session/handoff.ts`,

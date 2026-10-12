@@ -11,7 +11,7 @@ the last of it on 12 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 129.
+  green `make test` (decided 30 Sep). The next amendment is 130.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Not planned: Windows (dropped 10 Oct). The terminal (Amendment 112) and the rest are built and
@@ -57,10 +57,12 @@ the last of it on 12 Oct).
   - Fleet and Project: the **not handed off** chip (120) and the budget meter on each agent row (125).
   - Needs You: the **Not handed off**, **Reconnecting** and **Over budget** cards (104, 123, 124).
   - Metrics, key `8` (122).
-  - The status bar after midnight (103): a tab left open past midnight reads $0.00 today. Moving the
-    system clock forward is enough to see it. If what you saw not resetting was an agent's own
-    budget (the composer's "$4.10 of $25"), say so: those are lifetime caps by design (Amendment 77)
-    and a per-day cap was never confirmed.
+  - Midnight (103, 129): a tab left open past midnight reads $0.00 on the status bar, and an agent's
+    own budget (the composer's "$4.10 of $25 today") reads $0 again, with its over-budget warning
+    gone. Moving the system clock forward is enough to see both. An agent paused at its ceiling
+    stays paused, and the Budget reached card says its budget is renewed and offers **continue**.
+  - The details panel's **today** and **lifetime** lines, and the wording "budget per agent per
+    day" in Spawn (129).
 
 - [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-128 passes
   its tests on fakes; nothing has run on the real SDK, Copilot or OpenRouter. It costs money and needs
@@ -125,13 +127,23 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - No per-project filter, and no chart beyond the day table.
   - The comment in `web/src/lib/verify.ts` (~line 856) says no real screen has the hotkey `8`; it does now.
 
-- [ ] **Retry and budgets (123-125).**
+- [ ] **Retry and budgets (123-125, 129).**
   - The retry delays are fixed (5 s, 15 s, 30 s, 60 s, 5 min), not settings.
   - A retried agent that then ends its turn without `hand_off` is held as usual; the one-time ask of
     Amendment 119 applies only to restart resumes.
   - The Needs You card for a retry starts at the second retry, so the 5 s first try doesn't chime. Say
     if you want it from the first.
   - The budget ceiling is fixed at 2× (`BUDGET_CEILING`, `shared/src/budget.ts:18`).
+  - Budgets count the day's spend (129), and nothing resumes by itself at midnight, so an agent paused
+    at its ceiling overnight waits for you. An automatic **continue** at the day change would spend
+    money unattended; say if you want it, and for which agents.
+  - A daemon restarted after midnight does not rewrite the pauses (there was no day change to see). The
+    card still offers a plain continue because the web reads the state, but the note lacks the
+    "renewed" wording until the next day change.
+  - A Claude run's spend is counted when its turn ends, so a run that crosses midnight is counted
+    whole on the new day. It keeps the SDK limit it launched with.
+  - The job's budget is dollars only, and a token-capped agent still leaves the job's dollar cap
+    uncapped.
   - The navigator's rows have no budget meter, and a job has no meter of its own, only its warning card.
   - Claude's spend is known only when a turn ends, so its over-budget warning arrives with the turn that
     crossed the budget; the ceiling still stops it mid-turn through the SDK.

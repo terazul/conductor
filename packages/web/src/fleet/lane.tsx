@@ -160,9 +160,9 @@ export function Lane({
             <span
               className="pj-budget"
               data-tone={budget.tone}
-              title={`${tokenWords(budget.spent)} of a ${tokenWords(budget.cap)}-token budget${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${tokenWords(budget.ceiling)}`}`}
+              title={`${tokenWords(budget.spent)} of a ${tokenWords(budget.cap)}-token daily budget, spent today${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${tokenWords(budget.ceiling)}`}`}
             >
-              {budget.pct}% of {tokenWords(budget.cap)} tok{budget.over ? ' · over' : ''}
+              {budget.pct}% of {tokenWords(budget.cap)} tok/day{budget.over ? ' · over' : ''}
             </span>
           </>
         ) : budget ? (
@@ -173,9 +173,9 @@ export function Lane({
             <span
               className="pj-budget"
               data-tone={budget.tone}
-              title={`${fmtMoney(budget.spent)} of a ${fmtMoney(budget.cap)} budget${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${fmtMoney(budget.ceiling)}`}`}
+              title={`${fmtMoney(budget.spent)} of a ${fmtMoney(budget.cap)} daily budget, spent today${budget.state === 'ok' ? '' : ` — over it; a warning, it stops at ${fmtMoney(budget.ceiling)}`}`}
             >
-              {budget.pct}% of {fmtMoney(budget.cap)}
+              {budget.pct}% of {fmtMoney(budget.cap)}/day
               {budget.over ? ' · over' : ''}
             </span>
           </>
@@ -185,7 +185,7 @@ export function Lane({
         <span title={`${agent.inputTokens} in / ${agent.outputTokens} out`}>
           {fmtTokens(agent.inputTokens + agent.outputTokens)} tok
         </span>
-        {dollars && <span>{fmtMoney(agent.costUsd)}</span>}
+        {dollars && <span title="Spent over its whole life">{fmtMoney(agent.costUsd)}</span>}
       </div>
     </div>
   );

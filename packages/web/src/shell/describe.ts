@@ -290,7 +290,7 @@ const FAILURES: Record<string, string> = {
   launch_failed: "couldn't be launched",
   resume_failed: 'had no session to resume',
   folder_gone: 'lost its folder: it was deleted',
-  job_budget_reached: "reached its job's budget",
+  job_budget_reached: "reached its job's daily budget",
 };
 
 /**
@@ -299,19 +299,26 @@ const FAILURES: Record<string, string> = {
  */
 export function failureSentence(
   reason: string | undefined,
-  agent?: Pick<Agent, 'autonomy' | 'costUsd' | 'inputTokens' | 'outputTokens'>,
+  agent?: Pick<Agent, 'autonomy' | 'spentToday'>,
+  renewed = false,
 ): string {
   if (reason === 'budget_exhausted') {
     const cap = agent?.autonomy.budgetUsd;
     const capTokens = agent?.autonomy.budgetTokens ?? null;
     if (!agent || (!cap && !capTokens)) return 'reached its budget';
+    // A new day renewed it (Amendment 129). It is still paused: nothing resumes by itself.
+    if (renewed) return 'was stopped at its daily budget, which is renewed for the new day, so continue needs no raise';
     // Raised since it stopped: the old figure would be wrong, and continuing is all that's left.
     const stopped = budgetState(agent) === 'ceiling';
-    // It stops at twice the budget, not at it (Amendment 124), and says so.
-    if (cap) return stopped ? `stopped at twice its ${usd(cap)} budget` : `stopped on its budget, now raised to ${usd(cap)}`;
+    // It stops at twice the budget, not at it (Amendment 124), and says so. The budget is per
+    // day (Amendment 129): "daily" says the figure is what it may spend in a day.
+    if (cap) return stopped ? `stopped at twice its ${usd(cap)} daily budget` : `stopped on its daily budget, now raised to ${usd(cap)}`;
     return stopped
-      ? `stopped at twice its ${tokenWords(capTokens!)}-token budget`
-      : `stopped on its budget, now raised to ${tokenWords(capTokens!)} tokens`;
+      ? `stopped at twice its ${tokenWords(capTokens!)}-token daily budget`
+      : `stopped on its daily budget, now raised to ${tokenWords(capTokens!)} tokens`;
+  }
+  if (reason === 'job_budget_reached' && renewed) {
+    return "was held for its job's daily budget, which is renewed for the new day, so continue needs no raise";
   }
   if (!reason || reason === 'error') return 'ended with an error — see the transcript';
   return FAILURES[reason] ?? `${reason} — see the transcript`;
@@ -328,7 +335,7 @@ function usd(n: number): string {
 export function overBudgetSentence(alert: Pick<Alert, 'budget' | 'unit'>): string {
   const budget = alert.budget ?? 0;
   const said = alert.unit === 'tokens' ? `${tokenWords(budget)}-token` : usd(budget);
-  return `is over its ${said} budget — a warning only`;
+  return `is over its ${said} daily budget — a warning only`;
 }
 
 type Retry = Extract<Event['payload'], { kind: 'api_retry' }>;
@@ -484,7 +491,7 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
     }
     case 'budget':
     case 'failed':
-      return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one) };
+      return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one, alert.renewed === true) };
   }
 }
 
@@ -494,9 +501,9 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
     case 'failed':
       return 'failed';
     case 'budget':
-      return 'at its budget';
+      return 'at its daily budget';
     case 'budget_over':
-      return alert.cause === 'job_budget_over' ? 'job over its budget' : 'over its budget';
+      return alert.cause === 'job_budget_over' ? 'job over its daily budget' : 'over its daily budget';
     case 'server_down':
       return 'server down';
     case 'daily_budget':

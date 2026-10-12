@@ -22,12 +22,12 @@ export interface EngineLaunch {
   caps: Capabilities;
   /** The exact id every agent of the launch runs on. Unused for Claude, whose rows pick their own. */
   model: string;
-  /** Tokens per agent, input plus output, for an engine without dollars. Null is uncapped. */
+  /** Tokens per agent per day, input plus output, for an engine without dollars. Null is uncapped. */
   budgetTokens: number | null;
 }
 
 /**
- * Each agent's lifetime cap in tokens, unless you say otherwise. A cap rather than none,
+ * Each agent's cap in tokens per day (Amendment 129), unless you say otherwise. A cap rather than none,
  * as the dollar default is: an engine whose spend can't be seen in dollars is the last
  * one to leave unbounded.
  */

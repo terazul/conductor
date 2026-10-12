@@ -88,20 +88,40 @@ export class DayWatch {
 
 let watch: DayWatch | null = null;
 
+const turnListeners = new Set<(day: string, was: string) => void>();
+
+/**
+ * Told when the day changes (Amendment 129), after the status bar and the alerts have been:
+ * the new day and the one before. The supervisor renews budgets here, since an agent's
+ * budget is per day. Another listener rather than a change to the watch: the watch stays the
+ * one Amendment 103 describes, and a listener that throws does not stop the others.
+ */
+export function onDayTurn(fn: (day: string, was: string) => void): () => void {
+  turnListeners.add(fn);
+  return () => turnListeners.delete(fn);
+}
+
 /**
  * Every open page is told the new day's total (0, at midnight), and the daily budget's
- * alert is checked against it. Returns the way to stop. Called by `Alerts.start`, which
- * also refreshes at midnight for notes due.
+ * alert is checked against it; then whoever listens (`onDayTurn`) is told. Returns the way
+ * to stop. Called by `Alerts.start`, which also refreshes at midnight for notes due.
  */
 export function startDayWatch(db: Db): () => void {
   watch?.stop();
-  const mine = new DayWatch(() => {
+  const mine = new DayWatch((day, was) => {
     try {
       hub().broadcast({ type: 'cost', costToday: costToday(db) });
     } catch {
       // No hub outside the daemon. Not fatal.
     }
     costChanged();
+    for (const l of [...turnListeners]) {
+      try {
+        l(day, was);
+      } catch (err) {
+        console.error('[daily] a listener for the day changing failed', err);
+      }
+    }
   });
   watch = mine;
   mine.start();

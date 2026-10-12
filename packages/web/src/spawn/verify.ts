@@ -733,13 +733,13 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   const bare = specsOn(base, { provider: 'copilot', caps: NONE, model: 'gpt-5', budgetTokens: null });
   check('an engine that can do nothing: no effort, no helpers, no cap at all when none is typed', bare.every((x) => !('effort' in x.autonomy) && !('helpers' in x) && !('budgetTokens' in x.autonomy) && x.autonomy.budgetUsd === null), JSON.stringify(bare[0]));
   check('an engine the daemon hasn\'t described is trusted with nothing; Claude with everything', capabilitiesOf('copilot', null) === NONE && capabilitiesOf('copilot', []) === NONE && capabilitiesOf(CLAUDE, null) === ALL_ON && capabilitiesOf('copilot', [{ id: 'copilot', unavailable: null, capabilities: copilotCaps }]) === copilotCaps);
-  check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('stops at 500k tokens') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
+  check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('budget 500k tokens a day') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
-  check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span className="sp-pill" aria-pressed=\{budgetPerAgent !== null\}>\s*⏱ budget per agent \$/.test(src) && /value=\{budgetTok\}/.test(src));
+  check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title="[^"]*per day[^"]*"\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
   check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && !listsRoles && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 

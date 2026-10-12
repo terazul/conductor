@@ -38,7 +38,7 @@ import {
 
 const KIND: Record<AlertKind, { label: string; tone: string }> = {
   failed: { label: 'Agent failed', tone: 'var(--fail)' },
-  budget: { label: 'Budget reached', tone: 'var(--need)' },
+  budget: { label: 'Budget reached for today', tone: 'var(--need)' },
   connection: { label: 'Model API', tone: 'var(--need)' },
   server_down: { label: 'Dev server down', tone: 'var(--fail)' },
   daily_budget: { label: 'Daily budget', tone: 'var(--fail)' },
@@ -46,7 +46,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   blocked_dep: { label: 'Waiting', tone: 'var(--need)' },
   handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
   reconnecting: { label: 'Reconnecting', tone: 'var(--need)' },
-  budget_over: { label: 'Over budget', tone: 'var(--need)' },
+  budget_over: { label: 'Over its daily budget', tone: 'var(--need)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -182,11 +182,11 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
 
         {roles !== '' && <Kv k={mine.length > 1 ? 'agents' : 'agent'} v={roles} />}
         {alert.kind === 'budget' && first && budgetOf(first) !== null && (
-          <Kv k="spent" v={spentOf(first)} tone="var(--need)" />
+          <Kv k="today" v={spentOf(first)} tone={alert.renewed ? undefined : 'var(--need)'} />
         )}
         {alert.kind === 'budget_over' && alert.spent !== undefined && alert.budget !== undefined && (
           <>
-            <Kv k="spent" v={`${said(alert.spent, alert.unit)} of ${said(alert.budget, alert.unit)}`} tone="var(--need)" />
+            <Kv k="today" v={`${said(alert.spent, alert.unit)} of ${said(alert.budget, alert.unit)}`} tone="var(--need)" />
             <Kv k="stops at" v={said(ceilingOf(alert.budget), alert.unit)} />
           </>
         )}
@@ -257,10 +257,16 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             It stopped without being asked to. The preview can start it again.
           </div>
         )}
+        {alert.kind === 'budget' && alert.renewed && (
+          <div className="atn-note">
+            The new day renewed its budget, so continue needs no raise. Nothing resumes by itself: it is still paused until you
+            press continue.
+          </div>
+        )}
         {alert.kind === 'budget_over' && (
           <div className="atn-note">
             A warning only: {alert.cause === 'job_budget_over' ? 'the agents keep going' : 'it keeps working'}. Raise the budget to
-            quiet it, or leave it. {alert.cause === 'job_budget_over' ? 'Agents still to start are held' : 'It is paused'} at
+            quiet it, or leave it; it starts again at midnight. {alert.cause === 'job_budget_over' ? 'Agents still to start are held' : 'It is paused'} at
             twice the budget.
           </div>
         )}

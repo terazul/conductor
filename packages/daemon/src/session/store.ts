@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   Autonomy,
   BlockMode,
+  DaySpend,
   DecisionSummary,
   HelperRole,
   Isolation,
@@ -256,6 +257,9 @@ export function setDefaultBranch(db: Db, id: string, branch: string): Project | 
  *    happened, and what happened doesn't stop having happened.
  *  • `cost_daily` — the money was spent. A removal is not a refund.
  *  • anything on disk. Not this file's business, and not any caller's either.
+ *
+ * The agents' `agent_spend_daily` rows go with them (Amendment 129): they are the agents'
+ * budgets, and a removed agent has none left to read.
  */
 export function deleteProject(db: Db, id: string): void {
   db.prepare('DELETE FROM projects WHERE id = ?').run(id);
@@ -385,6 +389,9 @@ interface AgentRow {
   handoff_held?: number | null;
   helper_roles?: string | null;
   helper_role?: string | null;
+  /** From `agent_spend_daily` for today (Amendment 129); null when it has spent nothing today. */
+  spent_usd?: number | null;
+  spent_tokens?: number | null;
 }
 
 /** Used when a row predates a field, or carries unparseable JSON. */
@@ -395,7 +402,7 @@ export const DEFAULT_AUTONOMY: Autonomy = {
   budgetUsd: null,
 };
 
-const toAgent = (r: AgentRow): Agent => ({
+const toAgent = (r: AgentRow, day: string): Agent => ({
   id: r.id,
   jobId: r.job_id,
   projectId: r.project_id,
@@ -422,7 +429,26 @@ const toAgent = (r: AgentRow): Agent => ({
   ...(r.status === 'done' && r.handoff_held === 1 ? { handoffHeld: true } : {}),
   // Only on the orchestrator of an orchestrated stack (Amendment 128): the ids, nothing of the roles' prompts.
   ...pipelineRolesField(r.helper_roles),
+  // What it spent today, stamped with the day, which is what its budget is read against (Amendment 129).
+  spentToday: { day, usd: r.spent_usd ?? 0, tokens: r.spent_tokens ?? 0 },
 });
+
+/**
+ * Agents with what each has spent today (Amendment 129) joined on, so every wire Agent carries
+ * the figure its budget is read against. `where` is the rest of the statement, on `a`.
+ */
+function readAgents(db: Db, where = '', ...params: Array<string | number>): Agent[] {
+  const day = localDay();
+  return rows<AgentRow>(
+    db
+      .prepare(
+        `SELECT a.*, s.cost_usd AS spent_usd, s.tokens AS spent_tokens
+           FROM agents a LEFT JOIN agent_spend_daily s ON s.agent_id = a.id AND s.day = ?
+          ${where}`,
+      )
+      .all(day, ...params),
+  ).map((r) => toAgent(r, day));
+}
 
 /** The engine an agent runs on (Amendment 74). `claude` for every agent from before. */
 export function getAgentProvider(db: Db, id: string): ProviderId {
@@ -471,16 +497,12 @@ export function startedAsRole(db: Db, orchestratorId: string, role: string): num
 }
 
 export function helpersOf(db: Db, parentId: string): Agent[] {
-  return rows<AgentRow>(
-    db.prepare('SELECT * FROM agents WHERE parent_id = ? ORDER BY rowid').all(parentId),
-  ).map(toAgent);
+  return readAgents(db, 'WHERE a.parent_id = ? ORDER BY a.rowid', parentId);
 }
 
 /** Helpers whose final reply hasn't been handed to their orchestrator yet. */
 export function unreportedHelpers(db: Db, parentId: string): Agent[] {
-  return rows<AgentRow>(
-    db.prepare('SELECT * FROM agents WHERE parent_id = ? AND reported_at IS NULL ORDER BY rowid').all(parentId),
-  ).map(toAgent);
+  return readAgents(db, 'WHERE a.parent_id = ? AND a.reported_at IS NULL ORDER BY a.rowid', parentId);
 }
 
 export function markReported(db: Db, ids: string[]): void {
@@ -573,18 +595,15 @@ export function lastStatusNote(db: Db, agentId: string): string | null {
 }
 
 export function listAgents(db: Db): Agent[] {
-  return rows<AgentRow>(db.prepare('SELECT * FROM agents').all()).map(toAgent);
+  return readAgents(db);
 }
 
 export function getAgent(db: Db, id: string): Agent | undefined {
-  const r = row<AgentRow>(db.prepare('SELECT * FROM agents WHERE id = ?').get(id));
-  return r ? toAgent(r) : undefined;
+  return readAgents(db, 'WHERE a.id = ?', id)[0];
 }
 
 export function agentsForJob(db: Db, jobId: string): Agent[] {
-  return rows<AgentRow>(db.prepare('SELECT * FROM agents WHERE job_id = ?').all(jobId)).map(
-    toAgent,
-  );
+  return readAgents(db, 'WHERE a.job_id = ?', jobId);
 }
 
 export function getAgentBrief(db: Db, id: string): string | null {
@@ -649,6 +668,8 @@ export function insertAgent(
     ...(a.parentId ? { parentId: a.parentId } : {}),
     ...(a.provider && a.provider !== 'claude' ? { provider: a.provider } : {}),
     ...(a.helperRoles?.length ? { pipelineRoles: a.helperRoles.map((r) => r.id) } : {}),
+    // A new agent has spent nothing today (Amendment 129).
+    spentToday: { day: localDay(), usd: 0, tokens: 0 },
   };
   db.prepare(
     `INSERT INTO agents (id, job_id, project_id, role, model, sdk_session_id, status,
@@ -769,12 +790,69 @@ export function costToday(db: Db): number {
   return r?.cost_usd ?? 0;
 }
 
-/** Cumulative spend for a job, for the budget cap. */
+/** Cumulative spend for a job over its whole life. Information: no cap reads it (Amendment 129). */
 export function jobCost(db: Db, jobId: string): number {
   const r = row<{ total: number }>(
     db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM agents WHERE job_id = ?').get(jobId),
   );
   return r?.total ?? 0;
+}
+
+// ── what each agent spent today (Amendment 129) ─────────────────────────────
+
+/** What `agentId` has spent today: both units, stamped with the day. Zero when it has spent nothing. */
+export function spentToday(db: Db, agentId: string): DaySpend {
+  const day = localDay();
+  const r = row<{ cost_usd: number; tokens: number }>(
+    db.prepare('SELECT cost_usd, tokens FROM agent_spend_daily WHERE agent_id = ? AND day = ?').get(agentId, day),
+  );
+  return { day, usd: r?.cost_usd ?? 0, tokens: r?.tokens ?? 0 };
+}
+
+/**
+ * Add what a run just spent to the agent's day, and return the day's figure. It grows by deltas
+ * as usage arrives, the way `addCostToday` does for the machine's day, and is credited to the
+ * day the usage ARRIVES: a run that crosses midnight counts its later usage on the new day.
+ * Nothing negative or empty is written. An agent that no longer exists records nothing, and reads
+ * as zero.
+ */
+export function addSpendToday(db: Db, agentId: string, delta: { usd?: number; tokens?: number }): DaySpend {
+  const usd = delta.usd && delta.usd > 0 ? delta.usd : 0;
+  const tokens = delta.tokens && delta.tokens > 0 ? Math.round(delta.tokens) : 0;
+  if (usd > 0 || tokens > 0) {
+    db.prepare(
+      `INSERT INTO agent_spend_daily (agent_id, day, cost_usd, tokens)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agents WHERE id = ?)
+       ON CONFLICT(agent_id, day) DO UPDATE SET
+         cost_usd = cost_usd + excluded.cost_usd,
+         tokens = tokens + excluded.tokens`,
+    ).run(agentId, localDay(), usd, tokens, agentId);
+  }
+  return spentToday(db, agentId);
+}
+
+/**
+ * A job's spend today: what its agents spent, summed. What a job's budget is read against,
+ * as `jobCap` is the sum of its agents' budgets (Amendment 129). Dollars only, as the cap is.
+ */
+export function jobCostToday(db: Db, jobId: string): number {
+  const r = row<{ total: number }>(
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(s.cost_usd), 0) AS total
+           FROM agent_spend_daily s JOIN agents a ON a.id = s.agent_id
+          WHERE a.job_id = ? AND s.day = ?`,
+      )
+      .get(jobId, localDay()),
+  );
+  return r?.total ?? 0;
+}
+
+/** The agents that spent anything on `day`. The day change pushes these afresh, their budgets having renewed. */
+export function agentsThatSpentOn(db: Db, day: string): string[] {
+  return rows<{ agent_id: string }>(
+    db.prepare('SELECT agent_id FROM agent_spend_daily WHERE day = ? AND (cost_usd > 0 OR tokens > 0)').all(day),
+  ).map((r) => r.agent_id);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

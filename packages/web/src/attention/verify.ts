@@ -14,7 +14,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { HANDOFF_BY_USER_NOTE, HANDOFF_HELD_NOTE, HANDOFF_SUMMARY_MAX } from '@conductor/shared';
+import { HANDOFF_BY_USER_NOTE, HANDOFF_HELD_NOTE, HANDOFF_SUMMARY_MAX, localDayOf } from '@conductor/shared';
 import type { Agent, Alert, Event, PendingRequest, PermissionSuggestion, Project, Question } from '@conductor/shared';
 import {
   AGE_FULL_MS,
@@ -84,6 +84,15 @@ const many: Question = {
     { label: 'test', description: '' },
   ],
 };
+
+/**
+ * Amendment 129. A budget reads what an agent spent TODAY, which the fixtures below don't say; an
+ * agent made with `costUsd` and tokens is one whose whole life was today, so those figures are its day.
+ */
+const spendingToday = (a: Agent): Agent => ({
+  ...a,
+  spentToday: a.spentToday ?? { day: localDayOf(), usd: a.costUsd, tokens: a.inputTokens + a.outputTokens },
+});
 
 console.log('\n1 · a wait reads the same everywhere it appears');
 {
@@ -221,7 +230,7 @@ console.log('\n4 · a sent decision says what was sent');
 // pressed, which is the moment someone was counting on it.
 console.log('\n5 · a stopped agent is offered only what can work, and is counted');
 {
-  const agent = (over: Partial<Agent> = {}): Agent => ({
+  const agent = (over: Partial<Agent> = {}): Agent => spendingToday({
     id: 'a1',
     jobId: 'j1',
     projectId: 'p1',
@@ -355,7 +364,7 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   const note = alertNotice(budget, [agent({ costUsd: 10 })], projects);
   check(
     'a budget notification reads like a request one',
-    note.title === 'demo · builder needs you' && note.body === 'builder stopped at twice its $5 budget',
+    note.title === 'demo · builder needs you' && note.body === 'builder stopped at twice its $5 daily budget',
     JSON.stringify(note),
   );
   const net = alertNotice(outage, both, projects);
@@ -564,7 +573,7 @@ console.log('\n8 · an agent waiting to be tried again (Amendment 123)');
 
 console.log("\n9 · an agent's budget warns: the card for it, and the one that stops (Amendment 124)");
 {
-  const agent = (over: Partial<Agent> = {}): Agent => ({
+  const agent = (over: Partial<Agent> = {}): Agent => spendingToday({
     id: 'a1',
     jobId: 'j1',
     projectId: 'p1',
@@ -624,19 +633,77 @@ console.log("\n9 · an agent's budget warns: the card for it, and the one that s
 
   // The card that stops (kind 'budget') raises at twice the budget, in the agent's unit.
   const stopped = alert({ kind: 'budget', cause: 'budget_exhausted' });
-  check('the stop at twice a token budget raises in tokens (it used to offer only a continue that is refused)', ids(alertActions(stopped, [{ ...tokenAgent, status: 'paused', inputTokens: 600_000, outputTokens: 400_000 }])) === 'raise:100000->600000tokens raise:500000->1000000tokens open dismiss');
+  check('the stop at twice a token budget raises in tokens (it used to offer only a continue that is refused)', ids(alertActions(stopped, [{ ...tokenAgent, status: 'paused', inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 } }])) === 'raise:100000->600000tokens raise:500000->1000000tokens open dismiss');
   check('and between the budget and the ceiling a stopped agent only continues', ids(alertActions(stopped, [agent({ status: 'paused', costUsd: 7 })])) === 'continue open dismiss');
 
   const projects: Project[] = [{ id: 'p1', name: 'demo' } as Project];
   const note = alertNotice(alert(), [agent()], projects);
-  check('the notification says over budget, not that it needs you', note.title === 'demo · builder is over its budget' && note.body === 'builder is over its $5 budget — a warning only', JSON.stringify(note));
+  check('the notification says over budget, not that it needs you', note.title === 'demo · builder is over its daily budget' && note.body === 'builder is over its $5 daily budget — a warning only', JSON.stringify(note));
 
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
   const api = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
-  check('the card has a label for the kind, in amber like a stop', /budget_over: \{ label: 'Over budget', tone: 'var\(--need\)' \}/.test(card));
+  check('the card has a label for the kind, in amber like a stop', /budget_over: \{ label: 'Over its daily budget', tone: 'var\(--need\)' \}/.test(card));
   check('a raise that only raises does not continue; one that continues still does', /if \(a\.onlyRaise\) void cmd\.run\('Raising the budget', \(\) => raiseBudget\(agent, a\.to, a\.unit\)/.test(card) && /raiseAndContinue\(agent, a\.to, a\.unit\)/.test(card));
   check('a token raise sends budgetTokens, a dollar one budgetUsd', /unit === 'tokens' \? \{ budgetTokens: to \} : \{ budgetUsd: to \}/.test(api));
   check('the card says it is only a warning, and the ceiling', /A warning only:/.test(card) && /twice the budget/.test(card) && /k="stops at"/.test(card));
+}
+
+console.log("\n10 · a budget is per day: the cards, and what a new day changes (Amendment 129)");
+{
+  const day = localDayOf();
+  const before = localDayOf(new Date(Date.now() - 86_400_000));
+  const mk = (id: string, over: Partial<Agent> = {}): Agent => ({
+    id,
+    jobId: 'j1',
+    projectId: 'p1',
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status: 'paused',
+    blockMode: null,
+    costUsd: 55,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 25 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const stop = (renewed?: boolean): Alert => ({
+    id: 'al_stop',
+    kind: 'budget',
+    cause: 'budget_exhausted',
+    projectId: 'p1',
+    jobId: 'j1',
+    agentIds: ['a1'],
+    since: new Date().toISOString(),
+    ...(renewed ? { renewed: true } : {}),
+  });
+  const ids = (as: readonly AlertAction[]): string => as.map((a) => (a.id === 'raise' ? `raise:${a.by}->${a.to}` : a.id === 'continue' ? `continue` : a.id)).join(' ');
+
+  // Paused at its ceiling today: every way on raises the budget. The next morning the same agent only continues.
+  const atCeiling = mk('a1', { spentToday: { day, usd: 55, tokens: 0 } });
+  check('at its ceiling today, the card raises the daily budget', ids(alertActions(stop(), [atCeiling])) === 'raise:10->35 raise:25->50 open dismiss', ids(alertActions(stop(), [atCeiling])));
+  const nextDay = mk('a1', { spentToday: { day: before, usd: 55, tokens: 0 } });
+  check('a tab that still has yesterday\'s stamp offers a plain continue, with no raise', ids(alertActions(stop(true), [nextDay])) === 'continue open dismiss', ids(alertActions(stop(true), [nextDay])));
+  check('and so does the daemon\'s own renewed figure: nothing spent on the new day', ids(alertActions(stop(true), [mk('a1', { spentToday: { day, usd: 0, tokens: 0 } })])) === 'continue open dismiss');
+  const renewed = alertNotice(stop(true), [nextDay], [{ id: 'p1', name: 'demo' } as Project]);
+  check('the notification says the budget was renewed, not that it needs a raise', renewed.title === 'demo · builder needs you' && /renewed for the new day, so continue needs no raise/.test(renewed.body), JSON.stringify(renewed));
+
+  // The job's warning raises the agent that spent the most TODAY, not the one with the largest lifetime figure.
+  const team = [
+    mk('t1', { status: 'working', costUsd: 400, spentToday: { day, usd: 2, tokens: 0 } }),
+    mk('t2', { status: 'working', costUsd: 9, spentToday: { day, usd: 9, tokens: 0 } }),
+    mk('t3', { status: 'working', costUsd: 900, spentToday: { day: before, usd: 900, tokens: 0 } }),
+  ];
+  check("a job's warning raises the agent that spent the most today: a bigger lifetime figure, or yesterday's, does not count", jobRaiseTarget('j1', team)?.id === 't2', jobRaiseTarget('j1', team)?.id);
+
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  const alerts = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
+  check('the card tells what a renewed budget means: still paused, press continue', /alert\.kind === 'budget' && alert\.renewed &&/.test(card) && /Nothing resumes by itself/.test(card));
+  check('the warning\'s notification says daily', /is over its daily budget/.test(alerts));
+  check('nothing here compares the lifetime figure with a budget', !/costUsd\s*>=?\s*\w*(cap|budget)/i.test(alerts + card));
 }
 
 console.log(

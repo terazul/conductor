@@ -1007,8 +1007,12 @@ function Spawn() {
             );
           })}
           {has.budget === 'usd' ? (
-          <span className="sp-pill" aria-pressed={budgetPerAgent !== null}>
-            ⏱ budget per agent $
+          <span
+            className="sp-pill"
+            aria-pressed={budgetPerAgent !== null}
+            title="What each agent may spend per day. It warns when it has spent this much today, stops at twice that, and starts again at midnight. Empty for no cap."
+          >
+            ⏱ budget per agent per day $
             <input
               className="sp-input"
               style={{ width: '3.6em', marginLeft: 4, padding: '1px 5px' }}
@@ -1018,15 +1022,19 @@ function Spawn() {
             />
           </span>
           ) : (
-            /* No dollars from this engine, so its cap is tokens, input plus output (Amendment 77). */
-            <span className="sp-pill" aria-pressed={tokenCap !== null}>
-              ⏱ budget per agent
+            /* No dollars from this engine, so its cap is tokens, input plus output (Amendment 77), per day (Amendment 129). */
+            <span
+              className="sp-pill"
+              aria-pressed={tokenCap !== null}
+              title="What each agent may use per day, input plus output tokens. It warns at this figure, stops at twice it, and starts again at midnight. Empty for no cap."
+            >
+              ⏱ budget per agent per day
               <input
                 className="sp-input"
                 style={{ width: '4.2em', marginLeft: 4, marginRight: 4, padding: '1px 5px' }}
                 value={budgetTok}
                 onChange={(e) => setBudgetTok(e.target.value)}
-                aria-label="Tokens per agent, input plus output. Empty for no cap."
+                aria-label="Tokens per agent per day, input plus output. Empty for no cap."
               />
               tokens
             </span>
@@ -1082,11 +1090,11 @@ function Spawn() {
             )}
             {has.budget === 'usd' ? (
               <>
-                budget per agent <code>{autonomy.budgetUsd === null ? 'uncapped' : `$${autonomy.budgetUsd}`}</code>
+                budget per agent per day <code>{autonomy.budgetUsd === null ? 'uncapped' : `$${autonomy.budgetUsd}`}</code>
               </>
             ) : (
               <>
-                budget per agent{' '}
+                budget per agent per day{' '}
                 <code>{autonomy.budgetTokens ? `${tokenWords(autonomy.budgetTokens)} tokens` : 'uncapped'}</code>
               </>
             )}
@@ -1163,7 +1171,7 @@ function Launched({ result }: { result: CreateJobResponse }) {
 }
 
 function describeJob(job: Job): string {
-  return `${job.worktreePath}${job.budgetUsd === null ? '' : ` · capped at $${job.budgetUsd}`}`;
+  return `${job.worktreePath}${job.budgetUsd === null ? '' : ` · daily budget $${job.budgetUsd}`}`;
 }
 
 export const screen: ScreenDef = {
