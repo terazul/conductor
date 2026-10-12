@@ -5,8 +5,8 @@ Things we want but haven't built. Bugs and cleanup that are already planned live
 start, so picking one up doesn't begin with a search.
 
 Finished items are taken off this list. Their record is the CONTRACT.md amendment each
-one names, and this file's git history (everything up to Amendment 95 has been cleared;
-the last of it on 8 Oct).
+one names, and this file's git history (everything up to Amendment 128 has been cleared;
+the last of it on 12 Oct).
 
 ## How to work this list
 
@@ -14,29 +14,21 @@ the last of it on 8 Oct).
   green `make test` (decided 30 Sep). The next amendment is 129.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
-- A real terminal (xterm.js) is planned, for macOS and Ubuntu only: see Wave 9 below. The
-  terminal is a command runner on the Agent screen today (Amendment 58).
+- Not planned: Windows (dropped 10 Oct). The terminal (Amendment 112) and the rest are built and
+  tested for macOS and Ubuntu only; the old command runner is the fallback where no PTY loads.
 
-## Stacks: handing off from one agent to the next
+## Right now
 
-Do these first. Found (7 Oct) on a five-agent stack (`job_394bb67f-40d`, prompt "No actions
-yet, wait for us"). The architect replied "I'll wait" and was marked **done**. That started
-the developer, which found no plan and was marked done, then the validator, reviewer and
-scribe the same way: the whole stack ended in 62 seconds (events 5236–5289). When the user
-answered the architect at 19:40, only the architect ran again.
-Why: an agent's turn ending with no error, nothing open and no helpers is marked `done`
-(`#settle`, `packages/daemon/src/session/supervisor.ts:951-1026`, done at `:1018`). The
-scheduler starts an agent once every dependency is `done` (`pump` and `#depsSatisfied`,
-`supervisor.ts:708-748`). Replying to a finished agent resumes only that agent (`sendMessage`,
-`supervisor.ts:1209-1235`). The handoff is the upstream agent's last text, sent once in the
-first prompt (`#promptFor`, `supervisor.ts:809-828`; `handoff.ts:8-18`).
-*Decided (7 Oct): the `hand_off` tool, the question tool and re-run from here, in that
-order. Not chosen: guessing from the reply whether it waits (wrong in both directions),
-automatic re-runs on every reply (cost and overwritten work), and a per-job "hand off
-automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
-*Built (8 Oct): the question-tool line (Amendment 100), choosing who each agent waits for
-(99), passing the whole conversation as text (101), re-run from here (102) and the
-`hand_off` tool (104).*
+- [ ] **Push `main`.** Amendments 99-128 are only on this machine. `git push origin main` is a
+  fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
+  and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
+
+- [ ] **Make a missing install say so.** Found (12 Oct). After the terminal landed, the browser showed
+  Vite's `Failed to resolve import "@xterm/xterm"` overlay until `pnpm install` was run, because
+  `make start` doesn't check. `pnpm install --frozen-lockfile --offline` fixed it from the local store.
+  Have `make start` (or `make init`) notice that `pnpm-lock.yaml` is newer than `node_modules`, and
+  either run the install or stop with one sentence saying to. Add a row to the troubleshooting table
+  in `docs/MANUAL.md` too.
 
 ## Housekeeping
 
@@ -51,16 +43,17 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 
 ## Checks that need a person
 
-- [ ] **Look at what was built in Amendments 99-127 in a browser, in both themes.** Found (10 Oct).
+- [ ] **Look at what was built in Amendments 99-128 in a browser, in both themes.** Found (10 Oct).
   `make test` passes and the colour checks hold, but nobody has seen most of it.
   - Spawn: the ↑ ↓ buttons, the drag grip and the **waits for** ticks on preset and Custom rows, and
     **↺ back to …** (99); the three branch pills and the name box (115); the label backdrops of
-    the Project, Agent and Fleet screens side by side (127).
+    the Project, Agent and Fleet screens side by side (127); the **orchestrated pipeline** preset, its
+    listed roles with their tiers, and the **◆ orchestrator** mark on the plan row, the Project lane,
+    the Fleet row and the Agent tab, and no mark on a one-agent stack (128).
   - Files: the **+** on a folder row and on a tree's heading, the name box, and an empty file (121).
-  - The Agent screen: the terminal tab (112; checked in headless Chrome on macOS in both themes,
-    not on Ubuntu, and `vim`, `htop` and `less` were not tried), **↻ re-run after this** and its
-    disabled state for a held agent (102, 120), the reconnecting banner (123), the over-budget line,
-    the budget colours in the composer, details bar and tab (124, 125).
+  - The Agent screen: the terminal tab (112; checked in headless Chrome on macOS in both themes),
+    **↻ re-run after this** and its disabled state for a held agent (102, 120), the reconnecting banner
+    (123), the over-budget line, the budget colours in the composer, details bar and tab (124, 125).
   - Fleet and Project: the **not handed off** chip (120) and the budget meter on each agent row (125).
   - Needs You: the **Not handed off**, **Reconnecting** and **Over budget** cards (104, 123, 124).
   - Metrics, key `8` (122).
@@ -68,6 +61,19 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
     system clock forward is enough to see it. If what you saw not resetting was an agent's own
     budget (the composer's "$4.10 of $25"), say so: those are lifetime caps by design (Amendment 77)
     and a per-day cap was never confirmed.
+
+- [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-128 passes
+  its tests on fakes; nothing has run on the real SDK, Copilot or OpenRouter. It costs money and needs
+  someone watching. In this order:
+  - A two-agent stack where the first ends its turn without `hand_off`: it is held, the card shows,
+    you edit the summary and send it, and the next agent starts with that summary on top (104, 120).
+  - An orchestrated pipeline on a small task (128): does it write full briefs, read each result, stop
+    sending work back after two and ask you with the question tool?
+  - A real outage, with the network unplugged mid-run: the banner counts down 5 s, 15 s, 30 s, 60 s,
+    5 min; **retry now** and **stop retrying** work; a reply starts the count again (123).
+  - An agent with a $1 budget (124): the warning at $1, the stop at $2, **+$10** raising it.
+  - Metrics (122) after a resumed run: a resume adds only the difference. Also check that
+    `duration_api_ms` is a running total; the SDK's types don't say, and `session/metrics.ts` assumes it.
 
 - [ ] **A re-run of a parked agent, tried against the real SDK (Amendment 102).** Found (10 Oct).
   A re-run resumes a session that ended on `tool_deferred` with a prompt. `sendMessage` already does
@@ -77,3 +83,75 @@ automatically or ask me" setting (the `hand_off` item makes it unnecessary).*
 - [ ] **Compare the new built-in role instructions with the old on one real bug (Amendment 126).**
   Found (10 Oct). Run the bug fix and full stacks on one known bug with the old prompts and the new,
   and compare the hand-offs. It needs real agent runs and spend, so it was not done.
+
+## Loose ends from Amendments 112-128
+
+Taken from each lane's own "not done" list, found 12 Oct. Checked in the code on 12 Oct: the Needs You
+header, the terminal's fixed font and missing add-ons, Custom's missing orchestrated row, the
+navigator's missing marks and meters, the in-memory window registry, the fixed 2× ceiling, and the
+stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
+
+- [ ] **Terminal (112).** Only macOS arm64 ran; Ubuntu is untried, and so are `vim`, `htop` and `less`
+  in the browser. Left out of the first version, from `docs/plans/full-terminal.md`:
+  - a Terminal dock under every screen (D8b), and shells that survive a daemon restart (tmux, where
+    installed);
+  - settings for the shell, font size (13 px) and scrollback (5,000 lines), which are fixed in
+    `web/src/agent/Xterm.tsx:55-56`;
+  - the search, links, clipboard and WebGL add-ons, and mouse reports (`onBinary`);
+  - a hub frame so a terminal opened in one tab shows in another, and the headless mirror the plan
+    wanted in place of the raw 512 KB replay.
+  - **Token mode.** With `CONDUCTOR_TOKEN` set, `/ws` and `/ws/term` are refused to a browser even with
+    the right `?token=`, because the `Authorization` check in `index.ts` also runs on the upgrade and a
+    browser can't set that header. `/ws` did this before the terminal; it needs its own fix.
+
+- [ ] **Git methodology (115).**
+  - A branch that exists only on a remote is treated as new and cut from `HEAD`, not tracked.
+  - Spawn has no branch picker; you type the name.
+  - `restoreFolder` on a job whose named branch got checked out elsewhere fails with git's own
+    message. Say it plainly.
+  - The old `POST /api/workspaces` bootstrap route answers 500, not 400 or 409, for the new refusals.
+    It never passes `named`, so nothing reaches it today.
+
+- [ ] **Files (121).** The navigator's folders have no **+**. New folder, rename and delete are
+  separate items if wanted. A name that differs from an existing one only in case is refused only on a
+  case-insensitive filesystem, such as macOS.
+
+- [ ] **Metrics (122).**
+  - The Errors tile divides retried calls by every engine's calls, though only Claude reports retries.
+    The per-model rows are exact.
+  - Claude's model-call time includes subagents, but `calls` counts main-loop turns, so time per call
+    is overestimated when subagents run in parallel; tokens per second pairs a run's API time with all
+    of its output tokens.
+  - No per-project filter, and no chart beyond the day table.
+  - The comment in `web/src/lib/verify.ts` (~line 856) says no real screen has the hotkey `8`; it does now.
+
+- [ ] **Retry and budgets (123-125).**
+  - The retry delays are fixed (5 s, 15 s, 30 s, 60 s, 5 min), not settings.
+  - A retried agent that then ends its turn without `hand_off` is held as usual; the one-time ask of
+    Amendment 119 applies only to restart resumes.
+  - The Needs You card for a retry starts at the second retry, so the 5 s first try doesn't chime. Say
+    if you want it from the first.
+  - The budget ceiling is fixed at 2× (`BUDGET_CEILING`, `shared/src/budget.ts:18`).
+  - The navigator's rows have no budget meter, and a job has no meter of its own, only its warning card.
+  - Claude's spend is known only when a turn ends, so its over-budget warning arrives with the turn that
+    crossed the budget; the ceiling still stops it mid-turn through the SDK.
+
+- [ ] **Hand-off, windows and roles (120, 126).**
+  - The model-window registry is in memory (`session/windows.ts`). After a restart a resumed stack uses
+    the floor table until a model list is asked for. Claude's result carries
+    `modelUsage[model].contextWindow`, which would fill it from the `result` case in
+    `session/backends/claude.ts`.
+  - The cap on a handed-off conversation is still counted in characters (3 per token); there is no
+    tokenizer.
+  - Nothing checks that a model actually puts the closing headings in its `hand_off` summary, and "tests
+    only" and "docs only" in the role prompts are words, not rules.
+
+- [ ] **Label backdrops (127).** Needs You's `project / role` header stays on `--here`, so it no
+  longer matches the Agent screen it came from. Making it match is one class, `is-agent`, on
+  `web/src/attention/route.tsx` (the three `ui-crumb` spans), plus one line in `lib/verify-crumb.ts`.
+  The lightness gap between the three backdrops is small, because the 4.5:1 floor on `--ink3` caps it;
+  tell me if they are too alike once you have seen them.
+
+- [ ] **Orchestrated stacks (128).** Custom setups can't save the listed roles and have no orchestrated
+  row; only the preset does. Role briefs are edited only in Settings → Personas. The navigator tree has
+  no orchestrator mark, only the plan row, the Project lane, the Fleet row and the Agent tab.
