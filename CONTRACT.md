@@ -196,6 +196,25 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 132 — post-merge, applied. **A question is held until you answer it, and takes no slot meanwhile.**
+
+Asked 12 Oct, after 131: "when I finally answer, why can't it pick up where it left off", then "do never
+set aside". Parking a question ends its process, and Claude Code can't revive the cancelled call: the
+agent comes back one message later (131's answered nudge), not mid-call. So a question isn't parked.
+- **Arbiter.** `QUESTION_DEFER_AFTER_MS` is `null` (never) unless `CONDUCTOR_QUESTION_DEFER_AFTER_MS` is
+  set; no longer follows `CONDUCTOR_DEFER_AFTER_MS`. A question gets no timer, page open or not
+  (`parks` is false for it), so it is held until answered, paused, or the daemon stops. `Held.question`
+  marks it; `#unhold` (every removal from `#held`) calls `AgentControl.slotsChanged` when it was one;
+  `waitingOnQuestion(agentId)`. Permissions are unchanged: 90 s, or at once with no page open.
+- **Supervisor.** `#slotsUsed()`: live runs except those `waitingOnQuestion`. `pump()`, `resumeParked`
+  and `slots` use it in place of `#active.size`. `slotsChanged()` pushes the slots frame and pumps, so a
+  question starting to wait frees its slot for queued work. Answered, it counts again, which can take
+  the live count past the limit for a while; nothing is stopped for that.
+- **Unchanged:** a pause parks a question at once (`parkForAgent`), and `recoverOrphans` parks one a
+  restart left; answering either resumes with 131's nudge.
+- **Verify:** `session/verify-answer.ts` §2 (held with no page open, takes no slot, queued work starts,
+  the answer goes into the waiting call with no new run, counts again), 21 checks.
+
 ### Amendment 131 — post-merge, applied. **A question you answer after a while comes back as your answer.**
 
 Reported 12 Oct: "when an Architect is waiting for an answer, if I take a while to respond it loses
@@ -207,7 +226,7 @@ with *"Your AskUserQuestion call was approved by the human. Make that exact call
 answer in it: it had to re-ask to get it (PreToolUse applies the staged answer), against a transcript
 telling it to stop. Of 25 answered questions, 13 were parked; it recovered most of the time, and when
 it didn't the answer was lost.
-- **Hold questions longer.** `QUESTION_DEFER_AFTER_MS`, default 30 minutes
+- **Hold questions longer.** (Superseded by 132: never.) `QUESTION_DEFER_AFTER_MS`, default 30 minutes
   (`CONDUCTOR_QUESTION_DEFER_AFTER_MS`, else `CONDUCTOR_DEFER_AFTER_MS` when only that is set). A held
   question costs a slot and no tokens, and answering it is the live path: no interrupt, nothing lost.
   Permissions keep 90 s. With no page open a question still parks at once.

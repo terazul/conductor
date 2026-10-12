@@ -169,7 +169,7 @@ You don't need any of these. Set them before `make start`.
 | `CONDUCTOR_DB` | A database file to use instead, which also skips the first-start question. Settings then last only until the daemon stops. `:memory:` keeps nothing at all. |
 | `CONDUCTOR_SLOTS` | How many agents run at once, when Settings hasn't said. Default `7`. |
 | `CONDUCTOR_DEFER_AFTER_MS` | How long a request is held before it parks. Default `90000` (90 seconds). |
-| `CONDUCTOR_QUESTION_DEFER_AFTER_MS` | The same for an agent's question. Default `1800000` (30 minutes), or `CONDUCTOR_DEFER_AFTER_MS` when only that is set. |
+| `CONDUCTOR_QUESTION_DEFER_AFTER_MS` | The same for an agent's question. Unset by default: a question is held until you answer it. Set it to put questions aside after that many milliseconds. |
 | `ANTHROPIC_BASE_URL` | Where Conductor asks which models are served. Agents use it too, through Claude Code. |
 | `OPENROUTER_API_KEY` | The OpenRouter key. It wins over one saved in Settings, and is never shown, logged or stored. |
 | `LOG_LEVEL` | How much the daemon logs. Default `info`. |
@@ -822,7 +822,14 @@ as seen.
 | | |
 |---|---|
 | **held** | The agent's process is alive, waiting. Its context stays warm. Answering is instant. |
-| **parked** | It waited longer than 90 seconds (a question: 30 minutes), so its session was written to disk and the process released. Answering resumes it — about 0.7 seconds plus one replayed turn. An answered question comes back to the agent as your answers, in words, so it carries on rather than asking again. |
+| **parked** | It waited longer than 90 seconds, so its session was written to disk and the process released. Answering resumes it — about 0.7 seconds plus one replayed turn. |
+
+**A question is never parked by the clock.** An agent that asked you something is held
+until you answer, however long that is and whether or not a page is open, so your answer
+goes straight into the waiting question and it carries on mid-thought. While it waits it
+uses no tokens and doesn't take one of the agents-running-at-once slots, so queued work
+still starts. Only pausing it, or a daemon restart, puts a question aside; then answering
+resumes the agent with your answers, in words, and it carries on rather than asking again.
 
 Two practical consequences:
 
@@ -1145,7 +1152,8 @@ once adds up quickly.
   and lowering it stops nobody, so nothing new starts until fewer than the limit are
   running. `CONDUCTOR_SLOTS` sets the default when Settings hasn't. A message sent to a
   finished agent restarts it straight away, even when every slot is taken.
-  Parked agents don't occupy a slot.
+  Parked agents don't occupy a slot, and nor does an agent waiting on a question it asked
+  you. When you answer, it counts again, so for a moment more may run than the limit.
 - Cheaper models for mechanical roles is the easiest saving — validators and
   scribes rarely need the strongest model.
 

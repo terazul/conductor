@@ -100,16 +100,18 @@ import { extractQuestions, reversibility, toolLabel } from '../session/translate
 export const DEFER_AFTER_MS = Number(process.env.CONDUCTOR_DEFER_AFTER_MS ?? 90_000);
 
 /**
- * How long a QUESTION is held before it is parked (Amendment 131). Longer than a permission:
- * a question is something you think about, and parking it ends the agent's turn, which Claude
- * Code records as "the user doesn't want to proceed … STOP" — the agent then reads its own
- * question as rejected. A held question costs a slot and no tokens. Follows
- * CONDUCTOR_DEFER_AFTER_MS when only that is set, so a check that shortens one shortens both.
+ * How long a QUESTION is held before it is parked: never, unless this is set (Amendments 131,
+ * 132). Parking ends the agent's turn, which Claude Code records as "the user doesn't want to
+ * proceed … STOP", and the call can't be revived: the agent comes back one message later
+ * rather than mid-call. Held, your answer goes into the waiting call, however long you take.
+ * A held question costs no tokens, and doesn't count against the slot limit
+ * (`Supervisor.slots`). A daemon restart still parks it: the process is gone.
+ * `CONDUCTOR_QUESTION_DEFER_AFTER_MS` brings back a time limit.
  */
-export const QUESTION_DEFER_AFTER_MS = Number(
-  process.env.CONDUCTOR_QUESTION_DEFER_AFTER_MS ??
-    (process.env.CONDUCTOR_DEFER_AFTER_MS !== undefined ? DEFER_AFTER_MS : 30 * 60_000),
-);
+export const QUESTION_DEFER_AFTER_MS: number | null =
+  process.env.CONDUCTOR_QUESTION_DEFER_AFTER_MS !== undefined
+    ? Number(process.env.CONDUCTOR_QUESTION_DEFER_AFTER_MS)
+    : null;
 
 /** What the runner's PreToolUse hook should do with a call. */
 export type PreToolVerdict =
@@ -136,6 +138,11 @@ export interface PermissionAsk {
 export interface AgentControl {
   /** End the turn of a live agent whose held request has aged out. */
   interrupt(agentId: string): Promise<void>;
+  /**
+   * A question started or stopped being held (Amendment 132): an agent waiting on one doesn't
+   * count against the slot limit, so the supervisor recounts and may start queued work.
+   */
+  slotsChanged?(): void;
   /** Relaunch a parked agent with options.resume so its pending call proceeds. */
   resumeParked(agentId: string): void;
   /** True while a query() is iterating for this agent. */
@@ -148,6 +155,8 @@ interface Held {
   resolve: (r: PermissionDecision) => void;
   /** When it escalates to parked. None on an engine that can't defer: it holds. */
   timer: NodeJS.Timeout | undefined;
+  /** An AskUserQuestion: while held it doesn't count against the slot limit (Amendment 132). */
+  question?: boolean;
 }
 
 /** A decision taken while the agent had no live process, waiting for its resume. */
@@ -208,6 +217,19 @@ export class Arbiter {
     if (expired > 0) console.log(`[arbiter] expired ${expired} orphaned request(s) an engine without defer cannot re-offer`);
     if (moved + expired > 0) this.#broadcastPending();
     return moved + expired;
+  }
+
+  /** Stop holding a request; a question's agent counts against the slots again (Amendment 132). */
+  #unhold(requestId: string): void {
+    const h = this.#held.get(requestId);
+    this.#held.delete(requestId);
+    if (h?.question) this.#control?.slotsChanged?.();
+  }
+
+  /** Whether this agent is waiting, live, on a question it asked (Amendment 132). */
+  waitingOnQuestion(agentId: string): boolean {
+    for (const h of this.#held.values()) if (h.agentId === agentId && h.question) return true;
+    return false;
   }
 
   /** Whether this agent's engine can re-offer a call it parked (`defer`). Claude can. */
@@ -395,9 +417,11 @@ export class Arbiter {
     // Nobody is watching: a held promise pins a process for a browser that
     // cannot answer. Park it now and free the slot. Not on an engine that can't
     // defer: parking it would only end the run (Amendment 76), so it keeps holding.
+    // Not a question either (Amendment 132): it is held until you answer, page or no
+    // page, so the answer goes into the waiting call; it takes no slot meanwhile.
     const watched = hub().clientCount > 0;
-    const holdFor = watched ? (isQuestion ? QUESTION_DEFER_AFTER_MS : DEFER_AFTER_MS) : 0;
-    const parks = this.#defers(agent.id);
+    const holdFor = isQuestion ? (QUESTION_DEFER_AFTER_MS ?? 0) : watched ? DEFER_AFTER_MS : 0;
+    const parks = this.#defers(agent.id) && (!isQuestion || QUESTION_DEFER_AFTER_MS !== null);
 
     return new Promise<PermissionDecision>((resolve) => {
       const timer = parks
@@ -406,14 +430,15 @@ export class Arbiter {
           }, holdFor)
         : undefined;
 
-      this.#held.set(requestId, { requestId, agentId: agent.id, resolve, timer });
+      this.#held.set(requestId, { requestId, agentId: agent.id, resolve, timer, question: isQuestion });
+      if (isQuestion) this.#control?.slotsChanged?.();
 
       // If the SDK abandons the call (interrupt, shutdown) stop holding.
       ask.signal?.addEventListener('abort', () => {
         const h = this.#held.get(requestId);
         if (!h) return;
         clearTimeout(h.timer);
-        this.#held.delete(requestId);
+        this.#unhold(requestId);
         // Leave the request OPEN: it is still a question the human owes an
         // answer to, it is just no longer held by a live promise.
         setRequestBlockMode(this.#db, requestId, 'parked');
@@ -434,7 +459,7 @@ export class Arbiter {
     if (!request || request.resolvedAt) return;
 
     clearTimeout(held.timer);
-    this.#held.delete(requestId);
+    this.#unhold(requestId);
 
     setRequestBlockMode(this.#db, requestId, 'parked');
     const agent = getAgent(this.#db, held.agentId);
@@ -489,7 +514,7 @@ export class Arbiter {
     const held = this.#held.get(requestId);
     if (held) {
       clearTimeout(held.timer);
-      this.#held.delete(requestId);
+      this.#unhold(requestId);
       setAgentStatus(this.#db, agent.id, 'working');
       eventLog().emit(
         { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
@@ -516,7 +541,7 @@ export class Arbiter {
     for (const held of [...this.#held.values()]) {
       if (held.agentId !== agentId) continue;
       clearTimeout(held.timer);
-      this.#held.delete(held.requestId);
+      this.#unhold(held.requestId);
       resolveRequest(this.#db, held.requestId, { type: 'expired', by: 'system', note });
       held.resolve({ behavior: 'deny', message: note });
     }

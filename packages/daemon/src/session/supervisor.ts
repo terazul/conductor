@@ -924,7 +924,7 @@ export class Supervisor implements AgentControl {
       // Waiting for the model to come back (Amendment 123): it frees its slot while it waits
       // and starts when its time comes, like any queued agent.
       if (retryBook().waiting(agent.id)) continue;
-      if (this.#active.size >= slotLimit()) return;
+      if (this.#slotsUsed() >= slotLimit()) return;
       if (this.#active.has(agent.id)) continue;
       if (this.#halting.has(agent.jobId)) continue;
       if (!this.#depsSatisfied(agent)) continue;
@@ -1827,7 +1827,7 @@ export class Supervisor implements AgentControl {
       this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
       return;
     }
-    if (this.#active.size >= slotLimit()) {
+    if (this.#slotsUsed() >= slotLimit()) {
       // No slot right now. Queue it; pump() picks it up as soon as one frees.
       this.#reopenJob(agent.jobId);
       setAgentStatus(this.#db, agentId, 'queued');
@@ -2530,12 +2530,30 @@ export class Supervisor implements AgentControl {
   }
 
   get slots(): { used: number; total: number } {
-    return { used: this.#active.size, total: slotLimit() };
+    return { used: this.#slotsUsed(), total: slotLimit() };
   }
 
   /** Tell every tab the slot count — the status bar used to learn it only from a snapshot. */
   #pushSlots(): void {
     hub().broadcast({ type: 'slots', slots: this.slots });
+  }
+
+  /**
+   * Live agents that count against the slot limit: every live run except one waiting on a
+   * question it asked (Amendment 132). That one is held until you answer, however long you
+   * take, and costs nothing meanwhile, so it doesn't keep queued work from starting. When
+   * you answer it counts again, so for a moment there can be more live than the limit.
+   */
+  #slotsUsed(): number {
+    let n = 0;
+    for (const id of this.#active) if (!arbiter().waitingOnQuestion(id)) n += 1;
+    return n;
+  }
+
+  /** The arbiter's word that a question started or stopped waiting (Amendment 132). */
+  slotsChanged(): void {
+    this.#pushSlots();
+    this.pump();
   }
 }
 
