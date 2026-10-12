@@ -19,7 +19,7 @@ the last of it on 12 Oct).
 
 ## Right now
 
-- [ ] **Push `main`.** Amendments 99-128 are only on this machine. `git push origin main` is a
+- [ ] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
   and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
 
@@ -43,7 +43,7 @@ the last of it on 12 Oct).
 
 ## Checks that need a person
 
-- [ ] **Look at what was built in Amendments 99-128 in a browser, in both themes.** Found (10 Oct).
+- [ ] **Look at what was built in Amendments 99-129 in a browser, in both themes.** Found (10 Oct).
   `make test` passes and the colour checks hold, but nobody has seen most of it.
   - Spawn: the ↑ ↓ buttons, the drag grip and the **waits for** ticks on preset and Custom rows, and
     **↺ back to …** (99); the three branch pills and the name box (115); the label backdrops of
@@ -64,7 +64,7 @@ the last of it on 12 Oct).
   - The details panel's **today** and **lifetime** lines, and the wording "budget per agent per
     day" in Spawn (129).
 
-- [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-128 passes
+- [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-129 passes
   its tests on fakes; nothing has run on the real SDK, Copilot or OpenRouter. It costs money and needs
   someone watching. In this order:
   - A two-agent stack where the first ends its turn without `hand_off`: it is held, the card shows,
