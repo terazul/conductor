@@ -35,6 +35,7 @@ import {
 } from '../lib/store.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
+import { restOf, restWord } from './rest.js';
 import {
   SCREEN,
   openAgent,
@@ -614,7 +615,12 @@ export function ProjectCard({
    * agent entity has been transitioned to `blocked`. A project someone is
    * waiting on is amber whatever the rollup says; that is what the stripe is for.
    */
-  const stripe = blocked ? 'need' : key;
+  /*
+   * At rest, the stripe and the word are quiet unless a job here finished and is unseen
+   * (Amendment 130): a green stripe and a filled FINISHED mean "open this one".
+   */
+  const rest = restOf(status, agents.length, unseen.length > 0);
+  const stripe = blocked ? 'need' : rest === 'status' ? key : 'idle';
 
   /*
    * A job here finished and you haven't opened the project or its agents since
@@ -638,7 +644,9 @@ export function ProjectCard({
       {finished}
     </>
   ) : (
-    (finished ?? <Tag tone={key}>{STATUS_WORD[status]}</Tag>)
+    (finished ?? (
+      <Tag tone={rest === 'status' ? key : 'idle'}>{restWord(rest) ?? STATUS_WORD[status]}</Tag>
+    ))
   );
 
   return (

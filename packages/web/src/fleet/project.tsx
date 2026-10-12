@@ -46,6 +46,7 @@ import {
 import { removeJob, terminateJob, useCommand } from '../agent/endpoints.js';
 import { AddAgent } from '../spawn/AddAgent.js';
 import { Lane } from './lane.js';
+import { restOf, restWord } from './rest.js';
 import { nestHelpers } from './nest.js';
 import { NotesPanel } from './Notes.js';
 import { Dock } from './dock.js';
@@ -95,6 +96,8 @@ function JobGroup({
   const blocked = agents.filter((a) => pending.some((p) => p.agentId === a.id)).length;
   const working = agents.filter((a) => a.status === 'working').length;
   const live = agents.filter((a) => !ENDED_STATUS.has(a.status));
+  // At rest it says done, quietly; the loud finished is the unseen one (Amendment 130).
+  const groupRest = restOf(worstOf(agents), agents.length, finished);
 
   return (
     <section className={`pj-group${selected ? ' is-sel' : ''}`}>
@@ -120,8 +123,10 @@ function JobGroup({
           <Tag tone="need">{blocked} blocked on you</Tag>
         ) : working > 0 ? (
           <Tag tone="live">{working} working</Tag>
-        ) : (
-          <Tag tone={STATUS_KEY[worstOf(agents)]}>{STATUS_WORD[worstOf(agents)]}</Tag>
+        ) : finished ? null : (
+          <Tag tone={groupRest === 'status' ? STATUS_KEY[worstOf(agents)] : 'idle'}>
+            {restWord(groupRest) ?? STATUS_WORD[worstOf(agents)]}
+          </Tag>
         )}
         {finished && <Tag tone={job.status === 'failed' ? 'fail' : 'done'}>finished</Tag>}
 
@@ -316,6 +321,8 @@ export function ProjectScreen() {
   );
   const server = servers.find((s) => s.jobId === job?.id && s.alive);
   const spend = agents.reduce((n, a) => n + a.costUsd, 0);
+  // The header says finished only while a job here is unseen; at rest it is quiet (Amendment 130).
+  const headRest = restOf(status, agents.length, jobs.some(finishedHere));
   const working = agents.filter((a) => a.status === 'working').length;
 
   /*
@@ -434,7 +441,9 @@ export function ProjectScreen() {
           ) : working > 0 ? (
             <Tag tone="live">{working} working</Tag>
           ) : (
-            <Tag tone={STATUS_KEY[status]}>{STATUS_WORD[status]}</Tag>
+            <Tag tone={headRest === 'status' ? STATUS_KEY[status] : 'idle'}>
+              {restWord(headRest) ?? STATUS_WORD[status]}
+            </Tag>
           )}
 
           <div className="fl-panehead-r">

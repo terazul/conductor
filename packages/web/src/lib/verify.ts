@@ -18,13 +18,14 @@
  * is pure, so this is fast and has no jsdom dependency.
  */
 
-import type { Agent, Alert, Event, EventPayload, Job, ServerFrame, Snapshot } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, ServerFrame, Snapshot } from '@conductor/shared';
 import { budgetState, diffstat, localDayOf, resolveFileEdits, sparkline } from '@conductor/shared';
 import { store } from './store.js';
 import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
 import { readFileSync } from 'node:fs';
 import { nextChoice, parseChoice, resolveTheme } from '../shell/theme.js';
+import { restOf, restWord } from '../fleet/rest.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeWidth } from '../files/width.js';
 import {
   AGENT_INSPECTOR,
@@ -1646,6 +1647,28 @@ console.log("\n· a budget counts what was spent today, and goes back to zero at
   check('Needs You says daily on both cards and says nothing resumes by itself on a renewed one', /label: 'Budget reached for today'/.test(card) && /label: 'Over its daily budget'/.test(card) && /Nothing resumes by itself/.test(card));
   check('Spawn\'s pill says per agent per day, with a tooltip that says it starts again at midnight', /⏱ budget per agent per day \$/.test(spawn) && /starts again at midnight/.test(spawn));
   check('nothing on a screen decides from the lifetime figure: the budget is read through budgetOf', !/costUsd\s*>=\s*\w*(cap|budget)/i.test(comp + insp + src('./../fleet/lane.tsx') + src('./../fleet/card.tsx')));
+}
+
+console.log('\n37 · only a project you have not looked at since it finished says FINISHED (Amendment 130)');
+{
+  const src = (f: string): string => readFileSync(new URL(f, import.meta.url), 'utf8');
+
+  // The rule: the loud mark is the unseen one; at rest a project is quiet.
+  check('a project with no agents never ran anything: "no agents", whatever its roll-up says', restOf('done', 0, false) === 'empty' && restWord('empty') === 'no agents');
+  check('and not even a stray unseen job makes an empty project finished', restOf('done', 0, true) === 'empty');
+  check('a done project you have looked at is quiet: "done"', restOf('done', 3, false) === 'done' && restWord('done') === 'done');
+  check('a done project with a job you have not seen keeps its status word, so the loud FINISHED goes beside it', restOf('done', 3, true) === 'status' && restWord('status') === null);
+  const live: AgentStatus[] = ['working', 'blocked', 'failed', 'queued', 'paused', 'stopped'];
+  check('every other status is as it was, seen or not', live.every((st) => restOf(st, 2, false) === 'status' && restOf(st, 2, true) === 'status'));
+
+  // The screens draw it, and nothing at project level still says finished for every done project.
+  const card = src('../fleet/card.tsx');
+  const project = src('../fleet/project.tsx');
+  check('the Fleet card reads the rest and draws its stripe from it', /restOf\(status, agents\.length, unseen\.length > 0\)/.test(card) && /rest === 'status' \? key : 'idle'/.test(card));
+  check('and its headline is the loud tag when unseen, else the quiet word', /\(finished \?\? \(\s*<Tag tone=\{rest === 'status' \? key : 'idle'\}>\{restWord\(rest\) \?\? STATUS_WORD\[status\]\}<\/Tag>/.test(card));
+  check('the Project screen does the same in its header and on each job group, and the group never says finished twice', /restOf\(status, agents\.length, jobs\.some\(finishedHere\)\)/.test(project) && /restOf\(worstOf\(agents\), agents\.length, finished\)/.test(project) && /\) : finished \? null : \(/.test(project));
+  check('no project-level tag draws STATUS_WORD for a done project without going through the rest', !/<Tag tone=\{STATUS_KEY\[(status|worstOf\(agents\))\]\}>\{STATUS_WORD/.test(card + project));
+  check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
 console.log(

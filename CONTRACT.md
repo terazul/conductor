@@ -196,6 +196,34 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 130 — post-merge, applied. **Only a project you haven't looked at since it finished says FINISHED.**
+
+Web only (`fleet/rest.ts`, new; `fleet/card.tsx`, `fleet/project.tsx`, `lib/verify.ts`). Reported
+12 Oct: on the Fleet page every project said FINISHED, so there was no telling which one had
+just finished and needed a review.
+- **Why.** Amendment 87 made **finished** the mark for a job you haven't seen. Amendment 93 then
+  made the rolled-up `done` status read `finished` as well (`STATUS_WORD.done`), in the same
+  filled green tag. A project you reviewed last week looked like one that ended a minute ago.
+  A project with no agents at all rolls up to `done` (`rollupStatus([])`), so it said FINISHED
+  too, and so did its card's stripe.
+- **The rule** (`restOf(status, agentCount, unseenFinished)`, pure): no agents is `empty`, read
+  **no agents**; `done` with no unseen finished job is `done`, read **done**; anything else is
+  the status as it was. Both quiet words use the `idle` tone, unfilled, and the card's left edge
+  goes to `idle` with them. The loud, filled **finished** is drawn only for an unseen finished
+  job, as Amendment 87 had it, and is untouched.
+- **Where.** The Fleet card's headline and stripe; the Project screen's header and each job
+  group's tag (which also no longer says finished twice when the group is unseen). Opening the
+  project marks its jobs seen as before, and the green mark turns into **done**.
+- **Not changed.** `STATUS_WORD.done` stays `finished` for an agent (the agent rows, the lanes, the
+  Agent screen's header): Amendment 105 keeps the per-agent mark in the navigator and the tabs.
+  Amendment 93's filled tags and edges, and the daemon, are untouched.
+- Checked in `lib/verify.ts` §37: the rule for each case, and that the card and the Project screen
+  draw through it. Looked at in headless Chrome against the live daemon: the cards that had been
+  opened read DONE, the two empty projects read NO AGENTS, and the two with an unseen finished job
+  kept the green FINISHED.
+- **Not done.** The Fleet sort, **needs you first**, still ranks a seen `done` project the same as
+  an unseen one; putting just-finished projects above the rest is a separate choice.
+
 ### Amendment 129 — post-merge, applied. **An agent's budget, and a job's, count what was spent today and go back to zero at midnight.**
 
 Shared (`budget.ts`, `events.ts`, `wire.ts`), daemon (migration `210_spend_daily.sql`, `session/store.ts`,
