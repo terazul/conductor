@@ -39,6 +39,7 @@ import type { Isolation, WriteFileRequest } from '@conductor/shared';
 import { initWorkspace, WorkspaceError, workspace } from '../workspace/service.js';
 import { PathEscape } from '../workspace/paths.js';
 import { GitError } from '../workspace/git.js';
+import { LaunchBranchError } from '../workspace/worktree.js';
 
 interface JobParams {
   jobId: string;
@@ -77,6 +78,11 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
   }
   if (err instanceof WorkspaceError) {
     return reply.code(err.status).send({ error: err.message });
+  }
+  if (err instanceof LaunchBranchError) {
+    // Same shape `POST /api/jobs` answers (Amendment 115), so a refusal reads as a sentence
+    // with its 400 or 409, not as a 500 (Amendment 139).
+    return reply.code(err.status).send({ error: 'could not use that branch', detail: err.message });
   }
   if (err instanceof GitError) {
     return reply.code(500).send({ error: 'git failed', detail: err.message });

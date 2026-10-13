@@ -201,13 +201,33 @@ async function main(): Promise<void> {
   check('no such job → 404', none.status === 404);
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n5 · its branch is checked out elsewhere by then (Amendment 139)');
+  for (const r of runs) r.finish();
+  await until(() => sup.slots.used === 0);
+  git(ROOT, 'worktree', 'remove', '--force', WT);
+  const OTHER = `${ROOT}-other`;
+  git(ROOT, 'worktree', 'add', '-q', OTHER, 'conductor/job_f');
+  const taken = await send<{ error: string; detail?: string }>('POST', '/api/jobs/job_f/folder');
+  check('→ 409, not git\'s 500', taken.status === 409, `${taken.status} ${JSON.stringify(taken.body)}`);
+  check('with the sentence, naming where', taken.body.detail === `conductor/job_f is checked out in ${OTHER}; remove that worktree or check out another branch there, then recreate`, taken.body.detail);
+  check('and nothing was made', !existsSync(WT) && git(OTHER, 'branch', '--show-current') === 'conductor/job_f');
+  git(ROOT, 'worktree', 'remove', '--force', OTHER);
+  git(ROOT, 'switch', '-q', 'conductor/job_f');
+  const inRoot = await send<{ error: string; detail?: string }>('POST', '/api/jobs/job_f/folder');
+  check("the project's own folder on it → 409, naming the folder", inRoot.status === 409 && (inRoot.body.detail ?? '').startsWith(`conductor/job_f is checked out in ${ROOT};`), `${inRoot.status} ${JSON.stringify(inRoot.body)}`);
+  git(ROOT, 'switch', '-q', 'main');
+  const freed = await send<{ from: string }>('POST', '/api/jobs/job_f/folder');
+  check('once it is free, recreating works as before', freed.status === 200 && freed.body.from === 'branch' && git(WT, 'branch', '--show-current') === 'conductor/job_f', JSON.stringify(freed.body));
+  rmSync(OTHER, { recursive: true, force: true });
+
+  // ───────────────────────────────────────────────────────────────────────────
   for (const r of runs) r.finish();
   await until(() => sup.slots.used === 0);
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
   console.log(
     failures === 0
-      ? `\nAmendment 114 folder: PASS — ${checks} checks: a deleted folder is said plainly, nothing is launched into it, and it is recreated on its branch or from main.\n`
+      ? `\nAmendment 114 folder: PASS — ${checks} checks: a deleted folder is said plainly, nothing is launched into it, and it is recreated on its branch or from main; a branch checked out elsewhere is a 409 that says where (Amendment 139).\n`
       : `\nAmendment 114 folder: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

@@ -20,7 +20,8 @@
 
 import { onSettingsChanged, readSettings } from '../settings.js';
 import { branchTargetKey } from '@conductor/shared';
-import { branchExists, git, repoRoot } from '../workspace/git.js';
+import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
+import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
 import { SLOTS_KEY, slotLimit } from '../slots.js';
 import { existsSync, statSync } from 'node:fs';
@@ -2186,6 +2187,16 @@ export class Supervisor implements AgentControl {
     const root = await repoRoot(project.path);
     // A removed worktree's registration can linger, and `worktree add` refuses its path.
     await git(root, ['worktree', 'prune']);
+    // A branch can be checked out in one place at a time: say where, rather than pass on
+    // git's refusal as a 500 (Amendment 139). The route answers a FolderGoneError with 409.
+    const elsewhere = (await listWorktrees(root)).find(
+      (w) => w.branch === job.branch && canonicalRoot(w.path) !== canonicalRoot(job.worktreePath),
+    );
+    if (elsewhere) {
+      throw new FolderGoneError(
+        `${job.branch} is checked out in ${elsewhere.path}; remove that worktree or check out another branch there, then recreate`,
+      );
+    }
     let result: { path: string; branch: string; from: 'branch' | 'base'; base?: string };
     if (await branchExists(root, job.branch)) {
       await git(root, ['worktree', 'add', '--', job.worktreePath, job.branch]);

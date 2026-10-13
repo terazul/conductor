@@ -239,6 +239,26 @@ async function readRefs(root: string): Promise<Ref[]> {
   return refs;
 }
 
+/**
+ * The branch names under `refs/remotes/origin`, as last fetched (nothing fetches here),
+ * without `origin/HEAD` (Amendment 139). Empty for a repo with no origin.
+ */
+async function originNames(root: string): Promise<string[]> {
+  const out = await git(root, ['for-each-ref', '--format=%(refname)', 'refs/remotes/origin']);
+  const prefix = 'refs/remotes/origin/';
+  return out
+    .split('\n')
+    .filter((l) => l.startsWith(prefix))
+    .map((l) => l.slice(prefix.length))
+    .filter((n) => n.length > 0 && n !== 'HEAD');
+}
+
+/** Origin's branches with no local branch of the same name, sorted (Amendment 139). Pure. */
+export function remoteOnlyNames(origin: readonly string[], local: readonly string[]): string[] {
+  const have = new Set(local);
+  return [...new Set(origin)].filter((n) => !have.has(n)).sort((a, b) => a.localeCompare(b));
+}
+
 /** `rev-list --left-right --count a...b` → [left only, right only]. */
 async function leftRight(root: string, a: string, b: string): Promise<[number, number]> {
   const out = (await git(root, ['rev-list', '--left-right', '--count', `${a}...${b}`, '--'])).trim();
@@ -315,12 +335,13 @@ async function rootBranchOf(path: string): Promise<string | null> {
 
 export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> {
   const { root, target } = repo;
-  const [refs, where, remotes, rootBranch, rootClean] = await Promise.all([
+  const [refs, where, remotes, rootBranch, rootClean, origin] = await Promise.all([
     readRefs(root),
     checkouts(root),
     git(root, ['remote']),
     rootBranchOf(repo.path),
     trackedClean(repo.path).catch(() => undefined),
+    originNames(root),
   ]);
   const hasTarget = refs.some((r) => r.name === target);
   const targetRef = heads(target);
@@ -395,6 +416,7 @@ export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> 
     rootBranch,
     ...(rootClean !== undefined ? { rootClean } : {}),
     rootLive: repo.rootLive,
+    remoteOnly: remoteOnlyNames(origin, refs.map((r) => r.name)),
   };
 }
 
