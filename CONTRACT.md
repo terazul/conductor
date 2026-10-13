@@ -196,6 +196,76 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 142 — post-merge, applied. **A Custom setup can orchestrate and saves the roles it lists; the navigator marks an orchestrator.**
+
+Web only (`spawn/custom.ts`, `spawn/presets.ts`, `spawn/route.tsx`, `spawn/CustomSetup.tsx`,
+`spawn/Pipeline.tsx`, `spawn/spawn.css`, `shell/navtree.ts`, `shell/Navigator.tsx`, and the verify
+files). From the wave 10 plan (Lane I). It takes back the Amendment 128 "Not saved in a Custom
+setup" bullet: Custom now has an orchestrated row, and its listed roles are saved. Nothing changed
+on the wire or in the daemon: a Custom launch sends the same fields the preset sends
+(`AgentSpec.helpers`, `AgentSpec.helperRoles`), checked by the daemon as Amendment 128 has it.
+
+**The setup** (`spawn/custom.ts`):
+- **`CustomRole.orchestrates?: boolean`** (`:42`) and **`SavedSetup.listed?: ListedRole[]`** (`:54`),
+  both optional, so a setup saved before reads, launches and is written back as it was.
+- **One row at a time.** `withOrchestrator(roles, i, on)` (`:89`): on makes that row the one and
+  drops the field from the others; off drops it. `orchestratorRow` (`:97`) is the row that
+  orchestrates. `customProblems` (`:113`) has a sentence for two ("Only one agent can orchestrate:
+  untick the others.").
+- **`toPreset`** gives the row `orchestrates: true` (`:185`) and the preset `orchestrated: true`
+  (`:166`), as the preset "orchestrated pipeline" has them (`presets.ts:119`, `:125`), so
+  `orchestratedFor` and `toAgentSpecs` take the two the same way: the row gets `helpers`
+  (`helperCapFor`) and `helperRoles` (`helperRolesFor`), and nothing else in the stack changes.
+- **Saved.** `setupOf(name, roles, models, listed)` (`:105`) adds `listed` only beside a row that
+  orchestrates. `parseSetups` keeps the first row that orchestrates (a later one reads as an
+  ordinary row) and reads `listed` only beside it (`:257`), through `parseListed` (`:270`): an id
+  matching the role pattern and a tier of opus, sonnet or haiku, each once, at most
+  `PIPELINE_ROLES_MAX` (8); anything else is left out.
+
+**One agent needs no orchestrator** (`presets.ts:313`). With no role listed, a Custom setup keeps
+its rows and the one that orchestrated is an ordinary agent, with no flags (`:320`); only the
+preset becomes the full pipeline's architect, as before.
+
+**Spawn** (`spawn/route.tsx`):
+- `listsUnder` (`:318`) is the row the roles are listed under: the preset's one row, or the Custom
+  row that orchestrates; none on an engine that cannot start helpers (`has.helpers`). The preset's
+  `Pipeline` is drawn under that row (`:989`); the "+ up to N helpers" picker is not offered on it
+  (`:967`). The rest of the plan is as Amendment 128 has it: the ◆ mark, the `.is-orch` edge, a
+  tier with no model blocking the launch.
+- **The tick.** `CustomSetup` takes `orchestrable={has.helpers}` (`:731`); each row then has an
+  **orchestrates** checkbox (`CustomSetup.tsx:105`, `.sp-corch` in `spawn.css:930`, ink only).
+- **Saving and loading.** Save writes `setupOf(name, custom, ownPicks, listedEdit ??
+  defaultListed(personas))` (`:736`). Loading a saved setup puts its list back, or the default for
+  one with none (`:694`). Choosing a preset or **custom…** puts the default back, as before.
+- `Pipeline` takes `alone?` (`Pipeline.tsx:49`), its words with no role listed. Custom's
+  (`route.tsx:998`) say its own row launches as an ordinary agent; the preset's are unchanged.
+
+**The navigator** (`shell/navtree.ts:68`, `shell/Navigator.tsx:130-135`). `NavAgent.orchestrator` is
+the Agent tab's own answer (`agentTabs`, `marksOrchestrator`, `agent/tabs.ts:76`). The row wears
+`<OrchestratorMark short />` (◆, with its title) after the label, and its title ends
+" · orchestrator: starts the others", as the Agent tab's does (`agent/agent.tsx:627-636`). No edge,
+and no colour of its own.
+
+**Verify.** `spawn/verify.ts` §23 (35 checks; 469 in all): one orchestrator at a time; a saved
+setup round-trips with the tick and its listed roles and launches as before it was saved; a setup
+saved before this amendment parses to exactly what it was, launches with no helpers whatever list
+the screen holds, and is written back unchanged; the launch request and the `POST /api/jobs` body
+from a Custom orchestrator row equal the preset's for the same row and roles, with the default and
+an edited list; in a setup of several only the orchestrating row changes; with no role listed it
+launches as the setup without the tick; a hand-edited setting (two ticks, bad list entries, twelve
+roles, a list with no tick) is read safely. §15 and §21's source checks follow the new names.
+`shell/verify.ts` §11 (7 checks; 163 in all): the orchestrator's row is marked and its helper, a
+plain agent and an orchestrator with nothing listed are not; it agrees with `agentTabs` for every
+agent; the row draws the tab's mark and title.
+
+**Not done / not decided:**
+- **One orchestrator per Custom setup.** The tick is one row at a time; a second orchestrated row
+  in one stack is not offered.
+- **The other rows still run.** A Custom orchestrator beside other rows is one row of a fixed
+  stack: rows that wait for it start when it ends, and its helpers are its own. Its listed roles
+  are not drawn from the setup's other rows.
+- **No per-role brief in Spawn**, as Amendment 128: edit it in Settings → Personas.
+
 ### Amendment 141a — post-merge, applied. **The scheduler lifts only a hold it put on.**
 
 Found 13 Oct by lane F: `Scheduler.#once` (`daemon/src/session/schedule.ts`) called `release()` whenever
@@ -327,6 +397,98 @@ Ctrl-`, path parsing (`path:line:col`, tsc's form, a full stop, words that are n
 dock flag, `bin` keeping 0xfc one byte, the frame reaching only its scope's panel, and the wiring
 from the source. **A person checks** `vim`, `htop`, `less` and mouse mode in a browser, WebGL and
 the DOM fallback, and Ubuntu (plan §5).
+
+### Amendment 140 — post-merge, applied. **The retry delays and the budget ceiling are settings, the first retry has its card, a new day continues what only its budget paused, and the navigator has the meters.**
+
+Shared, daemon and web (`shared/src/{retry,budget,index}.ts`, `daemon/src/session/{retry,budget,
+alerts,supervisor,store}.ts`, `daemon/src/routes/session.ts`, `web/src/lib/settings.ts`,
+`web/src/settings/{budgets.ts,route.tsx}`, `web/src/shell/{navtree.ts,Navigator.tsx,autonomy.ts,
+describe.ts,shell.css}`, `web/src/agent/{reconnecting.ts,inspector.tsx}`,
+`web/src/attention/AlertCard.tsx`, `web/src/spawn/route.tsx`). The wave 10 plan's Lane G, with §6 Q3
+and Q4 both yes. Amends Amendments 123 (the retry), 124 and 129 (the ceiling, and midnight). No
+migration.
+
+- **`conductor.retryDelays`** (`shared/src/retry.ts`, new): one to five whole numbers of seconds,
+  separated by commas, each from 1 to 1800; how many there are is how many tries. Default
+  `5, 15, 30, 60, 300`, the list that was fixed at `daemon/src/session/retry.ts:26`. The rule
+  (`parseRetryDelays`, `retryDelaysProblem`) is shared, so the daemon's `settingRule` (400 with "one
+  to 5 whole numbers of seconds, separated by commas, each from 1 to 1800") and the Settings field
+  read it the same way. `RETRY_DELAYS_MS` and `MAX_RETRIES` stay as the defaults; `retryDelaysMs()`
+  is the schedule in force, read from the cached settings (`settings.ts:46`) each time a wait is
+  decided (`decideRetry`, which takes `delays?` for a pure call), so a change applies to the next
+  failure and a wait already counting keeps its time. `of` in the retry and the card is the set
+  list's length.
+- **`conductor.budgetCeiling`** (`shared/src/budget.ts`): a number from 1 to 10, default 2
+  (`BUDGET_CEILING`, `:35`). `ceilingOf(budget, ceiling = budgetCeiling())` reads it on every call,
+  rounded to a millionth (25 × 1.1 is 27.5). Shared imports neither side: each says where its copy
+  of the settings is through `readBudgetCeilingFrom` (the daemon's file, `daemon/src/session/
+  budget.ts`; the page's map, `web/src/lib/settings.ts`), and a value that is not one reads as 2.
+  `capState`, `budgetState`, `jobBudgetState`, `runLimit`, `budgetRefusal` and `budgetNote` all go
+  through `ceilingOf`, so the warning, the stop, the SDK's limit and the sentences move with it at
+  the next check. A change re-reads the alerts and pumps (a job held at the old ceiling may start);
+  it wakes nothing paused, as raising a budget wakes nothing. The words: `ceilingWords()` is "twice"
+  at 2, else "1.5×", in `failureSentence`, the inspector, the over-budget card and Spawn's hints.
+- **The first retry's card** (Q3). `RETRY_CARD_FROM = 1` (shared), read by the daemon's alert
+  (`RETRY_ALERT_FROM`) and by the agent's line and banner (`describe.ts`, `reconnecting.ts`), which
+  are amber from it. It was 2. The card's id is the bout's, so it chimes once, at the first retry, as
+  every alert chimes at once (`dueForChime`), and later retries update it. Claude Code's own
+  in-flight retries (the Model API alert, `ALERT_FROM_ATTEMPT`) are unchanged.
+- **A new day continues a budget pause** (Q4). `Supervisor.newDay` (Amendment 129's day turn): with
+  `conductor.budgetResumeAtMidnight` on (the default; `on` or `off`, 400 otherwise), an agent
+  paused ONLY by a budget, at its own ceiling (`budget_exhausted`) or held for its job's
+  (`job_budget_reached`, the job not still at its ceiling), with room on the new day
+  (`continuations`, pure, in `budget.ts`; a renewed note counts, since it is still only a budget
+  pause), is resumed as ▶ resume resumes it (`resumeAgent(id, note)`): queued, with
+  `newDayNote(day)` ("a new day's budget began (2033-02-11) — continuing") on the status event, and
+  on its next run told `NEW_DAY_NUDGE` (a synthetic turn, as every resume prompt; it outranks only
+  the plain wake). Queued, so the slots, the job's figure and a pause of everything (`supervisor().held`,
+  in which `pump` starts nothing) still decide when it runs. A pause you made, a hold's, a strand,
+  a failure or any other note is left. With the setting off, Amendment 129 as it was: the pause is
+  rewritten as renewed and nothing resumes. Returns how many it continued or rewrote.
+- **At start** (`Supervisor.catchUpDay`, from `routes/session.ts` after the scheduler has put back a
+  pause of everything and before the first pump): a daemon that was down at midnight saw no turn, so
+  a paused agent whose last status event is from an earlier local day (`lastStatusDay`, new in
+  `store.ts`) gets what the turn would have given it, continued or (off) renewed. A budget pause
+  written today is not touched. Amendment 129 left these until the next midnight.
+- **Settings (9).** Under Agents, the waits (`RetryDelaysRow`); under Spend, the ceiling
+  (`CeilingRow`) and **at midnight, continue agents the day's budget paused** on/off
+  (`MidnightRow`). The two fields are `SlotsSection`'s pattern: a draft checked as it is typed, the
+  problem in the field's sentence (`web/src/settings/budgets.ts`), written on Enter or blur, put
+  back by Esc, the default written as nothing.
+- **The navigator's meters.** `NavAgent.budget` is `budgetOf` (the Fleet lane's figure, the same
+  day), `NavJob.budget` the sum of its agents' (`sumBudgets`, `shell/autonomy.ts`: dollars when any
+  budget is in dollars, and then only those; null when none has a budget). `Navigator.tsx` draws the
+  Fleet's `pj-meter` with `data-tone` on the agent row and the job heading, with a hover
+  (`meterTitle`); `shell.css` only sizes it (`.pj-meter.sh-nav-meter`, no colour), and the panel
+  imports `fleet/fleet.css` so the tones are there on every screen. No budget, no bar.
+- **Not done.**
+  - A page re-reads the ceiling when it next renders; a meter already drawn changes at its next
+    redraw, not the instant the setting does.
+  - The job's meter in the navigator is its agents' budgets added up, not the daemon's job ceiling
+    (`jobCap`), which an uncapped agent lifts. It is a picture, not the stop.
+  - A continued agent whose job is at its ceiling after all (a budget lowered between the turn and
+    the pump) is paused again by `pump` with the job's note, as before.
+  - Retries still do not survive a restart (Amendment 123).
+  - Not looked at in a browser, in either theme.
+
+**Verified:** `session/verify.ts` (1,388 checks, 60 new): §23 with a set list (`2, 7`: two tries,
+waits of 2 s and 7 s through the supervisor, the transcript saying them, the third failure failed;
+bad lists 400 with the sentence; 30 min × 5 taken; removing it puts the default back), and the card
+from the first retry with the same id at the second, every tab told at the first; §24 with the
+ceiling set (bad values 400; at 1.5 a $25 budget stops at $37.50, the warning goes, the refusal and
+the pause note say $37.50; at 1 the budget is the stop; at 10 the SDK is given $210 of $250); §26,
+Amendment 129's checks, now with the continue off; §27 (31 checks): the setting's rule; at the turn,
+one at its ceiling and one held for its job continued within one free slot, each with the note, the
+running one resuming its session told `NEW_DAY_NUDGE` with the whole new day's $50, the second
+going when the slot frees, a person's pause and a strand left, a later message ordinary, a second
+turn nothing; with everything paused, continued but not run until `release`; `continuations` pure;
+at start, an earlier day's pause continued and today's left, a second look nothing, and with the
+setting off renewed instead. §17q (Amendment 103's day turn) runs with the continue off. Web:
+`shell/verify.ts` §11 (17 checks: the rows' meters, tones, the job sum, units never added, a stale
+day, the hover, the ceiling set, the source and the CSS), `lib/verify.ts` §38 (17 checks: the rows'
+rules and values, the page reading the ceiling, the rows' pattern, the daemon's rules), and the
+retry tone in `lib/verify.ts`, `agent/verify.ts`, `attention/verify.ts` (the first retry's card
+chimes once), `spawn/verify.ts`. `pnpm -r typecheck` and `make test` green.
 
 ### Amendment 139 — post-merge, applied. **A branch only on origin is tracked, Spawn lists the branches you can name, and a refusal is a sentence.**
 

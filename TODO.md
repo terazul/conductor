@@ -127,7 +127,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - No per-project filter, and no chart beyond the day table.
   - The comment in `web/src/lib/verify.ts` (~line 856) says no real screen has the hotkey `8`; it does now.
 
-- [ ] **Retry and budgets (123-125, 129).**
+- [x] **Retry and budgets (123-125, 129).** *Done 13 Oct: Amendment 140 (delays and ceiling as settings, the card from the first retry, a new day continues budget pauses, navigator meters).*
   - The retry delays are fixed (5 s, 15 s, 30 s, 60 s, 5 min), not settings.
   - A retried agent that then ends its turn without `hand_off` is held as usual; the one-time ask of
     Amendment 119 applies only to restart resumes.
@@ -164,6 +164,6 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   The lightness gap between the three backdrops is small, because the 4.5:1 floor on `--ink3` caps it;
   tell me if they are too alike once you have seen them.
 
-- [ ] **Orchestrated stacks (128).** Custom setups can't save the listed roles and have no orchestrated
+- [x] **Orchestrated stacks (128).** *Done 13 Oct: Amendment 142 (a Custom row can orchestrate and save its listed roles; the navigator marks orchestrators).* Custom setups can't save the listed roles and have no orchestrated
   row; only the preset does. Role briefs are edited only in Settings → Personas. The navigator tree has
   no orchestrator mark, only the plan row, the Project lane, the Fleet row and the Agent tab.
