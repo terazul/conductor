@@ -93,7 +93,7 @@ header, the terminal's fixed font and missing add-ons, Custom's missing orchestr
 navigator's missing marks and meters, the in-memory window registry, the fixed 2× ceiling, and the
 stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
 
-- [ ] **Terminal (112).** Only macOS arm64 ran; Ubuntu is untried, and so are `vim`, `htop` and `less`
+- [ ] **Terminal (112).** *13 Oct, Amendment 141: settings, find, links, clipboard, WebGL, mouse, paths into Files, the Terminal dock, the terminals frame and the headless mirror are built; still to check by hand in a browser and on Ubuntu; tmux is not wanted (Q5).* Only macOS arm64 ran; Ubuntu is untried, and so are `vim`, `htop` and `less`
   in the browser. Left out of the first version, from `docs/plans/full-terminal.md`:
   - a Terminal dock under every screen (D8b), and shells that survive a daemon restart (tmux, where
     installed);
@@ -106,7 +106,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
     the right `?token=`, because the `Authorization` check in `index.ts` also runs on the upgrade and a
     browser can't set that header. `/ws` did this before the terminal; it needs its own fix.
 
-- [ ] **Git methodology (115).**
+- [x] **Git methodology (115).** *Done 13 Oct: Amendment 139.*
   - A branch that exists only on a remote is treated as new and cut from `HEAD`, not tracked.
   - Spawn has no branch picker; you type the name.
   - `restoreFolder` on a job whose named branch got checked out elsewhere fails with git's own
@@ -114,7 +114,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - The old `POST /api/workspaces` bootstrap route answers 500, not 400 or 409, for the new refusals.
     It never passes `named`, so nothing reaches it today.
 
-- [ ] **Files (121).** The navigator's folders have no **+**. New folder, rename and delete are
+- [x] **Files (121).** *Done 13 Oct: Amendment 138 (new folder, rename, delete with a double check, and a + on the navigator's folders).* The navigator's folders have no **+**. New folder, rename and delete are
   separate items if wanted. A name that differs from an existing one only in case is refused only on a
   case-insensitive filesystem, such as macOS.
 

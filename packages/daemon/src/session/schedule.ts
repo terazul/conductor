@@ -153,7 +153,10 @@ export class Scheduler {
       }),
       registerSnapshotContributor(() => ({ scheduled: listScheduled(this.#db) })),
     );
-    if (pausedUntil()) await this.#sup.hold();
+    if (pausedUntil()) {
+      this.#holding = true;
+      await this.#sup.hold();
+    }
     await this.tick();
     this.#timer = setInterval(() => void this.tick(), everyMs);
     this.#timer.unref();
@@ -187,10 +190,13 @@ export class Scheduler {
   async #once(now: number): Promise<void> {
     const until = pausedUntil(now);
     if (until && !this.#sup.held) {
+      this.#holding = true;
       await this.#sup.hold();
     } else if (!until) {
       // Ended, or never on: wake what a pause paused (after a restart past its time too).
-      if (this.#sup.held || this.#first) this.#sup.release();
+      // Only a hold this made: one someone else put on (a check freezing the queue) is theirs.
+      if (this.#holding || this.#first) this.#sup.release();
+      this.#holding = false;
       // Passed: removed, so it reads as off everywhere. Removing it calls back here; a no-op.
       if (readSettings()[PAUSE_UNTIL_KEY] !== undefined) patchSettings({ [PAUSE_UNTIL_KEY]: null });
     }
@@ -215,6 +221,8 @@ export class Scheduler {
   }
 
   #first = true;
+  /** Whether the supervisor's hold is this scheduler's, from the pause setting. */
+  #holding = false;
 
   /** Every open page is told the whole list. */
   broadcast(): void {

@@ -196,6 +196,326 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 141a — post-merge, applied. **The scheduler lifts only a hold it put on.**
+
+Found 13 Oct by lane F: `Scheduler.#once` (`daemon/src/session/schedule.ts`) called `release()` whenever
+no pause was set and the supervisor was held, so a hold someone else put on (a verify file freezing the
+queue with `supervisor().hold()`) was lifted within 5 s and queued agents started. `#holding` records
+that the hold is the scheduler's; only then, or on the first tick after a start, does it release.
+**Verify:** `session/verify-schedule.ts` (43 checks) and `workspace/verify-methodology.ts` (93, with no
+stray launch) pass.
+
+### Amendment 141 — post-merge, applied. **The terminal, the rest of the plan: settings, add-ons, paths into Files, a Terminal dock under every screen, a `terminals` frame and the headless mirror.**
+
+Daemon, web and shared. From `docs/plans/full-terminal.md` §4-§7 and the wave 10 plan (Lane H);
+it finishes what Amendment 112 left out. Q5 stands: no tmux, so a daemon restart still ends every
+shell.
+
+**H1: settings.**
+- Three settings, in Settings (9) under **Terminal**, with rules in the daemon
+  (`daemon/src/terminal/prefs.ts:49-55`, through `settingRule`, `settings.ts:33`):
+  `conductor.terminal.fontSize` (9 to 24, default 13), `conductor.terminal.scrollback` (1,000 to
+  100,000, default 5,000) and `conductor.terminal.shell` (one of the shells this machine has,
+  default the one Amendment 112 picked). The keys, ranges and the parser (`termNumber`, digits
+  only, so `5e3` and `13.5` are refused) are shared (`shared/src/wire.ts:1096-1106`).
+- **The shells.** `findShells` (`daemon/src/terminal/shell.ts`): `$SHELL`, then `/etc/shells`
+  (absolute paths only, comments skipped), then `/bin/zsh`, `/bin/bash`, `/bin/sh`, each only if
+  it is there, no repeats; two with the same name are labelled with their path. `pickShell` takes
+  the setting when it names one of those that is still there, else falls back as before.
+  `GET /api/terminals/shells` → `{ shells: TermShell[], default }` (`routes/term.ts:133`). A new
+  terminal runs the chosen shell; open ones keep theirs. `TermInfo.shell` says which ran.
+- **Settings screen.** `TermNumber` and `TerminalSection` (`web/src/settings/route.tsx:186-275`) in
+  the `SlotsSection` pattern: a draft written on Enter or blur, Esc puts it back, the default
+  written as nothing; the shell is a select of the daemon's list, and a setting naming a shell no
+  longer there is shown as such. The Terminal dock's height joins the layout reset.
+- **Xterm reads them** (`web/src/agent/Xterm.tsx`): the font size and scrollback at creation, and
+  a change applies to an open terminal; a new font size re-fits, so the shell gets its new size.
+  The fixed `fontSize: 13` and `scrollback: 5000` are gone.
+
+**H1: add-ons** (`web/package.json`): `@xterm/addon-search` 0.16.0, `addon-web-links` 0.12.0,
+`addon-clipboard` 0.2.0, `addon-webgl` 0.19.0 and `addon-unicode11` 0.9.0.
+- **Find**: ⌘F on macOS, Ctrl-Shift-F elsewhere, opens a find bar in the terminal's corner; typing
+  searches as you go, Enter is next, Shift-Enter previous, Esc closes it and gives the terminal its
+  focus back.
+- **The key map** is `termKey` (`web/src/terminal/keys.ts`): find, copy (with a selection only),
+  paste and clear are ⌘F/⌘C/⌘V/⌘K on macOS and Ctrl-Shift-F/C/V/K (and Shift-Insert to paste) on
+  Ubuntu; everything else is the shell's, Ctrl-C included. Paste is left to the browser, so
+  xterm.js bracket-pastes it. `wantsCopy` (Amendment 112) is now one row of it.
+- **URLs** open in a new browser tab (`noopener`).
+- **OSC 52** (`vim`, `tmux` copying to the clipboard) writes the clipboard; a read is answered
+  with nothing, so a program cannot see what you copied elsewhere.
+- **WebGL**, with xterm.js's DOM renderer when WebGL is not there (the addon throws on load) or
+  the context is lost (`onContextLoss` disposes it). Unicode 11 widths for wide characters and
+  emoji (`allowProposedApi`).
+- **Mouse reports as bytes.** `t.onBinary` (`Xterm.tsx:225`) is sent as a new client frame,
+  `{ t: 'bin', d: <base64> }` (`TermClientFrame`, `shared/src/wire.ts:1086-1090`); the daemon
+  writes the bytes themselves (`routes/term.ts`, `parseClientFrame` refuses anything that is not
+  base64). Sent as `in`, an X10 mouse report past column 95 was UTF-8 encoded on the way and each
+  byte over 127 became two. `Pty.write` takes a `Buffer` (`terminal/pty.ts:22`).
+
+**H1: paths open in Files.** A link provider (`Xterm.tsx:152`) finds file paths in each line
+(`findPathLinks`, `web/src/terminal/paths.ts`): `path:line`, `path:line:col` and tsc's
+`path(line,col)`, or a path with a `/` in it; a bare word such as `node.js`, a version, a time and
+the inside of a URL are not. Each is taken relative to the folder the terminal started in and must
+stay inside its worktree (an agent's) or project folder (the dock's): `termFileTarget` resolves it
+with `files/links.ts`' `resolveDocLink`, so `..` past the root, `~`, another folder and a
+`/w/job-evil` beside `/w/job` are plain text. Clicking opens Files (5) on that root
+(`navigate(SCREEN.files, { jobId, path, line })`). Files learned `&line=`: `followLink` keeps the
+line wanted per tab (`web/src/files/useTabs.ts:147-166`), and the pane shows the file raw with that
+line marked and scrolled to the middle, once (`FilePane.tsx`, `rawAround` in `files/links.ts`).
+The cell mapping counts a wide character as two cells.
+
+**H2: project terminals.** `TermScope = { kind: 'agent'; agentId } | { kind: 'project'; projectId }`
+(`shared/src/wire.ts:1024`), on every `TermInfo`. The manager (`daemon/src/terminal/service.ts`)
+lists by scope; each terminal also carries its job and project, so removing a job ends its agents'
+terminals as before, and removing a project (`closeProject`, `service.ts:274`, called from
+`supervisor.ts:709`) ends its own and any of its agents'. Same cap (16 live, of either kind), same
+lifetime rules. New routes (`routes/term.ts:123-131`): `GET` and `POST
+/api/projects/:projectId/terminals`, the shell starting in the project folder; 404 for an unknown
+project.
+
+**H2: the `terminals` frame.** `ServerFrame` gains `{ type: 'terminals'; scope; terminals }`
+(`shared/src/wire.ts:909`), the scope's whole list, broadcast whenever a terminal in it opens, exits,
+is closed or is forgotten (`TerminalManager.onChange`, wired to the hub at `routes/term.ts:70`). It
+never carries output. The web store hands it to `web/src/terminal/live.ts` (`lib/store.ts:197`),
+and every terminal panel showing that scope takes the new list, so a terminal opened in one browser
+tab is listed in the others.
+
+**H2: the Terminal dock** (plan D8b; `web/src/terminal/dock.tsx`). Under every screen, above the
+status bar (`shell/shell.tsx:334`): the terminals of the project you are on (the one the navigator
+highlights, `currentProject`, `shell/navtree.ts:344`), in tabs, each in the project folder, **+**
+for another. Ctrl-` opens and closes it from anywhere, a terminal included (Xterm lets the key
+through), and so does the status bar's **▸ terminal** (`shell.tsx:231`). Its height is dragged at
+its top edge and kept (`TERMINAL_DOCK`, `shell/panels.ts:96`, `conductor.terminalDockH`), and
+whether it is up is a setting (`conductor.terminal.dock`). The tabs are `TermTabs`
+(`web/src/agent/TermPanel.tsx`), the Agent tab's, made scope-generic; `TermPanel` is it for an
+agent, with the runner fallback. The Project screen dock's placeholder terminal tab
+(`fleet/dock.tsx:65`, "not yet assigned") now opens the Terminal dock.
+
+**H2: the headless mirror** (`daemon/src/terminal/mirror.ts`). `@xterm/headless` 6.0.0 and
+`@xterm/addon-serialize` 0.14.0 (`daemon/package.json`), loaded lazily through `createRequire`.
+Each terminal has one, at the PTY's size and with the scrollback setting, fed every byte the shell
+prints, resized with it. A page that attaches is sent its `serialize()` (screen, alternate screen,
+cursor, modes and scrollback) as the first binary frame, instead of the last 512 KB of raw output;
+so reattaching mid-`vim` draws `vim`'s screen. The snapshot waits for the emulator to have parsed
+every write before it (`write('', cb)`), and output arriving meanwhile is held for that page and
+sent after it (`service.ts:180`), so nothing is lost or doubled. The socket protocol is unchanged
+for the page: binary frames, the screen first. If the packages do not load, a terminal keeps the
+raw 512 KB replay (`ring.ts`), as it does if serializing fails. The mirror's own backlog counts
+toward the pause at 1 MB (`#throttle`, `service.ts:346`), as a slow page's does, since xterm.js
+drops a write queue past 50 MB.
+
+**Verified.** `daemon/src/terminal/verify.ts`, 141 checks (100 before): §1 the shells found, the
+setting's pick and its fallback, `bin` parsed and non-base64 dropped, the mirror loads; §4 bytes
+sent as `bin` reach the shell as bytes (`od` reads `41 fc 0a`) and text as UTF-8 (`41 c3 bc`); §6 a
+page reattaching after 900 KB of output gets the screen and its 5,000 lines, under 256 KB, ending at
+the tail; §6b with the mirror forced off, the old 512 KB replay; §6c after a program switches to the
+alternate screen, clears it, places three lines by cursor moves and leaves the cursor mid-screen, a
+page reattaching (its bytes drawn in a fresh headless terminal) is on the alternate screen with each
+line where it was put and the cursor at row 3 column 7, the shell's screen behind it comes back on
+leaving, and it is live after; §11b a project terminal opens in the project folder, is listed with
+its scope and not in an agent's list, closes, and 404s for an unknown project; the hub sends a
+`terminals` frame for each open, close and exit (listed exited, with its code), for the agent's
+scope apart, carrying only `type`, `scope` and `terminals`; §11c each setting refuses out of range
+(`8`, `25`, `13.5`, `5e3`, `999`, `100001`, an unknown shell) with the range, and takes good values;
+`/api/terminals/shells` lists `/bin/sh` as the default; a chosen shell is what a new terminal runs;
+with scrollback 1000, a page reattaching after `seq 1 3000` gets 1,000 lines plus the screen; §12
+removing the project ends its own terminal too, and the hub says it has none. `web/src/agent/verify.ts`
+§ "the terminal, the rest of the plan": the key maps on both OSes (and what is left to the shell),
+Ctrl-`, path parsing (`path:line:col`, tsc's form, a full stop, words that are not paths, URLs) and
+`termFileTarget`'s inside/outside rules, `rawAround`, the settings readers and field messages, the
+dock flag, `bin` keeping 0xfc one byte, the frame reaching only its scope's panel, and the wiring
+from the source. **A person checks** `vim`, `htop`, `less` and mouse mode in a browser, WebGL and
+the DOM fallback, and Ubuntu (plan §5).
+
+### Amendment 139 — post-merge, applied. **A branch only on origin is tracked, Spawn lists the branches you can name, and a refusal is a sentence.**
+
+Daemon, shared and web (`daemon/src/workspace/{git,worktree,branches}.ts`,
+`daemon/src/session/supervisor.ts`, `daemon/src/routes/workspace.ts`, `shared/src/wire.ts`,
+`web/src/spawn/{launch.ts,route.tsx}`). The wave 10 plan's Lane F: the four "Not done" of Amendment 115.
+No migration.
+- **A branch only on origin is tracked.** `branchExists` looks at `refs/heads/` only, so a name that
+  existed only as `origin/<name>` was cut fresh from `HEAD`, with none of origin's commits. In
+  `#addNamed`, after the same refusals in the same order (a name git rejects, 400; the default branch,
+  409; one checked out somewhere, 409), a name with no local branch whose `refs/remotes/origin/<name>`
+  exists (`originBranchExists`, new in `git.ts`) is added with
+  `git worktree add --track -b <name> -- <path> origin/<name>`: a local branch at origin's tip with
+  its upstream set, so a push goes back there. **Nothing fetches**: it is origin as last fetched (the
+  Branches screen's **fetch**), and a name on neither is cut from `HEAD` with no upstream, as before.
+- **`BranchesResponse.remoteOnly?: string[]`** (`wire.ts`, optional, so an older web reads the answer
+  as it did). `listBranches` lists `for-each-ref refs/remotes/origin` (`originNames`), leaves out
+  `origin/HEAD`, and removes every name with a local branch (`remoteOnlyNames`, pure), sorted. Empty
+  for a repo with no origin. The Branches screen does not show it.
+- **Spawn's branch picker.** (2)'s name field gets a `<datalist>` (`list="sp-branch-list"`), so it is
+  still free text and a new name still works. `getBranches` is called when (2) is chosen and again
+  when the project changes (not for a folder with no git); a failed fetch lists nothing.
+  `branchOptions(res, defaults)` (pure, `launch.ts`) builds the list: the local branches first, in the
+  daemon's order, then the origin-only ones labelled **on origin**. A local branch a named launch
+  refuses is listed with why, not hidden: the project's default (`Project.defaultBranch`, the same one
+  `branchProblem` refuses; the compared-with branch is not a default) as **default branch (refused:
+  choose 1)**, one an agent is on as **an agent is on it (checked out)**, one some worktree has
+  (the project's own folder included) as **(checked out)**. `pickedNote` puts a sentence under the
+  field for the name typed: an origin-only one says a local branch tracking `origin/<name>` is made;
+  a checked-out one says the launch will be refused, drawn as the field's problem note but **not**
+  holding the launch back, since the list is what was true when it was fetched and the daemon has the
+  last word. The pill's hint and the empty field's note say a branch only on origin is tracked.
+- **`restoreFolder`, said plainly.** After `worktree prune`, and before `worktree add`, when
+  `listWorktrees` shows the job's branch checked out at another path, it throws `FolderGoneError`:
+  "`<branch>` is checked out in `<path>`; remove that worktree or check out another branch there, then
+  recreate". `POST /api/jobs/:jobId/folder` already answers that error with 409 and the sentence;
+  before, git's refusal was a 500. The project's own folder on that branch is named by its path.
+- **`POST /api/workspaces`.** `fail()` answers a `LaunchBranchError` with its own status and
+  `{ error: 'could not use that branch', detail: <the sentence> }`, the shape `POST /api/jobs` uses.
+  The route still does not pass `named`, so nothing raises it there today; it is no longer a 500 if
+  something does.
+- **Not done.**
+  - Spawn does not fetch, so a branch pushed to origin since the last fetch is neither listed nor
+    tracked: it is cut from `HEAD` as a new one. **fetch** on the Branches screen first.
+  - Only `origin`: a branch on another remote is not listed or tracked.
+  - A browser's `<datalist>` cannot be greyed per option, so a refused branch says so in its label.
+    Not looked at in a browser, in either theme.
+  - The bootstrap `POST /api/workspaces` still resets an explicitly named branch with `-B`
+    (Amendment 115's note stands).
+
+**Verified:** `workspace/verify-methodology.ts` §11 (93 checks in all, 14 new), against a bare origin
+with two branches the repo has never had locally, fetched once, one of them pushed to again since: the
+listing's `remoteOnly` is both, sorted, without `HEAD` or `main`; `remoteOnlyNames` pure; a launch
+naming one is 201, on a local branch whose upstream is `origin/<name>`, at origin's tip as fetched
+with origin's file in it, and the later push is not there (nothing fetched); then it is not in
+`remoteOnly`, naming it again is the usual 409, a bad name is still 400, the default still 409, and a
+name on neither is cut from `HEAD` with no upstream. `session/verify-folder.ts` §5 (23 checks, 5 new):
+the job's branch in another worktree → 409 with the sentence exactly, and nothing made; in the project's
+own folder → 409 naming it; once free, recreated on its branch as before. `spawn/verify.ts` §22 (15 checks): the picker's order and labels, a daemon with no `remoteOnly`,
+a name both local and on origin listed once, a compared-with branch that is not the default offered,
+the two notes, a checked-out pick still launching, and the screen's source (the datalist, its fetch and
+its keys). Also `workspace/verify-branches.ts`, `workspace/verify.ts`, `branches/verify.ts`,
+`pnpm --filter @conductor/web verify` and `pnpm -r typecheck` green.
+
+### Amendment 138 — post-merge, applied. **Files makes folders, renames and deletes, and the navigator's folders get a `+`.**
+
+Shared (`wire.ts`), daemon (`workspace/paths.ts`, `workspace/service.ts`, `workspace/tree.ts`,
+`workspace/git.ts`, `workspace/watcher.ts`, `routes/workspace.ts`, `workspace/verify-files-verbs.ts` new)
+and web (`files/deleting.ts` and `files/DeleteConfirm.tsx`, new; `files/FileTree.tsx`,
+`files/NewFileForm.tsx`, `files/naming.ts`, `files/tabs.ts`, `files/useTabs.ts`, `files/useWorkspace.ts`,
+`files/route.tsx`, `files/files.css`, `files/verify.ts`, `shell/Navigator.tsx`, `shell/shell.css`,
+`shell/verify.ts`). Asked 13 Oct, in the wave 10 plan (lane E, and Q2: a folder with files in it can be
+deleted, after a confirm and a second "Are you sure?" naming how many files go). Amendment 121 left
+"new folders, rename and delete" not done, and the navigator's folders (Amendment 92) with no `+`. No
+migration.
+
+- **Routes**, for a job (`/api/jobs/:jobId/…`) and a project folder
+  (`/api/projects/:projectId/dir/…?dir=`), addressed as the two PUT routes are. One handler per verb,
+  registered for both by `verbs(prefix, rootOf)` (`routes/workspace.ts:240`, `:304`, `:394`):
+  - `POST …/folders { path }` → 201 `CreateFolderResponse`. `mkdir -p`; anything at the name (a file,
+    a folder, a link) is a 409 "<path> already exists"; a folder in the name that is a file is a 409
+    "… cannot be made: a folder in that name is a file". **`folders`, not `folder`**: `POST
+    /api/jobs/:jobId/folder` is already Amendment 114's (put back a job's deleted worktree,
+    `routes/session.ts:702`), and Fastify refuses a second route on it at boot.
+  - `POST …/rename { from, to }` → `RenameResponse { from, to, type }`. `from` missing is a 404; `to`
+    taken is a 409, except by `from` itself under another case (same inode and device, names equal
+    but for case), which on a case-insensitive filesystem is the rename someone fixing `readme.md`
+    means; a folder into itself is a 400, and so is `to` equal to `from`. Folders above `to` are made.
+    A plain file moves by hard link then unlink (`moveNew`, `service.ts:886`), so a name an agent took
+    since the check is not replaced, for the reason `publishNew` exists (Amendment 121); a folder, a
+    link and a case-only rename use `rename`. A link is moved as the link.
+  - `GET …/entry?path=` → `EntryResponse { path, type, files, folders, capped?, tracked }`: what a
+    delete would take, counted on disk (`filesUnder`, `service.ts:909`), ignored files and
+    `node_modules` included, since a recursive delete takes those too and the tree lists neither. It
+    stops at 50,000 entries and says `capped`. `tracked` is how many git has (`trackedCount`,
+    `git.ts:183`, a `:(literal)` pathspec), null when the root is not a repo. Read-only, no lock.
+  - `DELETE …/entry?path=[&recursive=1]` → `DeleteEntryResponse { path, type, files }`. A file or a
+    link (never what it points at) goes; a folder only when empty, or with `recursive=1`. Not empty
+    without it is a 409 "<path> is not empty: it holds N files". A folder with a `.git` anywhere in it
+    is a 409 even with it ("… holds a git repository (vendor/lib/.git); delete it outside Conductor"):
+    a nested clone's history may be the only copy. `recursive` is read as strictly as `createOnly`:
+    `1`/`true`, `0`/`false` or absent; anything else is a 400.
+- **One gate, `resolveEntry`** (`paths.ts:149`). It is `resolveForWrite` with one difference: the
+  parent is canonicalised (the nearest existing ancestor realpath'd, missing segments put back) and the
+  last segment kept as typed, so a link is the link. Same refusals, all 400 through `fail()`: `..`, an
+  absolute path, anything under `.git` (any case, any depth), a link out of the root. Two more: the
+  root itself (`.`, `src/..`), which no verb may make, move or delete; and a `.git` reached through a
+  link (`gl -> .git`, then `gl/config`), checked again on the canonical path.
+- **Lock and log.** Every change runs under the same per-root lock as a write (`#lockKey`,
+  `service.ts:613`: `job:<id>`, or `dir:<path>`). The files a rename or delete changed are handed to
+  the watcher in one batch (`Watcher.touchAll`, `watcher.ts:208`), as a write's path is with `touch`,
+  so emission stays in one place and a job's tree and the log hear of it at once: a renamed tracked
+  file is a `file_edit` deleted for the old path and created for the new, a deleted one stays in the
+  tree as a deleted change to review (Amendment 29). A folder made or emptied is no `file_edit` (the
+  log is of files), and a project folder has no watcher; the screen re-reads the tree for both.
+- **Empty folders are in the tree** (`tree.ts`). `git ls-files` lists files, so a new folder was on
+  disk and nowhere on screen. In a repo, `untrackedDirs` (`git.ts:194`, `ls-files -o --directory`)
+  names the untracked folders, run beside `listFiles`, and `emptyUnder` (`tree.ts:159`) opens them, at
+  most 2,000 folders per read, for the ones with nothing listable; they go in as Amendment 90's empty
+  directories already did. With no git, `walkFiles` lists an empty folder as itself. The deny-list
+  (`node_modules` and the rest) still applies.
+- **Files tree** (`FileTree.tsx`, `TreeVerbs`). A folder row has **+/** (new folder) after its **+**,
+  and every row on disk has **✎** (rename) and **⌫** (delete), all siblings of the row's button, shown
+  on hover and focus and always where there is no hover. A file row is now a `.c5-filerow` holding its
+  button and those. On a focused row **F2** renames and **Delete** or **⌘⌫** deletes. Each tree's
+  heading has **+/** beside its **+** (`route.tsx` `RootSection`). One box at a time in a section.
+- **The box is `NewFileForm`**, with a `kind`: `folder` starts at `new-folder` and may end in `/`
+  (`checkFolderName`, `naming.ts:93`); a rename starts at the entry's whole path with its last name
+  selected, a file's without its extension (`prefillRename`, `naming.ts:82`), opens in the row's place,
+  and Enter on the name it already has puts it away. Enter commits, Esc cancels, the daemon's sentence
+  shows under it. A made folder is opened in the tree, with its ancestors.
+- **Delete asks** (`deleting.ts`, pure; `DeleteConfirm.tsx` draws it under the row). A file is one
+  confirm naming it, saying whether git has it. An empty folder is one confirm. A folder with files is
+  a first confirm naming the folder and how many files it holds, then a second, "Are you sure? N files
+  go with notes/, and this cannot be undone from Conductor.", whose yes alone sends `recursive=1`
+  (`deleteSteps`, `deleting.ts:91`; `onYes`, `:127`). The count is the daemon's (`GET …/entry`); the
+  tree's own count shows until it lands and the button waits for it, because the tree leaves out what a
+  recursive delete takes. The focus starts on **keep it**, and Esc is it, as in the tab strip's confirm.
+- **Open tabs follow** (`tabs.ts`, pure: `renameTabs` `:361`, `closeUnder` `:389`, `tabsUnder`, `renamedPath`).
+  A rename moves every tab on the path, or inside the folder, to the new path in the same place in the
+  strip with its view and scroll, the front tab stays in front, and the folders opened and closed under
+  it keep that state. `followRename` (`useTabs.ts:223`) moves their unsaved edits first, so the sweep in
+  `update` keeps them: what you were typing stays. A delete closes the tabs at or under it once the
+  delete has landed (`closeDeleted`); their unsaved edits are named in the first step ("Your unsaved
+  edit to docs/a.md goes with it."), which is the asking a dirty tab's close does, said once for all.
+- **Client** (`useWorkspace.ts:423-463`): `createFolder`, `renameEntry`, `entryInfo`, `deleteEntry`,
+  next to `createFile`, each through `rootEndpoint` and each re-reading its root's tree when it lands;
+  a refusal rejects with the daemon's sentence and re-reads nothing. A renamed file's last copy is
+  carried to its new name, so its tab shows at once.
+- **Navigator +** (`Navigator.tsx:201-384`). Each folder node and each folder row in it has a **+**
+  (`AddButton`, a sibling of the row's button, `aria-label` "New file in …", hover and focus as the
+  Files tree's, `.sh-nav-add` in `shell.css`). It opens the same `NewFileForm` in place; the file is
+  made with `createFile`, opened ready to type with `openNew`, then Files is shown on it
+  (`navigate(SCREEN.files, navFileLink(…))`). Only a new file here; rename and delete are on Files.
+- **Not changed:** writes and `createOnly`, `resolveForWrite`, Amendment 114's `…/folder`. Colours are
+  existing tokens only (`--surf`, `--line2`, `--ink`, `--ink3`, `--fail`, `--bg2`).
+- **Not done:** drag and drop to move; renaming or deleting the root folder of a tree (refused by
+  design); a rename or delete in the navigator; the Files tree and the navigator have not been looked at
+  in a browser in either theme. An empty folder that git ignores is listed if it sits inside an
+  untracked folder (`emptyUnder` reads the disk there). The tree read now runs one more `git ls-files`
+  (in parallel with the first).
+
+**Verify:** `workspace/verify-files-verbs.ts` (101 checks, a temp repo opened as an in_place job and a
+plain folder as a project's directory, port 7838): for each root, a new folder and its parents (201,
+in the tree while empty), 409 on a taken name, on a file and under a file, three at once give one 201
+and two 409; rename of a file, of a folder into new folders, of a link (as a link), 404 from missing,
+409 onto a file and onto a folder, 400 into itself and to the same name, a case-only rename (the disk
+asked whether it is case-blind; on macOS it is) and, there, another file onto a case-different name is
+409; `entry` counts files and folders and says what git has (null without git); delete of a file and a
+link (never its target), 404 when gone, 409 without recursive (and with `recursive=0`), 400 for
+`recursive=yes`, gone with `recursive=1`, an empty folder without it, 409 for a folder holding a `.git`;
+`..`, `../outside.txt`, an absolute path, `/etc`, `.git`, `.git/hooks/pre-commit`, `.GIT/config`,
+`src/../.git/x`, `.` and `src/..` refused by every verb (folder, delete, entry, rename from and to),
+`.git` through a link and a link out of the root refused; empty folders inside untracked and tracked
+ones listed, `node_modules` still not. For the job, a renamed tracked file emits its deletion and the
+new file, a deleted folder emits each tracked file as deleted and the tree keeps them. A job with no
+workspace and a folder not the project's are 404s, no `dir` is a 400. `files/verify.ts` "new folder,
+rename and delete": `renameTabs` (order, front tab, other roots, folder state, view and scroll, a
+displaced tab, no-ops), `tabsUnder` and `closeUnder`, the live store moving an unsaved edit with a
+rename and dropping it with a delete, `deleteSteps` and `onYes` (one step for a file and an empty
+folder, two for a folder with files, the count repeated, recursive only on the second yes, waiting for
+the daemon's count, "1 file goes", "at least", unsaved edits and git named), `countTreeFiles`,
+`prefillFolder`, `prefillRename`, `checkFolderName`, the tree drawn with and without `verbs` (which rows
+get which buttons, siblings of the row's button, the + still first, rename in place, the folder box
+and the confirm under their rows, F2 and Delete), the four client calls for both roots with their
+re-reads, the screen's wiring, the navigator's `+` on folder rows and nodes, and tokens only in the
+new CSS. `shell/verify.ts`'s "fetched with the Files screen's own hook" now accepts the import naming
+more than `useFileTree`.
+
 ### Amendment 137 — post-merge, applied. **A browser opens the sockets in token mode with `?token=`.**
 
 Daemon only (`daemon/src/index.ts`, `daemon/src/terminal/verify.ts`). Asked in the 12 Oct TODO's loose
