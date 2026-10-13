@@ -116,6 +116,7 @@ async function main(): Promise<void> {
   check('a background shell command is left as it is: a dev server for this turn is meant to stop with it', foregroundInput('Bash', { command: 'npm run dev', run_in_background: true }) === null);
   check('a workflow is declined, saying what to do instead', /Agent calls in the foreground/.test(declinedHere('Workflow') ?? ''));
   check('nothing else is declined', declinedHere('Agent') === null && declinedHere('Bash') === null && declinedHere('Edit') === null);
+  check('and not to end its turn to wait on something outside', /never end it to wait/.test(TURN_END_LINE) && /gh run watch/.test(TURN_END_LINE) && /foreground first/.test(TURN_END_LINE));
   check('every agent is told, after its persona', withTurnEndLine('Be terse.') === `Be terse.\n\n${TURN_END_LINE}` && withTurnEndLine(null) === TURN_END_LINE && withTurnEndLine('  ') === TURN_END_LINE);
   check('the line says what dies and what to do', /process ends/.test(TURN_END_LINE) && /background subagents, workflows, background shell commands/.test(TURN_END_LINE) && /foreground/.test(TURN_END_LINE));
 
