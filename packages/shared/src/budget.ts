@@ -31,22 +31,86 @@ export function localDayOf(d: Date = new Date()): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** The most an agent may spend, as a multiple of its budget. */
+/** The most an agent may spend, as a multiple of its budget, when no setting says otherwise. */
 export const BUDGET_CEILING = 2;
+
+/**
+ * The ceiling is a setting (Amendment 140): `conductor.budgetCeiling`, a number from 1 to 10.
+ * Each side keeps its own copy of the settings (the daemon its file, the page its map) and
+ * says where through `readBudgetCeilingFrom`, so this file imports neither; `ceilingOf` reads
+ * it on every call, so a change applies at the next check with nothing to restart.
+ */
+export const BUDGET_CEILING_KEY = 'conductor.budgetCeiling';
+export const BUDGET_CEILING_MIN = 1;
+export const BUDGET_CEILING_MAX = 10;
+
+/** Why a value won't do for the ceiling, or null. The daemon's rule and the Settings field both say this. */
+export function budgetCeilingProblem(v: string): string | null {
+  const t = v.trim();
+  const n = Number(t);
+  return t !== '' && Number.isFinite(n) && n >= BUDGET_CEILING_MIN && n <= BUDGET_CEILING_MAX
+    ? null
+    : `a number from ${BUDGET_CEILING_MIN} to ${BUDGET_CEILING_MAX}, such as 2 or 1.5`;
+}
+
+/** The setting's value as a multiple, or the default when it is absent or not one. */
+export function parseBudgetCeiling(v: string | null | undefined): number {
+  return v !== null && v !== undefined && budgetCeilingProblem(v) === null ? Number(v.trim()) : BUDGET_CEILING;
+}
+
+let ceilingSource: () => number = () => BUDGET_CEILING;
+
+/** Where this side keeps the setting: the daemon's file, the page's settings map. */
+export function readBudgetCeilingFrom(fn: () => number): void {
+  ceilingSource = fn;
+}
+
+/** The ceiling in force: the setting, held to 1-10, else 2. */
+export function budgetCeiling(): number {
+  const n = ceilingSource();
+  return Number.isFinite(n) && n >= BUDGET_CEILING_MIN && n <= BUDGET_CEILING_MAX ? n : BUDGET_CEILING;
+}
+
+/**
+ * The ceiling in words, for a sentence: "twice" at 2, else "1.5×" (Amendment 140). So a line
+ * that said "stopped at twice its $5 daily budget" still does at the default.
+ */
+export function ceilingWords(n: number = budgetCeiling()): string {
+  return n === 2 ? 'twice' : `${n}×`;
+}
+
+/**
+ * Whether an agent paused only by the day's budget or its ceiling is continued when the day
+ * changes (Amendment 140): `on` unless the setting says `off`.
+ */
+export const BUDGET_RESUME_KEY = 'conductor.budgetResumeAtMidnight';
+
+export function budgetResumeProblem(v: string): string | null {
+  return v === 'on' || v === 'off' ? null : 'on or off';
+}
+
+export function resumesAtMidnight(v: string | null | undefined): boolean {
+  return v !== 'off';
+}
 
 /**
  *  ok       under the budget.
  *  over     at or past the budget, under the ceiling: a warning, nothing stops.
- *  ceiling  at or past twice the budget: the hard stop (paused, `budget_exhausted`).
+ *  ceiling  at or past the ceiling (twice the budget unless set otherwise): the hard stop
+ *           (paused, `budget_exhausted`).
  */
 export type BudgetState = 'ok' | 'over' | 'ceiling';
 
 /** What a budget counts: dollars, or input plus output tokens. */
 export type BudgetUnit = 'usd' | 'tokens';
 
-/** The figure that stops an agent given `budget`. Exact: doubling loses nothing. */
-export function ceilingOf(budget: number): number {
-  return budget * BUDGET_CEILING;
+/**
+ * The figure that stops an agent given `budget`: the budget times the ceiling in force
+ * (`budgetCeiling`, 2 unless the setting says otherwise), or times `ceiling` when the caller
+ * says. Rounded to a millionth, so 25 x 1.1 is 27.5 and not 27.500000000000004.
+ */
+export function ceilingOf(budget: number, ceiling: number = budgetCeiling()): number {
+  return Math.round(budget * ceiling * 1e6) / 1e6;
 }
 
 /** Where `spent` stands against `budget`. null = no budget, so never anything. */

@@ -65,7 +65,7 @@ import { preview } from '../preview/index.js';
 import { workspace } from '../workspace/service.js';
 import type { WorkspaceRecord } from '../workspace/store.js';
 import { ALERT_AFTER_MS, Alerts, alerts, classifyRetry, initAlerts, retryNeedsYou } from './alerts.js';
-import { JOB_BUDGET_NOTE, agentBudget, budgetNote, budgetRefusal, budgetState, budgetStop, capState, ceilingOf, isRenewedNote, jobBudgetState, jobCap, renewals, renewedNote, runLimit, tokens } from './budget.js';
+import { JOB_BUDGET_NOTE, agentBudget, budgetNote, budgetRefusal, budgetState, budgetStop, capState, ceilingOf, continuations, isRenewedNote, jobBudgetState, jobCap, newDayNote, renewals, renewedNote, resumeAtMidnight, runLimit, tokens } from './budget.js';
 import { backendFor, providerRefusal, registerBackend } from './backends/index.js';
 import {
   DEFAULT_AUTONOMY,
@@ -120,9 +120,11 @@ import {
   onRetryDue,
   resetRetryBook,
   retryBook,
+  retryDelaysMs,
   retryNote,
   type Clock,
 } from './retry.js';
+import { BUDGET_CEILING_KEY, BUDGET_RESUME_KEY, RETRY_DELAYS_KEY, budgetCeiling } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
 import { forgetWindows, recordWindows, reportedWindow } from './windows.js';
 import {
@@ -145,7 +147,7 @@ import {
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
-import { HANDOFF_ASK, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { HANDOFF_ASK, NEW_DAY_NUDGE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
@@ -4068,6 +4070,9 @@ async function main(): Promise<void> {
     };
 
     // The watch is the one Alerts started. Its timer is ours to drive while the clock is fake.
+    // This section is about the day's spend; midnight's continue (Amendment 140) is off for it,
+    // so the budget pauses earlier sections left are not woken by its turns.
+    await send('PATCH', '/api/settings', { settings: { [BUDGET_RESUME_KEY]: 'off' } });
     const watch = dayWatch();
     check('the daemon is watching the day', watch !== null);
     watch?.stop();
@@ -4127,6 +4132,7 @@ async function main(): Promise<void> {
     setDayClock();
     watch?.check();
     watch?.start();
+    await send('PATCH', '/api/settings', { settings: { [BUDGET_RESUME_KEY]: null } });
     db.prepare("DELETE FROM cost_daily WHERE day >= '2031-01-01'").run();
     eyes.close();
     sdk.query = realQuery;
@@ -5625,10 +5631,13 @@ async function main(): Promise<void> {
     rjob('job_retry_a');
     rfix('rt_a', 'job_retry_a');
     const bell = await connect();
+    // Subscribed before anything happens: a frame broadcast before the hello is not this tab's.
+    await until(() => bell.frames.some((f) => f.type === 'hello'));
     const atA = runs.length;
     sup.pump();
     check('the agent starts', await until(() => runs.length === atA + 1 && getAgent(db, 'rt_a')?.status === 'working'));
     let run = runs[atA]!;
+    let firstCardId: string | undefined;
     for (let i = 0; i < MAX_RETRIES; i += 1) {
       const delay = RETRY_DELAYS_MS[i]!;
       failWith(run, null, 'unknown');
@@ -5641,19 +5650,22 @@ async function main(): Promise<void> {
       );
       check('…its slot is free and its job is still live', sup.slots.used === 0 && getJob(db, 'job_retry_a')?.status === 'working', `${sup.slots.used} used, job ${getJob(db, 'job_retry_a')?.status}`);
       const card = reconnecting('rt_a');
+      // From the first retry (Amendment 140, Q3): it was from the second (Amendment 123).
       check(
-        i === 0 ? '…the first is a blip: on its line, not in Needs You' : `…Needs You has the card: ${i + 1} of 5, at the time it will try`,
-        i === 0
-          ? card === undefined
-          : card?.attempt === i + 1 && card.maxRetries === 5 && card.cause === 'unreachable' && card.jobId === 'job_retry_a' && Date.parse(card.retryAt ?? '') === clock.now() + delay,
+        `…Needs You has the card: ${i + 1} of 5, at the time it will try${i === 0 ? ' (from the first retry, Amendment 140)' : ''}`,
+        card?.attempt === i + 1 && card.maxRetries === 5 && card.cause === 'unreachable' && card.jobId === 'job_retry_a' && Date.parse(card.retryAt ?? '') === clock.now() + delay,
         JSON.stringify(card),
       );
-      if (i === 1) {
-        await settle(80);
-        check('…and every tab is told', bell.frames.some((f) => f.type === 'alerts' && f.alerts.some((a) => a.kind === 'reconnecting' && a.agentIds[0] === 'rt_a')));
+      if (i === 0) {
+        // A new connection is sent the log so far before what is live, so this waits for the frame rather than a fixed time.
+        check('…and every tab is told at the first, so a page chimes as for any alert', await until(() => bell.frames.some((f) => f.type === 'alerts' && f.alerts.some((a) => a.kind === 'reconnecting' && a.agentIds[0] === 'rt_a' && a.attempt === 1))));
         const snap = await get<Snapshot>('/api/snapshot');
         check('…a fresh tab gets it in the snapshot', snap.body.alerts.some((a) => a.kind === 'reconnecting'), JSON.stringify(snap.body.alerts.map((a) => a.kind)));
       }
+      if (i === 1) {
+        check('…one card for the bout: the second retry updates it, with the same id', alerts().list().filter((a) => a.kind === 'reconnecting' && a.agentIds.includes('rt_a')).length === 1 && card?.id === firstCardId, `${card?.id} / ${firstCardId}`);
+      }
+      if (i === 0) firstCardId = card?.id;
       const before = runs.length;
       clock.advance(delay - 1);
       await settle(60);
@@ -5981,6 +5993,56 @@ async function main(): Promise<void> {
     await until(() => getAgent(db, 'rt_cp_query')?.status === 'failed');
     check("copilot: an error that is not the API's is failed as before", getAgent(db, 'rt_cp_query')?.status === 'failed' && retryOf('rt_cp_query') === undefined);
 
+    // ── the delays are a setting (Amendment 140) ──
+    const setDelays = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [RETRY_DELAYS_KEY]: v } });
+    const refusedDelays: number[] = [];
+    for (const bad of ['', '0', '5, 15, 30, 60, 300, 600', '1801', '2.5', 'soon', '5,,15', '-5']) refusedDelays.push((await setDelays(bad)).status);
+    check(
+      'a delay list that is not 1-5 whole seconds, each 1 to 1800, is refused → 400, and the default stays',
+      refusedDelays.every((s) => s === 400) && retryDelaysMs().join() === RETRY_DELAYS_MS.join(),
+      refusedDelays.join(),
+    );
+    check('the sentence says what will do', /one to 5 whole numbers of seconds, separated by commas, each from 1 to 1800/.test((await setDelays('0')).body.detail ?? ''));
+    check('the longest it takes is 30 min, and five of them', (await setDelays('1800, 1800, 1800, 1800, 1800')).status === 200 && retryDelaysMs().join() === '1800000,1800000,1800000,1800000,1800000');
+    check('a good one is taken, spaces or none', (await setDelays('2,7')).status === 200 && (await setDelays('2, 7')).status === 200 && retryDelaysMs().join() === '2000,7000', retryDelaysMs().join());
+    check(
+      'the rule reads it: two tries, 2 s then 7 s, and the third failure is out of tries',
+      JSON.stringify(ended({ used: 0 })) === '{"retry":true,"cause":"unreachable","attempt":1,"of":2,"delayMs":2000}' &&
+        JSON.stringify(ended({ used: 1 })) === '{"retry":true,"cause":"unreachable","attempt":2,"of":2,"delayMs":7000}' &&
+        JSON.stringify(ended({ used: 2 })) === '{"retry":false,"why":"out_of_tries"}',
+      JSON.stringify([ended({ used: 0 }), ended({ used: 1 }), ended({ used: 2 })]),
+    );
+    rjob('job_retry_set');
+    rfix('rt_set', 'job_retry_set');
+    const atSet = runs.length;
+    sup.pump();
+    await until(() => runs.length === atSet + 1);
+    failWith(runs[atSet], null, 'unknown');
+    await until(() => isWaiting('rt_set'));
+    const setCard = reconnecting('rt_set');
+    check(
+      'through the supervisor: it waits the set 2 s (1 of 2), and the card is up at the first',
+      retryOf('rt_set')?.delayMs === 2_000 && retryOf('rt_set')?.of === 2 && setCard?.attempt === 1 && setCard.maxRetries === 2,
+      `${JSON.stringify(retryOf('rt_set'))} ${JSON.stringify(setCard)}`,
+    );
+    check(
+      '…and the transcript says the set time',
+      eventLog().forAgent('rt_set').some((e) => e.payload.kind === 'status' && e.payload.error === "can't reach the model — trying again in 2 s (1 of 2)"),
+    );
+    clock.advance(1_999);
+    await settle(60);
+    check('…nothing starts a moment early', runs.length === atSet + 1 && isWaiting('rt_set'));
+    clock.advance(1);
+    check('…at 2 s it resumes', await until(() => runs.length === atSet + 2 && getAgent(db, 'rt_set')?.status === 'working'));
+    failWith(runs[atSet + 1], null, 'unknown');
+    await until(() => isWaiting('rt_set'));
+    check('…the second wait is the set 7 s (2 of 2)', retryOf('rt_set')?.delayMs === 7_000 && retryOf('rt_set')?.attempt === 2 && retryOf('rt_set')?.of === 2, JSON.stringify(retryOf('rt_set')));
+    clock.advance(7_000);
+    await until(() => runs.length === atSet + 3);
+    failWith(runs[atSet + 2], null, 'unknown');
+    check('…and the third failure is failed: two tries were all it had', await until(() => getAgent(db, 'rt_set')?.status === 'failed') && retryBook().waiting('rt_set') === undefined && reconnecting('rt_set') === undefined);
+    check('removing the setting puts the default back', (await setDelays(null)).status === 200 && retryDelaysMs().join() === RETRY_DELAYS_MS.join() && JSON.stringify(ended({ used: 0 })).includes('"of":5'));
+
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     resetRetryBook();
@@ -6176,6 +6238,42 @@ async function main(): Promise<void> {
     check('raise one agent\'s budget ($25 to $50) and the job\'s ceiling is $150, so it may start', (await send('POST', '/api/agents/bc_b/resume')).status === 200 && (await until(() => runs.length === at + 1)));
     runs[at]?.finish({ cost: 45, reason: 'completed' });
     await until(() => getAgent(db, 'bc_b')?.status === 'done');
+
+    // ── the ceiling is a setting (Amendment 140) ────────────────────────────────
+    const setCeiling = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [BUDGET_CEILING_KEY]: v } });
+    const refusedCeil: number[] = [];
+    for (const bad of ['0.5', '0', '10.5', '11', 'twice', '', 'Infinity', '-2']) refusedCeil.push((await setCeiling(bad)).status);
+    check('a ceiling that is not a number from 1 to 10 is refused → 400, and twice stays', refusedCeil.every((s) => s === 400) && budgetCeiling() === 2 && ceilingOf(25) === 50, refusedCeil.join());
+    check('the sentence says what will do', /a number from 1 to 10/.test((await setCeiling('11')).body.detail ?? ''));
+    bfix('b_ceil', 'job_b124', { sdkSessionId: 'sess_b_ceil', costUsd: 40 });
+    alerts().refresh();
+    check('at twice, $40 of $25 is over its budget and only warned about', budgetState(getAgent(db, 'b_ceil')!) === 'over' && warns('b_ceil').length === 1);
+    const ceilMark = eyes.frames.length;
+    check('1.5 is taken', (await setCeiling('1.5')).status === 200 && budgetCeiling() === 1.5);
+    check('the ceiling is the budget times it, read at once', ceilingOf(25) === 37.5 && ceilingOf(500_000) === 750_000 && ceilingOf(25, 2) === 50 && ceilingOf(25, 1.1) === 27.5);
+    check(
+      'the lines move with it: an agent, a token budget and a job',
+      budgetState(spend(37.49, 25)) === 'over' && budgetState(spend(37.5, 25)) === 'ceiling' &&
+        budgetState(spend(0, null, 500_000, 249_999, 500_000)) === 'over' && budgetState(spend(0, null, 500_000, 250_000, 500_000)) === 'ceiling' &&
+        jobBudgetState(pair, 74.99) === 'over' && jobBudgetState(pair, 75) === 'ceiling',
+    );
+    check('the SDK is given what is left of the new ceiling', near(runLimit(25, 20) ?? undefined, 17.5), String(runLimit(25, 20)));
+    check('the change is told at once: $40 is past the new ceiling, so its warning goes', warns('b_ceil').length === 0 && eyes.frames.slice(ceilMark).some((f) => f.type === 'alerts'));
+    const ceilRefused = await said('b_ceil');
+    check(
+      'a message to it is refused at the 1.5x ceiling, the sentence saying where it stops',
+      ceilRefused.status === 409 && ceilRefused.body.detail === 'The Builder has spent $40 of its $25 daily budget today, which stops it at $37.50 — raise it to continue, or it renews at midnight.',
+      JSON.stringify(ceilRefused.body),
+    );
+    check('the pause note says the same', budgetNote(getAgent(db, 'b_ceil')!) === 'budget reached for today — spent $40 of its $25 daily budget, which stops it at $37.50', budgetNote(getAgent(db, 'b_ceil')!));
+    check('at 1 the budget is the stop', (await setCeiling('1')).status === 200 && budgetState(spend(25, 25)) === 'ceiling' && budgetState(spend(24.99, 25)) === 'ok');
+    check('10 is taken', (await setCeiling('10')).status === 200 && budgetCeiling() === 10);
+    at = runs.length;
+    const ceilGo = await said('b_ceil', 'go on');
+    check('and at 10 it runs again, the SDK given the $210 left under $250', ceilGo.status === 200 && (await until(() => runs.length === at + 1)) && near(runs[at]?.options.maxBudgetUsd, 210), `${JSON.stringify(ceilGo.body)} ${runs[at]?.options.maxBudgetUsd}`);
+    runs[at]?.finish({ cost: 41, reason: 'completed' });
+    await until(() => getAgent(db, 'b_ceil')?.status === 'done');
+    check('removing the setting puts twice back', (await setCeiling(null)).status === 200 && budgetCeiling() === 2 && ceilingOf(25) === 50);
 
     eyes.close();
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
@@ -6456,12 +6554,15 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log("\n26 · an agent's and a job's budget count what was spent today (Amendment 129)");
+  console.log("\n26 · an agent's and a job's budget count what was spent today (Amendment 129), with midnight's continue off (Amendment 140)");
   {
     sdk.query = fakeQuery as typeof sdk.query;
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     const eyes = await connect();
+    // Amendment 129's midnight renews and resumes nothing. Since Amendment 140 that is the
+    // day change with `conductor.budgetResumeAtMidnight` off; section 27 has it on.
+    check('the continue at midnight is set off for this section', (await send('PATCH', '/api/settings', { settings: { [BUDGET_RESUME_KEY]: 'off' } })).status === 200 && !resumeAtMidnight());
     const D1 = '2032-06-10';
     const D2 = '2032-06-11';
     const D3 = '2032-06-12';
@@ -6579,7 +6680,7 @@ async function main(): Promise<void> {
     check('d_over is under its budget again: its own spent is back at zero, and the lifetime $27 stays', getAgent(db, 'd_over')?.spentToday?.day === D2 && getAgent(db, 'd_over')?.spentToday?.usd === 0 && budgetState(getAgent(db, 'd_over')!) === 'ok' && near(getAgent(db, 'd_over')?.costUsd, 27));
     check('the agents that spent yesterday are pushed afresh, so an open page redraws', eyes.frames.slice(mark).some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'd_over' && a.spentToday?.day === D2 && a.spentToday.usd === 0)), `${eyes.frames.length - mark} frames`);
     check('and a stale day stamp reads as nothing spent, for a page that has not heard yet', JSON.stringify(agentBudget({ spentToday: { day: D1, usd: 99, tokens: 0 }, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } })) === JSON.stringify({ unit: 'usd', spent: 0, budget: 25 }));
-    check('nothing started by itself: not one new run at midnight', runs.length === runsAtTurn && getAgent(db, 'd_pause')?.status === 'paused' && getAgent(db, 'e_b')?.status === 'paused' && getAgent(db, 'd_user')?.status === 'paused');
+    check('with the continue off, nothing started by itself: not one new run at midnight', runs.length === runsAtTurn && getAgent(db, 'd_pause')?.status === 'paused' && getAgent(db, 'e_b')?.status === 'paused' && getAgent(db, 'd_user')?.status === 'paused');
     check('the agent paused at its ceiling stays paused, and its pause now says its budget is renewed', budgetStop(note('d_pause') ?? '') === 'budget_exhausted' && isRenewedNote(note('d_pause') ?? '') && /renewed for 2032-06-11.*no raise needed/.test(note('d_pause') ?? ''), String(note('d_pause')));
     check('the Budget reached card is the same single card, marked renewed', stops('d_pause').length === 1 && stops('d_pause')[0]!.renewed === true, JSON.stringify(stops('d_pause')));
     check("the job's held agent too, with the job's own words", getAgent(db, 'e_b')?.status === 'paused' && budgetStop(note('e_b') ?? '') === 'job_budget_reached' && isRenewedNote(note('e_b') ?? '') && stops('e_b')[0]?.renewed === true, String(note('e_b')));
@@ -6681,6 +6782,183 @@ async function main(): Promise<void> {
     watch?.check();
     watch?.start();
     db.prepare("DELETE FROM cost_daily WHERE day >= '2032-01-01'").run();
+    check('the setting removed, the continue is on again', (await send('PATCH', '/api/settings', { settings: { [BUDGET_RESUME_KEY]: null } })).status === 200 && resumeAtMidnight());
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
+  console.log('\n27 · a new day continues the agents only its budget paused (Amendment 140, Q4 of wave 10)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const Q1 = '2033-02-10';
+    const Q2 = '2033-02-11';
+    const Q3 = '2033-02-12';
+    const Q4 = '2033-02-13';
+
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2033, 1, 10, 23, 50, 0);
+    setDayClock(() => now);
+    watch?.check();
+    check('the fake clock sets today: day 1', localDay() === Q1, localDay());
+    const goTo = (to: Date): boolean => {
+      now = to;
+      return watch?.check() === true;
+    };
+    const stops = (id: string): Alert[] => alerts().list().filter((a) => a.kind === 'budget' && a.agentIds.includes(id));
+    const note = (id: string): string | null => {
+      const p = lastStatus(id);
+      return p?.kind === 'status' ? (p.error ?? null) : null;
+    };
+    const queuedWith = (id: string, day: string): boolean =>
+      eventLog().forAgent(id).some((e) => e.payload.kind === 'status' && e.payload.status === 'queued' && e.payload.error === newDayNote(day));
+    const runFor = (session: string, from: number): FakeRun | undefined => runs.slice(from).find((r) => r.options.resume === session);
+    const statusAt = (id: string, iso: string): void => {
+      db.prepare("UPDATE events SET ts = ? WHERE agent_id = ? AND kind = 'status'").run(iso, id);
+    };
+    const setResume = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [BUDGET_RESUME_KEY]: v } });
+
+    // ── the setting ─────────────────────────────────────────────────────────────
+    check('the setting is on or off, nothing else → 400', (await setResume('yes')).status === 400 && (await setResume('')).status === 400 && /on or off/.test((await setResume('true')).body.detail ?? ''));
+    check('with nothing set it is on', resumeAtMidnight());
+
+    const qpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'midnight140' })).body.project.id;
+    const qjob = (id: string): void => {
+      insertJob(db, { id, projectId: qpid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const qfix = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: qpid, ...a });
+    qjob('job_q4');
+    qjob('job_q4_job');
+
+    // On day 1: one at its own ceiling, one held for its job's, one a person paused, one paused for something else.
+    qfix('q_ceil', 'job_q4', { status: 'queued', sdkSessionId: 'sess_q_ceil', costUsd: 55 });
+    qfix('qj_a', 'job_q4_job', { sdkSessionId: 'sess_qj_a', costUsd: 55 });
+    qfix('qj_b', 'job_q4_job', { role: 'reviewer', status: 'queued', dependsOn: ['qj_a'], sdkSessionId: 'sess_qj_b', costUsd: 45 });
+    qfix('q_user', 'job_q4', { status: 'paused', sdkSessionId: 'sess_q_user', costUsd: 60 });
+    eventLog().emit({ projectId: qpid, jobId: 'job_q4', agentId: 'q_user' }, { kind: 'status', status: 'paused', error: 'paused by the user' });
+    qfix('q_other', 'job_q4', { status: 'paused', sdkSessionId: 'sess_q_other' });
+    eventLog().emit({ projectId: qpid, jobId: 'job_q4', agentId: 'q_other' }, { kind: 'status', status: 'paused', error: strandNote('architect') });
+    let at = runs.length;
+    sup.pump();
+    await until(() => getAgent(db, 'q_ceil')?.status === 'paused' && getAgent(db, 'qj_b')?.status === 'paused');
+    check('on day 1: q_ceil is paused at its ceiling, qj_b held for its job, and nothing ran', budgetStop(note('q_ceil') ?? '') === 'budget_exhausted' && note('qj_b') === JOB_BUDGET_NOTE && runs.length === at && stops('q_ceil').length === 1, String(note('q_ceil')));
+
+    // ── midnight, with one slot ─────────────────────────────────────────────────
+    // What earlier sections left running keeps its slots; one more than that is free.
+    const held = sup.slots.used;
+    check('one slot free', (await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: String(held + 1) } })).status === 200 && slotLimit() === held + 1);
+    const mark = eyes.frames.length;
+    at = runs.length;
+    check('the day turns', goTo(new Date(2033, 1, 11, 0, 0, 20)) && localDay() === Q2);
+    await until(() => runs.length === at + 1);
+    await settle(80);
+    const both = ['q_ceil', 'qj_b'].map((id) => getAgent(db, id)?.status).sort().join();
+    check('both are continued, within the slots: one runs, the other is queued for the slot', runs.length === at + 1 && sup.slots.used === held + 1 && both === 'queued,working', `${both}, ${runs.length - at} runs`);
+    check('each is queued with a note on its transcript that a new day began', queuedWith('q_ceil', Q2) && queuedWith('qj_b', Q2) && newDayNote(Q2) === "a new day's budget began (2033-02-11) — continuing");
+    const first = runs[at]!;
+    await until(() => first.prompts.length > 0);
+    const firstId = first.options.resume === 'sess_q_ceil' ? 'q_ceil' : 'qj_b';
+    check('the one that runs resumes its own session, and is told why', (first.options.resume === 'sess_q_ceil' || first.options.resume === 'sess_qj_b') && first.prompts[0] === NEW_DAY_NUDGE, JSON.stringify(first.prompts));
+    check('with the whole of the new day\'s ceiling', near(first.options.maxBudgetUsd, 50), String(first.options.maxBudgetUsd));
+    check('their Budget reached cards clear, and every tab hears it', stops('q_ceil').length === 0 && stops('qj_b').length === 0 && eyes.frames.slice(mark).some((f) => f.type === 'alerts'));
+    check("a pause a person made, and one that was not the budget's, are left as they were", getAgent(db, 'q_user')?.status === 'paused' && note('q_user') === 'paused by the user' && getAgent(db, 'q_other')?.status === 'paused' && note('q_other') === strandNote('architect'));
+    first.finish({ cost: 56, reason: 'completed' });
+    const secondId = firstId === 'q_ceil' ? 'qj_b' : 'q_ceil';
+    check('when the slot frees, the other goes, told the same', await until(() => runFor(secondId === 'q_ceil' ? 'sess_q_ceil' : 'sess_qj_b', at + 1) !== undefined));
+    const second = runFor(secondId === 'q_ceil' ? 'sess_q_ceil' : 'sess_qj_b', at + 1)!;
+    await until(() => second.prompts.length > 0);
+    check('…with the nudge', second.prompts[0] === NEW_DAY_NUDGE, JSON.stringify(second.prompts));
+    second.finish({ cost: secondId === 'q_ceil' ? 56 : 46, reason: 'completed' });
+    await until(() => getAgent(db, 'q_ceil')?.status === 'done' && getAgent(db, 'qj_b')?.status === 'done');
+    const atMsg = runs.length;
+    await send('POST', '/api/agents/q_ceil/message', { text: 'one more thing' });
+    const msgRun = (await until(() => runs.length === atMsg + 1 && runs[atMsg]!.prompts.length > 0)) ? runs[atMsg] : undefined;
+    check('a later message is an ordinary one: the nudge was for that one run', msgRun?.prompts[0] === 'one more thing', JSON.stringify(msgRun?.prompts));
+    msgRun?.finish({ cost: 57, reason: 'completed' });
+    await until(() => getAgent(db, 'q_ceil')?.status === 'done');
+    check('a second turn on the same day continues nothing', sup.newDay(Q2, Q1) === 0);
+    check('the slots back to the default', (await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: null } })).status === 200);
+
+    // ── while everything is paused ─────────────────────────────────────────────
+    qfix('q_hold', 'job_q4', { status: 'queued', sdkSessionId: 'sess_q_hold', costUsd: 55 });
+    sup.pump();
+    await until(() => getAgent(db, 'q_hold')?.status === 'paused');
+    await sup.hold();
+    at = runs.length;
+    check('on day 2 q_hold is paused at its ceiling, and everything is paused until a time', budgetStop(note('q_hold') ?? '') === 'budget_exhausted' && sup.held);
+    check('the day turns again', goTo(new Date(2033, 1, 12, 0, 0, 20)) && localDay() === Q3);
+    await settle(80);
+    check('it is continued, but waits for the pause of everything: queued, not run', getAgent(db, 'q_hold')?.status === 'queued' && queuedWith('q_hold', Q3) && runs.length === at);
+    sup.release();
+    check('when the pause ends it goes, told the new day began', await until(() => runFor('sess_q_hold', at) !== undefined && runFor('sess_q_hold', at)!.prompts.length > 0) && runFor('sess_q_hold', at)!.prompts[0] === NEW_DAY_NUDGE);
+    runFor('sess_q_hold', at)!.finish({ cost: 56, reason: 'completed' });
+    await until(() => getAgent(db, 'q_hold')?.status === 'done');
+
+    // ── the rule, pure ─────────────────────────────────────────────────────────
+    const base = { agent: { id: 'x', spentToday: { day: Q3, usd: 0, tokens: 0 }, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 25 } }, note: 'budget reached for today — spent $50 of its $25 daily budget, which stops it at $50', jobAtCeiling: false };
+    const picked = continuations(
+      [
+        base,
+        { ...base, agent: { ...base.agent, id: 'y', spentToday: { day: Q3, usd: 50, tokens: 0 } } },
+        { ...base, agent: { ...base.agent, id: 'z' }, note: 'paused by the user' },
+        { ...base, agent: { ...base.agent, id: 'w' }, note: renewedNote('budget_exhausted', base.agent, Q2) },
+        { ...base, agent: { ...base.agent, id: 'j' }, note: JOB_BUDGET_NOTE },
+        { ...base, agent: { ...base.agent, id: 'k' }, note: JOB_BUDGET_NOTE, jobAtCeiling: true },
+        { ...base, agent: { ...base.agent, id: 'h' }, note: 'paused until the scheduled time' },
+        { ...base, agent: { ...base.agent, id: 'n' }, note: undefined },
+      ],
+      Q3,
+    );
+    check('the rule is pure: a ceiling pause, a renewed one and a job hold with room are continued; the rest are left', picked.join() === 'x,w,j', picked.join());
+
+    // ── the daemon was down at midnight ────────────────────────────────────────
+    qfix('q_down', 'job_q4', { status: 'queued', sdkSessionId: 'sess_q_down', costUsd: 55 });
+    sup.pump();
+    await until(() => getAgent(db, 'q_down')?.status === 'paused');
+    statusAt('q_down', new Date(2033, 1, 12, 22, 0, 0).toISOString());
+    // Paused by its budget today and since raised: a pause from today, which a start must not touch.
+    qfix('q_today', 'job_q4', { status: 'paused', sdkSessionId: 'sess_q_today' });
+    eventLog().emit({ projectId: qpid, jobId: 'job_q4', agentId: 'q_today' }, { kind: 'status', status: 'paused', error: 'budget reached for today — spent $50 of its $25 daily budget, which stops it at $50' });
+    statusAt('q_today', new Date(2033, 1, 13, 0, 30, 0).toISOString());
+    // The clock moves to day 4 with no day turn seen, as a daemon down at midnight would find it.
+    now = new Date(2033, 1, 13, 1, 0, 0);
+    check('day 4 has come with no turn seen', localDay() === Q4 && getAgent(db, 'q_down')?.status === 'paused');
+    at = runs.length;
+    check('at start, the pause from an earlier day is brought up to today: one', sup.catchUpDay() === 1);
+    check('…continued, with the note for today, and it runs told why', queuedWith('q_down', Q4) && (await until(() => runFor('sess_q_down', at) !== undefined && runFor('sess_q_down', at)!.prompts.length > 0)) && runFor('sess_q_down', at)!.prompts[0] === NEW_DAY_NUDGE);
+    check("a budget pause written today is left, and so are a person's and the others", getAgent(db, 'q_today')?.status === 'paused' && getAgent(db, 'q_user')?.status === 'paused' && getAgent(db, 'q_other')?.status === 'paused');
+    check('a second look at start changes nothing', sup.catchUpDay() === 0);
+    runFor('sess_q_down', at)!.finish({ cost: 56, reason: 'completed' });
+    await until(() => getAgent(db, 'q_down')?.status === 'done');
+    check('routes/session.ts runs it at start, after the scheduler, before the first pump', /await sched\.start\(\);[\s\S]{0,400}sup\.catchUpDay\(\);\s*sup\.pump\(\);/.test(readFileSync(new URL('../routes/session.ts', import.meta.url), 'utf8')));
+
+    // With the setting off, the start renews instead, as the day turn does.
+    qfix('q_off', 'job_q4', { status: 'queued', sdkSessionId: 'sess_q_off', costUsd: 55 });
+    sup.pump();
+    await until(() => getAgent(db, 'q_off')?.status === 'paused');
+    statusAt('q_off', new Date(2033, 1, 13, 22, 0, 0).toISOString());
+    now = new Date(2033, 1, 14, 1, 0, 0);
+    check('the continue set off', (await setResume('off')).status === 200 && !resumeAtMidnight());
+    at = runs.length;
+    check(
+      "with it off, the start renews the earlier pauses (q_off's, and q_today's, now a day old) and runs nothing",
+      sup.catchUpDay() === 2 && getAgent(db, 'q_off')?.status === 'paused' && isRenewedNote(note('q_off') ?? '') && isRenewedNote(note('q_today') ?? '') && runs.length === at,
+      `${note('q_off')} / ${note('q_today')}`,
+    );
+    check('the setting removed, on again', (await setResume(null)).status === 200 && resumeAtMidnight());
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // Back to the real day with the continue off, so the pauses left here are not woken by it.
+    await setResume('off');
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    await setResume(null);
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2033-01-01'").run();
     eyes.close();
     sdk.query = realQuery;
   }
@@ -6692,7 +6970,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and nothing resumes by itself at midnight; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

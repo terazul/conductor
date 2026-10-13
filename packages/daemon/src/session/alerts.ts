@@ -371,8 +371,8 @@ export class Alerts {
    * Agents waiting to be tried again because the model couldn't be reached (Amendment 123).
    * One alert per agent, with its own id for the whole bout: the card reads "Reconnecting in
    * 30 s (3 of 5)" and counts down on the page, so a new retry updates it instead of raising
-   * another. Not for the first retry, a blip that waits only 5 s and is on the agent's line.
-   * It clears when the try starts, and nothing derived is left behind: if the fifth fails,
+   * another. From the first retry (Amendment 140; it was from the second, Amendment 123).
+   * It clears when the try starts, and nothing derived is left behind: if the last fails,
    * the agent is `failed` and the failed (or gave-up) alert takes over.
    */
   #reconnecting(): Alert[] {

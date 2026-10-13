@@ -25,6 +25,8 @@ import { readFileSync } from 'node:fs';
 import { ORDER_KEY, SORTS, SORT_KEY, SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects } from '../fleet/order.js';
 import { dirRoot, parseDirRoot } from '../files/tabs.js';
 import { projectNeeds } from './describe.js';
+import { budgetOf, sumBudgets } from './autonomy.js';
+import { readBudgetCeilingFrom } from '@conductor/shared';
 import {
   DETAILS_KEY,
   NAV_OPEN_KEY,
@@ -36,6 +38,7 @@ import {
   isOpen,
   jobLine,
   jobShown,
+  meterTitle,
   navDirId,
   navDrop,
   navFileLink,
@@ -345,7 +348,7 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
   check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'working' && calm.jobs[1]!.status === 'done', calm.jobs.map((j) => j.status).join());
-  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, finished: false }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, finished: false }], []);
+  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false, budget: null }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, finished: false, budget: null }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, finished: false, budget: null }], []);
   check('a failure outranks working, by the Fleet\'s SORT_RANK', failed.length === 1 && failed[0]!.status === 'failed' && SORT_RANK.failed < SORT_RANK.working);
   check('a project with one job still gets its group', api.jobs.length === 1 && api.jobs[0]!.agents.length === 1);
   const unknown = navTree(projects, agents, [], [])[0]!;
@@ -454,9 +457,69 @@ console.log('\n10 · the carry-through: filled marks and a nested repo\'s branch
   );
 }
 
+console.log('\n11 · each agent row has its budget meter, and a job row the sum (Amendment 140)');
+{
+  const DAY = '2032-03-04';
+  const spent = (a: Agent, usd: number, budgetUsd: number | null, tokens?: { spent: number; budget: number }): Agent => ({
+    ...a,
+    spentToday: { day: DAY, usd, tokens: tokens?.spent ?? 0 },
+    autonomy: { ...a.autonomy, budgetUsd, ...(tokens ? { budgetTokens: tokens.budget } : {}) },
+  });
+  const ps = [{ id: 'm', name: 'meters', path: '/src/m' }];
+  const as = [
+    spent(agent('m1', 'm', 'jm', 'builder'), 5, 25), // 20%: ok
+    spent(agent('m2', 'm', 'jm', 'reviewer'), 20, 25), // 80%: warn
+    spent(agent('m3', 'm', 'jm', 'tester'), 0, null), // no budget
+    spent(agent('n1', 'm', 'jn', 'builder'), 0, null), // a job with no budgets at all
+    spent(agent('t1', 'm', 'jt', 'builder'), 0, null, { spent: 480_000, budget: 500_000 }), // 96% of a token budget: over
+  ];
+  const js = [
+    { id: 'jm', createdAt: '2032-03-04T10:00:00Z', prompt: 'meters' },
+    { id: 'jn', createdAt: '2032-03-04T09:00:00Z', prompt: 'none' },
+    { id: 'jt', createdAt: '2032-03-04T08:00:00Z', prompt: 'tokens' },
+  ];
+  const [m] = navTree(ps, as, [], [], js, new Set(), new Set(), DAY);
+  const row = (id: string) => m!.agents.find((a) => a.id === id)!;
+  const group = (id: string) => m!.jobs.find((j) => j.id === id)!;
+
+  check("an agent row's meter is the Fleet lane's own figure: budgetOf, the same day", JSON.stringify(row('m1').budget) === JSON.stringify(budgetOf(as[0]!, DAY)) && row('m1').budget?.tone === 'ok');
+  check('the same tones: green under 75%, yellow from it, red from 95%', row('m1').budget?.tone === 'ok' && row('m2').budget?.tone === 'warn' && row('t1').budget?.tone === 'over', [row('m1'), row('m2'), row('t1')].map((r) => r.budget?.tone).join());
+  check('an agent with no budget has no meter', row('m3').budget === null && row('n1').budget === null);
+  check("a job's meter is its agents' summed: $25 of $50, 50%, and the one without a budget adds nothing", group('jm').budget?.spent === 25 && group('jm').budget?.cap === 50 && group('jm').budget?.pct === 50 && group('jm').budget?.tone === 'ok', JSON.stringify(group('jm').budget));
+  check('a job none of whose agents has a budget has none', group('jn').budget === null);
+  check('a job of token budgets sums in tokens, and reads red as its agent does', group('jt').budget?.unit === 'tokens' && group('jt').budget?.tone === 'over' && group('jt').budget?.cap === 500_000);
+  check('dollars and tokens are never added: with any dollar budget, the sum is of those', sumBudgets([budgetOf(as[0]!, DAY), budgetOf(as[4]!, DAY)])?.unit === 'usd' && sumBudgets([budgetOf(as[0]!, DAY), budgetOf(as[4]!, DAY)])?.cap === 25);
+  check('and a sum of nothing is nothing', sumBudgets([]) === null && sumBudgets([null, null]) === null);
+  check('a stale day stamp reads nothing spent, as the lane does', navTree(ps, as, [], [], js, new Set(), new Set(), '2032-03-05')[0]!.agents.find((a) => a.id === 'm2')!.budget?.spent === 0);
+  check(
+    'the hover says the figure, its unit, and what over means',
+    meterTitle(row('m2').budget!, "builder's daily budget") === "builder's daily budget: $20.00 of $25.00 today, 80%" &&
+      meterTitle(row('t1').budget!, 'x') === 'x: 480k tokens of 500k tokens today, 96%' &&
+      /over it; a warning, it stops at \$50\.00/.test(meterTitle(budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 30, 25), DAY)!, 'x')),
+    meterTitle(row('t1').budget!, 'x'),
+  );
+  readBudgetCeilingFrom(() => 1.5);
+  check("the ceiling it names is the setting's: at 1.5, $25 stops at $37.50", budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 30, 25), DAY)?.ceiling === 37.5 && budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 37.5, 25), DAY)?.state === 'ceiling');
+  readBudgetCeilingFrom(() => 2);
+
+  const nav = src('./Navigator.tsx');
+  const css = src('./shell.css');
+  check(
+    "the rows draw the Fleet's pj-meter with its data-tone, on the agent row and the job's heading",
+    /className="pj-meter sh-nav-meter" data-tone=\{budget\.tone\}/.test(nav) &&
+      /<NavMeter budget=\{a\.budget\}/.test(nav) &&
+      /<NavMeter budget=\{job\.budget\}/.test(nav) &&
+      /if \(!budget\) return null;/.test(nav),
+  );
+  check('the Fleet\'s stylesheet is loaded with the panel, so its tones are there on every screen', /import '\.\.\/fleet\/fleet\.css';/.test(nav));
+  const i = css.indexOf('.pj-meter.sh-nav-meter {');
+  const rule = i === -1 ? '' : css.slice(i, css.indexOf('}', i));
+  check('the panel only sizes it: no colour of its own, so the tones are the Fleet\'s tokens', rule !== '' && !/#|rgb|hsl|background|color/.test(rule), rule);
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

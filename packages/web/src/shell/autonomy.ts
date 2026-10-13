@@ -56,13 +56,13 @@ export interface Budget {
   spent: number;
   /** The daily budget: what the agent may spend today before it is warned (Amendments 124, 129). */
   cap: number;
-  /** What stops it: twice the budget. */
+  /** What stops it: the budget times the ceiling, twice unless Settings says otherwise (Amendment 140). */
   ceiling: number;
   /** `spent / cap`, held at 1 once it is full: the bar never overflows. */
   fraction: number;
   /** `spent / cap` as a whole percent, past 100 when it is over. */
   pct: number;
-  /** ok under the budget, over from it, ceiling from twice it. */
+  /** ok under the budget, over from it, ceiling from the ceiling. */
   state: BudgetState;
   /**
    * The colour it reads in: the status bar's daily meter's thresholds and tokens
@@ -97,19 +97,42 @@ export interface Budget {
 export function budgetOf(agent: Pick<Agent, 'spentToday' | 'autonomy'>, today?: string): Budget | null {
   const b = agentBudget(agent, today);
   if (b === null || b.budget <= 0) return null;
-  const ratio = b.spent / b.budget;
-  const state = capState(b.spent, b.budget);
+  return budgetFigures(b.spent, b.budget, b.unit);
+}
+
+function budgetFigures(spent: number, cap: number, unit: Budget['unit']): Budget {
+  const ratio = spent / cap;
+  const state = capState(spent, cap);
   return {
-    spent: b.spent,
-    cap: b.budget,
-    ceiling: ceilingOf(b.budget),
+    spent,
+    cap,
+    ceiling: ceilingOf(cap),
     fraction: Math.min(1, ratio),
     pct: Math.round(ratio * 100),
     state,
     tone: toneOf(ratio),
     over: state !== 'ok',
-    unit: b.unit,
+    unit,
   };
+}
+
+/**
+ * A job's meter in the navigator (Amendment 140): what its agents with a budget spent today
+ * against the sum of their budgets, in the same tones as each agent's (`toneOf`). Null when
+ * none of them has a budget. Dollars when any budget is in dollars, and then only those: a
+ * token figure added to dollars would be no figure at all. Only a picture of the agents'
+ * own budgets, not the daemon's job ceiling (`jobCap`), which an uncapped agent lifts.
+ */
+export function sumBudgets(budgets: readonly (Budget | null)[]): Budget | null {
+  const have = budgets.filter((b): b is Budget => b !== null);
+  if (have.length === 0) return null;
+  const unit: Budget['unit'] = have.some((b) => b.unit === 'usd') ? 'usd' : 'tokens';
+  const same = have.filter((b) => b.unit === unit);
+  return budgetFigures(
+    same.reduce((n, b) => n + b.spent, 0),
+    same.reduce((n, b) => n + b.cap, 0),
+    unit,
+  );
 }
 
 /** A budget figure in its own unit: `$50.00`, `1M tokens`. Tokens never read as dollars. */

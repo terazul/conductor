@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ceilingOf, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
+import { ceilingOf, ceilingWords, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { alertTitle, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
@@ -259,15 +259,15 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         )}
         {alert.kind === 'budget' && alert.renewed && (
           <div className="atn-note">
-            The new day renewed its budget, so continue needs no raise. Nothing resumes by itself: it is still paused until you
-            press continue.
+            The new day renewed its budget, so continue needs no raise. Nothing resumes by itself while "continue at midnight"
+            is off on Settings (9): it is still paused until you press continue.
           </div>
         )}
         {alert.kind === 'budget_over' && (
           <div className="atn-note">
             A warning only: {alert.cause === 'job_budget_over' ? 'the agents keep going' : 'it keeps working'}. Raise the budget to
             quiet it, or leave it; it starts again at midnight. {alert.cause === 'job_budget_over' ? 'Agents still to start are held' : 'It is paused'} at
-            twice the budget.
+            {` ${ceilingWords()} `}the budget.
           </div>
         )}
         {alert.kind === 'daily_budget' && (

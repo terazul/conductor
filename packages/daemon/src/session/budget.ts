@@ -23,23 +23,45 @@
  * `@conductor/shared` (`budgetState`), the one copy the screens read too. Everything here
  * that REFUSES, or hands the SDK a limit, is about the ceiling.
  *
- * At midnight nothing resumes by itself (`renewals`): an agent paused at the ceiling stays
- * paused, with its budget renewed, until you say continue.
+ * At midnight an agent paused only by the day's budget or its ceiling is continued, as
+ * ▶ resume continues it (`continuations`, Amendment 140), unless `conductor.budgetResumeAtMidnight`
+ * is off; then it stays paused with its budget renewed (`renewals`), until you say continue.
  */
 
 import {
+  BUDGET_CEILING_KEY,
+  BUDGET_RESUME_KEY,
   agentBudget as sharedAgentBudget,
+  budgetCeilingProblem,
+  budgetResumeProblem,
   budgetState as sharedBudgetState,
   capState,
   ceilingOf,
+  parseBudgetCeiling,
+  readBudgetCeilingFrom,
+  resumesAtMidnight,
   type Agent,
   type AgentBudget,
   type Autonomy,
   type BudgetState,
 } from '@conductor/shared';
+import { readSettings, settingRule } from '../settings.js';
 import { localDay } from './store.js';
 
-export { BUDGET_CEILING, capState, ceilingOf } from '@conductor/shared';
+export { BUDGET_CEILING, budgetCeiling, capState, ceilingOf } from '@conductor/shared';
+
+/**
+ * The ceiling is the daemon's `conductor.budgetCeiling` (Amendment 140), read on every
+ * `ceilingOf` from the cached settings (settings.ts:46), so a change applies at the next check.
+ */
+readBudgetCeilingFrom(() => parseBudgetCeiling(readSettings()[BUDGET_CEILING_KEY]));
+settingRule(BUDGET_CEILING_KEY, budgetCeilingProblem);
+settingRule(BUDGET_RESUME_KEY, budgetResumeProblem);
+
+/** Whether the day change continues agents paused only by the day's budget (Amendment 140). On unless set off. */
+export function resumeAtMidnight(): boolean {
+  return resumesAtMidnight(readSettings()[BUDGET_RESUME_KEY]);
+}
 
 /**
  * The daemon's reading of the shared rule: today is the daemon's day (`localDay`, which a
@@ -178,6 +200,33 @@ export function renewals(paused: readonly PausedForBudget[], day: string): Array
     out.push({ agentId: p.agent.id, note: renewedNote(stop, p.agent, day) });
   }
   return out;
+}
+
+/**
+ * At the day change, which paused agents to CONTINUE (Amendment 140, Q4 of wave 10): the ones
+ * paused only by a budget, their own ceiling (`budget_exhausted`) or their job's
+ * (`job_budget_reached`), with room on `day`. Pure. A renewed note counts, since it is still
+ * only a budget pause (one renewed while the setting was off, or while everything was paused).
+ * Left alone: a pause you made, a hold, a failure, any other note, and one still at its ceiling
+ * on `day` (or whose job still is). Whether the setting is on is the caller's to ask.
+ */
+export function continuations(paused: readonly PausedForBudget[], day: string): string[] {
+  const out: string[] = [];
+  for (const p of paused) {
+    const stop = budgetStop(p.note);
+    if (!stop) continue;
+    if (stop === 'job_budget_reached' ? p.jobAtCeiling : sharedBudgetState(p.agent, day) === 'ceiling') continue;
+    out.push(p.agent.id);
+  }
+  return out;
+}
+
+/**
+ * What the transcript says of an agent the new day continued (Amendment 140), on the status
+ * event that queues it. The words a person reads; `NEW_DAY_NUDGE` (supervisor.ts) is the model's.
+ */
+export function newDayNote(day: string): string {
+  return `a new day's budget began (${day}) — continuing`;
 }
 
 /**

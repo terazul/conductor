@@ -33,6 +33,11 @@
  * Dragging a project in the panel is a Fleet drag: `navDrop` is your order with it moved
  * (`moveBefore`), and the sort switches to `mine`.
  *
+ * EACH AGENT ROW HAS ITS BUDGET METER (Amendment 140): the thin bar the Fleet lane draws
+ * (`budgetOf`, autonomy.ts:97; tones from spend.ts:30), and a job's heading the sum of its
+ * agents' (`sumBudgets`). An agent with no budget, or a job none of whose agents has one,
+ * has no bar at all.
+ *
  * Pure: no DOM, no React, no storage. shell/verify.ts runs these under Node.
  */
 
@@ -41,6 +46,7 @@ import { agentTabs } from '../agent/tabs.js';
 import { requestTitle } from '../attention/describe.js';
 import { dirRoot } from '../files/tabs.js';
 import { alertTitle, projectNeeds } from './describe.js';
+import { budgetOf, budgetWords, sumBudgets, type Budget } from './autonomy.js';
 import { SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects, type FleetSort } from '../fleet/order.js';
 
 /** Which nodes are open: a JSON array of node ids. */
@@ -61,6 +67,8 @@ export interface NavAgent {
   needs: number;
   /** Done, and you haven't opened it since (Amendment 105). */
   finished: boolean;
+  /** Today's spend against its own daily budget, as the Fleet lane's meter; null for none (Amendment 140). */
+  budget: Budget | null;
 }
 
 /** One job's agents in a project (Amendment 86). */
@@ -75,6 +83,8 @@ export interface NavJob {
   needs: number;
   /** It finished and you haven't seen it (Amendment 87). */
   finished: boolean;
+  /** Its agents' budgets summed (`sumBudgets`); null when none of them has one (Amendment 140). */
+  budget: Budget | null;
 }
 
 export interface NavNeed {
@@ -144,6 +154,8 @@ export function navTree(
   jobs: Pick<Job, 'id' | 'createdAt' | 'prompt'>[] = [],
   finished: ReadonlySet<string> = new Set(),
   finishedAgents: ReadonlySet<string> = new Set(),
+  /** The day the meters read; this browser's unless a check says. */
+  today?: string,
 ): NavProject[] {
   const jobOrder = [...jobs].sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt)).map((j) => j.id);
 
@@ -165,14 +177,18 @@ export function navTree(
         return { key: `a:${a.id}`, label: t.subject ? `${t.head} ${t.subject}` : t.head, params: { alertId: a.id } };
       });
 
-    const rows: NavAgent[] = tabs.map((t) => ({
-      id: t.id,
-      jobId: agents.find((a) => a.id === t.id)?.jobId ?? '',
-      label: t.label,
-      status: t.status,
-      needs: t.needs,
-      finished: t.status === 'done' && finishedAgents.has(t.id),
-    }));
+    const rows: NavAgent[] = tabs.map((t) => {
+      const agent = agents.find((a) => a.id === t.id);
+      return {
+        id: t.id,
+        jobId: agent?.jobId ?? '',
+        label: t.label,
+        status: t.status,
+        needs: t.needs,
+        finished: t.status === 'done' && finishedAgents.has(t.id),
+        budget: agent ? budgetOf(agent, today) : null,
+      };
+    });
 
     return {
       id: p.id,
@@ -207,6 +223,7 @@ export function groupByJob(
         status: a.status,
         needs: 0,
         finished: finished.has(a.jobId),
+        budget: null,
       };
       out.set(a.jobId, g);
     }
@@ -214,7 +231,18 @@ export function groupByJob(
     g.needs += a.needs;
     if (SORT_RANK[a.status] < SORT_RANK[g.status]) g.status = a.status;
   }
+  for (const g of out.values()) g.budget = sumBudgets(g.agents.map((a) => a.budget ?? null));
   return [...out.values()];
+}
+
+/**
+ * What a row's meter says on hover (Amendment 140): today's figure against the budget, in its
+ * own unit, and what over means, as the Fleet lane's title says it.
+ */
+export function meterTitle(b: Budget, whose: string): string {
+  const said = (n: number): string => budgetWords(b.unit, n);
+  const tail = b.state === 'ok' ? '' : b.state === 'over' ? ` — over it; a warning, it stops at ${said(b.ceiling)}` : ' — at its ceiling';
+  return `${whose}: ${said(b.spent)} of ${said(b.cap)} today, ${b.pct}%${tail}`;
 }
 
 /** A prompt as one line: its whitespace, newlines included, folded to single spaces. */

@@ -403,6 +403,9 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   // pump: a pause still on holds the supervisor before anything queued can start.
   const sched = initScheduler(db, sup);
   await sched.start();
+  // The day changed while the daemon was down (Amendment 140): budget pauses from an earlier
+  // day are continued (or renewed, with the setting off), after the pause above is back on.
+  sup.catchUpDay();
   sup.pump();
 
   app.addHook('onClose', async () => {

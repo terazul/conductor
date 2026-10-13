@@ -60,7 +60,7 @@ import type { ModelCatalog } from '@conductor/shared';
 import { screenForKey, tabbed } from './screens.js';
 import { addReferenced, addedLine, nameFrom, tidyPath } from '../fleet/addproject.js';
 import { DECLINE_NOTE, bannerLine, bringLine, homeish, questionLines } from '../settings/storage.js';
-import { importable, mergeIncoming } from './settings.js';
+import { importable, mergeIncoming, readSetting, writeSetting } from './settings.js';
 import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, slotsProblem } from '../settings/slots.js';
 import { readDraft, writeDraft } from './drafts.js';
 import { copyText } from './clipboard.js';
@@ -72,6 +72,21 @@ import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortProje
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
 import { OVER_AT, WARN_AT, budgetProblem, dailyMeter, parseBudget, toneOf } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
+import {
+  BUDGET_CEILING_KEY,
+  BUDGET_RESUME_KEY,
+  RETRY_DELAYS_KEY,
+  ceilingFieldProblem,
+  ceilingShown,
+  ceilingValue,
+  midnightOn,
+  midnightValue,
+  retryDelaysFieldProblem,
+  retryDelaysShown,
+  retryDelaysValue,
+  retryDelaysWords,
+} from '../settings/budgets.js';
+import { budgetCeiling, ceilingOf, ceilingWords } from '@conductor/shared';
 import { readdirSync, statSync } from 'node:fs';
 import type { StorageState } from '@conductor/shared';
 import { keyLine, keyStateFrom, loginLine, providerLabel, readCopilotLogin, readKeyState, saveKey } from './providers.js';
@@ -1397,9 +1412,9 @@ console.log('\n35 · an agent waiting to be tried again reads "Reconnecting in 3
   const line = (events: Event[], agent = ag(), now = T0 + 10_000) => currentAction(agent, events, [], [], now);
   const first = line([wait(1, 5_000)], ag(), T0 + 1_000);
   check('the agent line says it is reconnecting, with the time and the count', first.head === 'reconnecting' && first.subject === 'in 4 s (1 of 5)', `${first.head} / ${first.subject}`);
-  check('the first retry is a blip: not amber', first.tone === 'queue', first.tone);
+  check('from the first retry it is amber, as Needs You has the card (Amendment 140; it was from the second)', first.tone === 'need', first.tone);
   const third = line([wait(3, 30_000)]);
-  check('from the second it is amber, as Needs You has the card', third.head === 'reconnecting' && third.subject === 'in 20 s (3 of 5)' && third.tone === 'need', `${third.subject} (${third.tone})`);
+  check('and so at the third', third.head === 'reconnecting' && third.subject === 'in 20 s (3 of 5)' && third.tone === 'need', `${third.subject} (${third.tone})`);
   check('a queued agent that waits on a dependency says so, as before', currentAction(ag(), [], [], ['architect']).head === 'waiting on');
   check('and one that waits for a slot, as before', currentAction(ag(), [], [], []).subject === 'for a slot');
   check('a working agent does not read as reconnecting off an old wait', line([wait(3, 30_000)], ag({ status: 'working' })).head !== 'reconnecting');
@@ -1682,9 +1697,65 @@ console.log('\n37 · only a project you have not looked at since it finished say
   check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
+console.log('\n38 · the retry delays, the budget ceiling and midnight are settings (Amendment 140)');
+{
+  // The delays: the daemon's rule, said as a sentence in the field.
+  check('the default reads as the setting writes it', retryDelaysShown(null) === '5, 15, 30, 60, 300' && retryDelaysShown('garbage') === '5, 15, 30, 60, 300');
+  check('one to five whole seconds, each 1 to 1800, are taken, spaces or none', ['5', '1,1800', '2, 7', '5,15,30,60,300', ' 10 , 20 '].every((v) => retryDelaysFieldProblem(v) === null));
+  const bad = ['', '0', '1801', '2.5', 'soon', '5,,15', '-5', '1,2,3,4,5,6'];
+  check('anything else says why, before it is sent', bad.every((v) => retryDelaysFieldProblem(v) === 'One to 5 whole numbers of seconds, separated by commas, each from 1 to 1800.'), bad.map((v) => retryDelaysFieldProblem(v)).join(' | '));
+  check('what is written is tidied, and the default is written as nothing', retryDelaysValue('2,7') === '2, 7' && retryDelaysValue(' 5,15, 30,60,300 ') === null);
+  check('the hint says the waits and the tries', retryDelaysWords(null) === '5 s, 15 s, 30 s, 1 min, 5 min: five tries, then the agent has failed' && retryDelaysWords('90') === '90 s: one try, then the agent has failed', retryDelaysWords(null));
+
+  // The ceiling.
+  check('a number from 1 to 10 is a ceiling', ['1', '1.5', '2', '10', ' 3 '].every((v) => ceilingFieldProblem(v) === null));
+  check('anything else says why', ['0.5', '0', '10.5', 'twice', '', '-2', 'Infinity'].every((v) => ceilingFieldProblem(v) === 'A number from 1 to 10, such as 2 or 1.5.'));
+  check('2 is written as nothing; the field shows 2 for nothing', ceilingValue('2') === null && ceilingValue('1.5') === '1.5' && ceilingShown(null) === '2' && ceilingShown('3') === '3');
+
+  // The page reads the ceiling from its copy of the settings (lib/settings.ts), so every meter and sentence stops where the daemon does.
+  const at75 = { autonomy: { mode: 'acceptEdits' as const, allowedTools: [], disallowedTools: [], budgetUsd: 5 }, spentToday: { day: localDayOf(), usd: 7.5, tokens: 0 } };
+  const was = readSetting(BUDGET_CEILING_KEY);
+  writeSetting(BUDGET_CEILING_KEY, '1.5');
+  check('with 1.5 set, the page reads 1.5: $25 stops at $37.50, and the words say 1.5×', budgetCeiling() === 1.5 && ceilingOf(25) === 37.5 && ceilingWords() === '1.5×' && failureSentence('budget_exhausted', at75) === 'stopped at 1.5× its $5 daily budget', failureSentence('budget_exhausted', at75));
+  writeSetting(BUDGET_CEILING_KEY, 'nonsense');
+  check('a value that is not one reads as twice', budgetCeiling() === 2 && ceilingWords() === 'twice');
+  writeSetting(BUDGET_CEILING_KEY, was);
+  check('and with none it is twice, as before', budgetCeiling() === 2 && ceilingOf(25) === 50);
+
+  // Midnight.
+  check('midnight continues unless set off; on is written as nothing', midnightOn(null) && midnightOn('on') && !midnightOn('off') && midnightValue(true) === null && midnightValue(false) === 'off');
+
+  // The rows, on Settings (9), in the slot row's pattern.
+  const route = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
+  const rowOf = (name: string): string => {
+    const i = route.indexOf(`function ${name}()`);
+    return i === -1 ? '' : route.slice(i, route.indexOf('\nfunction ', i + 10));
+  };
+  for (const [name, key, prob] of [['RetryDelaysRow', 'RETRY_DELAYS_KEY', 'retryDelaysFieldProblem'], ['CeilingRow', 'BUDGET_CEILING_KEY', 'ceilingFieldProblem']] as const) {
+    const r = rowOf(name);
+    check(
+      `${name}: a draft, checked as it is typed, written on Enter or blur, put back by Esc, with a hint or the problem`,
+      r.includes(`useSetting(${key})`) && r.includes(`${prob}(draft)`) && /onBlur=\{commit\}/.test(r) && /e\.key === 'Enter'\) commit\(\)/.test(r) && /e\.key === 'Escape'\) setDraft\(null\)/.test(r) && /className="st-err"/.test(r) && /className="st-dim"/.test(r),
+    );
+  }
+  check('MidnightRow: on and off, written through the setting, and the hint says what each does', /useSetting\(BUDGET_RESUME_KEY\)/.test(rowOf('MidnightRow')) && /midnightValue\(true\)/.test(rowOf('MidnightRow')) && /midnightValue\(false\)/.test(rowOf('MidnightRow')));
+  check('the delays sit under Agents, the ceiling and midnight under Spend', /<SlotsSection \/>\s*<RetryDelaysRow \/>/.test(route) && /<SpendSection \/>\s*<CeilingRow \/>\s*<MidnightRow \/>/.test(route));
+
+  // The keys are the daemon's: the same names its rules are registered under.
+  const daemonRetry = readFileSync(new URL('../../../daemon/src/session/retry.ts', import.meta.url), 'utf8');
+  const daemonBudget = readFileSync(new URL('../../../daemon/src/session/budget.ts', import.meta.url), 'utf8');
+  check(
+    'the daemon has a rule for each, from the same shared functions',
+    RETRY_DELAYS_KEY === 'conductor.retryDelays' && BUDGET_CEILING_KEY === 'conductor.budgetCeiling' && BUDGET_RESUME_KEY === 'conductor.budgetResumeAtMidnight' &&
+      daemonRetry.includes('settingRule(RETRY_DELAYS_KEY, retryDelaysProblem)') &&
+      daemonBudget.includes('settingRule(BUDGET_CEILING_KEY, budgetCeilingProblem)') &&
+      daemonBudget.includes('settingRule(BUDGET_RESUME_KEY, budgetResumeProblem)'),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

@@ -11,7 +11,7 @@
  * have never seen); a card must degrade to a plainer sentence, never throw.
  */
 
-import { HANDOFF_HELD_NOTE, budgetState } from '@conductor/shared';
+import { HANDOFF_HELD_NOTE, RETRY_CARD_FROM, budgetState, ceilingWords } from '@conductor/shared';
 import { tokenWords } from '../lib/providers.js';
 import type {
   Agent,
@@ -186,8 +186,8 @@ export function currentAction(
       return {
         head: 'reconnecting',
         subject: reconnectTail(again, now),
-        // Amber from the second retry, when Needs You has the card too.
-        tone: again.attempt >= 2 ? 'need' : 'queue',
+        // Amber from the first retry, when Needs You has the card too (Amendment 140; it was the second).
+        tone: again.attempt >= RETRY_CARD_FROM ? 'need' : 'queue',
       };
     }
     if (dependencyNames.length > 0) {
@@ -310,11 +310,12 @@ export function failureSentence(
     if (renewed) return 'was stopped at its daily budget, which is renewed for the new day, so continue needs no raise';
     // Raised since it stopped: the old figure would be wrong, and continuing is all that's left.
     const stopped = budgetState(agent) === 'ceiling';
-    // It stops at twice the budget, not at it (Amendment 124), and says so. The budget is per
-    // day (Amendment 129): "daily" says the figure is what it may spend in a day.
-    if (cap) return stopped ? `stopped at twice its ${usd(cap)} daily budget` : `stopped on its daily budget, now raised to ${usd(cap)}`;
+    // It stops at the ceiling, twice the budget unless Settings says otherwise (Amendments 124,
+    // 140), not at it, and says so. The budget is per day (Amendment 129): "daily" says the
+    // figure is what it may spend in a day.
+    if (cap) return stopped ? `stopped at ${ceilingWords()} its ${usd(cap)} daily budget` : `stopped on its daily budget, now raised to ${usd(cap)}`;
     return stopped
-      ? `stopped at twice its ${tokenWords(capTokens!)}-token daily budget`
+      ? `stopped at ${ceilingWords()} its ${tokenWords(capTokens!)}-token daily budget`
       : `stopped on its daily budget, now raised to ${tokenWords(capTokens!)} tokens`;
   }
   if (reason === 'job_budget_reached' && renewed) {
@@ -330,7 +331,7 @@ function usd(n: number): string {
 
 /**
  * What an over-budget alert says after its subject (Amendment 124): past the budget, and
- * that it is only a warning. The ceiling is twice the budget.
+ * that it is only a warning. The ceiling is twice the budget unless set (Amendment 140).
  */
 export function overBudgetSentence(alert: Pick<Alert, 'budget' | 'unit'>): string {
   const budget = alert.budget ?? 0;

@@ -883,7 +883,7 @@ console.log('\n· an agent waiting to be tried again says so, with retry now and
 
   const bar = reconnectBar(agent(), [w(3, 30_000)], T0 + 2_000);
   check('the banner reads "Reconnecting in 30 s (3 of 5)", counted down, with what is wrong', bar?.text === 'Reconnecting in 28 s (3 of 5)' && bar.why === "can't reach the model API", JSON.stringify(bar));
-  check('amber from the second retry, as Needs You has the card; the first is a blip', bar?.needs === true && reconnectBar(agent(), [w(1, 5_000)], T0)?.needs === false);
+  check('amber from the first retry, as Needs You has the card (Amendment 140; it was from the second)', bar?.needs === true && reconnectBar(agent(), [w(1, 5_000)], T0)?.needs === true);
   check('each cause is told as it is', reconnectBar(agent(), [w(2, 15_000, 'throttled')], T0)?.why === 'the model API is busy' && reconnectBar(agent(), [w(2, 15_000, 'server')], T0)?.why === 'the model API is failing');
   check('at its time it says now, until the daemon starts it', reconnectBar(agent(), [w(5, 300_000)], T0 + 301_000)?.text === 'Reconnecting now (5 of 5)');
   check('the longest wait reads in minutes', reconnectBar(agent(), [w(5, 300_000)], T0)?.text === 'Reconnecting in 5 min (5 of 5)');
