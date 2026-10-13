@@ -36,7 +36,8 @@
 }
 
 /* The Project and Agent screens each have their own backdrop (Amendment 127), so the label
-   reads differently on each at a glance. Fleet and every other screen stay on `--here`. */
+   reads differently on each at a glance. Needs You's `project / role` label uses the Agent
+   screen's (Amendment 135). Fleet and every other screen stay on `--here`. */
 .ui-crumb.is-project {
   --crumb: var(--here-project);
 }
