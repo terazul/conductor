@@ -5378,6 +5378,67 @@ async function main(): Promise<void> {
     );
     check('and the agent row is still its lifetime tokens', getAgent(db, 'mt_c')?.inputTokens === 180 && getAgent(db, 'mt_c')?.costUsd === 0);
 
+    // ── Amendment 136: the retry rate's whole is Claude's calls, and the counts per project ──
+    rep = await report();
+    const claudeRows = rep.models.filter((m) => m.provider === 'claude');
+    const claudeCallsSum = claudeRows.reduce((n, m) => n + m.calls, 0);
+    check(
+      "with Copilot in the range, the total says how many of its calls were Claude's: the retry rate's whole",
+      rep.total.claudeCalls === claudeCallsSum && rep.total.claudeCalls < rep.total.calls && rep.total.calls - rep.total.claudeCalls === rep.models.filter((m) => m.provider !== 'claude').reduce((n, m) => n + m.calls, 0),
+      JSON.stringify([rep.total.calls, rep.total.claudeCalls, claudeCallsSum]),
+    );
+    check(
+      "a Claude row's Claude calls are its calls, a Copilot row's none, and every retry is on a Claude row",
+      claudeRows.every((m) => m.claudeCalls === m.calls) && rep.models.filter((m) => m.provider !== 'claude').every((m) => m.claudeCalls === 0 && m.retries === 0) && (rowOf(rep, A)?.retries ?? 0) >= 1,
+      JSON.stringify(rep.models.map((m) => [m.provider, m.model, m.calls, m.claudeCalls, m.retries])),
+    );
+    check('the all-projects report says it is for no one project', rep.project === null);
+
+    const projRep = (await get<MR>(`/api/metrics?range=all&projectId=${mpid}`)).body;
+    check("?projectId= reads that project's counts, and the answer names the project", projRep.project?.id === mpid && projRep.project.name === (await get<{ projects: Project[] }>('/api/projects')).body.projects.find((p) => p.id === mpid)?.name && projRep.range === 'all', JSON.stringify(projRep.project));
+    check(
+      "every run this section made was this project's agents', so its models' rows are the same in both views",
+      [A, B].every((m) => JSON.stringify(rowOf(projRep, m)) === JSON.stringify(rowOf(rep, m))) && JSON.stringify(rowOf(projRep, 'gpt-4.1', 'copilot')) === JSON.stringify(rowOf(rep, 'gpt-4.1', 'copilot')),
+      JSON.stringify([rowOf(projRep, A), rowOf(rep, A)]),
+    );
+    check('a project has no "before" line: the rows from before recording cannot say whose runs were whose', projRep.before === null && rep.before !== null);
+    check('and it starts when per-project counting did, a local day', /^\d{4}-\d{2}-\d{2}$/.test(projRep.since) && projRep.since >= rep.since && projRep.from === projRep.since, JSON.stringify([projRep.since, projRep.from, rep.since]));
+    check(
+      'the project table has rows for the project, keyed by it, written with the daily ones',
+      count(db, 'SELECT COUNT(*) AS n FROM metrics_project_daily WHERE project_id = ?', mpid) > 0 && count(db, 'SELECT COUNT(*) AS n FROM metrics_project_daily WHERE model = ?', A) === 1,
+    );
+
+    // Another project's agent, on another engine: in its project's view and the all-projects one, not in this one's.
+    const { insertProject } = await import('./store.js');
+    const other = insertProject(db, { path: join(ROOT, 'metrics-other'), name: 'metrics other', defaultBranch: 'main' });
+    insertJob(db, { id: 'job_mt_o', projectId: other.id, prompt: 'the other prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    fixture('mt_o', 'job_mt_o', { projectId: other.id, status: 'done', autonomy: DEFAULT_AUTONOMY, model: 'or-metrics', provider: 'openrouter' } as Partial<Agent>);
+    const otherEmpty = (await get<MR>(`/api/metrics?range=today&projectId=${other.id}`)).body;
+    check('a project nothing has run in yet is an empty report, not a 404', otherEmpty.project?.id === other.id && otherEmpty.models.length === 0 && otherEmpty.total.calls === 0);
+    mx.recordCall(db, { agentId: 'mt_o', model: 'or-metrics', inputTokens: 40, outputTokens: 8, cacheReadTokens: 0, durationMs: 400 });
+    mx.recordCall(db, { agentId: 'mt_o', model: 'or-metrics', inputTokens: 60, outputTokens: 12, cacheReadTokens: 0 });
+    mx.recordRunEnd(db, 'mt_o', 1500);
+    const otherRep = (await get<MR>(`/api/metrics?range=today&projectId=${other.id}`)).body;
+    const mine = (await get<MR>(`/api/metrics?range=all&projectId=${mpid}`)).body;
+    const everyone = await report();
+    const orRow = rowOf(otherRep, 'or-metrics', 'openrouter');
+    check(
+      "the other project's view has its agent's calls, tokens and run, and nothing of this project's",
+      orRow?.calls === 2 && orRow.inputTokens === 100 && orRow.runs === 1 && otherRep.models.length === 1 && otherRep.total.claudeCalls === 0 && rowOf(otherRep, A) === undefined,
+      JSON.stringify(otherRep.models),
+    );
+    check("this project's view does not have them", rowOf(mine, 'or-metrics', 'openrouter') === undefined && JSON.stringify(mine.total) === JSON.stringify(projRep.total));
+    check(
+      'and the all-projects view has both',
+      rowOf(everyone, 'or-metrics', 'openrouter')?.calls === 2 && JSON.stringify(rowOf(everyone, A)) === JSON.stringify(rowOf(rep, A)) && everyone.total.calls === rep.total.calls + 2 && everyone.total.claudeCalls === rep.total.claudeCalls,
+    );
+    check('a project that is not there is a 404', (await get('/api/metrics?projectId=prj_nothere000')).status === 404);
+    check(
+      'a project id that is not the shape of one is a 400, and so is an empty one, or two of them',
+      (await get('/api/metrics?projectId=%2E%2E%2Fx')).status === 400 && (await get('/api/metrics?projectId=')).status === 400 && (await get(`/api/metrics?projectId=${mpid}&projectId=${other.id}`)).status === 400,
+    );
+    check('and a bad range is still a 400 with a project', (await get(`/api/metrics?range=fortnight&projectId=${mpid}`)).status === 400);
+
     // ── removing the job keeps the history ──
     const keep = await report();
     const baselinesOf = (id: string): number => count(db, 'SELECT COUNT(*) AS n FROM metrics_baseline WHERE agent_id = ?', id);

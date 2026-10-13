@@ -7,10 +7,20 @@
  * metrics/verify.ts checks them under Node.
  *
  * Three rules the numbers keep:
- *  - A rate is `part / whole` of two counts the engine really reported. Time per call divides
- *    only the calls that were timed; tokens per second only the tokens of those calls.
+ *  - A rate is `part / whole` of two counts the engine really reported. Time per turn divides
+ *    only the turns that were timed; tokens per second only the tokens of those turns. The
+ *    retry rate's whole is Claude's calls, the only engine that reports a retry (Amendment 136).
  *  - An engine that reports no dollars has no cost, which is a dash and not $0.00.
  *  - Errors are failed runs. Your own stop, a pause and a budget stop are runs, not errors.
+ *
+ * WHAT "PER TURN" AND "SPEED" CAN HONESTLY SAY (Amendment 136). A Claude result gives
+ * `num_turns` and `duration_api_ms` for the whole turn, and that time includes the turn's
+ * subagents, whose calls can run side by side. So the figure is model time per turn,
+ * subagents included, not the length of one API call, and it is labelled so. Speed is a
+ * row's own (its timed output tokens over its model time); the total tile's speed is the
+ * average of the models' own speeds, not every token over every engine's time added up,
+ * which would mix a fast small model's seconds with a slow large one's. The rows are daily
+ * sums, so there is no per-run figure to average; per model is the finest there is.
  */
 
 import type {
@@ -36,6 +46,22 @@ export const RANGE_KEY = 'conductor.metricsRange';
 
 export function asRange(v: string | null | undefined): MetricsRange {
   return RANGES.some((r) => r.id === v) ? (v as MetricsRange) : DEFAULT_RANGE;
+}
+
+/** The setting that remembers the project picked (Amendment 136); none is all projects. */
+export const PROJECT_KEY = 'conductor.metricsProject';
+
+/** The picker's first choice. */
+export const ALL_PROJECTS = 'All projects';
+
+/** The remembered project, if it is still one of `projects`; else null, all of them. */
+export function asProject(v: string | null | undefined, projects: ReadonlyArray<{ id: string }>): string | null {
+  return v && projects.some((p) => p.id === v) ? v : null;
+}
+
+/** The picker's choices: all projects, then each by name. */
+export function projectChoices(projects: ReadonlyArray<{ id: string; name: string }>): Array<{ id: string | null; label: string }> {
+  return [{ id: null, label: ALL_PROJECTS }, ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ id: p.id, label: p.name }))];
 }
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
@@ -82,13 +108,13 @@ export interface Derived {
   tokens: number;
   /** Failed runs over runs. */
   errorRate: number | null;
-  /** Retried model calls over calls. */
+  /** Retried model calls over Claude's calls: only Claude reports a retry. */
   retryRate: number | null;
   /** Wall time of an average run. */
   avgRunMs: number | null;
-  /** Model-call time per call, over the calls that were timed. */
-  apiPerCallMs: number | null;
-  /** Output tokens per second of model-call time. Only when both numbers exist. */
+  /** Model time per turn, subagents included, over the turns that were timed. */
+  apiPerTurnMs: number | null;
+  /** Output tokens per second of model time, this row's own. Only when both numbers exist. */
   tokensPerSec: number | null;
 }
 
@@ -96,11 +122,26 @@ export function derive(c: MetricsCounts): Derived {
   return {
     tokens: c.inputTokens + c.outputTokens,
     errorRate: ratio(c.failedRuns, c.runs),
-    retryRate: ratio(c.retries, c.calls),
+    retryRate: ratio(c.retries, c.claudeCalls),
     avgRunMs: c.runs > 0 && c.runMs > 0 ? c.runMs / c.runs : null,
-    apiPerCallMs: c.timedCalls > 0 && c.apiMs > 0 ? c.apiMs / c.timedCalls : null,
+    apiPerTurnMs: c.timedCalls > 0 && c.apiMs > 0 ? c.apiMs / c.timedCalls : null,
     tokensPerSec: c.apiMs > 0 && c.timedOutputTokens > 0 ? c.timedOutputTokens / (c.apiMs / 1000) : null,
   };
+}
+
+/**
+ * The range's speed: each model's own, averaged. Null when no model has one. One model is
+ * just its own speed; with several, the tile says it is their average.
+ */
+export function averageSpeed(models: ReadonlyArray<MetricsCounts>): { tps: number; of: number } | null {
+  const speeds = models.map((m) => derive(m).tokensPerSec).filter((v): v is number => v !== null);
+  if (speeds.length === 0) return null;
+  return { tps: speeds.reduce((a, b) => a + b, 0) / speeds.length, of: speeds.length };
+}
+
+/** Whether an engine other than Claude ran in these rows: then "calls" and "Claude's calls" differ. */
+export function otherEnginesRan(models: ReadonlyArray<Pick<MetricsModelRow, 'provider'>>): boolean {
+  return models.some((m) => m.provider !== 'claude');
 }
 
 /** `42 tok/s`, `1.2k tok/s`, or a dash. */
@@ -121,14 +162,25 @@ export interface Tile {
   title?: string;
 }
 
-/** The five figures at the top: the range's totals. */
-export function tiles(total: MetricsCounts): Tile[] {
+/** The Errors tile's retry half: Claude's calls are the whole, and it says so when others ran. */
+function retryLine(total: MetricsCounts, others: boolean, retryRate: number | null): string {
+  if (!others) return `${total.retries.toLocaleString('en')} of ${plural(total.calls, 'call')} retried (${percent(retryRate)})`;
+  if (total.claudeCalls === 0) return 'retries: only Claude reports them, and it made no calls';
+  return `${total.retries.toLocaleString('en')} of Claude's ${plural(total.claudeCalls, 'call')} retried (${percent(retryRate)})`;
+}
+
+/** The five figures at the top: the range's totals, and its models for what only they can say. */
+export function tiles(total: MetricsCounts, models: ReadonlyArray<MetricsModelRow>): Tile[] {
   const d = derive(total);
+  const others = otherEnginesRan(models);
+  const speed = averageSpeed(models);
   const cached = total.cacheReadTokens > 0 ? ` · ${tokensText(total.cacheReadTokens)} cached` : '';
-  const timed =
-    d.apiPerCallMs === null
-      ? 'model-call time not reported'
-      : `${duration(d.apiPerCallMs)} per call${d.tokensPerSec === null ? '' : ` · ${rate(d.tokensPerSec)}`}`;
+  const speedText = speed === null ? '' : ` · ${rate(speed.tps)}${speed.of > 1 ? ` (average of ${speed.of} models)` : ''}`;
+  const timed = d.apiPerTurnMs === null ? 'model time not reported' : `${duration(d.apiPerTurnMs)} per turn, subagents included${speedText}`;
+  const partly =
+    total.timedCalls < total.calls
+      ? `Model time is known for ${total.timedCalls.toLocaleString('en')} of ${total.calls.toLocaleString('en')} calls; per-turn figures use only those. `
+      : '';
   return [
     {
       id: 'tokens',
@@ -143,10 +195,7 @@ export function tiles(total: MetricsCounts): Tile[] {
       label: 'Time per run',
       value: duration(d.avgRunMs),
       sub: timed,
-      title:
-        total.timedCalls < total.calls
-          ? `Model-call time is known for ${total.timedCalls.toLocaleString('en')} of ${total.calls.toLocaleString('en')} calls; per-call figures use only those.`
-          : undefined,
+      title: `${partly}A Claude turn's model time includes its subagents', which can run side by side, so this is not the length of one API call. Speed is each model's own output tokens per second of model time${speed !== null && speed.of > 1 ? ', averaged over the models' : ''}.`,
     },
     {
       id: 'errors',
@@ -155,9 +204,9 @@ export function tiles(total: MetricsCounts): Tile[] {
       sub:
         total.runs === 0
           ? 'no runs'
-          : `${total.failedRuns.toLocaleString('en')} of ${plural(total.runs, 'run')} failed · ${total.retries.toLocaleString('en')} of ${plural(total.calls, 'call')} retried (${percent(d.retryRate)})`,
+          : `${total.failedRuns.toLocaleString('en')} of ${plural(total.runs, 'run')} failed · ${retryLine(total, others, d.retryRate)}`,
       bad: total.failedRuns > 0,
-      title: "A failed run ended in failure. Your own stop, a pause and a budget stop aren't errors.",
+      title: `A failed run ended in failure. Your own stop, a pause and a budget stop aren't errors.${others ? " Only Claude reports a retried call, so the retry rate is out of Claude's calls, not every engine's." : ''}`,
     },
     {
       id: 'cost',
@@ -186,10 +235,14 @@ const COLUMN: Record<ColumnId, Column> = {
   calls: { id: 'calls', label: 'Calls', title: 'Calls to the model: a Claude run’s turns, or one per call for Copilot and OpenRouter' },
   runs: { id: 'runs', label: 'Runs', title: 'Runs that ended, however they ended' },
   run: { id: 'run', label: 'Per run', title: 'Time an average run took' },
-  percall: { id: 'percall', label: 'Per call', title: 'Time the engine spent in a model call, over the calls it timed' },
-  tps: { id: 'tps', label: 'Speed', title: 'Output tokens per second of model-call time, over the calls that were timed' },
+  percall: {
+    id: 'percall',
+    label: 'Per turn',
+    title: "Model time per turn, subagents included, over the turns that were timed. A Claude turn's subagents can run side by side, so this is not the length of one API call",
+  },
+  tps: { id: 'tps', label: 'Speed', title: "Output tokens per second of model time, this row's own, over the turns that were timed" },
   errors: { id: 'errors', label: 'Failed', title: 'Runs that failed, out of runs. A stop of yours, a pause and a budget stop are not failures' },
-  retries: { id: 'retries', label: 'Retried', title: 'Model calls the SDK had to retry, out of calls (Claude only)' },
+  retries: { id: 'retries', label: 'Retried', title: "Model calls the SDK had to retry, out of Claude's calls: only Claude reports them" },
   cost: { id: 'cost', label: 'Cost', title: 'Dollars, where the engine reports them' },
 };
 
@@ -213,14 +266,14 @@ export function cell(id: ColumnId, c: MetricsCounts): string {
     case 'run':
       return duration(d.avgRunMs);
     case 'percall':
-      return duration(d.apiPerCallMs);
+      return duration(d.apiPerTurnMs);
     case 'tps':
       return rate(d.tokensPerSec);
     case 'errors':
       return c.runs === 0 ? '—' : `${percent(d.errorRate)} · ${c.failedRuns}/${c.runs}`;
     case 'retries':
-      if (c.calls === 0) return c.retries > 0 ? `${c.retries} retried` : '—';
-      return `${percent(d.retryRate)} · ${c.retries}/${c.calls}`;
+      if (c.claudeCalls === 0) return c.retries > 0 ? `${c.retries} retried` : '—';
+      return `${percent(d.retryRate)} · ${c.retries}/${c.claudeCalls}`;
     case 'cost':
       return dollars(c.costUsd);
   }
@@ -276,6 +329,15 @@ export function isEmpty(r: Pick<MetricsResponse, 'models' | 'total'>): boolean {
   return r.models.length === 0 && r.total.runs === 0 && r.total.calls === 0;
 }
 
+/**
+ * With a project picked: its counts begin when per-project counting was added, so an
+ * earlier run is in All projects only. Null for all projects.
+ */
+export function projectNote(r: Pick<MetricsResponse, 'project' | 'since'>): string | null {
+  if (!r.project) return null;
+  return `Counts for ${r.project.name} start on ${dayLabel(r.since)}, when per-project counting was added. Earlier runs are under ${ALL_PROJECTS} only.`;
+}
+
 /** The days to show: only when the range has more than one. */
 export function showDays(r: Pick<MetricsResponse, 'range' | 'days'>): MetricsDay[] {
   return r.range === 'today' ? [] : r.days;
@@ -303,9 +365,11 @@ export function beforeModelLine(m: MetricsBefore['models'][number]): string {
 /** The definitions under the tables. */
 export const HOW_COUNTED: ReadonlyArray<string> = [
   'Calls are the model’s round-trips: a Claude run’s turns, or each reply a Copilot or OpenRouter agent asked for.',
-  'Time per run is how long a run took from start to end, waiting for you included. Time per call and speed use only the model-call time an engine reports, over the calls it timed, so they are a dash where none was.',
-  'Failed counts runs that ended failed. A stop of your own, a pause and a budget stop are runs but not failures. Retried counts the model calls the SDK had to try again; only Claude reports them.',
+  'Time per run is how long a run took from start to end, waiting for you included. Time per turn and speed use only the model time an engine reports, over the turns it timed, so they are a dash where none was.',
+  'A Claude turn’s model time includes its subagents’, which can run side by side, so time per turn is not the length of one API call. Speed is each model’s own output tokens per second of that time; the total is the average of the models’ speeds.',
+  'Failed counts runs that ended failed. A stop of your own, a pause and a budget stop are runs but not failures. Retried counts the model calls the SDK had to try again; only Claude reports them, so the rate is out of Claude’s calls.',
   'A run is credited to the model that did most in it. Tokens and dollars are exact per model.',
   'Copilot and OpenRouter report tokens, not dollars, so their cost is a dash. Days are the daemon’s own, midnight to midnight.',
   'What is shown is kept after a job or agent is removed. Runs from before recording began are not in the tables, only in the line under them.',
+  'A project’s counts begin when per-project counting was added; runs before that are under All projects only.',
 ];

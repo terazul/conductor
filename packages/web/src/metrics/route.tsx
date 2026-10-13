@@ -1,6 +1,7 @@
 /**
  * Screen 8 — Metrics (Amendment 122). What the models were used for: tokens, calls, time
- * and errors, in total and per model, over today, 7 days or all of it.
+ * and errors, in total and per model, over today, 7 days or all of it, for every project or
+ * one (Amendment 136).
  *
  *   order 80 · hotkey 8. Registered by main.tsx's `./＊/route.tsx` glob, like every screen.
  *
@@ -10,9 +11,14 @@
  * switching an agent's model does not credit everything it did to the new one. The screen
  * only divides: every rate is made in rules.ts from two sums the daemon sent.
  *
- * WHEN IT RE-READS. On arriving, on the window getting focus back, when the range changes,
- * and a moment after today's spend or any agent's status changes, because those are when a
- * result has landed or a run has ended.
+ * WHEN IT RE-READS. On arriving, on the window getting focus back, when the range or the
+ * project changes, and a moment after today's spend or any agent's status changes, because
+ * those are when a result has landed or a run has ended.
+ *
+ * THE PROJECT PICKER. "All projects" reads every count, as before; a project reads that
+ * project's own (migration 220), which begin when they were added, and says so. The choice
+ * is a setting, like the range; a remembered project that has since been removed is
+ * All projects again.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,15 +26,17 @@ import type { MetricsRange, MetricsResponse } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
 import { errorText } from '../lib/errors.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useStatusBar } from '../lib/store.js';
+import { useAgents, useProjects, useStatusBar } from '../lib/store.js';
 import { getMetrics } from './endpoints.js';
 import {
   BEFORE_NOTE,
   DAY_COLUMNS,
   HOW_COUNTED,
   MODEL_COLUMNS,
+  PROJECT_KEY,
   RANGES,
   RANGE_KEY,
+  asProject,
   asRange,
   beforeLine,
   beforeModelLine,
@@ -38,6 +46,8 @@ import {
   isEmpty,
   modelCell,
   modelName,
+  projectChoices,
+  projectNote,
   rangeLine,
   share,
   showDays,
@@ -47,7 +57,7 @@ import {
 import './metrics.css';
 
 /** The range's report, re-read whenever something says a result may have landed. */
-function useMetrics(range: MetricsRange) {
+function useMetrics(range: MetricsRange, projectId: string | null) {
   const [resp, setResp] = useState<MetricsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,7 +68,7 @@ function useMetrics(range: MetricsRange) {
     const mine = ++seq.current;
     setLoading(true);
     try {
-      const next = await getMetrics(range);
+      const next = await getMetrics(range, projectId);
       if (mine !== seq.current) return;
       setResp(next);
       setError(null);
@@ -68,7 +78,7 @@ function useMetrics(range: MetricsRange) {
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [range]);
+  }, [range, projectId]);
 
   useEffect(() => {
     setResp(null);
@@ -100,9 +110,11 @@ function useMetrics(range: MetricsRange) {
 
 function Metrics() {
   const range = asRange(useSetting(RANGE_KEY));
-  const { resp, error, loading, load } = useMetrics(range);
-  // What the screen shows is the answer for the range it was asked for, never an older one.
-  const shown = resp && resp.range === range ? resp : null;
+  const projects = useProjects();
+  const projectId = asProject(useSetting(PROJECT_KEY), projects);
+  const { resp, error, loading, load } = useMetrics(range, projectId);
+  // What the screen shows is the answer for the range and project it was asked for, never an older one.
+  const shown = resp && resp.range === range && (resp.project?.id ?? null) === projectId ? resp : null;
 
   return (
     <div className="mt">
@@ -124,6 +136,19 @@ function Metrics() {
             </button>
           ))}
         </div>
+        <select
+          className="mt-project"
+          aria-label="project"
+          title="Whose runs to count"
+          value={projectId ?? ''}
+          onChange={(e) => writeSetting(PROJECT_KEY, e.target.value || null)}
+        >
+          {projectChoices(projects).map((p) => (
+            <option key={p.id ?? ''} value={p.id ?? ''}>
+              {p.label}
+            </option>
+          ))}
+        </select>
         {shown && <span className="mt-quiet">{rangeLine(shown)}</span>}
         {loading && <span className="mt-quiet">reading…</span>}
         <div className="mt-actions">
@@ -152,10 +177,12 @@ function Metrics() {
 export function Report({ resp }: { resp: MetricsResponse }) {
   const empty = isEmpty(resp);
   const days = showDays(resp);
+  const note = projectNote(resp);
   return (
     <>
+      {note && <div className="mt-note">{note}</div>}
       <section className="mt-tiles" aria-label="totals">
-        {tiles(resp.total).map((t) => (
+        {tiles(resp.total, resp.models).map((t) => (
           <div key={t.id} className={`mt-tile${t.bad ? ' bad' : ''}`} title={t.title}>
             <div className="mt-tile-label">{t.label}</div>
             <div className="mt-tile-value">{t.value}</div>

@@ -287,3 +287,22 @@
   color: var(--ink2);
   margin-bottom: 8px;
 }
+
+/* The project picker (Amendment 136): a plain select, quiet like the range. */
+.mt-project {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  background: var(--bg2);
+  color: var(--ink2);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 2px 6px;
+  max-width: 220px;
+}
+
+.mt-project:hover,
+.mt-project:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink3);
+}

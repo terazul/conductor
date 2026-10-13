@@ -856,14 +856,25 @@ console.log('\n15 · a screen can be reached without having a tab (Amendment 42)
     { id: 'files', hotkey: '5', order: 50 },
     { id: 'fleet', hotkey: '1', order: 10 },
     { id: 'spawn', tab: false, order: 70 },
-    // A made-up screen naming a hotkey no real screen has ('8'), to show tab: false wins over it.
-    { id: 'old', hotkey: '8', tab: false, order: 80 },
+    // A made-up screen naming a hotkey no real screen has, to show tab: false wins over it.
+    // Every digit is a real screen's now (Metrics took '8', Amendment 122), so it is a letter
+    // no screen and no shortcut uses (Amendment 136).
+    { id: 'old', hotkey: 'x', tab: false, order: 80 },
   ];
   check('a screen with tab: false gets no nav chip', tabbed(defs).map((d) => d.id).join() === 'fleet,files', tabbed(defs).map((d) => d.id).join());
   check('the tabs come in nav order, whatever order they were found in', tabbed(defs)[0]?.id === 'fleet');
   check('a hotkey still opens its screen', screenForKey(defs, '5')?.id === 'files');
-  check('and a screen without a tab has none, even if it names one', screenForKey(defs, '8') === undefined);
+  check('and a screen without a tab has none, even if it names one', screenForKey(defs, 'x') === undefined);
   check('a key no screen has opens nothing', screenForKey(defs, '9') === undefined);
+  {
+    // The made-up key really is one nothing has: no screen registers it.
+    const real: string[] = [];
+    for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'settings', 'diagnostics', 'spawn']) {
+      const code = readFileSync(new URL(`../${dir}/route.tsx`, import.meta.url), 'utf8');
+      for (const m of code.matchAll(/hotkey:\s*'(.)'/g)) real.push(m[1]!);
+    }
+    check("the made-up screen's key is one no real screen uses", real.length >= 10 && !real.includes('x') && real.includes('8'), real.join());
+  }
   const spawnSrc = readFileSync(new URL('../spawn/route.tsx', import.meta.url), 'utf8');
   const def = spawnSrc.slice(spawnSrc.indexOf('export const screen'));
   check('Spawn is registered without a tab or a hotkey', /tab:\s*false/.test(def) && !/hotkey:/.test(def), def.slice(0, 200));
