@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -38,7 +38,7 @@ import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.j
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, pillsWith, resetPersona, withPersona, withoutPersona } from './personas.js';
 import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, toPreset, withSetup, withoutSetup, type CustomRole } from './custom.js';
 import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
-import { DEFAULT_METHOD, METHODS, branchProblem, isolationOf, launchBody, methodFrom, methodReady, presetLabel } from './launch.js';
+import { DEFAULT_METHOD, METHODS, branchOptions, branchProblem, isolationOf, launchBody, methodFrom, methodReady, pickedNote, presetLabel } from './launch.js';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { ALL_ON, CLAUDE, NONE, capabilitiesOf, type Capabilities } from '../lib/providers.js';
@@ -1307,8 +1307,43 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   check('the orchestrator\'s plan rules use ink and line tokens only: no hex, and not --live, --done, --need, --fail or --you', mine.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(mine) && vars.every((v) => !STATUS.includes(v)) && ['ink2', 'line2'].every((v) => vars.includes(v)), [...new Set(vars)].join());
 }
 
+console.log('\n22 · (2)\'s branch picker: local branches, then the ones only on origin (Amendment 139)');
+{
+  const b = (name: string, o: Partial<BranchInfo> = {}): BranchInfo => ({
+    name, head: 'abc', subject: 's', at: '2026-10-13T00:00:00Z', isTarget: false, ahead: 0, behind: 0,
+    forkedAt: null, commits: [], worktree: null, jobId: null, live: false, upstream: null, ...o,
+  });
+  const res = {
+    branches: [
+      b('main', { isTarget: true, worktree: { path: '/p', uncommitted: 0 } }),
+      b('conductor/job_x', { worktree: { path: '/p/.conductor/wt/job_x', uncommitted: 0 }, jobId: 'job_x', live: true }),
+      b('topic/done', { worktree: { path: '/elsewhere', uncommitted: 2 } }),
+      b('topic/free'),
+    ],
+    remoteOnly: ['feature/a', 'feature/b'],
+  };
+  const opts = branchOptions(res, ['main']);
+  check('local branches first, in the order the daemon gives, then origin-only ones', opts.map((o) => `${o.from}:${o.value}`).join() === 'local:main,local:conductor/job_x,local:topic/done,local:topic/free,origin:feature/a,origin:feature/b', opts.map((o) => o.value).join());
+  check('the default is marked as the default, and refused', opts[0]!.refused && /default branch/.test(opts[0]!.label));
+  check('one an agent is on, and one checked out somewhere, say "(checked out)" and are refused', opts[1]!.refused && /\(checked out\)/.test(opts[1]!.label) && opts[2]!.refused && opts[2]!.label === '(checked out)');
+  check('a free local branch is offered plainly', !opts[3]!.refused && opts[3]!.label === 'local');
+  check('origin-only ones are labelled "on origin", and not refused', opts.slice(4).every((o) => o.label === 'on origin' && !o.refused));
+  check('a daemon from before (no remoteOnly) gives the local ones only; no listing gives none', branchOptions({ branches: res.branches }, ['main']).length === 4 && branchOptions(null).length === 0);
+  check('a name both local and in remoteOnly is listed once, as local', branchOptions({ branches: [b('x')], remoteOnly: ['x', 'y'] }).map((o) => `${o.from}:${o.value}`).join() === 'local:x,origin:y');
+  check('the default is the project\'s, not the compared-with branch: a target that is not the default is offered', !branchOptions({ branches: [b('develop', { isTarget: true })] }, ['main'])[0]!.refused);
+  check('the note for an origin-only pick says it will track origin', /tracks origin\/feature\/a/.test(pickedNote('feature/a', opts) ?? ''));
+  check('the note for a checked-out pick says it will be refused; the default is left to branchProblem; anything else says nothing', /will be refused/.test(pickedNote(' topic/done ', opts) ?? '') && pickedNote('main', opts) === null && pickedNote('topic/free', opts) === null && pickedNote('brand/new', opts) === null);
+  check('the list never holds a launch back: a checked-out pick is still a name methodReady takes', methodReady('named', 'topic/done', ['main']));
+
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check('the field is still free text, with the list as its datalist', /list="sp-branch-list"/.test(route) && /<datalist id="sp-branch-list">/.test(route) && /onChange=\{\(e\) => setBranchName\(e\.target\.value\)\}/.test(route));
+  check('each option shows its label', /<option key=\{`\$\{o\.from\}:\$\{o\.value\}`\} value=\{o\.value\} label=\{o\.label\} \/>/.test(route));
+  check('the branches are fetched when (2) is chosen and when the project changes', /const wantsBranches = method === 'named' && projectId !== null && isRepo !== false;/.test(route) && /getBranches\(projectId\)/.test(route) && /\}, \[wantsBranches, projectId\]\);/.test(route));
+  check('the list is built from the project\'s default, as the name check is', /branchOptions\(branchList, refused\)/.test(route));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

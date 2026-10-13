@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Agent,
   Autonomy,
+  BranchesResponse,
   CreateJobResponse,
   EffortLevel,
   Job,
@@ -88,7 +89,8 @@ import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { Pipeline } from './Pipeline.js';
 import { defaultListed, helperCapFor, orchestrates, unresolvedListed, type ListedRole } from './orchestrated.js';
-import { METHODS, branchProblem, launchBody, methodReady, presetLabel, type Method } from './launch.js';
+import { METHODS, branchOptions, branchProblem, launchBody, methodReady, pickedNote, presetLabel, type Method } from './launch.js';
+import { getBranches } from '../branches/endpoints.js';
 import { useReorder } from './reorder.js';
 import { WaitsFor } from './RoleRow.js';
 import { PERSONAS_KEY, personasFrom } from './personas.js';
@@ -378,6 +380,30 @@ function Spawn() {
   const methodOk = methodReady(method, branchName, refused);
   const nameProblem = method === 'named' && branchName.trim() !== '' ? branchProblem(branchName, refused) : null;
 
+  /*
+   * (2)'s picker (Amendment 139): the project's branches, fetched when (2) is chosen and
+   * again when the project changes, local ones first and then those only on origin. A
+   * failed fetch leaves the field as it was, free text with nothing listed.
+   */
+  const [branchList, setBranchList] = useState<BranchesResponse | null>(null);
+  const wantsBranches = method === 'named' && projectId !== null && isRepo !== false;
+  useEffect(() => {
+    setBranchList(null);
+    if (!wantsBranches || projectId === null) return;
+    let live = true;
+    getBranches(projectId).then(
+      (res) => {
+        if (live) setBranchList(res);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [wantsBranches, projectId]);
+  const branchPicks = useMemo(() => branchOptions(branchList, refused), [branchList, refused]);
+  const branchNote = method === 'named' ? pickedNote(branchName, branchPicks) : null;
+
   const budgetPerAgent = useMemo(() => {
     const n = Number(budget);
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -574,11 +600,25 @@ function Spawn() {
               autoComplete="off"
               aria-invalid={nameProblem !== null}
               aria-describedby="sp-branch-note"
+              list="sp-branch-list"
             />
-            <span id="sp-branch-note" className={`sp-branchnote${nameProblem ? ' is-bad' : ''}`}>
+            {/*
+             * Still free text (Amendment 139): the list only offers what is there. A branch
+             * a named launch refuses is listed with why, so you can see it is taken.
+             */}
+            <datalist id="sp-branch-list">
+              {branchPicks.map((o) => (
+                <option key={`${o.from}:${o.value}`} value={o.value} label={o.label} />
+              ))}
+            </datalist>
+            <span
+              id="sp-branch-note"
+              className={`sp-branchnote${nameProblem || branchPicks.some((o) => o.refused && o.value === branchName.trim()) ? ' is-bad' : ''}`}
+            >
               {nameProblem ??
+                branchNote ??
                 (branchName.trim() === ''
-                  ? 'Name the branch to launch. One that exists is used as it is; a new one is cut from what the folder has checked out.'
+                  ? `Name the branch to launch, or pick one${branchPicks.length > 0 ? ` of ${branchPicks.length}` : ''}. One that exists is used as it is; one only on origin is tracked; a new one is cut from what the folder has checked out.`
                   : 'In its own worktree. One that exists is used as it is, with its commits.')}
             </span>
           </div>

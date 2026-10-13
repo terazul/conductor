@@ -148,6 +148,14 @@ export async function branchExists(cwd: string, branch: string): Promise<boolean
 }
 
 /**
+ * Whether origin has `branch`, as last fetched: `refs/remotes/origin/<branch>` only, so
+ * nothing here fetches (Amendment 139). A repo with no `origin` remote says false.
+ */
+export async function originBranchExists(cwd: string, branch: string): Promise<boolean> {
+  return gitOk(cwd, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]);
+}
+
+/**
  * The branch label for a nested repo's folder mark (Amendment 90). Null for a
  * detached HEAD or a repo with no commits yet — "on branch X" would be a guess
  * in both cases, since an unborn HEAD names a branch nothing has been

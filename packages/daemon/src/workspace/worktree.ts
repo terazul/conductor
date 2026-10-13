@@ -38,6 +38,7 @@ import {
   git,
   hasHead,
   isRepo,
+  originBranchExists,
   listWorktrees,
   repoRoot,
   type WorktreeEntry,
@@ -265,8 +266,9 @@ export class WorktreeMgr {
   /**
    * A worktree on a branch the user named (Amendment 115, methodology 2). Refused first, in
    * this order: a name git rejects (400), the project's default branch (409), a branch some
-   * worktree already has checked out (409). Then an existing branch is added as it is, and
-   * a new one is cut from `baseRef`.
+   * worktree already has checked out (409). Then an existing branch is added as it is, one
+   * only on origin gets a local branch tracking `origin/<name>` (Amendment 139), and a new
+   * one is cut from `baseRef`.
    *
    * NEVER `-B`: it would move an existing branch to `baseRef` and lose its commits.
    * `-b` refuses a name that exists, so a race with a branch created since the check fails
@@ -298,6 +300,10 @@ export class WorktreeMgr {
       if (refusal) throw new LaunchBranchError(409, refusal);
       if (await branchExists(root, branch)) {
         await git(root, ['worktree', 'add', '--', path, branch]);
+      } else if (await originBranchExists(root, branch)) {
+        // Only on origin, as last fetched (nothing fetches here): a local branch tracking it,
+        // so the agents start from origin's commits and a push goes back there.
+        await git(root, ['worktree', 'add', '--track', '-b', branch, '--', path, `origin/${branch}`]);
       } else {
         await git(root, ['worktree', 'add', '-b', branch, '--', path, baseRef]);
       }

@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CreateJobResponse } from '@conductor/shared';
+import type { BranchesResponse, CreateJobResponse } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
 import { modelSources } from '../session/models.js';
@@ -27,6 +27,7 @@ import { insertProject, listJobs, setDefaultBranch } from '../session/store.js';
 import { supervisor } from '../session/supervisor.js';
 import { listWorktrees } from './git.js';
 import { branchNameProblem, branchRefusal } from './worktree.js';
+import { remoteOnlyNames } from './branches.js';
 
 modelSources.gateway = () => Promise.reject(new Error('verify asked the real model API'));
 modelSources.claudeCode = () => Promise.reject(new Error('verify started a real Claude Code'));
@@ -37,6 +38,8 @@ const ROOT = realpathSync(mkdtempSync(join(tmpdir(), 'conductor-methodology-veri
 const REPO = join(ROOT, 'repo');
 const ELSEWHERE = join(ROOT, 'elsewhere');
 const PLAIN = join(ROOT, 'not-a-repo');
+const ORIGIN = join(ROOT, 'origin.git');
+const CLONE = join(ROOT, 'clone');
 
 let failures = 0;
 let checks = 0;
@@ -261,12 +264,63 @@ async function main(): Promise<void> {
   check('201, on a new conductor/<jobId> in the folder', inPlaceBranch.status === 201 && inPlaceBranch.body.job?.branch === `conductor/${inPlaceBranch.body.job?.id}` && inPlaceBranch.body.job.worktreePath === REPO, `${inPlaceBranch.status} ${JSON.stringify(inPlaceBranch.body)}`);
   sh(REPO, 'switch', '-q', 'main');
 
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n11 · a branch only on origin is tracked, and listed for the picker (Amendment 139)');
+  // A bare origin with main and two branches the project has never had locally; fetched
+  // once, and then one of them moves on origin without another fetch.
+  sh(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
+  sh(REPO, 'remote', 'add', 'origin', ORIGIN);
+  sh(REPO, 'push', '-q', 'origin', 'main');
+  sh(ROOT, 'clone', '-q', ORIGIN, CLONE);
+  sh(CLONE, 'switch', '-q', '-c', 'remote/only');
+  const originTip = commitFile(CLONE, 'remote.txt', 'from origin\n', 'remote: first');
+  sh(CLONE, 'push', '-q', 'origin', 'remote/only');
+  sh(CLONE, 'switch', '-q', '-c', 'remote/other', 'main');
+  commitFile(CLONE, 'other.txt', 'other\n', 'other: first');
+  sh(CLONE, 'push', '-q', 'origin', 'remote/other');
+  sh(REPO, 'fetch', '-q', 'origin');
+  sh(REPO, 'remote', 'set-head', 'origin', 'main');
+  sh(CLONE, 'switch', '-q', 'remote/only');
+  const unfetched = commitFile(CLONE, 'remote.txt', 'from origin\nnot fetched yet\n', 'remote: second');
+  sh(CLONE, 'push', '-q', 'origin', 'remote/only');
+  check('remote/only is on origin and not a local branch', !branchExists('remote/only') && sh(REPO, 'rev-parse', 'refs/remotes/origin/remote/only') === originTip);
+
+  const getBranches = async (): Promise<BranchesResponse> =>
+    (await fetch(`${BASE}/api/projects/${project.id}/branches`)).json() as Promise<BranchesResponse>;
+  const listed = await getBranches();
+  check("the listing has remoteOnly: origin's branches with no local one, sorted", JSON.stringify(listed.remoteOnly) === JSON.stringify(['remote/only', 'remote/other']), JSON.stringify(listed.remoteOnly));
+  check('origin/HEAD and main (which has a local branch) are not in it', !(listed.remoteOnly ?? []).includes('HEAD') && !(listed.remoteOnly ?? []).includes('main'));
+  check('remoteOnlyNames is that rule, pure', remoteOnlyNames(['b', 'a', 'main', 'a'], ['main']).join() === 'a,b' && remoteOnlyNames([], ['main']).length === 0);
+
+  const tracked = await launch({ isolation: 'worktree', branch: 'remote/only' });
+  check('a launch naming it → 201', tracked.status === 201, `${tracked.status} ${JSON.stringify(tracked.body)}`);
+  const trackedPath = tracked.body.job?.worktreePath ?? '';
+  check('the job is on remote/only, in its own worktree', tracked.body.job?.branch === 'remote/only' && existsSync(trackedPath) && sh(trackedPath, 'branch', '--show-current') === 'remote/only');
+  check('a local branch now, whose upstream is origin/remote/only', branchExists('remote/only') && sh(REPO, 'rev-parse', '--abbrev-ref', 'remote/only@{upstream}') === 'origin/remote/only');
+  check("at origin's tip as last fetched, with origin's file in it, not cut from main", sh(trackedPath, 'rev-parse', 'HEAD') === originTip && readFileSync(join(trackedPath, 'remote.txt'), 'utf8') === 'from origin\n' && originTip !== mainTip);
+  check('nothing was fetched: the later push to origin is not here', sh(REPO, 'rev-parse', 'refs/remotes/origin/remote/only') === originTip && unfetched !== originTip);
+  check('the listing no longer has it as origin-only', JSON.stringify((await getBranches()).remoteOnly) === JSON.stringify(['remote/other']));
+  const twice = await launch({ isolation: 'worktree', branch: 'remote/only' });
+  check('naming it again is the usual 409, naming where', twice.status === 409 && (twice.body.detail ?? '').includes(trackedPath), `${twice.status} ${JSON.stringify(twice.body)}`);
+  check('a bad name is still 400 first', (await launch({ isolation: 'worktree', branch: 'remote..only' })).status === 400);
+  check('the default branch is still refused, though origin has it too', (await launch({ isolation: 'worktree', branch: 'main' })).status === 409);
+  const fresh = await launch({ isolation: 'worktree', branch: 'nowhere/yet' });
+  const noUpstream = (() => {
+    try {
+      sh(REPO, 'rev-parse', '--abbrev-ref', 'nowhere/yet@{upstream}');
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+  check('a name neither has is still cut from HEAD, with no upstream', fresh.status === 201 && sh(fresh.body.job!.worktreePath, 'rev-parse', 'HEAD') === mainTip && noUpstream, `${fresh.status} ${JSON.stringify(fresh.body)}`);
+
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 115 methodology: PASS — ${checks} checks: a branch you name (new, or existing with its commits kept), invalid names 400, a default branch or one checked out elsewhere 409, a new branch per launch and in_place unchanged.\n`
+      ? `\nAmendment 115 methodology: PASS — ${checks} checks: a branch you name (new, or existing with its commits kept), invalid names 400, a default branch or one checked out elsewhere 409, a new branch per launch and in_place unchanged; a branch only on origin tracked from it, unfetched, and listed as remoteOnly (Amendment 139).\n`
       : `\nAmendment 115 methodology: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

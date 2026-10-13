@@ -877,6 +877,12 @@ export interface BranchesResponse {
    * refused while this is true.
    */
   rootLive?: boolean;
+  /**
+   * Branches origin has (as last fetched) that have no local branch of the same name, by
+   * name, sorted; `origin/HEAD` left out (Amendment 139). Spawn's branch picker lists them
+   * as "on origin": a named launch on one tracks it. Absent from a daemon from before.
+   */
+  remoteOnly?: string[];
 }
 
 export type BranchAction =

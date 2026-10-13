@@ -15,7 +15,7 @@
  * accepts that isolation, so jobs that have it are unchanged.
  */
 
-import type { AgentSpec, CreateJobRequest, Isolation } from '@conductor/shared';
+import type { AgentSpec, BranchesResponse, CreateJobRequest, Isolation } from '@conductor/shared';
 
 export type Method = 'in_place' | 'named' | 'worktree';
 
@@ -50,7 +50,7 @@ export const METHODS: MethodDef[] = [
     note: 'a name you give',
     words: 'new branch, named at launch',
     hint:
-      "A separate checkout on the branch you name, so your folder and your other jobs are untouched. A branch that exists is used as it is, with its commits; one that doesn't is made from what the folder has checked out. The default branch, and one that is checked out somewhere already, are refused.",
+      "A separate checkout on the branch you name, so your folder and your other jobs are untouched. A branch that exists is used as it is, with its commits; one only on origin gets a local branch that tracks it; one that is nowhere is made from what the folder has checked out. The default branch, and one that is checked out somewhere already, are refused.",
     requiresGit: true,
   },
   {
@@ -140,4 +140,62 @@ export function launchBody(i: LaunchInput): CreateJobRequest {
     agents: i.agents,
     budgetUsd: i.budgetUsd,
   };
+}
+
+/**
+ * One entry of (2)'s branch picker (Amendment 139). `refused` is set for a branch the daemon
+ * would refuse by what the listing says: the default, or one checked out somewhere (the
+ * project's own folder included). It is still offered, so you see it is there, but marked.
+ */
+export interface BranchOption {
+  value: string;
+  /** What the picker shows beside the name. */
+  label: string;
+  from: 'local' | 'origin';
+  refused: boolean;
+}
+
+/**
+ * The picker's list, from `GET …/branches`: local branches first, in the order the daemon
+ * gives them (the compared-with branch, then newest tip), then the branches only origin has,
+ * as last fetched, marked "on origin". `defaults` are the names refused as the project's
+ * default (`Project.defaultBranch`), as `branchProblem` refuses them. The field stays free
+ * text: a name not in the list is a new branch. A daemon from before Amendment 139 sends no
+ * `remoteOnly`, and the list is the local branches only.
+ */
+export function branchOptions(
+  res: Pick<BranchesResponse, 'branches' | 'remoteOnly'> | null,
+  defaults: readonly string[] = [],
+): BranchOption[] {
+  if (!res) return [];
+  const local = res.branches.map((b): BranchOption => {
+    if (defaults.includes(b.name)) {
+      return { value: b.name, label: 'default branch (refused: choose 1)', from: 'local', refused: true };
+    }
+    if (b.live) return { value: b.name, label: 'an agent is on it (checked out)', from: 'local', refused: true };
+    if (b.worktree) return { value: b.name, label: '(checked out)', from: 'local', refused: true };
+    return { value: b.name, label: 'local', from: 'local', refused: false };
+  });
+  const have = new Set(local.map((o) => o.value));
+  const origin = (res.remoteOnly ?? [])
+    .filter((n) => !have.has(n))
+    .map((n): BranchOption => ({ value: n, label: 'on origin', from: 'origin', refused: false }));
+  return [...local, ...origin];
+}
+
+/**
+ * What (2)'s note says about the name typed, from the picker's list, or null to say the usual
+ * thing. The daemon has the last word; this is what the listing knew when it was fetched, so
+ * it does not hold the launch back.
+ */
+export function pickedNote(raw: string, options: readonly BranchOption[]): string | null {
+  const o = options.find((x) => x.value === raw.trim());
+  if (!o) return null;
+  if (o.from === 'origin') {
+    return `Only on origin, as last fetched: a local ${o.value} is made that tracks origin/${o.value}, with its commits.`;
+  }
+  if (o.refused && o.label !== 'default branch (refused: choose 1)') {
+    return `${o.value} is checked out somewhere already, so the launch will be refused: finish the work there, or name another.`;
+  }
+  return null;
 }
