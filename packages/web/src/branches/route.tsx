@@ -33,9 +33,15 @@ import { branchAction, getBranches, previewMerge } from './endpoints.js';
 import { BranchGraph } from './graph.js';
 import { onBranchesChanged } from './live.js';
 import {
+  FORGET_LABEL,
   checkoutConfirm,
   checkoutReason,
+  cleanConfirm,
+  cleanLine,
+  cleanState,
   commitReason,
+  deleteConfirm,
+  deleteReason,
   defaultInto,
   defaultMessage,
   intoChoices,
@@ -44,9 +50,11 @@ import {
   mergeAllState,
   mergeConfirm,
   mergeable,
+  ownersOf,
   pushConfirm,
   previewLine,
   pushReason,
+  removedText,
   rootLine,
   showCommit,
   showPush,
@@ -57,7 +65,7 @@ type Outcome =
   | { kind: 'done'; action: BranchAction['action']; res: BranchActionResult }
   | { kind: 'error'; label: string; text: string; tone: 'warn' | 'fail' };
 
-type Confirming = 'merge' | 'merge_all' | 'push' | 'checkout' | null;
+type Confirming = 'merge' | 'merge_all' | 'push' | 'checkout' | 'delete' | 'clean' | null;
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -176,6 +184,9 @@ function Branches() {
   const [message, setMessage] = useState('');
   // Where "merge into" points (Amendment 110): the target unless you pick another.
   const [into, setInto] = useState('');
+  // "forget its job too" for Delete, and for Clean up merged (Amendment 143). Off each time.
+  const [forget, setForget] = useState(false);
+  const [forgetAll, setForgetAll] = useState(false);
 
   // This is the project you're on now, for the screens that open on "the one you were on".
   useEffect(() => {
@@ -193,7 +204,8 @@ function Branches() {
 
   // Each newly selected branch starts from its job's prompt as the message.
   useEffect(() => {
-    setConfirming((c) => (c === 'merge_all' ? c : null));
+    setConfirming((c) => (c === 'merge_all' || c === 'clean' ? c : null));
+    setForget(false);
     setMessage(branch ? defaultMessage(branch, jobs) : '');
     setInto(branch && resp ? defaultInto(resp, branch) : '');
   }, [selected]);
@@ -224,6 +236,12 @@ function Branches() {
 
   const all = resp ? mergeAllState(resp) : null;
   const target = resp?.target ?? 'main';
+  // Who owns each branch, from the store's jobs (Amendment 143): a job keeps its folder.
+  const owners = (b: BranchInfo): string[] => ownersOf(b, jobs, project.id);
+  const clean = resp ? cleanState(resp, owners, forgetAll) : null;
+  // Enabled when something would go with the checkbox ticked; the count is for it as it is.
+  const cleanable = resp ? cleanState(resp, owners, true).go.length : 0;
+  const cleanJobs = clean ? clean.go.flatMap(owners) : [];
 
   return (
     <div className="br">
@@ -268,8 +286,60 @@ function Branches() {
               )}
             </>
           )}
+          {clean && (
+            <>
+              <button
+                type="button"
+                className="br-btn"
+                disabled={clean.reason !== null || cleanable === 0 || busy !== null}
+                title={clean.reason ?? (cleanable === 0 ? 'every merged branch is kept for a reason: select one to see why' : `delete the merged branches and their folders; origin is not touched`)}
+                onClick={() => setConfirming('clean')}
+              >
+                {busy === 'clean_merged' ? '⌫ Cleaning up…' : `⌫ Clean up merged (${clean.go.length})`}
+              </button>
+              {clean.reason && <span className="br-why">{clean.reason}</span>}
+            </>
+          )}
         </div>
       </div>
+
+      {confirming === 'clean' && resp && clean && (
+        <div className="br-confirm br-confirm-list" role="alertdialog" aria-label="confirm clean up merged">
+          <span>{clean.go.length > 0 ? cleanConfirm(clean.go.length, forgetAll, cleanJobs.length) : 'Nothing would go as things stand.'}</span>
+          {clean.go.length > 0 && (
+            <ul className="br-clean-list">
+              {clean.go.map((b) => (
+                <li key={b.name}>{cleanLine(b, owners(b))}</li>
+              ))}
+            </ul>
+          )}
+          {clean.stay.length > 0 && (
+            <ul className="br-clean-list br-quiet">
+              {clean.stay.map((k) => (
+                <li key={k.branch}>
+                  {k.branch} stays — {k.why}
+                </li>
+              ))}
+            </ul>
+          )}
+          {resp.branches.some((b) => !b.isTarget && b.ahead === 0 && owners(b).length > 0) && (
+            <label className="br-check">
+              <input type="checkbox" checked={forgetAll} onChange={(e) => setForgetAll(e.target.checked)} /> {FORGET_LABEL}
+            </label>
+          )}
+          <button
+            type="button"
+            className="br-btn br-btn-go"
+            disabled={busy !== null || clean.go.length === 0}
+            onClick={() => void run(forgetAll ? { action: 'clean_merged', forgetJobs: true } : { action: 'clean_merged' }, 'Clean up merged')}
+          >
+            Clean up
+          </button>
+          <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
 
       {confirming === 'merge_all' && resp && all && all.reason === null && (
         <div className="br-confirm" role="alertdialog" aria-label="confirm merge all">
@@ -322,6 +392,9 @@ function Branches() {
           into={into}
           setInto={setInto}
           preview={preview}
+          owners={owners(branch)}
+          forget={forget}
+          setForget={setForget}
           run={(a, l) => void run(a, l)}
           onClose={() => setSelected(null)}
         />
@@ -414,6 +487,9 @@ function ActionBar({
   into,
   setInto,
   preview,
+  owners,
+  forget,
+  setForget,
   run,
   onClose,
 }: {
@@ -429,6 +505,9 @@ function ActionBar({
   into: string;
   setInto: (b: string) => void;
   preview: BranchMergePreview | null;
+  owners: string[];
+  forget: boolean;
+  setForget: (on: boolean) => void;
   run: (a: BranchAction, label: string) => void;
   onClose: () => void;
 }) {
@@ -444,6 +523,8 @@ function ActionBar({
   const commitBlocked = commit ?? (message.trim().length === 0 ? 'write a message first' : null);
   const makeDefault = makeDefaultReason(defaultBranch, b);
   const checkout = checkoutReason(resp, defaultBranch, b);
+  const del = deleteReason(resp, b, owners, forget);
+  const deleteAction: BranchAction = forget && owners.length > 0 ? { action: 'delete', branch: b.name, forgetJob: true } : { action: 'delete', branch: b.name };
 
   return (
     <div className="br-bar" role="region" aria-label={`actions for ${b.name}`}>
@@ -553,6 +634,13 @@ function ActionBar({
           onClick={() => setConfirming('checkout')}
         />
 
+        <Act label={busy === 'delete' ? 'Deleting…' : 'Delete'} reason={del} busy={working} onClick={() => setConfirming('delete')} />
+        {owners.length > 0 && !b.isTarget && (
+          <label className="br-check">
+            <input type="checkbox" checked={forget} onChange={(e) => setForget(e.target.checked)} disabled={working} /> {FORGET_LABEL}
+          </label>
+        )}
+
         {b.isTarget && !showCommit(b) && !showPush(resp, b) && (
           <span className="br-why">nothing to commit or push — {resp.remote ?? 'origin'} has all of {resp.target}</span>
         )}
@@ -578,6 +666,21 @@ function ActionBar({
           <span>{pushConfirm(resp, b)}</span>
           <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'push', branch: b.name }, 'Push')}>
             Push
+          </button>
+          <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {confirming === 'delete' && del === null && (
+        <div className="br-confirm" role="alertdialog" aria-label={`confirm deleting ${b.name}`}>
+          <span>
+            {deleteConfirm(b, owners, forget)}
+            {owners.length > 0 && forget && <span className="br-warn"> This can't be undone from here.</span>}
+          </span>
+          <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run(deleteAction, 'Delete')}>
+            Delete
           </button>
           <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
             Cancel
@@ -634,6 +737,7 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
   } else if (action === 'commit') text = `Committed${sha}.`;
   else if (action === 'push') text = res.ok ? 'Pushed.' : 'The push did not go through.';
   else if (action === 'set_default') text = res.ok ? 'Made the default.' : 'That did not go through.';
+  else if (action === 'delete' || action === 'clean_merged') text = removedText(res.removed ?? [], res.forgotJobs ?? []);
   else text = res.ok ? 'Fetched.' : 'The fetch did not go through.';
 
   return (
@@ -654,6 +758,15 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
               ))}
             </ul>
           </div>
+        )}
+        {res.kept && res.kept.length > 0 && (
+          <ul className="br-clean-list">
+            {res.kept.map((k) => (
+              <li key={k.branch}>
+                {k.branch} stayed — {k.why}
+              </li>
+            ))}
+          </ul>
         )}
         {res.output && <pre className="br-output">{res.output}</pre>}
       </div>

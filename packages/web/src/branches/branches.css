@@ -408,6 +408,24 @@
   flex: 1 1 320px;
 }
 
+/* Clean up merged's confirm and result (Amendment 143): one line per branch, folder, job. */
+.br-clean-list {
+  flex: 1 1 100%;
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* "forget its job too (its transcripts stay)" beside Delete and in the clean-up confirm. */
+.br-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
 .br-result {
   flex: none;
   display: flex;

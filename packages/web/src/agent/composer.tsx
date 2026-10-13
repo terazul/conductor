@@ -38,7 +38,7 @@ import {
   useProviderModels,
   useProviders,
 } from '../lib/providers.js';
-import { DEFAULT_EFFORT, EFFORTS } from '../spawn/autonomy.js';
+import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } from '../spawn/autonomy.js';
 import { scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
@@ -148,6 +148,15 @@ const PILLS: PillDef[] = [
         ? a.disallowedTools.filter((t) => t !== PUSH_RULE)
         : [...a.disallowedTools, PUSH_RULE],
     }),
+  },
+  {
+    // Amendment 144: what happens when its job finishes. Not a tool rule; the daemon reads it
+    // when the job settles done (session/finish.ts).
+    id: 'merge_when_done',
+    label: MERGE_WHEN_DONE_LABEL,
+    hint: MERGE_WHEN_DONE_HINT,
+    on: (a) => a.mergeWhenDone === true,
+    flip: (_a, on) => ({ mergeWhenDone: on }),
   },
 ];
 

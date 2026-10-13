@@ -25,6 +25,7 @@ import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptio
 import {
   DEFAULT_BUDGET_USD,
   DEFAULT_MODE,
+  MERGE_WHEN_DONE_LABEL,
   MODES,
   EFFORTS,
   PILLS,
@@ -1438,6 +1439,27 @@ console.log('\n23 · a Custom setup can orchestrate, and saves the roles it list
   const at = css.indexOf('.sp-corch {');
   const tick = at === -1 ? '' : css.slice(at, css.indexOf('}', at));
   check("the tick's rule uses ink tokens only: no hex, no status colour", tick.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(tick) && [...tick.matchAll(/var\(--([a-z0-9-]+)\)/g)].every((m) => !['live', 'need', 'fail', 'done', 'you', 'queue', 'idle'].includes(m[1]!)));
+}
+
+console.log('\n24 · "merge into main and clean up when done", a launch option (Amendment 144)');
+{
+  const pill = PILLS.find((p) => p.id === 'mergeWhenDone');
+  check('it is a pill, with its words, off by default', pill?.label === 'merge into main and clean up when done' && MERGE_WHEN_DONE_LABEL === pill.label && defaultPills()['mergeWhenDone'] === false);
+  check("its hint says the agents can't be messaged afterwards, the transcripts stay, and it never pushes", /can't be messaged afterwards/.test(pill?.hint ?? '') && /transcripts stay/.test(pill?.hint ?? '') && /never pushes/.test(pill?.hint ?? ''));
+  const off = toAutonomy(defaultPills(), 5);
+  const on = toAutonomy({ ...defaultPills(), mergeWhenDone: true }, 5);
+  check('off, the autonomy has no such field: as before', !('mergeWhenDone' in off));
+  check('on, it says so, and no tool list changes', on.mergeWhenDone === true && JSON.stringify(on.allowedTools) === JSON.stringify(off.allowedTools) && JSON.stringify(on.disallowedTools) === JSON.stringify(off.disallowedTools) && on.mode === off.mode);
+  const specs = toAgentSpecs(presetById('full'), { ...defaultPills(), mergeWhenDone: true }, 5);
+  check('every agent of the launch gets it, a reading role too', specs.length > 1 && specs.every((x) => x.autonomy.mergeWhenDone === true), specs.map((x) => `${x.role}:${x.autonomy.mergeWhenDone}`).join(','));
+  const saved = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ ...defaultPills(), mergeWhenDone: true }) : null));
+  check('Settings → What Spawn starts from keeps it, as it keeps every pill', saved.pills['mergeWhenDone'] === true);
+  const older = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ allowBash: true }) : null));
+  check('a saved set of pills from before it reads it as off', older.pills['mergeWhenDone'] === false && older.pills['allowBash'] === true);
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check("Spawn draws it with the other pills (PILLS.map)", /\{PILLS\.map\(\(p\) => \{/.test(route));
+  const settings = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
+  check('and Settings does too', /\{PILLS\.map\(\(p\) => \(/.test(settings));
 }
 
 console.log(

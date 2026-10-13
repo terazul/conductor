@@ -493,6 +493,16 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
     case 'budget':
     case 'failed':
       return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one, alert.renewed === true) };
+    case 'finished':
+      // A worktree job finished ahead of the target (Amendment 144): the card asks.
+      return { head: 'Finished: merge into', subject: `${alert.into ?? 'main'}?` };
+    case 'merged':
+      return {
+        head: alert.branch ?? 'a branch',
+        subject: alert.cleaned
+          ? `was merged into ${alert.into ?? 'main'} and cleaned up`
+          : `was merged into ${alert.into ?? 'main'}, and not cleaned up`,
+      };
   }
 }
 
@@ -520,6 +530,10 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
       return alert.cause === 'auth' ? 'model API login' : 'no model API';
     case 'reconnecting':
       return 'reconnecting';
+    case 'finished':
+      return 'finished: merge?';
+    case 'merged':
+      return 'merged';
   }
 }
 

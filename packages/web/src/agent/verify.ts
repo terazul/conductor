@@ -1076,6 +1076,14 @@ console.log('\n· the terminal, the rest of the plan (Amendment 141)');
   check("Settings (9) has a Terminal section: the two numbers as the slot limit is edited, and the shell from the daemon's list", /<Section title="Terminal">\s*<TerminalSection \/>/.test(settings) && /range=\{TERM_FONT_SIZE\}/.test(settings) && /range=\{TERM_SCROLLBACK\}/.test(settings) && /listShells\(\)/.test(settings) && /onBlur=\{commit\}[\s\S]*?e\.key === 'Escape'\) setDraft\(null\)/.test(settings));
 }
 
+console.log('\n· "merge into main and clean up when done" in the agent\'s settings (Amendment 144)');
+{
+  const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  check('the composer has the pill, worded as Spawn words it', /label: MERGE_WHEN_DONE_LABEL,\s*hint: MERGE_WHEN_DONE_HINT,/.test(comp) && /from '\.\.\/spawn\/autonomy\.js'/.test(comp));
+  check('it reads mergeWhenDone and sends only that field', /on: \(a\) => a\.mergeWhenDone === true,/.test(comp) && /flip: \(_a, on\) => \(\{ mergeWhenDone: on \}\),/.test(comp));
+  check('it sits with the guardrails, so it folds with them', comp.indexOf("id: 'merge_when_done'") > comp.indexOf('const PILLS: PillDef[] = [') && comp.indexOf("id: 'merge_when_done'") < comp.indexOf('interface ModeDef'));
+}
+
 console.log(
   failures === 0
     ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'

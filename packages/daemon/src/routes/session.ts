@@ -110,6 +110,8 @@ function parseAutonomy(raw: unknown): Autonomy {
   const effort = EFFORTS.includes(a['effort'] as EffortLevel)
     ? (a['effort'] as EffortLevel)
     : undefined;
+  // Amendment 144: only `true` turns it on; anything else is off, and off is left out.
+  const mergeWhenDone = a['mergeWhenDone'] === true;
 
   return {
     mode,
@@ -119,6 +121,7 @@ function parseAutonomy(raw: unknown): Autonomy {
     // Absent when uncapped, so a Claude agent's autonomy is the shape it always was.
     ...(capTokens !== null ? { budgetTokens: capTokens } : {}),
     ...(effort ? { effort } : {}),
+    ...(mergeWhenDone ? { mergeWhenDone } : {}),
   };
 }
 

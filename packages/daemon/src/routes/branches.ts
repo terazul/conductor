@@ -15,29 +15,21 @@
  * branch, a name starting with '-', an empty message; 409 live branch, target not checked
  * out or dirty, nothing to commit or merge, a rejected push, or (Amendment 117) a
  * `set_default` checkout refused because the project folder is dirty, something is working
- * in it, or the branch is checked out elsewhere; 504 push or fetch timed out;
+ * in it, or the branch is checked out elsewhere; (Amendment 143) a `delete` refused, with its
+ * sentence — the target, the folder's own branch, not merged, uncommitted files, a live
+ * agent, or a job that owns it without `forgetJob`; 504 push or fetch timed out;
  * 500 git failed (its stderr in detail).
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { AgentStatus, Project } from '@conductor/shared';
 import { branchTargetKey } from '@conductor/shared';
-import { onSettingsChanged, readSettings } from '../settings.js';
+import { onSettingsChanged } from '../settings.js';
 import { openDb } from '../db/index.js';
 import { hub } from '../hub.js';
-import { agentsForJob, defaultBranchIsSet, getProject, jobsForProject, setDefaultBranch } from '../session/store.js';
+import { supervisor } from '../session/supervisor.js';
 import { GitError } from '../workspace/git.js';
-import {
-  BranchError,
-  branchAction,
-  listBranches,
-  openRepo,
-  parseBranchAction,
-  previewMerge,
-  type BranchLookup,
-} from '../workspace/branches.js';
-
-const LIVE: ReadonlySet<AgentStatus> = new Set<AgentStatus>(['working', 'blocked', 'queued']);
+import { BranchError, branchAction, listBranches, parseBranchAction, previewMerge } from '../workspace/branches.js';
+import { projectRepo } from '../workspace/project-repo.js';
 
 function fail(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof BranchError) {
@@ -52,33 +44,9 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
 export default async function branchesRoutes(app: FastifyInstance): Promise<void> {
   const db = openDb();
 
-  /** The project's jobs by branch, read once per request: newest job first, a live one preferred. */
-  function lookupFor(project: Project): BranchLookup {
-    const byBranch = new Map<string, { jobId: string; live: boolean }>();
-    for (const job of jobsForProject(db, project.id)) {
-      const live = agentsForJob(db, job.id).some((a) => LIVE.has(a.status));
-      const seen = byBranch.get(job.branch);
-      if (!seen || (live && !seen.live)) byBranch.set(job.branch, { jobId: job.id, live });
-    }
-    return (branch) => byBranch.get(branch) ?? { jobId: null, live: false };
-  }
-
-  async function repoFor(projectId: string) {
-    const project = getProject(db, projectId);
-    if (!project) return null;
-    const chosen = readSettings()[branchTargetKey(project.id)] ?? null;
-    const defaultBranchSet = defaultBranchIsSet(db, project.id);
-    const rootLive = jobsForProject(db, project.id).some(
-      (job) =>
-        (job.isolation === 'in_place' || job.isolation === 'branch') &&
-        agentsForJob(db, job.id).some((a) => LIVE.has(a.status)),
-    );
-    const setDefault = (branch: string) => {
-      const updated = setDefaultBranch(db, project.id, branch);
-      if (updated) hub().broadcast({ type: 'entities', projects: [updated] });
-    };
-    return openRepo(project.id, project.path, project.defaultBranch, lookupFor(project), chosen, defaultBranchSet, rootLive, setDefault);
-  }
+  // The repo is built from the store as the finished-job merge builds it (project-repo.ts);
+  // a job forgotten for `delete` goes exactly as DELETE /api/jobs/:jobId removes it.
+  const repoFor = (projectId: string) => projectRepo(db, projectId, (jobId) => supervisor().deleteJob(jobId));
 
   // Choosing what to compare with is a setting (Amendment 113): every open page re-reads.
   const PREFIX = branchTargetKey('');

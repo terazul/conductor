@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ceilingOf, ceilingWords, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
+import { openBranches } from '../shell/nav.js';
 import { alertTitle, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
 import { tokenWords } from '../lib/providers.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
@@ -28,6 +29,9 @@ import {
   alertActions,
   alertProject,
   continueAgent,
+  finishedConfirm,
+  mergeAndClean,
+  mergeFinished,
   restoreAndContinue,
   dismissAlert,
   raiseAndContinue,
@@ -47,6 +51,8 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
   reconnecting: { label: 'Reconnecting', tone: 'var(--need)' },
   budget_over: { label: 'Over its daily budget', tone: 'var(--need)' },
+  finished: { label: 'Finished', tone: 'var(--need)' },
+  merged: { label: 'Merged', tone: 'var(--done)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -72,6 +78,8 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
   const now = useNow(alert.kind === 'reconnecting');
   // The hand-off summary box (Amendment 104). A new hold is a new alert, so it closes with it.
   const [handingOff, setHandingOff] = useState(false);
+  // "merge and clean up" asks first (Amendment 144): its agents can't be messaged after.
+  const [confirmClean, setConfirmClean] = useState<Extract<AlertAction, { id: 'merge_clean' }> | null>(null);
   const kind = KIND[alert.kind];
   const { head, subject } = alertTitle(alert, agents);
   const project = alertProject(alert, projects);
@@ -126,6 +134,23 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
       case 'project':
         navigate('project', { projectId: a.projectId });
         return;
+      case 'merge_clean':
+        setConfirmClean(a);
+        return;
+      case 'merge':
+        void cmd.run(
+          'Merging',
+          async () => {
+            const sha = await mergeFinished(a);
+            await dismissAlert(alert.id);
+            return sha;
+          },
+          (sha: string) => `merged into ${a.into} as ${sha.slice(0, 7)}; the job, its folder and its branch stay`,
+        );
+        return;
+      case 'branches':
+        openBranches(a.projectId);
+        return;
       case 'dismiss':
         void cmd.run('Dismissing', () => dismissAlert(alert.id));
         return;
@@ -135,6 +160,20 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
       case 'stop_retrying':
         void cmd.run('Stopping the retries', () => stopRetryingAgent(a.agentId), 'stopped retrying — it is failed');
     }
+  };
+
+  const cleanUp = (a: Extract<AlertAction, { id: 'merge_clean' }>) => {
+    setConfirmClean(null);
+    void cmd.run(
+      'Merging and cleaning up',
+      async () => {
+        const sha = await mergeAndClean(a);
+        // The job is gone, so the card goes with it; put it away in case this tab hears first.
+        await dismissAlert(alert.id).catch(() => undefined);
+        return sha;
+      },
+      (sha: string) => `merged into ${a.into} as ${sha.slice(0, 7)}, and cleaned up`,
+    );
   };
 
   const roles = mine.map((m) => m.role).join(' · ');
@@ -195,7 +234,13 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         {alert.kind === 'handoff_held' && first && waitingRoles(first.id, agents).length > 0 && (
           <Kv k="waiting" v={waitingRoles(first.id, agents).join(' · ')} />
         )}
-        {alert.detail !== undefined && <Kv k="sdk said" v={alert.detail} />}
+        {(alert.kind === 'finished' || alert.kind === 'merged') && alert.branch !== undefined && (
+          <Kv k="branch" v={alert.ahead !== undefined ? `${alert.branch} · ${alert.ahead} commit${alert.ahead === 1 ? '' : 's'}` : alert.branch} />
+        )}
+        {alert.kind === 'merged' && alert.sha !== undefined && <Kv k="merge" v={alert.sha.slice(0, 7)} />}
+        {alert.kind === 'finished' && alert.detail !== undefined && <Kv k="not merged by itself" v={alert.detail} tone="var(--need)" />}
+        {alert.kind === 'merged' && alert.detail !== undefined && <Kv k="not cleaned up" v={alert.detail} tone="var(--need)" />}
+        {alert.detail !== undefined && alert.kind !== 'finished' && alert.kind !== 'merged' && <Kv k="sdk said" v={alert.detail} />}
         {alert.endpoint !== undefined && <Kv k="endpoint" v={alert.endpoint} />}
         {alert.port !== undefined && <Kv k="port" v={String(alert.port)} />}
         {alert.kind === 'note_due' && alert.noteText !== undefined && (
@@ -220,6 +265,32 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
           ))}
         </div>
 
+        {confirmClean && (
+          <div className="atn-note" role="alertdialog" aria-label="confirm merge and clean up">
+            {finishedConfirm(confirmClean)}{' '}
+            <button type="button" className="atn-btn primary" disabled={cmd.busy} onClick={() => cleanUp(confirmClean)}>
+              merge and clean up
+            </button>{' '}
+            <button type="button" className="atn-btn ghost" onClick={() => setConfirmClean(null)}>
+              cancel
+            </button>
+          </div>
+        )}
+        {alert.kind === 'finished' && !confirmClean && (
+          <div className="atn-note">
+            Its job is done and its branch has commits {alert.into ?? 'main'} lacks. Merge keeps the job, its folder and its branch, so
+            its agents can still be messaged; merge and clean up removes them, keeping the transcripts. Pushing stays on the Branches
+            screen.
+          </div>
+        )}
+        {alert.kind === 'merged' && (
+          <div className="atn-note">
+            Its agent had "merge into main and clean up when done" on.{' '}
+            {alert.cleaned
+              ? 'The job, its folder and its branch were removed; the transcripts stay. Nothing was pushed.'
+              : 'The job, its folder and its branch are still there. Nothing was pushed.'}
+          </div>
+        )}
         {alert.kind === 'handoff_held' && first && (
           <>
             <HandOffPanel agent={first} editing={handingOff} onClose={() => setHandingOff(false)} cmd={cmd} />
@@ -312,7 +383,13 @@ function spentOf(agent: Agent): string {
 /** Something that makes the problem go away, as opposed to looking at it. */
 function isFix(a: AlertAction): boolean {
   return (
-    a.id === 'continue' || a.id === 'raise' || a.id === 'note_done' || a.id === 'hand_off' || a.id === 'restore' || a.id === 'retry_now'
+    a.id === 'continue' ||
+    a.id === 'raise' ||
+    a.id === 'note_done' ||
+    a.id === 'hand_off' ||
+    a.id === 'restore' ||
+    a.id === 'retry_now' ||
+    a.id === 'merge_clean'
   );
 }
 
@@ -343,6 +420,12 @@ function labelOf(a: AlertAction): string {
       return 'retry now';
     case 'stop_retrying':
       return 'stop retrying';
+    case 'merge_clean':
+      return 'merge and clean up';
+    case 'merge':
+      return 'merge';
+    case 'branches':
+      return 'open Branches';
   }
 }
 
@@ -362,6 +445,10 @@ function titleOf(a: AlertAction): string | undefined {
       return 'Try the model again now instead of waiting';
     case 'stop_retrying':
       return 'Give up: the agent ends failed, as it would have before retries';
+    case 'merge_clean':
+      return `Merge ${a.branch} into ${a.into}, then remove its job, folder and branch (asks first)`;
+    case 'merge':
+      return `Merge ${a.branch} into ${a.into}; the job, its folder and its branch stay`;
     default:
       return undefined;
   }

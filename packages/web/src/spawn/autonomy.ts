@@ -34,6 +34,11 @@ export interface PillDef {
   hint: string;
 }
 
+/** The per-agent setting of Amendment 144, worded the same in Spawn, Settings and the composer. */
+export const MERGE_WHEN_DONE_LABEL = 'merge into main and clean up when done';
+export const MERGE_WHEN_DONE_HINT =
+  "When its job finishes on a branch of its own and the merge would be clean, the branch is merged into main, then the job, its folder and its branch are removed: its agents can't be messaged afterwards, and their transcripts stay. Off, or when it can't merge cleanly, Needs You asks instead. It never pushes.";
+
 /** Read-only tools an agent needs to do anything useful. Always auto-approved. */
 const READ_TOOLS = ['Read', 'Glob', 'Grep'];
 
@@ -74,6 +79,9 @@ export const PILLS: PillDef[] = [
     label: 'allow MCP tools',
     hint: 'Tools from your MCP servers (Jira, Lucid, Obsidian…) run without asking. Off sends each to your queue. Some of them change things outside this folder.',
   },
+  // Amendment 144: what happens when the job finishes, not a tool rule, so `toAutonomy` sets
+  // `mergeWhenDone` from it and no tool list changes.
+  { id: 'mergeWhenDone', label: MERGE_WHEN_DONE_LABEL, hint: MERGE_WHEN_DONE_HINT },
 ];
 
 export type PillState = Record<string, boolean>;
@@ -112,6 +120,7 @@ export function defaultPills(): PillState {
     network: false,
     mcp: false,
     plan: false,
+    mergeWhenDone: false,
   };
 }
 
@@ -180,7 +189,7 @@ export function toAutonomy(
         ? 'acceptEdits'
         : 'default');
 
-  return { mode, allowedTools, disallowedTools, budgetUsd, effort };
+  return { mode, allowedTools, disallowedTools, budgetUsd, effort, ...(pills['mergeWhenDone'] ? { mergeWhenDone: true } : {}) };
 }
 
 /** One-line plain-English summary of what the agent may do unattended. */
