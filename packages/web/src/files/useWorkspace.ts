@@ -22,10 +22,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   Agent,
+  CreateFolderRequest,
+  CreateFolderResponse,
+  DeleteEntryResponse,
   DiffResponse,
+  EntryResponse,
   FileContentResponse,
   FileTreeResponse,
   Job,
+  RenameRequest,
+  RenameResponse,
   WriteFileRequest,
 } from '@conductor/shared';
 import { api } from '../lib/feed.js';
@@ -412,6 +418,48 @@ export async function createFile(root: string, path: string): Promise<FileConten
   const made = await writeFile(root, path, '', { createOnly: true });
   refreshRoot(root);
   return made;
+}
+
+// ── new folder, rename and delete (Amendment 138) ───────────────────────────
+//
+// Each refreshes its root's tree when it lands, as `createFile` does and for the same
+// reason: a project folder is never watched, and a folder (made, or emptied) is not a
+// file_edit even in a job's worktree. A refusal rejects with the daemon's own sentence,
+// as an `ApiError`, and refreshes nothing.
+
+/** Make a folder, and any above it. A name that is taken is a 409. */
+export async function createFolder(root: string, path: string): Promise<CreateFolderResponse> {
+  const body: CreateFolderRequest = { path };
+  const made = await api<CreateFolderResponse>(endpoint(root, 'folders'), { method: 'POST', body });
+  refreshRoot(root);
+  return made;
+}
+
+/**
+ * Rename or move a file or folder. The open tabs are the caller's to move (`followRename`,
+ * useTabs.ts); the last copy of a renamed file is carried to its new name here, so its
+ * tab shows it at once rather than "opening…".
+ */
+export async function renameEntry(root: string, from: string, to: string): Promise<RenameResponse> {
+  const body: RenameRequest = { from, to };
+  const done = await api<RenameResponse>(endpoint(root, 'rename'), { method: 'POST', body });
+  const last = lastFiles.get(`${root}\u0000${done.from}`);
+  if (done.type === 'file' && last) lastFiles.set(`${root}\u0000${done.to}`, { ...last, path: done.to });
+  refreshRoot(root);
+  return done;
+}
+
+/** What a delete would take, counted on disk: the confirm's numbers. */
+export function entryInfo(root: string, path: string): Promise<EntryResponse> {
+  return api<EntryResponse>(endpoint(root, 'entry', path));
+}
+
+/** Delete a file or folder. `recursive` only after the second confirm (`deleteSteps`). */
+export async function deleteEntry(root: string, path: string, recursive: boolean): Promise<DeleteEntryResponse> {
+  const url = `${endpoint(root, 'entry', path)}${recursive ? '&recursive=1' : ''}`;
+  const done = await api<DeleteEntryResponse>(url, { method: 'DELETE' });
+  refreshRoot(root);
+  return done;
 }
 
 /** Bootstrap a workspace. Track A's session engine is the real caller. */

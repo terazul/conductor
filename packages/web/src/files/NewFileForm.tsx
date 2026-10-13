@@ -7,26 +7,55 @@
  * `checkName` here or the daemon's own sentence (a name that is taken, a path it will
  * not write), shows under the box and leaves what was typed to be fixed.
  *
+ * The same box names a new folder and a rename (Amendment 138), by `kind`: a folder
+ * starts at `new-folder` and may end in `/`; a rename starts at the entry's own path with
+ * its last name selected, and Enter on the name it already has just puts the box away.
+ *
  * Presentational: making the file, and what happens after, is the caller's. `onCreate`
  * rejects with the reason, which is shown as it came.
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorText } from '../lib/errors.js';
-import { checkName, prefill } from './naming.js';
+import { checkFolderName, checkName, prefill, prefillFolder, prefillRename, type NameCheck } from './naming.js';
+
+/** What the box names. `file` is Amendment 121's, and the default. */
+export type NameKind = 'file' | 'folder' | 'rename-file' | 'rename-dir';
+
+interface Kind {
+  start: (dir: string) => { value: string; from: number; to: number };
+  check: (raw: string) => NameCheck;
+  /** For "name of the … in X". */
+  what: string;
+  /** The ↵ button's label. */
+  make: string;
+}
+
+const KINDS: Record<NameKind, Kind> = {
+  file: { start: prefill, check: (v) => checkName(v), what: 'new file', make: 'create the file' },
+  folder: { start: prefillFolder, check: checkFolderName, what: 'new folder', make: 'create the folder' },
+  'rename-file': { start: (p) => prefillRename(p, 'file'), check: (v) => checkName(v), what: 'file', make: 'rename it' },
+  'rename-dir': { start: (p) => prefillRename(p, 'dir'), check: checkFolderName, what: 'folder', make: 'rename it' },
+};
 
 interface Props {
-  /** The folder the name starts in, as a tree path. '' is the root. */
+  /**
+   * The folder the name starts in, as a tree path ('' is the root); for a rename, the
+   * path of what is being renamed.
+   */
   dir: string;
   /** Left padding in px, so the box sits where the folder's children do. */
   indent: number;
   /** Make the file at this path. Rejects with the reason it could not. */
   onCreate: (path: string) => Promise<void>;
   onCancel: () => void;
+  kind?: NameKind;
 }
 
-export function NewFileForm({ dir, indent, onCreate, onCancel }: Props) {
-  const start = useMemo(() => prefill(dir), [dir]);
+export function NewFileForm({ dir, indent, onCreate, onCancel, kind = 'file' }: Props) {
+  const k = KINDS[kind];
+  const renaming = kind === 'rename-file' || kind === 'rename-dir';
+  const start = useMemo(() => k.start(dir), [k, dir]);
   const [value, setValue] = useState(start.value);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,9 +72,14 @@ export function NewFileForm({ dir, indent, onCreate, onCancel }: Props) {
 
   const submit = async (): Promise<void> => {
     if (busy) return;
-    const named = checkName(value);
+    const named = k.check(value);
     if (!named.ok) {
       setError(named.reason);
+      return;
+    }
+    // A rename to the name it already has is no rename: put the box away, send nothing.
+    if (renaming && named.path === dir) {
+      onCancel();
       return;
     }
     setBusy(true);
@@ -61,6 +95,7 @@ export function NewFileForm({ dir, indent, onCreate, onCancel }: Props) {
   };
 
   const where = dir.length > 0 ? dir : 'the top';
+  const label = renaming ? `new name for the ${k.what} ${dir}` : `name of the ${k.what} in ${where}`;
 
   return (
     <div
@@ -86,7 +121,7 @@ export function NewFileForm({ dir, indent, onCreate, onCancel }: Props) {
           disabled={busy}
           spellCheck={false}
           autoComplete="off"
-          aria-label={`name of the new file in ${where}`}
+          aria-label={label}
           aria-invalid={error !== null}
           aria-describedby={error ? errId : undefined}
           onChange={(e) => {
@@ -99,8 +134,8 @@ export function NewFileForm({ dir, indent, onCreate, onCancel }: Props) {
           className="c5-iconbtn"
           onClick={() => void submit()}
           disabled={busy}
-          title="Create the file (Enter)"
-          aria-label="create the file"
+          title={`${k.make[0]!.toUpperCase()}${k.make.slice(1)} (Enter)`}
+          aria-label={k.make}
         >
           {busy ? '…' : '↵'}
         </button>

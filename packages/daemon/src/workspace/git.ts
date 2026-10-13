@@ -175,6 +175,27 @@ export async function listFiles(cwd: string): Promise<string[]> {
   return [...new Set(splitZ(out))];
 }
 
+/**
+ * How many files git tracks at or under `relPath` (Amendment 138), for the delete
+ * confirm's "git has N of them". `:(literal)` so a name with `*` or `?` in it is that
+ * name, not a pattern matching its neighbours.
+ */
+export async function trackedCount(cwd: string, relPath: string): Promise<number> {
+  const out = await git(cwd, ['ls-files', '-z', '--', `:(literal)${relPath}`]);
+  return splitZ(out).length;
+}
+
+/**
+ * Untracked folders, each once, as `git ls-files -o --directory` names them: a trailing
+ * `/`, and a folder holding nothing git would list collapsed to itself. The tree takes
+ * the empty ones from here (Amendment 138), which plain `ls-files` never names, so a new
+ * folder shows before anything is put in it.
+ */
+export async function untrackedDirs(cwd: string): Promise<string[]> {
+  const out = await git(cwd, ['ls-files', '-o', '--directory', '--exclude-standard', '-z']);
+  return splitZ(out).filter((p) => p.endsWith('/'));
+}
+
 export interface StatusEntry {
   path: string;
   /** Two-letter porcelain code, e.g. ' M', '??', 'A ', 'D '. */

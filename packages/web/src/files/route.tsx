@@ -29,7 +29,8 @@ import { errorText } from '../lib/errors.js';
 import { Splitter } from '../shell/Splitter.js';
 import { highlight, recall } from '../shell/nav.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { FileTree } from './FileTree.js';
+import { FileTree, type TreeVerbs } from './FileTree.js';
+import { DeleteConfirm } from './DeleteConfirm.js';
 import { FilePane } from './FilePane.js';
 import { DiffView } from './DiffView.js';
 import { TabStrip } from './TabStrip.js';
@@ -49,10 +50,12 @@ import {
   toggleFolder,
   type FilesState,
 } from './tabs.js';
-import { followLink, keep, openNew, update, useDirty, useFiles, useScrollMemory } from './useTabs.js';
+import { followLink, followRename, keep, openNew, update, useDirty, useFiles, useScrollMemory } from './useTabs.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeMax, treeWidth } from './width.js';
 import {
   createFile,
+  createFolder,
+  renameEntry,
   imageUrl,
   isImagePath,
   openWorkspace,
@@ -577,6 +580,77 @@ function RootSection({
     setAdding(null);
   };
 
+  /*
+   * New folder, rename and delete (Amendment 138). One box open at a time in a section:
+   * opening one puts any other away. A made folder is opened, so its new-file + is at
+   * hand; a rename moves the open tabs and their edits along (`followRename`); a delete's
+   * confirm closes the tabs it took when it lands (DeleteConfirm).
+   */
+  const [folderIn, setFolderIn] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<FileNode | null>(null);
+  const only = (which: 'file' | 'folder' | 'rename' | 'delete'): void => {
+    if (which !== 'file') setAdding(null);
+    if (which !== 'folder') setFolderIn(null);
+    if (which !== 'rename') setRenaming(null);
+    if (which !== 'delete') setDeleting(null);
+  };
+  // The + is Amendment 121's and hands `setAdding` straight to the tree; opening its box
+  // puts the others away from here.
+  useEffect(() => {
+    if (adding === null) return;
+    setFolderIn(null);
+    setRenaming(null);
+    setDeleting(null);
+  }, [adding]);
+  const verbs: TreeVerbs = {
+    folderIn,
+    onFolder: (dir) => {
+      only('folder');
+      setFolderIn(folderIn === dir ? null : dir);
+    },
+    onMakeFolder: async (path) => {
+      const made = await createFolder(r.root, path);
+      update((st) => {
+        const parts = made.path.split('/');
+        // Open it and every folder above it, so it shows where it was made.
+        return parts.reduce(
+          (acc, _, i) => toggleFolder(acc, r.root, parts.slice(0, i + 1).join('/'), false),
+          st,
+        );
+      });
+      setFolderIn(null);
+    },
+    renaming,
+    onRename: (path) => {
+      only('rename');
+      setRenaming(path);
+    },
+    onRenamed: async (from, to) => {
+      const done = await renameEntry(r.root, from, to);
+      followRename(r.root, done.from, done.to);
+      setRenaming(null);
+    },
+    onDelete: (node) => {
+      only('delete');
+      setDeleting(node);
+    },
+    deleting: deleting?.path ?? null,
+    confirm: deleting ? (
+      <DeleteConfirm
+        key={deleting.path}
+        root={r.root}
+        node={deleting}
+        onDone={() => setDeleting(null)}
+        onCancel={() => setDeleting(null)}
+      />
+    ) : null,
+    onCancel: () => {
+      setFolderIn(null);
+      setRenaming(null);
+    },
+  };
+
   // Chosen with nothing open: its default pick, once its tree lands.
   useEffect(() => {
     if (!top || !picking) return;
@@ -607,6 +681,18 @@ function RootSection({
             aria-pressed={adding === ''}
           >
             +
+          </button>
+        )}
+        {tree.data && (
+          <button
+            type="button"
+            className="c5-iconbtn"
+            onClick={() => verbs.onFolder('')}
+            title={`New folder in ${r.name}`}
+            aria-label={`New folder in ${r.name}`}
+            aria-pressed={folderIn === ''}
+          >
+            +/
           </button>
         )}
         {r.job ? (
@@ -650,6 +736,7 @@ function RootSection({
           onAdd={setAdding}
           onCreate={create}
           onCancelAdd={() => setAdding(null)}
+          verbs={verbs}
         />
       ) : (
         <div className="c5-note">reading {r.job ? 'the worktree' : 'the directory'}…</div>

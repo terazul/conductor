@@ -33,9 +33,9 @@ export type NameCheck = { ok: true; path: string } | { ok: false; reason: string
  * Empty segments (`a//b`) and `.` are dropped, so what is sent is what the daemon would
  * make of it anyway, and the tab that opens is under the path that was written.
  */
-export function checkName(raw: string): NameCheck {
+export function checkName(raw: string, kind: 'file' | 'folder' = 'file'): NameCheck {
   const typed = raw.trim();
-  if (typed.length === 0) return { ok: false, reason: 'Type a name for the file.' };
+  if (typed.length === 0) return { ok: false, reason: `Type a name for the ${kind}.` };
   if (/[\u0000-\u001f\u007f]/.test(typed)) {
     return { ok: false, reason: 'A name cannot hold control characters.' };
   }
@@ -49,7 +49,7 @@ export function checkName(raw: string): NameCheck {
     return { ok: false, reason: 'That ends in /, which names a folder. Add a file name after it.' };
   }
   const segments = typed.split('/').filter((s) => s !== '' && s !== '.');
-  if (segments.length === 0) return { ok: false, reason: 'Type a name for the file.' };
+  if (segments.length === 0) return { ok: false, reason: `Type a name for the ${kind}.` };
   for (const s of segments) {
     if (s === '..') return { ok: false, reason: 'A name cannot use .. to climb out of the folder.' };
     if (s.toLowerCase() === '.git') {
@@ -60,4 +60,36 @@ export function checkName(raw: string): NameCheck {
     }
   }
   return { ok: true, path: segments.join('/') };
+}
+
+// ── folders and renames (Amendment 138) ─────────────────────────────────────
+
+/** What the box offers for a new folder. */
+export const DEFAULT_FOLDER = 'new-folder';
+
+/** `prefill` for a new folder: the folder's own name selected, as a file's is. */
+export function prefillFolder(dir: string): { value: string; from: number; to: number } {
+  const folder = dir.replace(/^\/+|\/+$/g, '');
+  const prefix = folder.length > 0 ? `${folder}/` : '';
+  return { value: `${prefix}${DEFAULT_FOLDER}`, from: prefix.length, to: prefix.length + DEFAULT_FOLDER.length };
+}
+
+/**
+ * The box for a rename starts with the whole path, so a move to another folder is the
+ * same box; the last name is selected, a file's without its extension, so typing renames
+ * it and keeps both the folder it is in and the kind of file it is.
+ */
+export function prefillRename(path: string, type: 'file' | 'dir'): { value: string; from: number; to: number } {
+  const from = path.lastIndexOf('/') + 1;
+  const name = path.slice(from);
+  const dot = type === 'file' ? name.lastIndexOf('.') : -1;
+  return { value: path, from, to: from + (dot > 0 ? dot : name.length) };
+}
+
+/**
+ * `checkName` for a folder: the same rules in the same words, except that a trailing `/`
+ * is how people write a folder, so it is dropped rather than refused.
+ */
+export function checkFolderName(raw: string): NameCheck {
+  return checkName(raw.trim().replace(/\/+$/, ''), 'folder');
 }

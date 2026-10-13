@@ -200,6 +200,16 @@ export class Watcher {
     return this.flush();
   }
 
+  /**
+   * `touch` for many paths at once: a renamed or deleted folder (Amendment 138). One flush,
+   * so one batch of git calls. Past `MAX_BATCH` the rest stay pending, and the events the
+   * same move raises on disk schedule them in the usual way.
+   */
+  async touchAll(paths: { path: string; deleted: boolean }[]): Promise<FileEditPayload[]> {
+    for (const p of paths) this.#pending.set(p.path, p);
+    return this.flush();
+  }
+
   async #emitBatch(batch: Pending[]): Promise<FileEditPayload[]> {
     const root = this.#ws.path;
     // Filter 3 — one process for the whole batch. Deleted paths can't be

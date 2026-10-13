@@ -1135,3 +1135,83 @@
 .c5-emptyfile {
   padding: 4px 0;
 }
+
+/* ── new folder, rename and delete (Amendment 138) ───────────────────────── */
+
+/* A file row with its actions beside it, as a folder row has its + (.c5-dirrow). */
+.c5-filerow {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.c5-filerow:hover {
+  background: var(--surf);
+}
+
+.c5-filerow > .c5-row {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+/* +/ (new folder), ✎ (rename), ⌫ (delete): quiet until the row is pointed at or tabbed to. */
+.c5-act {
+  min-width: 20px;
+  padding: 0 3px;
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0;
+}
+
+.c5-dirrow:hover .c5-act,
+.c5-dirrow:focus-within .c5-act,
+.c5-filerow:hover .c5-act,
+.c5-filerow:focus-within .c5-act,
+.c5-act:focus-visible {
+  opacity: 1;
+}
+
+.c5-del:hover,
+.c5-del:focus-visible {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
+/* Nothing to hover with: the actions are always there, quietly. */
+@media (hover: none) {
+  .c5-act {
+    opacity: 1;
+  }
+}
+
+/* The confirm under the row it is about, in the tab strip's confirm colours. */
+.c5-delrow {
+  padding: 2px 4px 5px 8px;
+}
+
+.c5-delconfirm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--fail);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fail) 6%, var(--bg2));
+  font-size: var(--fs-sm);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.c5-delask {
+  color: var(--ink);
+}
+
+.c5-delnote {
+  color: var(--ink3);
+}
+
+.c5-delconfirm .c5-actions {
+  margin-left: 0;
+  padding: 2px 0 0;
+}

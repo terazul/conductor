@@ -30,7 +30,7 @@
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FileNode, FileTreeResponse } from '@conductor/shared';
-import { isRepo, listFiles, nestedBranch, toPosix } from './git.js';
+import { isRepo, listFiles, nestedBranch, toPosix, untrackedDirs } from './git.js';
 import type { ChangeSet } from './changes.js';
 
 /**
@@ -106,6 +106,12 @@ export function walkFiles(root: string, limit: number, maxDepth = 12): string[] 
       // tree should not fail the whole screen.
       return;
     }
+    // A folder with nothing in it is listed as itself (Amendment 138), the same entry
+    // `classifyLevel` already reads as an empty directory, so a new folder shows.
+    if (rel.length > 0 && !entries.some((e) => !NEVER_LISTED.has(e.name))) {
+      out.push(toPosix(rel));
+      return;
+    }
     for (const entry of entries) {
       if (out.length >= limit) return;
       if (NEVER_LISTED.has(entry.name)) continue;
@@ -140,6 +146,34 @@ export function walkFiles(root: string, limit: number, maxDepth = 12): string[] 
  * or not — useless for telling "this folder is its own repo" from "this folder
  * is just a folder".
  */
+/** How many folders `emptyUnder` may open in one tree read. */
+const MAX_EMPTY_PROBES = 2_000;
+
+/**
+ * The empty folders at or under an untracked folder (Amendment 138). `git ls-files`
+ * lists files, so a folder with none in it never reached the tree, and a folder made
+ * from the Files screen was there on disk and nowhere on screen. `untrackedDirs` names
+ * the untracked folders; this opens them, `budget` folders at most per tree read, and
+ * returns the ones with nothing listable in them. A nested repo is left to Amendment 90.
+ */
+function emptyUnder(abs: string, rel: string, budget: { left: number }, depth = 0): string[] {
+  if (budget.left <= 0 || depth > 12 || hasDotGit(abs)) return [];
+  budget.left -= 1;
+  let entries;
+  try {
+    entries = readdirSync(abs, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const kids = entries.filter((e) => !NEVER_LISTED.has(e.name));
+  if (kids.length === 0) return [rel];
+  const out: string[] = [];
+  for (const e of kids) {
+    if (e.isDirectory()) out.push(...emptyUnder(join(abs, e.name), `${rel}/${e.name}`, budget, depth + 1));
+  }
+  return out;
+}
+
 function hasDotGit(abs: string): boolean {
   try {
     lstatSync(join(abs, '.git'));
@@ -303,11 +337,21 @@ export async function buildTree(
 ): Promise<FileTreeResponse> {
   // Asked rather than passed in: a caller that got the flag wrong would either
   // throw a GitError on a scratch folder or list node_modules in a real repo.
-  const rawEntries = (await isRepo(worktree))
-    ? (await listFiles(worktree)).filter(listed)
-    : walkFiles(worktree, cap * 5);
+  const repo = await isRepo(worktree);
+  const [rawEntries, untracked] = repo
+    ? await Promise.all([
+        listFiles(worktree).then((l) => l.filter(listed)),
+        untrackedDirs(worktree).catch(() => [] as string[]),
+      ])
+    : [walkFiles(worktree, cap * 5), [] as string[]];
 
   const top = classifyLevel(worktree, rawEntries, '');
+  const budget = { left: MAX_EMPTY_PROBES };
+  for (const raw of untracked) {
+    const rel = raw.slice(0, -1);
+    if (rel.length === 0 || !listed(rel)) continue;
+    top.emptyDirs.push(...emptyUnder(join(worktree, rel), rel, budget));
+  }
 
   // Amendment 90: expand every nested-repo boundary found at the root, in
   // parallel, each recursing into whatever it contains of its own.

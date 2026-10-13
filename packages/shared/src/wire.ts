@@ -506,6 +506,64 @@ export interface WriteFileRequest {
   createOnly?: boolean;
 }
 
+/**
+ * The rest of the verbs on a root (Amendment 138): a job's worktree at
+ * `/api/jobs/:jobId/…`, or a project folder at `/api/projects/:projectId/dir/…?dir=`.
+ * Every path is root-relative and crosses the same gate as a write: `..`, an absolute
+ * path and anything under `.git` are a 400, and so is the root itself.
+ *
+ *   POST   …/folders              ← CreateFolderRequest → CreateFolderResponse (201)
+ *   POST   …/rename               ← RenameRequest       → RenameResponse
+ *   GET    …/entry?path=          → EntryResponse
+ *   DELETE …/entry?path=[&recursive=1] → DeleteEntryResponse
+ */
+export interface CreateFolderRequest {
+  /** Missing folders above it are made too. Anything already at the path is a 409. */
+  path: string;
+}
+
+export interface CreateFolderResponse {
+  /** The daemon's spelling of the path. */
+  path: string;
+}
+
+export interface RenameRequest {
+  /** A file or a folder. Missing is a 404. */
+  from: string;
+  /**
+   * Taken is a 409, except by `from` itself under another case on a case-insensitive
+   * filesystem (`readme.md` → `README.md`), which is a rename. A folder into itself is a 400.
+   */
+  to: string;
+}
+
+export interface RenameResponse {
+  from: string;
+  to: string;
+  type: 'file' | 'dir';
+}
+
+/** What a delete would take, so the confirm can name it before anything goes. */
+export interface EntryResponse {
+  path: string;
+  type: 'file' | 'dir';
+  /** Files under it on disk, ignored ones included (1 for a file). */
+  files: number;
+  /** Folders under it, not counting itself. */
+  folders: number;
+  /** The count stopped at the daemon's ceiling: there are at least `files`. */
+  capped?: true;
+  /** How many of those files git tracks. Null when the root is not a git repo. */
+  tracked: number | null;
+}
+
+export interface DeleteEntryResponse {
+  path: string;
+  type: 'file' | 'dir';
+  /** Files that went with it (1 for a file). */
+  files: number;
+}
+
 export interface DiffResponse {
   /** Unified diff for the whole worktree against HEAD. */
   diff: string;
