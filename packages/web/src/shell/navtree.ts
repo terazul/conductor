@@ -61,6 +61,11 @@ export interface NavAgent {
   needs: number;
   /** Done, and you haven't opened it since (Amendment 105). */
   finished: boolean;
+  /**
+   * The orchestrator of an orchestrated stack (Amendment 142): the Agent tab's own answer,
+   * `marksOrchestrator` (agent/tabs.ts:76), so the two can't disagree.
+   */
+  orchestrator: boolean;
 }
 
 /** One job's agents in a project (Amendment 86). */
@@ -172,6 +177,7 @@ export function navTree(
       status: t.status,
       needs: t.needs,
       finished: t.status === 'done' && finishedAgents.has(t.id),
+      orchestrator: t.orchestrator,
     }));
 
     return {

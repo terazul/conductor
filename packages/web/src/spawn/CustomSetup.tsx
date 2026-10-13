@@ -15,10 +15,14 @@
  * the row was already named something of its own, and its brief shows as the row's
  * placeholder: typing one overrides it for this launch. A persona's model reaches the row's
  * picker in the plan preview, where it can be changed like any other.
+ *
+ * On an engine that can start helpers, each row can orchestrate (Amendment 142), one at a time:
+ * the roles it may start are then listed under it in the plan preview, as under the preset
+ * "orchestrated pipeline"'s row (route.tsx, `Pipeline`), and saved with the setup.
  */
 
 import { useState } from 'react';
-import { KNOWN_ROLES, addRow, customProblems, removeRole, renameRole, roleFromName, rowPersona, untouchedRole, type CustomRole } from './custom.js';
+import { KNOWN_ROLES, addRow, customProblems, removeRole, renameRole, roleFromName, rowPersona, untouchedRole, withOrchestrator, type CustomRole } from './custom.js';
 import { moveRow, toggleWait } from './order.js';
 import { personaFor, type Persona } from './personas.js';
 import { useReorder } from './reorder.js';
@@ -32,6 +36,7 @@ export function CustomSetup({
   onSave,
   saved,
   personas,
+  orchestrable = false,
 }: {
   roles: CustomRole[];
   onChange: (roles: CustomRole[]) => void;
@@ -42,6 +47,8 @@ export function CustomSetup({
   saved: boolean;
   /** Every persona, for each row's pick (Amendment 68). */
   personas: readonly Persona[];
+  /** The engine can start helpers, so a row may orchestrate (Amendment 142): route.tsx's `has.helpers`. */
+  orchestrable?: boolean;
 }) {
   const problems = customProblems(roles);
   const [said, setSaid] = useState<string | null>(null);
@@ -93,7 +100,20 @@ export function CustomSetup({
             onBrief={(brief) => set(i, { brief })}
             onRemove={() => onChange(removeRole(roles, i))}
             removeDisabled={roles.length === 1}
-          />
+          >
+            {/* One row orchestrates at a time: ticking this one unticks the others (Amendment 142). */}
+            {orchestrable && (
+              <label className="sp-corch" title="It starts the roles listed under it in the plan below, one at a time, reads what each did and writes the next brief">
+                <input
+                  type="checkbox"
+                  checked={r.orchestrates === true}
+                  aria-label={`Agent ${i + 1} orchestrates`}
+                  onChange={(e) => onChange(withOrchestrator(roles, i, e.target.checked))}
+                />
+                orchestrates: starts the roles listed under it in the plan
+              </label>
+            )}
+          </RoleRow>
         </div>
       ))}
       <button

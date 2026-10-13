@@ -926,6 +926,15 @@
   color: var(--ink3);
 }
 
+/* A Custom row's "orchestrates" tick (Amendment 142): as quiet as its "waits for" ticks. */
+.sp-corch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
 /* The persona a plan row takes, when its role is named apart from it (Amendment 68). */
 .sp-persona {
   font-size: var(--fs-2xs);

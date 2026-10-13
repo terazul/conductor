@@ -21,6 +21,7 @@
  */
 
 import type { Agent, Alert, PendingRequest } from '@conductor/shared';
+import { agentTabs } from '../agent/tabs.js';
 import { readFileSync } from 'node:fs';
 import { ORDER_KEY, SORTS, SORT_KEY, SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects } from '../fleet/order.js';
 import { dirRoot, parseDirRoot } from '../files/tabs.js';
@@ -345,7 +346,7 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
   check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'working' && calm.jobs[1]!.status === 'done', calm.jobs.map((j) => j.status).join());
-  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, finished: false }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, finished: false }], []);
+  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false, orchestrator: false }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, finished: false, orchestrator: false }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, finished: false, orchestrator: false }], []);
   check('a failure outranks working, by the Fleet\'s SORT_RANK', failed.length === 1 && failed[0]!.status === 'failed' && SORT_RANK.failed < SORT_RANK.working);
   check('a project with one job still gets its group', api.jobs.length === 1 && api.jobs[0]!.agents.length === 1);
   const unknown = navTree(projects, agents, [], [])[0]!;
@@ -454,9 +455,31 @@ console.log('\n10 · the carry-through: filled marks and a nested repo\'s branch
   );
 }
 
+console.log('\n11 · an orchestrator wears the Agent tab\'s mark in the navigator too (Amendment 142)');
+{
+  // An orchestrated stack: the orchestrator with two roles listed, one helper started, and a plain agent beside it.
+  const orch: Agent = { ...agent('o1', 'web', 'jP', 'orchestrator'), pipelineRoles: ['developer', 'reviewer'] };
+  const helper: Agent = { ...agent('h1', 'web', 'jP', 'developer'), parentId: 'o1' };
+  // An orchestrator whose stack is one agent: nothing to mark (Amendment 128, `showsOrchestrator`).
+  const alone: Agent = { ...agent('o2', 'api', 'jQ', 'orchestrator'), pipelineRoles: [] };
+  const all = [...agents, orch, helper, alone];
+  const t = navTree(projects, all, [], [], [...jobs, { id: 'jP', createdAt: '2026-10-03T09:00:00Z', prompt: 'Run it' }]);
+  const row = (id: string) => t.flatMap((p) => p.agents).find((a) => a.id === id)!;
+  check('the orchestrator\'s row is marked', row('o1').orchestrator === true);
+  check('its helper is not, nor a plain agent, nor an orchestrator with nothing listed', !row('h1').orchestrator && !row('a1').orchestrator && !row('o2').orchestrator && !row('b1').orchestrator);
+  check('it is the Agent tab\'s own answer, for every agent', t.every((p) => p.agents.every((a) => a.orchestrator === agentTabs(all, p.id, ['jP', 'jNew', 'jApi', 'jOld'], [], []).find((x) => x.id === a.id)!.orchestrator)));
+  check('a job\'s group carries the same rows, mark and all', t[0]!.jobs.find((j) => j.id === 'jP')!.agents.find((a) => a.id === 'o1')!.orchestrator);
+
+  const nav = src('./Navigator.tsx');
+  const tab = src('../agent/agent.tsx');
+  check('the row draws the mark the Agent tab draws, OrchestratorMark short', /\{a\.orchestrator && <OrchestratorMark short \/>\}/.test(nav) && /\{t\.orchestrator && <OrchestratorMark short \/>\}/.test(tab));
+  check('and its title says what the tab\'s says', /a\.orchestrator \? ' · orchestrator: starts the others' : ''/.test(nav) && /t\.orchestrator \? ' · orchestrator: starts the others' : ''/.test(tab));
+  check('the mark comes from shell/ui.tsx, so its own title is the one every screen shows', /import \{[^}]*OrchestratorMark[^}]*\} from '\.\/ui\.js';/.test(nav));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; and an orchestrator wears the Agent tab\'s mark.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

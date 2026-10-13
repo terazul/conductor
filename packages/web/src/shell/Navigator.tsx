@@ -65,7 +65,7 @@ import {
 } from './navtree.js';
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
-import { Chevron, Dot, STATUS_WORD, tildePath } from './ui.js';
+import { Chevron, Dot, OrchestratorMark, STATUS_WORD, tildePath } from './ui.js';
 
 /** The screen up now and its params, kept current by every navigation. */
 export function useRoute(): { id: string; params: NavParams } {
@@ -127,10 +127,12 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
       type="button"
       className={`sh-nav-row${selected ? ' is-sel' : ''}`}
       onClick={() => openAgent({ id: a.id, jobId: a.jobId, projectId })}
-      title={a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}
+      title={`${a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}${a.orchestrator ? ' · orchestrator: starts the others' : ''}`}
     >
       <Dot status={a.status} />
       <span className="sh-nav-label">{a.label}</span>
+      {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
+      {a.orchestrator && <OrchestratorMark short />}
       {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). Finished only until
           you open the agent, and again when it finishes again (Amendment 105). */}
       {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
