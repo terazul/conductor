@@ -13,9 +13,18 @@ import type { BranchInfo, BranchMergePreview, BranchesResponse } from '@conducto
 import { G, badges, layout } from './graph.js';
 import { onBranchesChanged, receiveBranches } from './live.js';
 import {
+  FORGET_LABEL,
   checkoutConfirm,
   checkoutReason,
+  cleanConfirm,
+  cleanLine,
+  cleanState,
   commitReason,
+  deleteConfirm,
+  deleteReason,
+  ownedReason,
+  ownersOf,
+  removedText,
   defaultInto,
   defaultMessage,
   intoChoices,
@@ -294,6 +303,86 @@ console.log("\n9 · a project's default branch, and checking it out on it (Amend
   check("the action sent is set_default, checkout true only once confirmed", /\{ action: 'set_default', branch: b\.name, checkout: false \}/.test(route) && /\{ action: 'set_default', branch: b\.name, checkout: true \}/.test(route));
 }
 
+console.log('\n10 · deleting merged branches, and cleaning them all up (Amendment 143)');
+{
+  const done = br('conductor/job_d', { ahead: 0, behind: 3, jobId: 'job_d', worktree: { path: '/r/.conductor/wt/job_d', uncommitted: 0 } });
+  const dirty = br('feature/dirty', { ahead: 0, behind: 1, worktree: { path: '/r/.conductor/wt/dirty', uncommitted: 1 } });
+  const unpushed = br('feature/unpushed', { ahead: 0, behind: 1, upstream: { ref: 'origin/feature/unpushed', ahead: 2, behind: 0 } });
+  const busy = br('conductor/job_busy', { ahead: 0, behind: 1, live: true, jobId: 'job_busy' });
+  const onRoot = br('on/root', { ahead: 0, behind: 1 });
+  const r: BranchesResponse = { ...resp, rootBranch: 'on/root', branches: [main, job, merged, orphan, done, dirty, unpushed, busy, onRoot] };
+  const jobs = [
+    { id: 'job_d', branch: 'conductor/job_d', projectId: 'p1' },
+    { id: 'job_d2', branch: 'conductor/job_d', projectId: 'p1' },
+    { id: 'job_other', branch: 'feature/done', projectId: 'p2' },
+  ];
+  const own = (b: BranchInfo) => ownersOf(b, jobs, 'p1');
+
+  check("the owners are the listing's job and every job of the project on it", own(done).join() === 'job_d,job_d2' && own(merged).length === 0, own(done).join());
+  check('the target: refused, named', deleteReason(r, main, [], false) === 'this is main, the branch everything is compared with');
+  check("the project folder's own branch: refused", deleteReason(r, onRoot, [], false) === "it is checked out in the project's own folder — switch that folder to another branch first");
+  check('not merged: refused, saying -d would refuse it', deleteReason(r, job, [], false) === "3 commits on it aren't in main — it isn't merged, and git branch -d would refuse it");
+  check('unrelated history: refused', deleteReason(r, orphan, [], false) === "it shares no history with main, so it isn't merged into it");
+  check('a commit its upstream lacks: refused', deleteReason(r, unpushed, [], false) === "2 commits on it aren't on origin/feature/unpushed, and git branch -d checks against it — push it first");
+  check('uncommitted (untracked counts): refused', deleteReason(r, dirty, [], false) === 'its folder has 1 uncommitted file (untracked ones count) — commit or discard it first');
+  check('a live agent: refused even with forget', deleteReason(r, busy, own(busy), true) === 'an agent is working on it — wait for it to finish');
+  check(
+    "a job's branch, not forgetting: the daemon's sentence",
+    deleteReason(r, done, own(done), false) === ownedReason('job_d') &&
+      ownedReason('job_d') === "job job_d's agents can still be messaged, and they need this folder; remove the job, or choose 'forget the job too'",
+  );
+  check("a job's branch, forgetting: allowed", deleteReason(r, done, own(done), true) === null);
+  check('a merged branch with no job and no folder: allowed', deleteReason(r, merged, [], false) === null);
+  check('the checkbox says the transcripts stay', FORGET_LABEL === 'forget its job too (its transcripts stay)');
+
+  const plainAsk = deleteConfirm(merged, [], false);
+  check(
+    'the confirm names the branch, says it has no folder, and that origin keeps its copy',
+    plainAsk === 'Delete feature/done? It is merged; it has no folder, and the branch goes with git branch -d. Origin keeps its copy, if it has one.',
+    plainAsk,
+  );
+  const jobAsk = deleteConfirm(done, own(done), true);
+  check(
+    "forgetting, the confirm names the folder and the jobs, and says the agents can't be messaged after",
+    jobAsk.includes('/r/.conductor/wt/job_d is removed (git worktree remove, never forced)') &&
+      jobAsk.includes("Jobs job_d, job_d2 are removed first: their agents can't be messaged afterwards, and their transcripts stay."),
+    jobAsk,
+  );
+  check('not forgetting, it says nothing of jobs', !deleteConfirm(done, own(done), false).includes('Job'));
+
+  const kept = cleanState(r, own, false);
+  check('clean up: only what passes goes', kept.go.map((b) => b.name).join() === 'feature/done', kept.go.map((b) => b.name).join());
+  check('  and each one that stays has its sentence', kept.stay.length === 5 && kept.stay.every((k) => k.why.length > 0) && kept.stay.some((k) => k.branch === 'conductor/job_d' && k.why === ownedReason('job_d')), JSON.stringify(kept.stay));
+  check('  never the target or an unmerged branch', ![...kept.go.map((b) => b.name), ...kept.stay.map((k) => k.branch)].some((x) => x === 'main' || x === 'conductor/job_a' || x === 'gh-pages'));
+  const forgetting = cleanState(r, own, true);
+  check('  with forget, the job-owned one goes too, oldest tip first', forgetting.go.map((b) => b.name).join() === 'feature/done,conductor/job_d', forgetting.go.map((b) => b.name).join());
+  check('  nothing merged: says so', cleanState({ ...resp, branches: [main, job] }, own, false).reason === 'nothing to clean up — no branch is merged into main');
+  check('the confirm line names branch, folder and job', cleanLine(done, own(done)) === 'conductor/job_d · /r/.conductor/wt/job_d · job job_d, job_d2' && cleanLine(merged, []) === 'feature/done · no folder · no job');
+  check(
+    "the clean-up ask says never forced, origin untouched, and with jobs that their agents can't be messaged",
+    /never forced; origin is not touched\.$/.test(cleanConfirm(1, false, 0)) &&
+      /2 jobs are removed with them: their agents can't be messaged afterwards, and the transcripts stay\./.test(cleanConfirm(2, true, 2)),
+  );
+  check(
+    'the result names what went and the jobs forgotten',
+    removedText(['a', 'b'], ['job_x']) === 'Removed a, b, with their folders. Forgot job job_x; the transcripts stay.' && removedText([], []) === 'Nothing was removed.',
+  );
+
+  const route = src('./route.tsx');
+  check('the bar has Delete, with its reason from rules.ts', /label=\{busy === 'delete' \? 'Deleting…' : 'Delete'\} reason=\{del\}/.test(route) && /deleteReason\(resp, b, owners, forget\)/.test(route));
+  check('the checkbox shows only when a job owns it', /owners\.length > 0 && !b\.isTarget && \(/.test(route) && /\{FORGET_LABEL\}/.test(route));
+  check(
+    'Delete confirms first, and sends forgetJob only when ticked',
+    /setConfirming\('delete'\)/.test(route) && /deleteConfirm\(b, owners, forget\)/.test(route) && /\{ action: 'delete', branch: b\.name, forgetJob: true \}/.test(route),
+  );
+  check(
+    'the head has ⌫ Clean up merged (n), confirmed with each branch, folder and job',
+    /⌫ Clean up merged \(\$\{clean\.go\.length\}\)/.test(route) && /setConfirming\('clean'\)/.test(route) && /cleanLine\(b, owners\(b\)\)/.test(route),
+  );
+  check('clean up sends forgetJobs only when ticked', /forgetAll \? \{ action: 'clean_merged', forgetJobs: true \} : \{ action: 'clean_merged' \}/.test(route));
+  check('the result lists what stayed, with why', /res\.kept\.map/.test(route) && /stayed — \{k\.why\}/.test(route));
+}
+
 console.log('\n6 · the status bar and nav.ts');
 {
   // 1–7 when Branches was the last screen; Metrics (8, Amendment 122) made it 1–8.
@@ -305,7 +394,7 @@ console.log('\n6 · the status bar and nav.ts');
 
 console.log(
   failures === 0
-    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117).'
+    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117); merged branches are deleted only with their reasons met, and a job\'s only when you forget it too (143).'
     : `\nAmendment 109 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

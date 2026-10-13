@@ -203,3 +203,102 @@ export function rootLine(defaultBranch: string, rootBranch: string | null | unde
 export function checkoutConfirm(path: string, branch: string): string {
   return `This switches ${path} to ${branch}. Anything running from that folder — Conductor itself, if this is its repo — runs the new branch's code.`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deleting merged branches (Amendment 143)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The jobs that own `b`: the listing's `jobId` and every job of the project on that branch.
+ * A done job's agents can still be messaged, and they need its folder, so each of these
+ * keeps the branch unless you choose to forget the job too.
+ */
+export function ownersOf(b: BranchInfo, jobs: Pick<Job, 'id' | 'branch' | 'projectId'>[], projectId: string): string[] {
+  const ids = jobs.filter((j) => j.projectId === projectId && j.branch === b.name).map((j) => j.id);
+  if (b.jobId && !ids.includes(b.jobId)) ids.unshift(b.jobId);
+  return ids;
+}
+
+/** The daemon's sentence for a branch a job owns (`ownedSentence`, daemon workspace/branches.ts). */
+export function ownedReason(jobId: string): string {
+  return `job ${jobId}'s agents can still be messaged, and they need this folder; remove the job, or choose 'forget the job too'`;
+}
+
+/**
+ * Why `b` can't be deleted, or null (Amendment 143). The daemon's refusals in its order:
+ * the target, the project folder's own branch, not merged (`git branch -d` would refuse it),
+ * a commit its upstream lacks (`-d` judges by that), uncommitted files, a live agent, and a
+ * job that owns it unless `forget`.
+ */
+export function deleteReason(resp: BranchesResponse, b: BranchInfo, owners: string[], forget: boolean): string | null {
+  if (b.isTarget) return `this is ${resp.target}, the branch everything is compared with`;
+  if (resp.rootBranch === b.name) return "it is checked out in the project's own folder — switch that folder to another branch first";
+  if (b.forkedAt === null) return `it shares no history with ${resp.target}, so it isn't merged into it`;
+  if (b.ahead > 0) {
+    return `${plural(b.ahead, 'commit')} on it ${b.ahead === 1 ? "isn't" : "aren't"} in ${resp.target} — it isn't merged, and git branch -d would refuse it`;
+  }
+  if (b.upstream && b.upstream.ahead > 0) {
+    return `${plural(b.upstream.ahead, 'commit')} on it ${b.upstream.ahead === 1 ? "isn't" : "aren't"} on ${b.upstream.ref}, and git branch -d checks against it — push it first`;
+  }
+  const n = b.worktree?.uncommitted ?? 0;
+  if (n > 0) return `its folder has ${plural(n, 'uncommitted file')} (untracked ones count) — commit or discard ${n === 1 ? 'it' : 'them'} first`;
+  if (b.live) return 'an agent is working on it — wait for it to finish';
+  const owner = owners[0];
+  if (owner && !forget) return ownedReason(owner);
+  return null;
+}
+
+/** The checkbox beside Delete and in Clean up merged's confirm: offered when a job owns what would go. */
+export const FORGET_LABEL = 'forget its job too (its transcripts stay)';
+
+/** The confirm before a delete: the branch, its folder and its job, and what happens to each. */
+export function deleteConfirm(b: BranchInfo, owners: string[], forget: boolean): string {
+  const folder = b.worktree ? `its folder ${b.worktree.path} is removed (git worktree remove, never forced)` : 'it has no folder';
+  const one = owners.length === 1;
+  const jobs =
+    owners.length > 0 && forget
+      ? ` ${one ? `Job ${owners[0]} is` : `Jobs ${owners.join(', ')} are`} removed first: ${one ? 'its' : 'their'} agents can't be messaged afterwards, and ${one ? 'its' : 'their'} transcripts stay.`
+      : '';
+  return `Delete ${b.name}? It is merged; ${folder}, and the branch goes with git branch -d. Origin keeps its copy, if it has one.${jobs}`;
+}
+
+/** What "Clean up merged" would do: every merged branch but the target, oldest tip first, split by `deleteReason`. */
+export function cleanState(
+  resp: BranchesResponse,
+  ownersFor: (b: BranchInfo) => string[],
+  forget: boolean,
+): { go: BranchInfo[]; stay: { branch: string; why: string }[]; reason: string | null } {
+  const merged = resp.branches
+    .filter((b) => !b.isTarget && b.ahead === 0 && b.forkedAt !== null)
+    .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.name.localeCompare(b.name)));
+  const go: BranchInfo[] = [];
+  const stay: { branch: string; why: string }[] = [];
+  for (const b of merged) {
+    const why = deleteReason(resp, b, ownersFor(b), forget);
+    if (why) stay.push({ branch: b.name, why });
+    else go.push(b);
+  }
+  const reason = merged.length === 0 ? `nothing to clean up — no branch is merged into ${resp.target}` : null;
+  return { go, stay, reason };
+}
+
+/** One line of Clean up merged's confirm: the branch, its folder, its job. */
+export function cleanLine(b: BranchInfo, owners: string[]): string {
+  const folder = b.worktree ? b.worktree.path : 'no folder';
+  const job = owners.length === 0 ? 'no job' : `job ${owners.join(', ')}`;
+  return `${b.name} · ${folder} · ${job}`;
+}
+
+/** The ask at the top of Clean up merged's confirm. */
+export function cleanConfirm(count: number, forget: boolean, jobs: number): string {
+  const head = `Delete ${plural(count, 'merged branch', 'merged branches')}, oldest first, each with its folder? Each goes with git worktree remove and git branch -d, never forced; origin is not touched.`;
+  if (!forget || jobs === 0) return head;
+  return `${head} ${plural(jobs, 'job')} ${jobs === 1 ? 'is' : 'are'} removed with them: ${jobs === 1 ? 'its' : 'their'} agents can't be messaged afterwards, and the transcripts stay.`;
+}
+
+/** What delete or Clean up merged did, in words. */
+export function removedText(removed: string[], forgot: string[]): string {
+  if (removed.length === 0) return 'Nothing was removed.';
+  const jobs = forgot.length > 0 ? ` Forgot ${forgot.length === 1 ? `job ${forgot[0]}` : `jobs ${forgot.join(', ')}`}; the transcripts stay.` : '';
+  return `Removed ${removed.join(', ')}, with ${removed.length === 1 ? 'its folder' : 'their folders'}.${jobs}`;
+}

@@ -19,7 +19,7 @@ export function getBranches(projectId: string): Promise<BranchesResponse> {
   return api<BranchesResponse>(path(projectId));
 }
 
-/** Merge, merge all, commit, push or fetch. The answer carries the branches as they are after. */
+/** Merge, merge all, commit, push, fetch, set the default, delete or clean up merged (Amendment 143). The answer carries the branches as they are after. */
 export function branchAction(projectId: string, action: BranchAction): Promise<BranchActionResult> {
   return api<BranchActionResult>(path(projectId), { method: 'POST', body: action });
 }

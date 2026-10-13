@@ -897,7 +897,17 @@ export type BranchAction =
    * project's own folder to it. Refused while the folder has tracked changes or anything
    * works in it.
    */
-  | { action: 'set_default'; branch: string; checkout: boolean };
+  | { action: 'set_default'; branch: string; checkout: boolean }
+  /**
+   * Remove a branch that is merged into the target, and its worktree (Amendment 143):
+   * `git worktree remove` (never forced), `worktree prune`, `git branch -d` (never `-D`).
+   * Refused while its folder has changes, an agent is on it, or it is the target or the
+   * project folder's. A job that owns it keeps it unless `forgetJob`: that job is removed
+   * first, as DELETE /api/jobs/:jobId does, and its transcripts stay. Remotes are never touched.
+   */
+  | { action: 'delete'; branch: string; forgetJob?: boolean }
+  /** `delete` for every merged branch, oldest tip first; what was refused is listed as kept (Amendment 143). */
+  | { action: 'clean_merged'; forgetJobs?: boolean };
 
 export interface BranchActionResult {
   ok: boolean;
@@ -911,6 +921,12 @@ export interface BranchActionResult {
   sha?: string;
   /** Git's own words, trimmed, for push and fetch. */
   output?: string;
+  /** The branches removed, in order, for delete and clean_merged (Amendment 143). */
+  removed?: string[];
+  /** The merged branches clean_merged left, each with the sentence `delete` refused it with. */
+  kept?: { branch: string; why: string }[];
+  /** The jobs removed first because `forgetJob(s)` was set; their transcripts stay. */
+  forgotJobs?: string[];
   /** The state after, so the screen redraws once. */
   branches: BranchesResponse;
 }

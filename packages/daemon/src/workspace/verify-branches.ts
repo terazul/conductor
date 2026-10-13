@@ -25,7 +25,10 @@ import type {
 } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
-import { DEFAULT_AUTONOMY, getProject, insertAgent, insertJob, insertProject, setAgentStatus } from '../session/store.js';
+import { DEFAULT_AUTONOMY, getJob, getProject, insertAgent, insertJob, insertProject, setAgentStatus } from '../session/store.js';
+import type { AgentStatus, Isolation } from '@conductor/shared';
+import { readFileSync } from 'node:fs';
+import { EventLog } from '../eventlog.js';
 import { GitError, git } from './git.js';
 import { resolveTarget } from './branches.js';
 import { patchSettings } from '../settings.js';
@@ -81,6 +84,16 @@ const PLAIN = join(ROOT, 'not-a-repo');
 const REPO2 = join(ROOT, 'repo2');
 const ORIGIN2 = join(ROOT, 'origin2.git');
 const WT2 = join(ROOT, 'wt2');
+// Amendment 143's own repo: the project folder on a branch of its own, main in a worktree.
+const REPO3 = join(ROOT, 'repo3');
+const ORIGIN3 = join(ROOT, 'origin3.git');
+const WT3_MAIN = join(ROOT, 'wt3-main');
+const WT3_MERGED = join(ROOT, 'wt3-merged');
+const WT3_DIRTY = join(ROOT, 'wt3-dirty');
+const WT3_LIVE = join(ROOT, 'wt3-live');
+const WT3_DONE = join(ROOT, 'wt3-done');
+const WT3_C2 = join(ROOT, 'wt3-c2');
+const WT3_C3 = join(ROOT, 'wt3-c3');
 
 /** Commits get one minute apart, so "oldest tip first" never ties on a second. */
 let clock = Date.parse('2026-01-01T09:00:00Z');
@@ -198,6 +211,54 @@ function makeRepo2(): void {
   sh(REPO2, 'worktree', 'add', '-q', WT2, 'other');
 }
 
+/**
+ * Amendment 143's repo. The project folder (REPO3) has `on/root` checked out and `main` is in
+ * its own worktree, so "the project folder's own branch" is a branch that isn't the target.
+ * Every `merged/*` branch is merged into main by a merge commit; `unmerged` isn't;
+ * `merged/pushed` is on origin too, and `merged/unpushed` has a commit its upstream lacks.
+ */
+function makeRepo3(): void {
+  sh(ROOT, 'init', '-q', '--bare', ORIGIN3);
+  sh(ROOT, 'init', '-q', '-b', 'main', REPO3);
+  sh(REPO3, 'config', 'user.name', 'Verify');
+  sh(REPO3, 'config', 'user.email', 'verify@example.invalid');
+  commitFile(REPO3, 's.txt', 'start\n', 'start');
+  sh(REPO3, 'remote', 'add', 'origin', ORIGIN3);
+  sh(REPO3, 'push', '-q', '-u', 'origin', 'main');
+  const mergeIn = (name: string, subject: string): void => {
+    sh(REPO3, 'checkout', '-q', 'main');
+    sh(REPO3, 'merge', '-q', '--no-ff', '--no-edit', '-m', subject, name);
+  };
+  for (const name of ['merged/plain', 'merged/wt', 'merged/dirty', 'merged/live', 'conductor/job_done3', 'on/root', 'c/one', 'c/two', 'c/three']) {
+    sh(REPO3, 'checkout', '-q', '-b', name, 'main');
+    commitFile(REPO3, `${name.replace(/\//g, '-')}.txt`, `${name}\n`, `work on ${name}`);
+    mergeIn(name, `Merge ${name}`);
+  }
+  sh(REPO3, 'checkout', '-q', '-b', 'merged/pushed', 'main');
+  commitFile(REPO3, 'pushed.txt', 'p\n', 'pushed work');
+  sh(REPO3, 'push', '-q', '-u', 'origin', 'merged/pushed');
+  mergeIn('merged/pushed', 'Merge pushed');
+  sh(REPO3, 'checkout', '-q', '-b', 'merged/unpushed', 'main');
+  commitFile(REPO3, 'unpushed.txt', 'u\n', 'unpushed base');
+  sh(REPO3, 'push', '-q', '-u', 'origin', 'merged/unpushed');
+  commitFile(REPO3, 'unpushed.txt', 'u2\n', 'unpushed more');
+  mergeIn('merged/unpushed', 'Merge unpushed');
+  sh(REPO3, 'push', '-q', 'origin', 'main');
+  sh(REPO3, 'checkout', '-q', '-b', 'unmerged', 'main');
+  commitFile(REPO3, 'unmerged.txt', 'not yet\n', 'unmerged work');
+  // The folder goes to on/root; main moves to a worktree of its own.
+  sh(REPO3, 'checkout', '-q', 'on/root');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_MAIN, 'main');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_MERGED, 'merged/wt');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_DIRTY, 'merged/dirty');
+  writeFileSync(join(WT3_DIRTY, 'scratch.txt'), 'untracked only\n');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_LIVE, 'merged/live');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_DONE, 'conductor/job_done3');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_C2, 'c/two');
+  sh(REPO3, 'worktree', 'add', '-q', WT3_C3, 'c/three');
+  writeFileSync(join(WT3_C3, 'c-three.txt'), 'edited, not committed\n');
+}
+
 function byName(r: BranchesResponse, name: string): BranchInfo | undefined {
   return r.branches.find((b) => b.name === name);
 }
@@ -240,6 +301,7 @@ async function main(): Promise<void> {
 
   const fx = makeRepos();
   makeRepo2();
+  makeRepo3();
 
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
@@ -698,13 +760,133 @@ async function main(): Promise<void> {
   check("a name starting with '-' → 400", dashDefault.status === 400, `${dashDefault.status} ${JSON.stringify(dashDefault.body)}`);
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n13 · deleting merged branches, never a folder an agent can resume in (Amendment 143)');
+  {
+    const project3 = insertProject(db, { path: REPO3, name: 'delete-verify', defaultBranch: 'main' });
+    const URL3 = `/api/projects/${project3.id}/branches`;
+    const act3 = (body: unknown) => post<BranchActionResult & Err>(URL3, body);
+    const log = new EventLog(db);
+    const jobOn = (id: string, branch: string, path: string, status: AgentStatus, isolation: Isolation = 'worktree'): void => {
+      insertJob(db, { id, projectId: project3.id, prompt: `work on ${branch}`, isolation, worktreePath: path, branch, status, budgetUsd: null });
+      insertAgent(db, {
+        id: `agt_${id}`,
+        jobId: id,
+        projectId: project3.id,
+        role: 'builder',
+        model: 'claude-sonnet-5',
+        sdkSessionId: null,
+        status,
+        blockMode: null,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        dependsOn: [],
+        autonomy: DEFAULT_AUTONOMY,
+      });
+      log.emit({ projectId: project3.id, jobId: id, agentId: `agt_${id}` }, { kind: 'user_text', text: `do ${branch}` });
+    };
+    const eventsOf = (jobId: string): number =>
+      (db.prepare('SELECT COUNT(*) AS n FROM events WHERE job_id = ?').get(jobId) as { n: number }).n;
+    const hasBranch = (name: string): boolean => shOk(REPO3, 'rev-parse', '--verify', '--quiet', `refs/heads/${name}`);
+    const originRefs = (): string => sh(ORIGIN3, 'for-each-ref', '--format=%(refname) %(objectname)');
+    jobOn('job_live3', 'merged/live', WT3_LIVE, 'working');
+    jobOn('job_done3', 'conductor/job_done3', WT3_DONE, 'done');
+    jobOn('job_c2', 'c/two', WT3_C2, 'stopped');
+    const originBefore = originRefs();
+
+    const listed = await get<BranchesResponse>(URL3);
+    check('the repo reads: main is the target, the folder is on on/root', listed.body.target === 'main' && listed.body.rootBranch === 'on/root', `${listed.body.target} ${listed.body.rootBranch}`);
+
+    const refused = async (label: string, body: unknown, pattern: RegExp, still: string): Promise<void> => {
+      const r = await act3(body);
+      check(`${label} → 409, with its sentence`, r.status === 409 && pattern.test(r.body.error), `${r.status} ${JSON.stringify(r.body).slice(0, 300)}`);
+      check(`  and ${still} is still there`, hasBranch(still));
+    };
+    await refused('the target', { action: 'delete', branch: 'main' }, /is the branch everything is compared with/, 'main');
+    await refused("the project folder's own branch", { action: 'delete', branch: 'on/root' }, /checked out in the project's own folder/, 'on/root');
+    await refused('a branch not merged into the target', { action: 'delete', branch: 'unmerged' }, /has 1 commit main doesn't; it isn't merged, and git branch -d would refuse it/, 'unmerged');
+    await refused('a merged branch with a commit its upstream lacks (git branch -d judges by the upstream)', { action: 'delete', branch: 'merged/unpushed' }, /origin\/merged\/unpushed doesn't, and git branch -d checks against it/, 'merged/unpushed');
+    await refused('a folder with only an untracked file', { action: 'delete', branch: 'merged/dirty' }, /wt3-dirty has 1 uncommitted file \(untracked ones count\)/, 'merged/dirty');
+    check('  and its folder too', existsSync(join(WT3_DIRTY, 'scratch.txt')));
+    await refused('a job with a live agent, even with forgetJob', { action: 'delete', branch: 'merged/live', forgetJob: true }, /an agent is working on merged\/live \(job job_live3\)/, 'merged/live');
+    check('  and the live job is untouched', getJob(db, 'job_live3') !== undefined && existsSync(WT3_LIVE));
+    await refused(
+      "a done job's branch without forgetJob",
+      { action: 'delete', branch: 'conductor/job_done3' },
+      /^job job_done3's agents can still be messaged, and they need this folder; remove the job, or choose 'forget the job too'$/,
+      'conductor/job_done3',
+    );
+    check('  and the done job and its folder are untouched', getJob(db, 'job_done3') !== undefined && existsSync(WT3_DONE));
+    const bad = await act3({ action: 'delete', branch: 'merged/plain', forgetJob: 'yes' });
+    check('forgetJob that is not a boolean → 400', bad.status === 400, `${bad.status}`);
+    const dash = await act3({ action: 'delete', branch: '-D' });
+    check("a name starting with '-' → 400", dash.status === 400, `${dash.status}`);
+    const none = await act3({ action: 'delete', branch: 'no/such' });
+    check('an unknown branch → 400', none.status === 400, `${none.status}`);
+
+    const plainDel = await act3({ action: 'delete', branch: 'merged/plain' });
+    check('a merged branch with no folder and no job → 200, removed', plainDel.status === 200 && plainDel.body.ok && plainDel.body.removed?.join() === 'merged/plain', JSON.stringify(plainDel.body).slice(0, 300));
+    check('  the branch is gone, and git said "Deleted branch"', !hasBranch('merged/plain') && /Deleted branch merged\/plain/.test(plainDel.body.output ?? ''), plainDel.body.output);
+    check('  and the listing after it lacks it', !byName(plainDel.body.branches, 'merged/plain'));
+
+    const wt = await act3({ action: 'delete', branch: 'merged/wt' });
+    check('a merged branch with a clean folder → removed', wt.status === 200 && wt.body.removed?.join() === 'merged/wt', JSON.stringify(wt.body).slice(0, 300));
+    check('  its folder and its branch are both gone', !existsSync(WT3_MERGED) && !hasBranch('merged/wt'));
+    check('  and git no longer lists the worktree', !sh(REPO3, 'worktree', 'list', '--porcelain').includes(WT3_MERGED));
+
+    const pushed = await act3({ action: 'delete', branch: 'merged/pushed' });
+    check('a merged branch that is on origin → removed locally', pushed.status === 200 && !hasBranch('merged/pushed'), JSON.stringify(pushed.body).slice(0, 200));
+    check('  and origin still has it', shOk(ORIGIN3, 'rev-parse', '--verify', '--quiet', 'refs/heads/merged/pushed'));
+
+    const eventsBefore = eventsOf('job_done3');
+    const forgot = await act3({ action: 'delete', branch: 'conductor/job_done3', forgetJob: true });
+    check("a done job's branch with forgetJob → removed", forgot.status === 200 && forgot.body.removed?.join() === 'conductor/job_done3' && forgot.body.forgotJobs?.join() === 'job_done3', JSON.stringify(forgot.body).slice(0, 300));
+    check('  the job row is gone, its agent with it', getJob(db, 'job_done3') === undefined && !db.prepare('SELECT 1 FROM agents WHERE id = ?').get('agt_job_done3'));
+    check('  its transcript is still in the events table', eventsBefore > 0 && eventsOf('job_done3') === eventsBefore, `${eventsBefore} → ${eventsOf('job_done3')}`);
+    check('  its folder and its branch are gone', !existsSync(WT3_DONE) && !hasBranch('conductor/job_done3'));
+
+    const code = readFileSync(new globalThis.URL('./branches.ts', import.meta.url), 'utf8');
+    check(
+      "the code deletes with 'branch', '-d' and never '-D' or a forced worktree remove",
+      /\['branch', '-d', '--'/.test(code) && !/'-D'/.test(code) && !/'worktree', 'remove', '--force'/.test(code) && !/'worktree', 'remove', '-f'/.test(code),
+    );
+
+    // clean_merged: c/one (plain), c/two (a stopped job owns it), c/three (uncommitted), and
+    // what still stands from above: merged/dirty, merged/live, merged/unpushed, on/root.
+    const first = await act3({ action: 'clean_merged' });
+    const keptWhy = (r: typeof first, b: string): string => r.body.kept?.find((k) => k.branch === b)?.why ?? '';
+    check('clean_merged → 200, ok', first.status === 200 && first.body.ok, JSON.stringify(first.body).slice(0, 300));
+    check('  removed only c/one', first.body.removed?.join() === 'c/one', JSON.stringify(first.body.removed));
+    check("  kept c/two with the job's sentence", /^job job_c2's agents can still be messaged/.test(keptWhy(first, 'c/two')), keptWhy(first, 'c/two'));
+    check('  kept c/three: uncommitted', /uncommitted file/.test(keptWhy(first, 'c/three')), keptWhy(first, 'c/three'));
+    check(
+      '  kept merged/live, merged/dirty, merged/unpushed and on/root, each with why',
+      /agent is working/.test(keptWhy(first, 'merged/live')) && /uncommitted/.test(keptWhy(first, 'merged/dirty')) && /checks against it/.test(keptWhy(first, 'merged/unpushed')) && /project's own folder/.test(keptWhy(first, 'on/root')),
+      JSON.stringify(first.body.kept),
+    );
+    check('  never lists the target or an unmerged branch', !first.body.kept?.some((k) => k.branch === 'main' || k.branch === 'unmerged'));
+    check('  the stopped job, its folder and its branch stay', getJob(db, 'job_c2') !== undefined && existsSync(WT3_C2) && hasBranch('c/two'));
+
+    // An older tip than c/two's: removed before it.
+    sh(REPO3, 'branch', 'c/zero', 'refs/heads/main~5'); // Merge on/root, before c/one and c/two
+    const second = await act3({ action: 'clean_merged', forgetJobs: true });
+    const order = second.body.removed ?? [];
+    check('clean_merged with forgetJobs removes the job-owned one too', second.status === 200 && order.includes('c/two') && second.body.forgotJobs?.join() === 'job_c2', JSON.stringify(second.body).slice(0, 300));
+    check('  oldest tip first: c/zero before c/two', order.indexOf('c/zero') > -1 && order.indexOf('c/zero') < order.indexOf('c/two'), JSON.stringify(order));
+    check('  job_c2 is gone, its folder and branch too, its transcript kept', getJob(db, 'job_c2') === undefined && !existsSync(WT3_C2) && !hasBranch('c/two') && eventsOf('job_c2') > 0);
+    check('  the live one still stays, with its job', hasBranch('merged/live') && getJob(db, 'job_live3') !== undefined && /agent is working/.test(keptWhy(second, 'merged/live')));
+    check('  the uncommitted edit in c/three is still there', readFileSync(join(WT3_C3, 'c-three.txt'), 'utf8').startsWith('edited'));
+    check('origin is exactly as it was', originRefs() === originBefore, `${originBefore}\n→\n${originRefs()}`);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   ws.close();
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117).\n`
+      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117), deleting merged branches (Amendment 143).\n`
       : `\nAmendment 109 branches: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

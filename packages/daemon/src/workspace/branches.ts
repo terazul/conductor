@@ -1,6 +1,7 @@
 /**
  * A project's branches: list them against the default branch, merge them into it, commit
- * a branch's uncommitted work, push, fetch (Amendment 109, ADR 0008).
+ * a branch's uncommitted work, push, fetch (Amendment 109, ADR 0008), and remove the ones
+ * that are merged (Amendment 143).
  *
  * The first code in the daemon that writes history and talks to a remote, so it is
  * deliberately narrow:
@@ -10,6 +11,7 @@
  *     (`refs/heads/<name>`) and after `--` where git takes it, so no name can become an option;
  *   - nothing is ever forced: push names an explicit `src:dst` refspec without '+', so a
  *     configured `remote.origin.push = +…` is never used, and there is no `--force` anywhere;
+ *     a branch is deleted with `branch -d`, never `-D`, and only local branches ever are;
  *   - fetch never prunes;
  *   - every mutating action holds `branches:<repoRoot>` so two never interleave.
  *
@@ -52,6 +54,26 @@ export class BranchError extends Error {
 /** What the store knows of a branch: the job it belongs to, and whether an agent is on it. */
 export type BranchLookup = (branch: string) => { jobId: string | null; live: boolean };
 
+/** One of the project's jobs, as `delete` needs it (Amendment 143). */
+export interface BranchJob {
+  id: string;
+  branch: string;
+  worktreePath: string;
+  /** An agent of it is working, blocked or queued. */
+  live: boolean;
+}
+
+/**
+ * The store's side of `delete` (Amendment 143), supplied by the route so this file stays
+ * narrow: the project's jobs, and removing one exactly as DELETE /api/jobs/:jobId does
+ * (`Supervisor.deleteJob`: the job row and its agents go, the events table keeps their
+ * transcripts, and the workspace is forgotten, not closed).
+ */
+export interface BranchJobs {
+  jobs: () => BranchJob[];
+  forgetJob: (jobId: string) => Promise<void>;
+}
+
 export interface BranchRepo {
   projectId: string;
   /** The repo's top level. */
@@ -74,7 +96,17 @@ export interface BranchRepo {
   rootLive: boolean;
   /** Store `branch` as the project's default, and mark it chosen (Amendment 117). */
   setDefault: (branch: string) => void;
+  /** The project's jobs, and how to forget one (Amendment 143). */
+  jobs: BranchJobs;
 }
+
+/** No jobs, and nothing to forget: `openRepo`'s default, for a caller that has no store. */
+const NO_JOBS: BranchJobs = {
+  jobs: () => [],
+  forgetJob: async (jobId) => {
+    throw new BranchError(500, 'jobs cannot be removed here', jobId);
+  },
+};
 
 const locks = new KeyedLock();
 
@@ -93,11 +125,12 @@ export async function openRepo(
   defaultBranchSet = false,
   rootLive = false,
   setDefault: (branch: string) => void = () => {},
+  jobs: BranchJobs = NO_JOBS,
 ): Promise<BranchRepo> {
   if (!(await isRepo(path))) throw new BranchError(400, 'not a git repo', path);
   const root = await repoRoot(path);
   const { target, from } = await resolveTarget(root, recorded, chosen, defaultBranchSet);
-  return { projectId, root, path, target, targetFrom: from, lookup, rootLive, setDefault };
+  return { projectId, root, path, target, targetFrom: from, lookup, rootLive, setDefault, jobs };
 }
 
 /**
@@ -185,11 +218,22 @@ export function parseBranchAction(raw: unknown): BranchAction {
       }
       return { action, branch, checkout: checkout === true };
     }
+    case 'delete': {
+      const branch = branchOf();
+      const forgetJob = body['forgetJob'];
+      if (forgetJob !== undefined && typeof forgetJob !== 'boolean') throw new BranchError(400, 'forgetJob must be a boolean');
+      return forgetJob === true ? { action, branch, forgetJob: true } : { action, branch };
+    }
+    case 'clean_merged': {
+      const forgetJobs = body['forgetJobs'];
+      if (forgetJobs !== undefined && typeof forgetJobs !== 'boolean') throw new BranchError(400, 'forgetJobs must be a boolean');
+      return forgetJobs === true ? { action, forgetJobs: true } : { action };
+    }
     default:
       throw new BranchError(
         400,
         'unknown action',
-        'one of merge, merge_all, commit, push, fetch, set_default',
+        'one of merge, merge_all, commit, push, fetch, set_default, delete, clean_merged',
       );
   }
 }
@@ -632,6 +676,118 @@ function said(out: { stdout: string; stderr: string }): string {
   return [out.stdout.trim(), out.stderr.trim()].filter(Boolean).join('\n');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Deleting a merged branch (Amendment 143)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The refusal for a branch whose job's agents could still be resumed. A `done` job's agent
+ * can be messaged again, and it then needs its folder: removing a done job's worktree once
+ * broke a user's agent (9 Oct; Amendment 114 is what that agent saw). So a job's folder and
+ * branch only go when the job goes too, and only when asked.
+ */
+export function ownedSentence(jobId: string): string {
+  return `job ${jobId}'s agents can still be messaged, and they need this folder; remove the job, or choose 'forget the job too'`;
+}
+
+interface Deleted {
+  branch: string;
+  forgot: string[];
+  output: string;
+}
+
+/**
+ * Remove one merged branch and its worktree, or refuse with one plain sentence (409 unless
+ * said). Every check runs before anything changes, in this order: the target; the project
+ * folder's own branch; not merged into the target; what `git branch -d` would judge it by;
+ * uncommitted files in its folder; a live agent; a job that owns it without `forget`. Then:
+ * the owning jobs are removed (`forget` only), `git worktree remove -- <path>` (never
+ * `--force`, so git refuses a dirty folder itself too), `git worktree prune`, and
+ * `git branch -d -- <name>` (never `-D`). Nothing here talks to a remote.
+ */
+async function deleteOne(repo: BranchRepo, state: BranchesResponse, name: string, forget: boolean): Promise<Deleted> {
+  const b = known(state, name);
+  const target = state.target;
+  if (b.isTarget) throw new BranchError(409, `${b.name} is the branch everything is compared with; it isn't deleted here`);
+
+  // Read the checkouts again rather than trusting `worktree`, which is null when the folder
+  // couldn't be read, and a branch checked out anywhere can't be deleted.
+  const where = await checkouts(repo.root);
+  const path = where.get(b.name) ?? null;
+  if (state.rootBranch === b.name || path === repo.path || path === repo.root) {
+    throw new BranchError(409, `${b.name} is checked out in the project's own folder (${repo.path}); switch that folder to another branch first`);
+  }
+
+  if (!state.branches.some((x) => x.isTarget)) throw new BranchError(409, `there is no ${target} to check ${b.name} against, so it isn't known to be merged`);
+  if (b.forkedAt === null) throw new BranchError(409, `${b.name} shares no history with ${target}, so it isn't merged into it`);
+  if (b.ahead > 0) {
+    throw new BranchError(409, `${b.name} has ${b.ahead} commit${b.ahead === 1 ? '' : 's'} ${target} doesn't; it isn't merged, and git branch -d would refuse it`);
+  }
+  // `git branch -d` judges by the branch's upstream when it has one, else by HEAD where it
+  // runs: it runs in the target's checkout, so HEAD is the target, unless that isn't
+  // checked out. Ask the same question first, so it can't refuse after the folder went.
+  const cwd = state.targetCheckout?.path ?? repo.root;
+  if (b.upstream && b.upstream.ahead > 0) {
+    throw new BranchError(409, `${b.name} has ${b.upstream.ahead} commit${b.upstream.ahead === 1 ? '' : 's'} ${b.upstream.ref} doesn't, and git branch -d checks against it; push it first`);
+  }
+  if (!b.upstream && !(await gitOk(cwd, ['merge-base', '--is-ancestor', heads(b.name), 'HEAD']))) {
+    throw new BranchError(409, `git branch -d judges by what ${cwd} has checked out, and that doesn't have all of ${b.name}; check ${target} out there first`);
+  }
+
+  if (path) {
+    const n = await uncommitted(path);
+    if (n === null) throw new BranchError(409, `${path} can't be read, so it isn't known to be clean`);
+    if (n > 0) throw new BranchError(409, `${path} has ${n} uncommitted file${n === 1 ? '' : 's'} (untracked ones count); commit or discard ${n === 1 ? 'it' : 'them'} first`);
+  }
+
+  // The jobs it belongs to: by branch, and any whose folder is the one that would go.
+  const jobs = repo.jobs.jobs().filter((j) => j.branch === b.name || (path !== null && j.worktreePath === path));
+  if (b.jobId && !jobs.some((j) => j.id === b.jobId)) jobs.push({ id: b.jobId, branch: b.name, worktreePath: path ?? '', live: b.live });
+  const live = jobs.find((j) => j.live);
+  if (b.live || live) {
+    throw new BranchError(409, `an agent is working on ${b.name}${live ? ` (job ${live.id})` : ''}; wait for it to finish or stop it`);
+  }
+  const owner = jobs[0];
+  if (owner && !forget) throw new BranchError(409, ownedSentence(owner.id));
+
+  // Past every check. The job goes first, as the Project screen's ✕ removes it.
+  const forgot: string[] = [];
+  for (const j of jobs) {
+    await repo.jobs.forgetJob(j.id);
+    forgot.push(j.id);
+  }
+  if (path) {
+    try {
+      await git(repo.root, ['worktree', 'remove', '--', path]);
+    } catch (err) {
+      if (err instanceof GitError) throw new BranchError(409, `git wouldn't remove ${path}; the branch stays`, err.stderr.trim() || undefined);
+      throw err;
+    }
+  }
+  await git(repo.root, ['worktree', 'prune']);
+  try {
+    const out = await gitBoth(cwd, ['branch', '-d', '--', b.name]);
+    return { branch: b.name, forgot, output: said(out) };
+  } catch (err) {
+    if (err instanceof GitError) throw new BranchError(409, `git branch -d refused ${b.name}`, err.stderr.trim() || undefined);
+    throw err;
+  }
+}
+
+/** A refusal as the one sentence `kept` carries. */
+function why(err: unknown): string {
+  if (err instanceof BranchError) return err.detail ? `${err.message}: ${err.detail}` : err.message;
+  if (err instanceof GitError) return `git failed: ${err.stderr.trim() || err.message}`;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** The branches clean_merged tries, oldest tip first: every one but the target with nothing the target lacks. */
+export function mergedBranches(state: BranchesResponse): BranchInfo[] {
+  return state.branches
+    .filter((b) => !b.isTarget && b.ahead === 0 && b.forkedAt !== null)
+    .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.name.localeCompare(b.name)));
+}
+
 /** Run one action under the repo's lock, and answer with the state after it. */
 export async function branchAction(repo: BranchRepo, action: BranchAction): Promise<BranchActionResult> {
   return locks.run(`branches:${repo.root}`, async () => {
@@ -748,6 +904,30 @@ async function act(
         await git(repo.path, ['switch', '--', b.name]);
       }
       return { ok: true, merged: [] };
+    }
+
+    case 'delete': {
+      const d = await deleteOne(repo, state, action.branch, action.forgetJob === true);
+      return { ok: true, merged: [], removed: [d.branch], forgotJobs: d.forgot, ...(d.output ? { output: d.output } : {}) };
+    }
+
+    case 'clean_merged': {
+      // One at a time, each against a fresh listing: removing one job's folder can change
+      // what the next one is (a shared folder, a job that owned both).
+      const removed: string[] = [];
+      const kept: { branch: string; why: string }[] = [];
+      const forgotJobs: string[] = [];
+      for (const b of mergedBranches(state)) {
+        try {
+          const now = await listBranches(repo);
+          const d = await deleteOne(repo, now, b.name, action.forgetJobs === true);
+          removed.push(d.branch);
+          forgotJobs.push(...d.forgot);
+        } catch (err) {
+          kept.push({ branch: b.name, why: why(err) });
+        }
+      }
+      return { ok: true, merged: [], removed, kept, forgotJobs };
     }
   }
 }
