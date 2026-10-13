@@ -1,7 +1,7 @@
 # Plan: wave 10, the "worth doing next" list (Amendments 134-144)
 
-**Status:** proposed, 13 Oct 2026. Not started. Built on `main` at `55f1df8` (Amendment 133).
-The open questions are in §6; the lanes they block are marked.
+**Status:** wave 10a started 13 Oct 2026. Built on `main` at `55f1df8` (Amendment 133). The decisions
+are in §6.
 
 **Asked (13 Oct):** "generate an execution plan for the worth doing next". That list was the
 "Right now" install check, the loose ends of Amendments 112-128 in `TODO.md`, and the branch hygiene
@@ -253,16 +253,16 @@ From `TODO.md` "Checks that need a person", plus what this wave adds. Best done 
 4. A re-run of a parked agent against the real SDK (102).
 5. The new role instructions against the old on one real bug (126).
 
-## 6. Questions for you
+## 6. Decisions (answered 13 Oct)
 
-| | Question | Default if you don't say |
+| | Question | Decided |
 |---|---|---|
-| **Q1** | Metrics per project: add `project_id` to the metrics table? Counts from before it have no project. (C) | yes |
-| **Q2** | Delete a **non-empty folder** from Files? (E) | no: empty folders only; files one at a time |
-| **Q3** | Should a retry's card show from the **first** retry (5 s), so it chimes at once? (G) | no: from the second, as now |
-| **Q4** | At midnight, **continue** agents that were paused only for today's budget, unattended? (G) | no |
-| **Q5** | Shells that survive a daemon restart, through **tmux** where it's installed? (H) | not in this wave |
-| **Q6** | When a job finishes, offer **merge and clean up** as a card (K), or do it **automatically** when its branch merges cleanly? | a card |
+| **Q1** | Metrics per project: add `project_id` to the metrics table? (C) | **Yes.** Counts from before it have no project and show under "all projects" only. |
+| **Q2** | Delete a non-empty folder from Files? (E) | **Yes, with a double check:** a confirm, then a second "Are you sure?" naming how many files go with it. |
+| **Q3** | Show a retry's card from the first retry (5 s)? (G) | **Yes.** |
+| **Q4** | At midnight, continue agents paused only for today's budget, unattended? (G) | **Yes.** Only those paused by the day's budget or ceiling, not ones you paused. |
+| **Q5** | Shells that survive a daemon restart through tmux? (H) | **No.** |
+| **Q6** | Merge and clean up when a job finishes: a card, or automatic? (K) | **A setting on the agent:** "merge and clean up when done". When it is on and the merge is clean, it happens by itself; when it is off (or the merge would conflict), Needs You offers **merge and clean up**. |
 
 ## 7. Cost and order of work
 
