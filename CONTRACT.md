@@ -196,6 +196,210 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 144 — post-merge, applied. **Merge and clean up when a job finishes, by the agent's setting or a card.**
+
+Daemon (`session/finish.ts` new, `session/supervisor.ts`, `session/alerts.ts`, `routes/session.ts`,
+`db/migrations/230_finished.sql` new, `session/verify-finish.ts` new), shared (`wire.ts`), web
+(`spawn/autonomy.ts`, `agent/composer.tsx`, `attention/alerts.ts`, `attention/AlertCard.tsx`,
+`shell/describe.ts`, and the verify files). From the wave 10 plan (Lane K), with Q6 as decided on
+13 Oct: a setting on the agent, "merge and clean up when done"; when it is on and the merge is
+clean it happens by itself; when it is off, or the merge can't run cleanly, Needs You offers it.
+
+**The setting** (`shared/src/wire.ts`). `Autonomy.mergeWhenDone?: boolean`, absent is off. The
+daemon's `parseAutonomy` (`routes/session.ts:114`) keeps it only when it is `true`, so a launch, an
+added agent and `POST /api/agents/:agentId/autonomy` (which merges over the stored autonomy) all
+take it, and `false` or anything else removes it. Labelled **merge into main and clean up when
+done** (`MERGE_WHEN_DONE_LABEL`, `spawn/autonomy.ts`), with one hint (`MERGE_WHEN_DONE_HINT`): the
+branch is merged, then the job, its folder and its branch are removed, its agents can't be
+messaged afterwards, their transcripts stay, and it never pushes.
+- **Spawn.** A pill of `PILLS` (`spawn/autonomy.ts:84`), off in `defaultPills`; `toAutonomy` adds
+  `mergeWhenDone: true` when it is on (`:192`) and changes no tool list, so every agent of the
+  launch has it, a reading role too. Being a pill, **Settings → What Spawn starts from** shows it
+  and keeps it in `conductor.launch.pills`; a saved set from before reads it as off.
+- **The composer.** A pill with the guardrails (`agent/composer.tsx:150-160`), so it folds with
+  them; it sends `{ mergeWhenDone: on }` alone.
+
+**When a job finishes** (`session/supervisor.ts:1888`). `#rollUpJob` calls `#finished(jobId)` only
+on the way into `done` (not when it settles `failed`, and not on a roll-up that changes nothing).
+`finishJob` (`session/finish.ts`) runs after it, never throws (a failure is logged and the job left
+as it is), and `Supervisor.finishing(jobId)` is the run in flight, for the verify. It does nothing
+for a job that isn't isolated in a worktree of its own, or whose branch isn't ahead of the target
+(`resolveTarget`'s, as the Branches screen draws). Otherwise, through `projectRepo`
+(Amendment 143), as the Branches screen would:
+- **The setting asked** (any agent of the job has `mergeWhenDone`), every agent of the job is
+  `done` (a paused one may still need the folder), and Amendment 110's `previewMerge` gives no
+  reason (so the target is checked out, clean, and nothing is live on either side) and no
+  conflicts (`[]`; `null`, "this git can't tell", counts as not clean): the branch is merged with
+  `branchAction` `merge` (the screen's merge, `--no-ff`, into the target), then removed with
+  Amendment 143's `delete` and `forgetJob: true` (the job as DELETE /api/jobs/:jobId removes it,
+  then `git worktree remove`, `prune`, `git branch -d`). This is the user's explicit opt-in. Each
+  of the job's agents gets a synthetic `user_text` note in its transcript: what was merged into
+  what, the short sha, and that the job, its folder and its branch were removed and the
+  transcript stays. Needs You gets an information card, **Merged**.
+- **Any step refuses, it stops there.** A preview reason, a conflict, an agent not done, or a
+  merge that conflicts anyway (undone, as always): nothing is merged, and the card below says why
+  (`detail`). A merge that went in with a clean-up that was then refused (an untracked file in the
+  folder, say): the **Merged** card says it was not cleaned up and why, the agents' notes say so,
+  and the job, its folder and its branch stay. No "merge?" card is raised for a branch already
+  merged.
+- **Otherwise** (the setting off): nothing moves, and Needs You asks.
+- Nothing here pushes. Push stays a separate, confirmed action on the Branches screen.
+
+**The cards** (`db/migrations/230_finished.sql`, `finishAlerts` in `session/finish.ts:194`). One row
+of `job_finishes` per outcome (`offer` or `merged`), with the branch, the target, how far ahead,
+the job's agents, the sha, whether it was cleaned up and why not. No foreign key to `jobs`: the
+clean-up it reports removes the job. Alerts are derived from it, as the others are from what is
+stored, so a restart keeps them; dismissals are `alert_dismissals`, and a write refreshes Needs You
+(`onFinishesChanged`).
+- **`finished`** (`Alert.kind`), id `finished:<row>`: the newest offer per job, while that job is
+  still there and `done` (a job that runs again asks again when it next finishes; one that was
+  removed has nothing left to offer). `branch`, `into`, `ahead`, `agentIds`, and `detail` when the
+  setting asked and something refused.
+- **`merged`**, id `merged:<row>`: every one, until dismissed. `sha`, `cleaned`, and `detail` when
+  not cleaned up; `agentIds` empty once cleaned up.
+- **Wire.** `AlertKind` gains `'finished' | 'merged'`; `Alert` gains `branch?`, `into?`, `ahead?`,
+  `sha?`, `cleaned?`.
+
+**Web** (`attention/alerts.ts`, `AlertCard.tsx`, `shell/describe.ts`).
+- **Finished: merge into <target>?** (`alertTitle`; the top bar's word is "finished: merge?"),
+  labelled **Finished** in `--need`, with the branch and its commits, and "not merged by itself"
+  with the reason when there is one. Its buttons (`alertActions`, `:198`): **merge and clean up**
+  first, which asks (`finishedConfirm`, `:213`: "Merge <branch> into <target>, then remove job
+  <id>, its folder and its branch? Its agents can't be messaged afterwards; their transcripts
+  stay."), then `mergeAndClean` (`:239`); **merge** (`mergeFinished`, `:222`): the preview first,
+  refused with its reason or its conflicts named, then `POST …/branches { action: 'merge', branch,
+  into }`, and the card is dismissed; the job, its folder and its branch stay. **open Branches**
+  (`openBranches`), and dismiss. `mergeAndClean` is the same merge, then `{ action: 'delete',
+  branch, forgetJob: true }`; a refused clean-up says "merged as <sha>, but not cleaned up: <the
+  daemon's sentence>".
+- **Merged**, in `--done`: the branch, the merge's short sha, "not cleaned up" with why when so, and
+  a line saying the agent's setting did it and nothing was pushed. Open the agent (when it is still
+  there), open Branches, dismiss.
+
+**Verify.** daemon `session/verify-finish.ts` (port 7817, 38 checks, a real repo with real
+worktrees, a fake SDK whose runs end at once, so each job settles through `#rollUpJob`): the
+setting through the autonomy route (on, off, anything but true is off); on with a clean merge:
+main has the merge commit, the job row and its agent are gone, its folder and branch are gone, its
+transcript is kept with the note naming the sha, the **Merged** card says cleaned with the sha, and
+no "merge?" card; on with a conflict: the card naming the file, main unmoved, nothing removed; on
+with main's checkout dirty: the card with the merge's reason, nothing merged; on, merged, with an
+untracked file in the folder: merged, the card says not cleaned up and why, everything still there,
+the note says so; off: the card with no reason, nothing moved, then the card's calls: the preview
+clean, merge keeps the job, folder and branch, dismiss puts the card away; off, merge then delete
+with `forgetJob` removes the job, folder and branch, keeps the transcript, and the card goes with
+the job; no card for a branch that isn't ahead or a job in the project folder; nothing pushed.
+web `attention/verify.ts` §11 (16 checks): the buttons and their order, what they carry, the
+confirm text, the titles and the top-bar word, and the calls behind them against a stand-in daemon
+(preview then merge; preview, merge, then delete with `forgetJob`; a conflict or a reason stops
+before the merge; a refused clean-up says the merge went in), and the card's wiring.
+`spawn/verify.ts` §24 (9 checks): the pill, its words and hint, off by default, `toAutonomy` with
+and without it, every spec of a launch, Settings keeps it and an older saved set reads it off.
+`agent/verify.ts` (3 checks): the composer's pill, the field it sends, with the guardrails.
+
+**Not done / not decided:**
+- **Only `done`.** A job that settles `failed` gets no card.
+- **Only into the target.** The card and the setting merge into the branch the Branches screen
+  compares with when the job finished; the label says "main" as the plan words it.
+- **The card stays after a merge made elsewhere** (on the Branches screen, say) until it is
+  dismissed or pressed; pressing it then says there is nothing to merge.
+- **No push.** As decided: pushing stays on the Branches screen.
+
+### Amendment 143 — post-merge, applied. **Delete merged branches safely, one or all, never a folder an agent can still resume in.**
+
+Daemon (`workspace/branches.ts`, `workspace/project-repo.ts` new, `routes/branches.ts`,
+`workspace/verify-branches.ts`), shared (`wire.ts`), web (`branches/rules.ts`, `branches/route.tsx`,
+`branches/branches.css`, `branches/endpoints.ts`, `branches/verify.ts`). From the wave 10 plan (Lane J).
+It takes back Amendment 109's "no branch is ever deleted".
+
+**The rule, from 9 Oct.** A `done` job's agent can be messaged again, and it then needs its folder:
+removing a done job's worktree broke a user's agent (Amendment 114 is what that agent saw). So
+nothing here removes a folder or a branch a job's agent could resume on, unless you choose to forget
+that job too, and the job's transcripts are always kept.
+
+**Wire** (`shared/src/wire.ts`). `BranchAction` gains `{ action: 'delete'; branch; forgetJob? }` and
+`{ action: 'clean_merged'; forgetJobs? }`. `BranchActionResult` gains `removed?: string[]` (in order),
+`kept?: { branch, why }[]` (clean_merged: each merged branch it left, with the sentence `delete`
+refused it with) and `forgotJobs?: string[]` (the jobs removed first). Nothing else changed.
+
+**`delete`** (`workspace/branches.ts`, `deleteOne` `:708`). Parsed like every action (`:221`): an
+unknown branch or one starting with `-` is 400, and so is a `forgetJob` that isn't a boolean. Every
+check runs before anything changes, each a 409 with one plain sentence, in this order:
+- it is the **target** ("… is the branch everything is compared with; it isn't deleted here");
+- it is checked out in the **project's own folder** (`rootBranch`, or a worktree at the project's
+  path), read from `git worktree list` afresh rather than the listing's `worktree`;
+- it isn't **merged** into the target: no target branch at all, no shared history, or `ahead > 0`
+  ("… has N commits main doesn't; it isn't merged, and git branch -d would refuse it");
+- what `git branch -d` will judge it by: its upstream when it has one (`upstream.ahead > 0` is
+  refused, "… and git branch -d checks against it; push it first"), else HEAD where `-d` runs, which
+  is the target's checkout (else the repo's top level, checked with `merge-base --is-ancestor` first).
+  So `-d` can't refuse after the folder has gone;
+- its worktree has **uncommitted** files, `status --porcelain`, untracked ones included (a folder that
+  can't be read is refused too);
+- a job on it has a **live** agent (`working`, `blocked`, `queued`), even with `forgetJob`;
+- a job **owns** it (any job of the project on that branch, or whose folder is that worktree, plus
+  the listing's `jobId`) and `forgetJob` isn't set: *"job <id>'s agents can still be messaged, and
+  they need this folder; remove the job, or choose 'forget the job too'"* (`ownedSentence`, `:689`).
+
+Past them: with `forgetJob`, each owning job is removed first exactly as DELETE /api/jobs/:jobId
+removes it (`Supervisor.deleteJob`: the job row and its agents go, the events table keeps their
+transcripts, the workspace is forgotten rather than closed); then `git worktree remove -- <path>`
+(never `--force`), `git worktree prune`, and `git branch -d -- <name>` (never `-D`) in the target's
+checkout. A git refusal there is a 409 with git's words. Remotes are never touched. The answer is
+`{ ok: true, merged: [], removed: [name], forgotJobs, output }` (git's "Deleted branch …").
+
+**`clean_merged`** (`:914`). Every branch but the target with `ahead === 0` and history in common
+(`mergedBranches`, `:785`), oldest tip first, one at a time, each against a fresh listing, through
+the same `deleteOne` with `forgetJobs` as its `forgetJob`. A refusal doesn't stop it: the branch is
+listed in `kept` with its sentence. `{ ok: true, merged: [], removed, kept, forgotJobs }`. Unmerged
+branches are not listed.
+
+**The store's side** (`workspace/project-repo.ts`, new). `projectRepo(db, projectId, forgetJob)` builds
+the `BranchRepo` from the store as `routes/branches.ts` did (target, `live`, `rootLive`,
+`setDefault`), plus `BranchRepo.jobs` (`BranchJobs`, `branches.ts:72`): the project's jobs read afresh
+each time, and `forgetJob`, which the route passes as `supervisor().deleteJob`. The `jobId`/`live`
+lookup is re-read after each forgotten job. `openRepo` takes it as a last optional argument (no jobs,
+nothing to forget, by default). Amendment 144 opens a project's branches through the same function.
+
+**Screen** (`branches/route.tsx`, `rules.ts`).
+- **Delete** in the action bar of every branch (`route.tsx:637`), disabled with its reason from
+  `deleteReason` (`rules.ts:233`) otherwise: the daemon's checks in its order, worded for the bar.
+  The jobs that own a branch are `ownersOf` (`:216`): the listing's `jobId` and every job of the
+  project in the store on that branch. With one, a checkbox **forget its job too (its transcripts
+  stay)** (`FORGET_LABEL`) sits beside it, unticked each time a branch is selected; ticked, the
+  delete sends `forgetJob: true`. **Delete** asks first (`deleteConfirm`, `:255`), naming the branch,
+  its folder (or that it has none), that origin keeps its copy, and, forgetting, the jobs and that
+  their agents can't be messaged afterwards while their transcripts stay.
+- **⌫ Clean up merged (n)** in the head (`route.tsx:298`), n the branches that would go with the
+  checkbox as it is (`cleanState`, `:266`); disabled with a reason when nothing is merged, or when
+  every merged branch is kept for a reason even with jobs forgotten. Its confirm lists each branch
+  that would go as `branch · folder · job` (`cleanLine`), then each that would stay with why, the
+  same checkbox (sending `forgetJobs: true`), **Clean up** and Cancel.
+- The result says what went and which jobs were forgotten (`removedText`), and lists each kept
+  branch with its sentence. Styles: `.br-clean-list`, `.br-check` (tokens only).
+
+**Verify.** daemon `workspace/verify-branches.ts` §13 (47 checks; 183 in all), in a repo of its own
+whose project folder is on a branch that isn't the target: each refusal (the target, the folder's
+branch, unmerged, a commit the upstream lacks, an untracked-only folder, a live job even with
+`forgetJob`, a done job without it, bad `forgetJob`, `-` and unknown names) leaves the branch, and the
+folder where there is one; a plain merged branch and one with a clean folder are removed (folder,
+worktree entry and branch gone, "Deleted branch" said); a pushed one goes locally and stays on
+origin; a done job's branch with `forgetJob` removes the job row and its agent, keeps its events, and
+removes its folder and branch; the source uses `'branch', '-d'` and never `-D` or a forced worktree
+remove; `clean_merged` removes the plain one and keeps a stopped job's, an uncommitted one, the live
+one, the unpushed one and the folder's own, each with its sentence, never listing the target or an
+unmerged branch; with `forgetJobs` it removes the job-owned one too, oldest tip first, transcripts
+kept; origin's refs are exactly as before. web `branches/verify.ts` §10 (29 checks): every
+`deleteReason` sentence, the owners, the confirm texts, `cleanState` with and without forgetting,
+the result text, and the route's Delete, checkbox, confirm, actions sent and kept list.
+
+**Not done / not decided:**
+- **Remote branches** are never deleted, here or anywhere.
+- **A job's folder that is the project folder** (`in_place`, `branch` isolation): the job still owns
+  the branch, so it is kept unless forgotten; the folder itself is never removed (the branch checked
+  out there is refused).
+- No undo. A deleted branch's commits are in the target (that is what merged means), and git's
+  reflog keeps the tip for a while.
+
 ### Amendment 142 — post-merge, applied. **A Custom setup can orchestrate and saves the roles it lists; the navigator marks an orchestrator.**
 
 Web only (`spawn/custom.ts`, `spawn/presets.ts`, `spawn/route.tsx`, `spawn/CustomSetup.tsx`,

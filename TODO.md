@@ -32,7 +32,7 @@ the last of it on 12 Oct).
 
 ## Housekeeping
 
-- [ ] **Clear out wave 9's worktrees and branches.** Found (10 Oct). The job `job_07af774e-eb6` is
+- [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
   `done`, but its folder `.conductor/wt/job_07af774e-eb6` (with `w9/d`, `w9/m`, `w9/t` under
   `.claude/worktrees/`) and branch `conductor/job_07af774e-eb6` are still there, and
   `conductor/job_91cc23e2-9b7` is a recreated folder. Everything on them is on `main` (the terminal

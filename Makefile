@@ -197,6 +197,7 @@ test:
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-folder.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-background.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-answer.ts
+	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-finish.ts
 
 # The database lives in ~/.conductor/ once you allowed it (Amendment 46); CONDUCTOR_DATA
 # moves it. Settings beside it are kept, and so is the database from before the move,

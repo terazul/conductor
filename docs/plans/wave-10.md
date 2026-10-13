@@ -1,7 +1,7 @@
 # Plan: wave 10, the "worth doing next" list (Amendments 134-144)
 
-**Status:** wave 10a started 13 Oct 2026. Built on `main` at `55f1df8` (Amendment 133). The decisions
-are in §6.
+**Status:** built 13 Oct 2026, all of it: 134-144 (and 141a) are on `main`, `make test` green (27 suites).
+Not looked at in a browser yet: see §5. Each lane's notes are in `docs/plans/wave-10/lane-*.md`.
 
 **Asked (13 Oct):** "generate an execution plan for the worth doing next". That list was the
 "Right now" install check, the loose ends of Amendments 112-128 in `TODO.md`, and the branch hygiene
