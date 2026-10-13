@@ -700,6 +700,14 @@
   tab-size: 2;
 }
 
+/* The line a terminal's `src/a.ts:12` asked for (Amendment 141). */
+.c5-lit {
+  display: inline-block;
+  min-width: 100%;
+  background: var(--line2);
+  color: var(--ink);
+}
+
 /* The editor is a recessed input, not a raised surface — hence --well, the
    below-background token added in the first contract amendment. */
 .c5-editor {

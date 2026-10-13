@@ -1,5 +1,6 @@
 /**
- * The Agent screen's full terminal, the parts that need no browser (Amendment 112).
+ * The full terminal, the parts that need no browser (Amendment 112): the Agent screen's, and
+ * since Amendment 141 the Terminal dock's, whose terminals are a project's (`TermScope`).
  *
  * `Xterm.tsx` draws one terminal and `TermPanel.tsx` holds the tabs; everything either has to
  * decide lives here as a function, so `verify.ts` can test it without a DOM or xterm.js.
@@ -13,19 +14,31 @@ import {
   type TermCreateResponse,
   type TermInfo,
   type TermListResponse,
+  type TermScope,
+  type TermShellsResponse,
 } from '@conductor/shared';
 import { api } from '../lib/feed.js';
+import { termKey, type KeyLike } from '../terminal/keys.js';
 
 // ── talking to the daemon ────────────────────────────────────────────────────
 
-const termsPath = (agentId: string) => `/api/agents/${encodeURIComponent(agentId)}/terminals`;
+/** An agent's terminals, or (Amendment 141) a project's. */
+const termsPath = (scope: TermScope) =>
+  scope.kind === 'agent'
+    ? `/api/agents/${encodeURIComponent(scope.agentId)}/terminals`
+    : `/api/projects/${encodeURIComponent(scope.projectId)}/terminals`;
 
-export function listTerminals(agentId: string): Promise<TermListResponse> {
-  return api(termsPath(agentId));
+export function listTerminals(scope: TermScope): Promise<TermListResponse> {
+  return api(termsPath(scope));
 }
 
-export function openTerminal(agentId: string, body: TermCreateRequest = {}): Promise<TermCreateResponse> {
-  return api(termsPath(agentId), { method: 'POST', body });
+export function openTerminal(scope: TermScope, body: TermCreateRequest = {}): Promise<TermCreateResponse> {
+  return api(termsPath(scope), { method: 'POST', body });
+}
+
+/** The shells the daemon found, for Settings (Amendment 141). */
+export function listShells(): Promise<TermShellsResponse> {
+  return api('/api/terminals/shells');
 }
 
 export function closeTerminal(id: string): Promise<unknown> {
@@ -45,6 +58,11 @@ export function termSocketUrl(id: string, loc: { protocol: string; host: string 
 }
 
 export const inputFrame = (d: string): string => JSON.stringify({ t: 'in', d } satisfies TermClientFrame);
+/**
+ * xterm.js's `onBinary` (Amendment 141): a string whose every character is one byte, as mouse
+ * reports in the X10 encoding are. Sent as base64 so the daemon writes the bytes themselves.
+ */
+export const binaryFrame = (d: string): string => JSON.stringify({ t: 'bin', d: btoa(d) } satisfies TermClientFrame);
 export const resizeFrame = (cols: number, rows: number): string =>
   JSON.stringify({ t: 'resize', cols, rows } satisfies TermClientFrame);
 
@@ -95,10 +113,11 @@ export function endedLine(t: Pick<TermInfo, 'exitCode'>): string {
 
 /**
  * Copy on a Linux browser: Ctrl-Shift-C. (macOS copies with ⌘C, which xterm.js leaves to the
- * browser; Ctrl-C is the shell's interrupt everywhere and is never taken.)
+ * browser; Ctrl-C is the shell's interrupt everywhere and is never taken.) Since Amendment 141
+ * one row of the key map in terminal/keys.ts, which has the rest (find, paste, clear, both OSes).
  */
-export function wantsCopy(e: { type: string; key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }, mac: boolean): boolean {
-  return !mac && e.type === 'keydown' && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'c';
+export function wantsCopy(e: KeyLike, mac: boolean): boolean {
+  return !mac && termKey(e, false) === 'copy';
 }
 
 // ── colour ───────────────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ import { api, Feed, type FeedStatus } from './feed.js';
 import { receiveSettings } from './settings.js';
 import { receiveTerminalOut, receiveTerminalRun } from './terminal.js';
 import { receiveBranches } from '../branches/live.js';
+import { receiveTerminals } from '../terminal/live.js';
 
 /** Per-agent transcript cap. Older events stay in SQLite, not in the tab. */
 const MAX_EVENTS_PER_AGENT = 2_000;
@@ -191,6 +192,11 @@ class Store {
       case 'branches':
         // The Branches screen re-reads its own (Amendment 109); nothing here to project.
         receiveBranches(frame.projectId);
+        return;
+
+      case 'terminals':
+        // A scope's terminals, whole (Amendment 141): the panels showing it take the new list.
+        receiveTerminals(frame);
         return;
 
       case 'pong':

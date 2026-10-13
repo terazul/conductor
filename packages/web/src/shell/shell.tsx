@@ -22,6 +22,9 @@
  * 66): one list, not two, since the Project screen no longer draws its own. The top bar
  * gains the two icons that put panels away — the navigator's, always, and the Agent
  * inspector's, only on the Agent screen, because no other screen has a right panel.
+ *
+ * Under every screen, above the status bar, the Terminal dock (terminal/dock.tsx, Amendment
+ * 141): the project's shells, opened and closed with Ctrl-` or the status bar's ▸ terminal.
  */
 
 import type { ShellDef } from '../lib/screens.js';
@@ -43,6 +46,7 @@ import { PauseAll } from './pauseall.js';
 import { fmtAge, fmtMoney } from './ui.js';
 import { chooseTheme, installTheme, nextChoice, useTheme, type ThemeChoice } from './theme.js';
 import { buildTag, buildTitle, getBuild, type Build } from '../diagnostics/build.js';
+import { DockButton, TerminalDock, useDockKey } from '../terminal/dock.js';
 import { useEffect, useState } from 'react';
 import './shell.css';
 
@@ -224,6 +228,7 @@ function StatusBar() {
       <span>
         <kbd>0</kbd> diagnostics
       </span>
+      <DockButton />
       <span className="sh-right">
         <PauseAll />
         <span>seq {seq}</span>
@@ -306,6 +311,7 @@ function RightToggle({ screen }: { screen: string }) {
 function Shell({ children, nav }: { children: React.ReactNode; nav: React.ReactNode }) {
   const screen = useRoute().id;
   const navUp = navShown(useSetting(NAV_OPEN_KEY));
+  useDockKey();
   return (
     <div className="sh-root conductor-grid conductor-grain">
       <header className="sh-top">
@@ -323,6 +329,9 @@ function Shell({ children, nav }: { children: React.ReactNode; nav: React.ReactN
         {navUp && <Navigator />}
         <div className="sh-screen">{children}</div>
       </div>
+
+      {/* The project's shells, under whichever screen is up (Amendment 141). */}
+      <TerminalDock />
 
       <StatusBar />
     </div>

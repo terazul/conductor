@@ -36,10 +36,10 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FileContentResponse } from '@conductor/shared';
 import { DiffView } from './DiffView.js';
-import { headingSlugs, resolveDocLink } from './links.js';
+import { headingSlugs, rawAround, resolveDocLink } from './links.js';
 import { printRendered } from './print.js';
 import type { View } from './tabs.js';
-import { putEdit, takeFocus, useEdit, useScrollMemory } from './useTabs.js';
+import { lineShown, putEdit, takeFocus, useEdit, useScrollMemory, useWantedLine } from './useTabs.js';
 import { imageUrl, isImagePath, since, writeFile } from './useWorkspace.js';
 import { errorText } from '../lib/errors.js';
 import { hrefFor, navigate } from '../lib/nav.js';
@@ -109,6 +109,27 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
         : view;
 
   useScrollMemory(body, tabKey, editing ? null : shown);
+
+  /*
+   * A line a link asked for (Amendment 141: `src/a.ts:12` clicked in a terminal). The text is
+   * shown, the line marked and scrolled to the middle, once: after that the tab keeps its own
+   * scroll again. Declared after useScrollMemory, so this runs after it has restored the tab.
+   */
+  const wanted = useWantedLine(tabKey);
+  const [lit, setLit] = useState<number | null>(null);
+  const litRef = useRef<HTMLElement | null>(null);
+  useEffect(() => setLit(null), [tabKey]);
+  useEffect(() => {
+    if (wanted !== null && !editing && shown !== 'raw') onView('raw');
+  }, [wanted, editing, shown]);
+  useLayoutEffect(() => {
+    if (wanted === null || editing || shown !== 'raw') return;
+    setLit(wanted);
+    lineShown(tabKey);
+  }, [wanted, editing, shown, tabKey]);
+  useLayoutEffect(() => {
+    if (lit !== null) litRef.current?.scrollIntoView({ block: 'center' });
+  }, [lit]);
 
   useEffect(() => {
     // `takeFocus`: a file just made from the tree opens with its editor already started
@@ -253,6 +274,7 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
     }
   };
 
+  const around = lit !== null ? rawAround(file.raw, lit) : null;
   const segments = file.path.split('/');
   const name = segments.pop() ?? file.path;
 
@@ -392,6 +414,14 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
             onClick={follow}
             dangerouslySetInnerHTML={{ __html: file.html }}
           />
+        ) : around ? (
+          <div className="c5-raw">
+            {around.before}
+            <mark ref={litRef} className="c5-lit">
+              {around.line}
+            </mark>
+            {around.after}
+          </div>
         ) : (
           <div className="c5-raw">{file.raw}</div>
         )}

@@ -92,6 +92,15 @@ export const PREVIEW_DOCK: Panel = {
   share: 0.7,
 };
 
+/** The Terminal dock under every screen (Amendment 141), opened with Ctrl-`. */
+export const TERMINAL_DOCK: Panel = {
+  key: 'conductor.terminalDockH',
+  axis: 'height',
+  fallback: 260,
+  min: 120,
+  share: 0.7,
+};
+
 export function panelMax(p: Panel, viewport: number): number {
   return Math.max(p.min, Math.floor(viewport * p.share));
 }

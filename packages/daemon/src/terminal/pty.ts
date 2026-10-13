@@ -19,7 +19,7 @@ export interface Pty {
   readonly pid: number;
   onData(cb: (data: Buffer) => void): void;
   onExit(cb: (e: { exitCode: number; signal?: number }) => void): void;
-  write(data: string): void;
+  write(data: string | Buffer): void;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
   pause(): void;
