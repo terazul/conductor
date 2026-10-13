@@ -196,6 +196,170 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 137 — post-merge, applied. **A browser opens the sockets in token mode with `?token=`.**
+
+Daemon only (`daemon/src/index.ts`, `daemon/src/terminal/verify.ts`). Asked in the 12 Oct TODO's loose
+end "Token mode" and the wave 10 plan (Lane D). With `CONDUCTOR_TOKEN` set, the feed socket (`/ws`) and
+the terminal socket (`/ws/term/:id`) were refused to a browser even with the right `?token=`. The
+cause: the bearer hook in `index.ts` runs on every request, the WebSocket upgrade included, and wanted
+`Authorization: Bearer …`, which a browser cannot set on a WebSocket. `/ws` had this before the
+terminal existed, and `terminal/verify.ts` §15 asserted the refusal ("exactly as /ws is"). The web
+already sends `?token=` from `VITE_CONDUCTOR_TOKEN` on both sockets (`web/src/lib/feed.ts:87-89`,
+`web/src/agent/term.ts:41-45`); nothing there changes.
+
+- **The two sockets are checked by `?token=`.** In the bearer hook, a request with
+  `Upgrade: websocket` whose path is `WS_PATH` or starts with `/ws/term/` (`isBrowserSocket`) is let
+  through on a `?token=` equal to the token, and on nothing else: no token, a wrong one, or only a
+  bearer header is 401, answered on the raw socket and ended, as the guard's 403 is, so a refused
+  upgrade cannot hold `app.close()` open.
+- **Constant time.** The token is compared with `crypto.timingSafeEqual` (`isToken`), a different
+  length refused before comparing. The bearer header and the websocket `verifyClient` use it too.
+- **Unchanged:** the localhost Host/Origin guard (`guard.ts:41`) runs first, so a foreign Origin is
+  403 whatever its token; every other request, including a plain GET to `/ws` or `/api/...` carrying
+  `?token=`, still needs the bearer header; `/preview/` is still exempt.
+
+**Verified:** `terminal/verify.ts` §15, against a daemon started with a token (21 checks): for the
+feed and the terminal socket, `?token=` alone connects, and from a local Origin; no token, a bearer
+header without `?token=`, a wrong token of the same length, a shorter or longer one, and a foreign
+Origin with the right token are each refused; a plain HTTP request with `?token=` is 401, with the
+bearer header 200, with a wrong one 401. Against the old hook, the four "connects" checks fail.
+
+### Amendment 136 — post-merge, applied. **Metrics say what they mean, and can be read for one project.**
+
+Daemon (`db/migrations/220_metrics_project.sql` new, `session/metrics.ts`, `routes/metrics.ts`,
+`session/verify.ts`). Wire (`MetricsCounts.claudeCalls`, `MetricsResponse.project`, and `MetricsProject`
+at the end of the Metrics section of `shared/src/wire.ts`). Web (`metrics/rules.ts`, `metrics/route.tsx`,
+`metrics/endpoints.ts`, `metrics/metrics.css`, `metrics/verify.ts`, `lib/verify.ts`). Asked 13 Oct (wave
+10, Lane C; Q1 answered yes): fix the three "Not done" items of Amendment 122 about what its rates mean,
+and add the per-project filter it left out. The causes, from 122's own notes: (1) the Errors tile divided
+retries by every engine's calls, though only Claude reports a retry (`api_retry` comes from
+`backends/claude.ts` alone), so with Copilot or OpenRouter agents in the range the rate read lower than
+Claude's own; (2) "per call" divided a Claude turn's `duration_api_ms`, which covers its subagents and
+their side-by-side calls, by `num_turns`, so it was not the length of one API call; (3) the total's speed
+added every engine's output tokens over every engine's model time; (4) `metrics_daily` is keyed
+`(day, provider, model)` and had no project.
+
+- **The retry rate is out of Claude's calls.** `MetricsCounts` gains `claudeCalls`, the calls of rows whose
+  provider is `claude` (`RETRIES_REPORTED_BY` in `session/metrics.ts`), summed by the daemon for the
+  total, each model and each day. `derive` (`rules.ts`) divides `retries` by it, and the Retried cell is
+  `retries/claudeCalls`. When another engine ran in the range (`otherEnginesRan(models)`), the Errors tile
+  says "6 of Claude's 200 calls retried (3.0%)" and its hover says why; with Claude alone it reads as
+  before ("6 of 250 calls retried"); with no Claude calls it says only Claude reports retries, not "0 of
+  50". A non-Claude row's retries stay a dash.
+- **Time is per turn, subagents included.** `apiPerCallMs` is `apiPerTurnMs`; the tile reads "2.0 s per
+  turn, subagents included", the column is **Per turn**, and both hovers say a Claude turn's subagents can
+  run side by side, so it is not the length of one API call. Copilot and OpenRouter, which time each call,
+  are one turn per call, so the same words hold.
+- **Speed is each model's own, averaged.** A row's speed is still its timed output tokens over its model
+  time. The total tile's is `averageSpeed(models)`: the mean of the models' own speeds, said as "(average
+  of N models)" when there are several, instead of all tokens over all time, which mixed a fast small
+  model's seconds with a slow large one's. The spec asked for per run then averaged; the rows are daily
+  sums per model, so per model is the finest figure there is. (A Claude run's output tokens, its
+  subagents' included, are still credited to its main model's timed tokens, as in 122.)
+- **Per project: a table of its own.** Migration `220_metrics_project.sql` adds `metrics_project_daily
+  (day, project_id, provider, model, …the same twelve counters…)`, keyed `(project_id, day, provider,
+  model)`, and `metrics_meta.project_since`, the instant it began. It is not a re-key of `metrics_daily`:
+  that table, every row in it and every query on it are untouched, and the all-projects view still reads
+  it. `bump` writes both tables from the same call, with the agent's `projectId` (read when the result
+  arrives, kept with the run's credit for `recordRunEnd` and the `failed` that follows), inside a
+  SAVEPOINT (`atomically`) so the two never disagree, including when a status event is heard inside
+  someone else's transaction. Like `metrics_daily` it references nothing: removing a job, an agent or a
+  project leaves the counts. Counts from before the migration have no project and are under all projects
+  only.
+- **Route.** `GET /api/metrics?range=…&projectId=…`. Without `projectId`, as before, with `project: null`.
+  With it: 400 for an id that is not the shape of one (`/^[A-Za-z0-9_-]{1,64}$/`), an empty one or a
+  repeated one; 404 for a project that is not there; otherwise that project's counts from
+  `metrics_project_daily`, `project: { id, name }`, `since` the day per-project counting began (so `all`
+  starts there), and no `before` line (the agent rows from before recording cannot say whose runs were
+  whose). A bad range is still 400 first.
+- **Web.** A project picker in the head, after the range: **All projects**, then each project by name
+  (`projectChoices`), kept as the setting `conductor.metricsProject` like the range; a remembered project
+  that has been removed is All projects again (`asProject`). The screen shows an answer only for the range
+  and project it asked for. With a project picked, a short note above the tiles says "Counts for alpha start
+  on Tue 13 Oct, when per-project counting was added. Earlier runs are under All projects only."
+  (`projectNote`), and How these are counted says the same. `.mt-project` uses tokens only.
+- **Hotkey comment.** `lib/verify.ts` §15's made-up screen named `'8'` "a hotkey no real screen has";
+  Metrics has had `8` since 122 and every digit is a real screen's now, so it uses `'x'`, and a new check
+  reads every `route.tsx` to confirm no real screen registers it.
+- **Not done.** (1) Nothing was looked at in a browser: the picker's place in the head and both themes
+  are held by the stylesheet checks only. (2) The retry rate's whole is "the `claude` provider's calls",
+  a constant beside the reader, not a backend capability; an engine that starts reporting retries needs it
+  changed. (3) A Claude run's output tokens are credited to its main model, so a model's speed with busy
+  subagents on another model is still a blend; the rows cannot split it.
+
+**Verified:** `session/verify.ts` §22 (15 new checks): with Copilot calls in the range, the total's
+`claudeCalls` is the Claude rows' calls and less than all calls; a Claude row's `claudeCalls` is its calls,
+a Copilot row's none, every retry on a Claude row; `?projectId=` names the project and its A, B and
+gpt-4.1 rows equal the all-projects ones, with no `before` and `since` the per-project start; the project
+table has the rows; another project's OpenRouter agent (`recordCall` twice, `recordRunEnd`) is in its own
+view and the all-projects one and not this one's, an empty project is an empty report and not a 404; an
+unknown project is 404; `..%2F`, an empty id and two ids are 400, and a bad range with a project is still
+400. `metrics/verify.ts` (new §2b and §6b, more in §3, §4, §7): mixed-engine fixtures (opus 200 calls with
+6 retries, Copilot 50): the rate is 3.0%, not 2.4%; the tile says "of Claude's 200 calls" only when another
+engine ran; Copilot alone says only Claude reports retries; speed averages 200 and 100 to 150 tok/s, not
+189; Per turn and its hovers; the picker's choices, the remembered project, the note, the request's
+`&projectId=` and the route's 400/404. `lib/verify.ts` §15: the made-up key is one no screen uses.
+`pnpm -r typecheck`, `pnpm --filter @conductor/web verify`, `metrics/verify.ts` and `session/verify.ts` pass.
+
+### Amendment 135 — post-merge, applied. **Needs You's `project / role` label uses the Agent screen's backdrop.**
+
+Web only (`attention/route.tsx`, `lib/verify-crumb.ts`, `shell/ui.css` (a comment)), and
+`docs/MANUAL.md`. No behaviour, wire or daemon change, no migration, no new token. Asked: a TODO.md
+loose end (12 Oct, "Label backdrops (127)"), taken into the wave 10 plan as Lane B: "Needs You's
+`project / role` header stays on `--here`, so it no longer matches the Agent screen it came from."
+It finishes Amendment 127, whose own **Not done** said the same.
+- **The label for the request in focus** (`project / role`, `route.tsx`) is now
+  `ui-crumb is-agent`, so it sits on `--here-agent`'s wine rose, the Agent screen's backdrop, in
+  both themes. It names an agent, the one whose request you are answering, so it reads as that
+  agent's screen at a glance. The text is unchanged, and so is the layout: `is-agent` sets
+  `--crumb` and nothing else (Amendment 127).
+- **The other two Needs You headers stay on `--here`**: `needs you / N alerts` (alerts only) and
+  `needs you / nothing` (queue clear). They name the screen, not an agent or a project, so they
+  keep Fleet's slate blue, like Preview, Files and Branches. Neither is a project-only label, so
+  nothing on Needs You uses `is-project`.
+- **Checked**: `lib/verify-crumb.ts` section F no longer counts Needs You among the screens that
+  stay on `--here`. It finds the span that starts with `{focused.projectName}` and fails unless its
+  class is exactly `ui-crumb is-agent`, and fails unless `route.tsx` has three crumbs, that one and
+  two plain `ui-crumb`. Fleet, Preview, Files and Branches are still checked to carry neither class.
+- **Not done**: not looked at in a browser, in either theme. Amendment 127's question stands: the
+  three backdrops differ only a little in lightness, so say if Needs You's label and Fleet's are
+  too alike once seen.
+
+**Verified:** `lib/verify-crumb.ts` (PASS, section F's two new checks among them),
+`attention/verify.ts` (PASS), `attention/verify-needs-panel.ts` (PASS), `lib/verify.ts` (PASS),
+`pnpm --filter @conductor/web typecheck` (clean).
+
+### Amendment 134 — post-merge, applied. **`make start` says when the install is out of date, and starts nothing.**
+
+Make and scripts only (`scripts/check-install.mjs` new, `Makefile`, `scripts/verify-check-install.mjs`
+new). Asked 13 Oct, in the wave 10 plan (lane A, from the "Right now" list in `TODO.md`). After a pull
+that adds a package, `make start` started the daemon and Vite against a `node_modules` that didn't have
+it, and the browser showed Vite's `Failed to resolve import` overlay, which looks like a bug in the
+code. The cause: nothing compared the install with `pnpm-lock.yaml` before starting.
+
+- **The check** (`scripts/check-install.mjs`). pnpm writes a copy of the lockfile to
+  `node_modules/.pnpm/lock.yaml` on every install, and when the install is current the two are the
+  same byte for byte (checked 13 Oct). `installState(root)` reads both: `current`, `stale` when they
+  differ, `missing` when there is no copy (no `node_modules`, or an install that didn't finish). Paths
+  are from the script's own location, not the cwd; `--root <dir>` points it at another checkout.
+- **Current:** exit 0, says nothing. **Stale or missing:** one line on stderr, *"Dependencies are out
+  of date: run `make install` (or `pnpm install`), then start again."*, and exit 1. With
+  `CONDUCTOR_AUTO_INSTALL=1` it runs `pnpm install --frozen-lockfile --prefer-offline` in the checkout
+  instead (output shown) and exits with its code, so a lock that no longer matches `package.json`
+  still stops the start.
+- **Makefile.** A `check-install` target runs it. `start` depends on it before anything else, so a
+  stale install starts no process and writes no pid. `restart` is `check-install stop start`: it checks
+  before it stops, so a stale install doesn't take down what is running and then refuse to start it.
+- **Unchanged:** `make install`, `pnpm dev`, `make fixture` and `make attention` don't check.
+
+**Verify:** `scripts/verify-check-install.mjs` (24 checks: temp checkouts under the system temp dir for
+current, stale, no `node_modules`, no copy and line endings alone; the CLI on each with a fake `pnpm`
+first on the PATH, so "starts nothing" is seen, not assumed; `CONDUCTOR_AUTO_INSTALL=1` runs the
+frozen, offline-first install in the checkout and passes its exit code through; and with no `--root`
+it checks its own repo from any cwd). In `make test`. By hand, 13 Oct: a newline appended to
+`pnpm-lock.yaml`, `make start` and `make restart` printed the sentence, exited non-zero, and created
+no run directory; the lock put back, the check passed.
+
 ### Amendment 133 — post-merge, applied. **An agent's turn ending ends its process, so nothing it starts is left to die in the background.**
 
 Daemon only (`session/background.ts` new, `session/backends/claude.ts`, `session/verify.ts`,

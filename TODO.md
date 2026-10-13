@@ -19,11 +19,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
-- [ ] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a
+- [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
   and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
 
-- [ ] **Make a missing install say so.** Found (12 Oct). After the terminal landed, the browser showed
+- [x] **Make a missing install say so.** Found (12 Oct). After the terminal landed, the browser showed *Done 13 Oct: Amendment 134.*
   Vite's `Failed to resolve import "@xterm/xterm"` overlay until `pnpm install` was run, because
   `make start` doesn't check. `pnpm install --frozen-lockfile --offline` fixed it from the local store.
   Have `make start` (or `make init`) notice that `pnpm-lock.yaml` is newer than `node_modules`, and
@@ -102,7 +102,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - the search, links, clipboard and WebGL add-ons, and mouse reports (`onBinary`);
   - a hub frame so a terminal opened in one tab shows in another, and the headless mirror the plan
     wanted in place of the raw 512 KB replay.
-  - **Token mode.** With `CONDUCTOR_TOKEN` set, `/ws` and `/ws/term` are refused to a browser even with
+  - **Token mode.** *Done 13 Oct: Amendment 137.* With `CONDUCTOR_TOKEN` set, `/ws` and `/ws/term` are refused to a browser even with
     the right `?token=`, because the `Authorization` check in `index.ts` also runs on the upgrade and a
     browser can't set that header. `/ws` did this before the terminal; it needs its own fix.
 
@@ -118,7 +118,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   separate items if wanted. A name that differs from an existing one only in case is refused only on a
   case-insensitive filesystem, such as macOS.
 
-- [ ] **Metrics (122).**
+- [ ] **Metrics (122).** *13 Oct, Amendment 136: the Errors rate, time per turn, the speed average, the stale `lib/verify.ts` comment and a per-project filter are done; a chart beyond the day table is not.*
   - The Errors tile divides retried calls by every engine's calls, though only Claude reports retries.
     The per-model rows are exact.
   - Claude's model-call time includes subagents, but `calls` counts main-loop turns, so time per call
@@ -158,7 +158,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - Nothing checks that a model actually puts the closing headings in its `hand_off` summary, and "tests
     only" and "docs only" in the role prompts are words, not rules.
 
-- [ ] **Label backdrops (127).** Needs You's `project / role` header stays on `--here`, so it no
+- [x] **Label backdrops (127).** Needs You's `project / role` header stays on `--here`, so it no *Done 13 Oct: Amendment 135, for the request in focus.*
   longer matches the Agent screen it came from. Making it match is one class, `is-agent`, on
   `web/src/attention/route.tsx` (the three `ui-crumb` spans), plus one line in `lib/verify-crumb.ts`.
   The lightness gap between the three backdrops is small, because the 4.5:1 floor on `--ink3` caps it;

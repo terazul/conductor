@@ -171,6 +171,7 @@ attention:
 test:
 	pnpm -r typecheck
 	pnpm --filter @conductor/daemon smoke
+	node scripts/verify-check-install.mjs
 	pnpm --filter @conductor/web verify
 	pnpm --filter @conductor/web exec tsx src/spawn/verify.ts
 	pnpm --filter @conductor/web exec tsx src/agent/verify.ts
