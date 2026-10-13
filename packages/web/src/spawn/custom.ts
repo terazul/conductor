@@ -12,10 +12,16 @@
  * the persona changes the setup. It fills in the row's role name, brief and model; the row
  * overrides the brief by typing one, and the model with the plan preview's picker, for that
  * launch only. The role name stays free, so two rows can share a persona.
+ *
+ * One row can orchestrate (Amendment 142): it starts the roles listed under it in the plan, as
+ * the preset "orchestrated pipeline" does (Amendment 128, `orchestrated.ts`), and the list is
+ * saved with the setup. Both fields are optional, so a setup saved before reads as it did.
  */
 
 import type { AgentRole, ModelTier } from '@conductor/shared';
+import { PIPELINE_ROLES_MAX } from '@conductor/shared';
 import type { Preset, PresetRole, RoleModels } from './presets.js';
+import type { ListedRole } from './orchestrated.js';
 import { removeRow } from './order.js';
 import { personaFor, renamedPersona, type Persona } from './personas.js';
 
@@ -28,6 +34,12 @@ export interface CustomRole {
    * there is one. `''`: none, chosen — so a row called developer can be plain.
    */
   persona?: string;
+  /**
+   * Amendment 142. This row orchestrates: it starts the roles listed under it in the plan instead
+   * of the others waiting on it, as the preset's orchestrator row does (`PresetRole.orchestrates`,
+   * presets.ts:47). One row at most (`withOrchestrator`). Absent is an ordinary row.
+   */
+  orchestrates?: boolean;
 }
 
 export interface SavedSetup {
@@ -35,6 +47,11 @@ export interface SavedSetup {
   roles: CustomRole[];
   /** Exact model ids picked per role when it was saved. */
   models: RoleModels;
+  /**
+   * Amendment 142. The roles its orchestrating row may start, as the plan listed them when it was
+   * saved. Only when a row orchestrates; absent, the default list (`defaultListed`).
+   */
+  listed?: ListedRole[];
 }
 
 export const SETUPS_KEY = 'conductor.setups';
@@ -65,10 +82,35 @@ export function addRow(roles: CustomRole[]): CustomRole[] {
   return [...roles, { role: nextRole(roles), brief: '', dependsOnRoles: last ? [last.role] : [] }];
 }
 
+/**
+ * The setup with row `i` orchestrating, or not (Amendment 142). One row at a time: turning one on
+ * turns the others off. Off, the field is dropped rather than set false, so the row is as it was.
+ */
+export function withOrchestrator(roles: readonly CustomRole[], i: number, on: boolean): CustomRole[] {
+  return roles.map((r, j) => {
+    const { orchestrates: _was, ...rest } = r;
+    return on && j === i ? { ...rest, orchestrates: true } : rest;
+  });
+}
+
+/** The row that orchestrates, or undefined (Amendment 142). */
+export function orchestratorRow(roles: readonly CustomRole[]): CustomRole | undefined {
+  return roles.find((r) => r.orchestrates === true);
+}
+
+/**
+ * The setup as it is saved (Amendment 142): its rows, your own picks, and the roles listed under
+ * its orchestrating row. No row orchestrating, no list: the setup is saved as it was before.
+ */
+export function setupOf(name: string, roles: CustomRole[], models: RoleModels, listed: readonly ListedRole[]): SavedSetup {
+  return { name, roles, models, ...(orchestratorRow(roles) ? { listed: [...listed] } : {}) };
+}
+
 /** What's wrong with a setup, one sentence each; empty when it can launch. */
 export function customProblems(roles: CustomRole[]): string[] {
   const out: string[] = [];
   if (roles.length === 0) out.push('Add at least one agent.');
+  if (roles.filter((r) => r.orchestrates === true).length > 1) out.push('Only one agent can orchestrate: untick the others.');
   const seen = new Set<string>();
   roles.forEach((r, i) => {
     if (!ROLE.test(r.role)) out.push(`Agent ${i + 1}: a role is lowercase letters, digits and dashes, starting with a letter.`);
@@ -119,6 +161,9 @@ export function toPreset(id: string, label: string, roles: CustomRole[], persona
   return {
     id,
     label,
+    // A row that orchestrates makes it an orchestrated stack, as the preset is (presets.ts:119), so
+    // `orchestratedFor` and `toAgentSpecs` treat the two the same (Amendment 142).
+    ...(orchestratorRow(roles) ? { orchestrated: true as const } : {}),
     roles: roles.map((r): PresetRole => {
       const p = rowPersona(r, personas);
       const brief = r.brief.trim() || p?.brief.trim() || '';
@@ -136,6 +181,8 @@ export function toPreset(id: string, label: string, roles: CustomRole[], persona
         ...(r.dependsOnRoles.length > 0 ? { dependsOnRoles: r.dependsOnRoles } : {}),
         // Explicit, so the launch uses the same persona the row shows: none stays none.
         persona: rowPersona(r, personas)?.id ?? '',
+        // Last, as on the preset's row (presets.ts:125): it starts the listed roles (Amendment 142).
+        ...(r.orchestrates === true ? { orchestrates: true as const } : {}),
       };
     }),
   };
@@ -185,26 +232,50 @@ export function parseSetups(raw: string | null): SavedSetup[] {
     for (const x of parsed) {
       const s = x as Partial<SavedSetup>;
       if (typeof s?.name !== 'string' || !s.name.trim() || !Array.isArray(s.roles)) continue;
+      let orchestrator = false;
       const roles = s.roles
         .filter((r): r is CustomRole => typeof r?.role === 'string')
-        .map((r) => ({
-          role: r.role,
-          brief: typeof r.brief === 'string' ? r.brief : '',
-          dependsOnRoles: Array.isArray(r.dependsOnRoles) ? r.dependsOnRoles.filter((d): d is string => typeof d === 'string') : [],
-          // By id, so the persona as it is now is what the setup gets (Amendment 68).
-          ...setupPersona(r),
-        }));
+        .map((r): CustomRole => {
+          // The first row that orchestrates does; any later one is an ordinary row (Amendment 142).
+          const orch = r.orchestrates === true && !orchestrator;
+          if (orch) orchestrator = true;
+          return {
+            role: r.role,
+            brief: typeof r.brief === 'string' ? r.brief : '',
+            dependsOnRoles: Array.isArray(r.dependsOnRoles) ? r.dependsOnRoles.filter((d): d is string => typeof d === 'string') : [],
+            // By id, so the persona as it is now is what the setup gets (Amendment 68).
+            ...setupPersona(r),
+            ...(orch ? { orchestrates: true } : {}),
+          };
+        });
       if (customProblems(roles).length > 0) continue;
       const models: RoleModels = {};
       if (s.models && typeof s.models === 'object') {
         for (const [k, v] of Object.entries(s.models)) if (typeof v === 'string') models[k] = v;
       }
-      if (!out.some((o) => o.name === s.name)) out.push({ name: s.name.trim(), roles, models });
+      // The list only beside a row that orchestrates, so an older setup is read as it was (Amendment 142).
+      const listed = orchestrator && Array.isArray(s.listed) ? parseListed(s.listed) : null;
+      if (!out.some((o) => o.name === s.name)) out.push({ name: s.name.trim(), roles, models, ...(listed ? { listed } : {}) });
     }
     return out;
   } catch {
     return [];
   }
+}
+
+/**
+ * A saved list of roles (Amendment 142): each a role name with a tier, once, and no more than
+ * the daemon takes (`PIPELINE_ROLES_MAX`). Anything else is left out, as a malformed setup is.
+ */
+function parseListed(raw: unknown[]): ListedRole[] {
+  const out: ListedRole[] = [];
+  for (const x of raw) {
+    const l = x as Partial<ListedRole> | null;
+    if (typeof l?.id !== 'string' || !ROLE.test(l.id) || typeof l.tier !== 'string' || !TIERS.includes(l.tier)) continue;
+    if (out.some((o) => o.id === l.id) || out.length >= PIPELINE_ROLES_MAX) continue;
+    out.push({ id: l.id, tier: l.tier as ModelTier });
+  }
+  return out;
 }
 
 /**

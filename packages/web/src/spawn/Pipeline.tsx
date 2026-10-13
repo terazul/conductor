@@ -32,6 +32,7 @@ export function Pipeline({
   claude,
   model,
   onChange,
+  alone,
 }: {
   listed: readonly ListedRole[];
   personas: readonly Persona[];
@@ -41,6 +42,11 @@ export function Pipeline({
   /** The one model every role runs on, off Claude. */
   model: string;
   onChange: (next: ListedRole[]) => void;
+  /**
+   * What it says with no role listed. Absent, the preset's words; a Custom row that orchestrates
+   * (Amendment 142) says its own agent launches plainly, since it does not become an architect.
+   */
+  alone?: string;
 }) {
   const offered = offeredRoles(listed, personas);
   return (
@@ -95,8 +101,12 @@ export function Pipeline({
         </>
       ) : (
         <div className="sp-pipe-note">
-          No role listed, so this launches one architect agent and nothing orchestrates. Add a role to have an
-          orchestrator run a pipeline.
+          {alone ?? (
+            <>
+              No role listed, so this launches one architect agent and nothing orchestrates. Add a role to have an
+              orchestrator run a pipeline.
+            </>
+          )}
         </div>
       )}
       {offered.length > 0 && listed.length < PIPELINE_ROLES_MAX && (

@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type BranchInfo, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -36,7 +36,7 @@ import {
 import { scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.js';
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, pillsWith, resetPersona, withPersona, withoutPersona } from './personas.js';
-import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, toPreset, withSetup, withoutSetup, type CustomRole } from './custom.js';
+import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, orchestratorRow, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, setupOf, toPreset, withOrchestrator, withSetup, withoutSetup, type CustomRole, type SavedSetup } from './custom.js';
 import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { DEFAULT_METHOD, METHODS, branchOptions, branchProblem, isolationOf, launchBody, methodFrom, methodReady, pickedNote, presetLabel } from './launch.js';
 import { execFileSync } from 'node:child_process';
@@ -57,6 +57,7 @@ import {
   toAgentSpecs,
   unresolvedRoles,
   orchestratedFor,
+  type Preset,
 } from './presets.js';
 import {
   ORCHESTRATED_ID,
@@ -740,7 +741,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd', /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title="[^"]*per day[^"]*"\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
-  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && !listsRoles && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
+  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && r\.role !== listsUnder && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 
 console.log('\n16 · fewer built-in personas, and the full pipeline reads the plan (Amendment 84)');
@@ -974,7 +975,7 @@ console.log('\n18 · move rows in Spawn to set who each agent waits for (Amendme
       !/writeSetting\([^)]*arranged/.test(route) && !/setCustom\([^)]*arranged/.test(route),
   );
   check('choosing a preset puts its own rows back, and so does the button in the plan', /setPresetId\(id\);\s*setArranged\(null\);/.test(route) && /onClick=\{\(\) => setArranged\(null\)\}/.test(route));
-  check('the Custom editor saves its own rows, not the plan', /withSetup\(saved, \{ name, roles: custom, models: ownPicks \}\)/.test(route));
+  check('the Custom editor saves its own rows, not the plan', /withSetup\(saved, setupOf\(name, custom, ownPicks, listedEdit \?\? defaultListed\(personas\)\)\)/.test(route));
   check(
     "the preset's plan rows show their waits for, with the same ticks a Custom row has",
     /<WaitsFor\s+who=\{r\.role\}\s+options=\{rolesAbove\(preset\.roles, i\)\}\s+waits=\{r\.dependsOnRoles \?\? \[\]\}\s+onToggle=\{\(on\) => arrange\(toggleWait\(preset\.roles, i, on\)\)\}/.test(route) &&
@@ -1289,8 +1290,8 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
 
   // What Spawn shows.
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn lists the roles under the row, and marks the orchestrator only on that row', /listsRoles && i === 0 && \(\s*<Pipeline/.test(route) && /\{r\.orchestrates && <OrchestratorMark \/>\}/.test(route) && /\$\{r\.orchestrates \? ' is-orch' : ''\}/.test(route));
-  check('the row\'s "+ up to N helpers" is not offered on it, nor on the lone architect it becomes: the list sets the cap, and one agent has no orchestrator affordance', /has\.helpers && !r\.orchestrates && !listsRoles/.test(route));
+  check('Spawn lists the roles under the row, and marks the orchestrator only on that row', /listsRoles && r\.role === listsUnder && \(\s*<Pipeline/.test(route) && /\{r\.orchestrates && <OrchestratorMark \/>\}/.test(route) && /\$\{r\.orchestrates \? ' is-orch' : ''\}/.test(route));
+  check('the row\'s "+ up to N helpers" is not offered on it, nor on the lone architect it becomes: the list sets the cap, and one agent has no orchestrator affordance', /has\.helpers && !r\.orchestrates && r\.role !== listsUnder/.test(route));
   check('the list is state of this launch: a preset change puts the default back', /setListedEdit\(null\)/.test(route) && /listedEdit \?\? defaultListed\(personas\)/.test(route));
   check('an engine that cannot start helpers lists none', /has\.helpers \? \(listedEdit \?\? defaultListed\(personas\)\) : \[\]/.test(route));
   check('a launch waits for a tier with no model, as it does for a row', /missingListed\.length === 0/.test(route) && /unresolvedListed\(listed, tiers\)/.test(route));
@@ -1342,8 +1343,105 @@ console.log('\n22 · (2)\'s branch picker: local branches, then the ones only on
   check('the list is built from the project\'s default, as the name check is', /branchOptions\(branchList, refused\)/.test(route));
 }
 
+console.log('\n23 · a Custom setup can orchestrate, and saves the roles it lists (Amendment 142)');
+{
+  const tiersNow = { opus: 'us.anthropic.claude-opus-5', sonnet: 'us.anthropic.claude-sonnet-5', haiku: 'us.anthropic.claude-haiku-5' };
+  const every = personasFrom(null);
+  const orch = presetById(ORCHESTRATED_ID);
+  const defaults = defaultListed(every);
+  const specsOf = (p: Preset, listed: readonly ListedRole[]) =>
+    toAgentSpecs(orchestratedFor(p, listed), PERMISSIVE, 5, undefined, {}, tiersNow, {}, undefined, every, listed);
+  const custom = (roles: CustomRole[]) => toPreset('custom', 'mine', roles, every);
+
+  // One row at a time.
+  const three: CustomRole[] = [
+    { role: 'architect', brief: '', dependsOnRoles: [] },
+    { role: 'developer', brief: '', dependsOnRoles: ['architect'] },
+    { role: 'scribe', brief: '', dependsOnRoles: ['developer'] },
+  ];
+  const on1 = withOrchestrator(three, 1, true);
+  check('ticking a row makes it the one that orchestrates', orchestratorRow(on1)?.role === 'developer' && on1.filter((r) => r.orchestrates).length === 1);
+  const on2 = withOrchestrator(on1, 2, true);
+  check('ticking another unticks the first: only one orchestrator', orchestratorRow(on2)?.role === 'scribe' && on2.filter((r) => r.orchestrates).length === 1 && !('orchestrates' in on2[1]!));
+  const off = withOrchestrator(on2, 2, false);
+  check('unticking it leaves the rows as they were, with no field at all', JSON.stringify(off) === JSON.stringify(three) && orchestratorRow(off) === undefined);
+  check('two rows orchestrating is a problem, one sentence', customProblems([{ ...three[0]!, orchestrates: true }, { ...three[1]!, orchestrates: true }]).some((p) => /Only one agent can orchestrate/.test(p)) && customProblems(on1).length === 0);
+  check('the rest of the rules keep the field: renaming, moving and removing a row', renameRole(on1, 1, 'builder')[1]!.orchestrates === true && moveRow(on1, 1, 0)[0]!.orchestrates === true && removeRole(on1, 0).find((r) => r.role === 'developer')!.orchestrates === true);
+
+  // It becomes an orchestrated stack, launched as the preset is.
+  const asPreset: CustomRole[] = [{ role: 'orchestrator', brief: orch.roles[0]!.brief, dependsOnRoles: [], persona: 'architect', orchestrates: true }];
+  const mine = custom(asPreset);
+  check('a Custom setup with a row that orchestrates is an orchestrated stack, and its row orchestrates', mine.orchestrated === true && mine.roles[0]!.orchestrates === true);
+  check('without one it is as before: neither field', custom(three).orchestrated === undefined && !JSON.stringify(custom(three)).includes('orchestrat'));
+  const fromPreset = specsOf(orch, defaults);
+  const fromCustom = specsOf(mine, defaults);
+  check("the launch request from Custom is the preset's, field for field, for the same row and roles", JSON.stringify(fromCustom) === JSON.stringify(fromPreset), JSON.stringify(fromCustom).slice(0, 200));
+  const bodyOf = (specs: AgentSpec[]) => JSON.parse(JSON.stringify(launchBody({ projectId: 'p', prompt: 'Build it.', method: 'worktree', branch: '', preset: 'x', agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) }))) as { agents: unknown[] };
+  check('and so is the body sent to POST /api/jobs', JSON.stringify(bodyOf(fromCustom).agents) === JSON.stringify(bodyOf(fromPreset).agents));
+  check('with the helper cap and the roles on that row', fromCustom[0]!.helpers === 12 && fromCustom[0]!.helperRoles?.map((r) => r.id).join() === 'developer,validator,reviewer,scribe');
+  const lighter = withTier(withoutRole(defaults, 'scribe'), 'developer', 'haiku');
+  check('an edited list is sent the same way from either', JSON.stringify(specsOf(mine, lighter)) === JSON.stringify(specsOf(orch, lighter)) && specsOf(mine, lighter)[0]!.helpers === 9);
+
+  // Beside other rows, only the orchestrating one changes.
+  const mixed = custom(on1);
+  const mixedSpecs = specsOf(mixed, defaults);
+  const plainSpecs = specsOf(custom(three), defaults);
+  check('in a setup of several, only the row that orchestrates takes the roles and the cap', mixedSpecs.filter((x) => x.helperRoles).length === 1 && mixedSpecs[1]!.helpers === 12 && mixedSpecs[1]!.helperRoles!.length === 4);
+  check('and the other rows are sent exactly as they were', JSON.stringify(mixedSpecs[0]) === JSON.stringify(plainSpecs[0]) && JSON.stringify(mixedSpecs[2]) === JSON.stringify(plainSpecs[2]));
+  const noneListed = orchestratedFor(mixed, []);
+  check("with no role listed it keeps its rows, not the preset's architect, and nothing orchestrates", noneListed.roles.map((r) => r.role).join() === 'architect,developer,scribe' && !noneListed.orchestrated && noneListed.roles.every((r) => !r.orchestrates));
+  check('and is launched exactly as the setup without the tick', JSON.stringify(specsOf(mixed, [])) === JSON.stringify(specsOf(custom(three), [])));
+  check('an engine that cannot start helpers is sent neither', specsOn(mixedSpecs, { provider: 'copilot', caps: NONE, model: 'gpt-5', budgetTokens: null }).every((x) => !('helpers' in x) && !('helperRoles' in x)));
+
+  // Saved, and read back.
+  const saved1 = setupOf('pipe', on1, { scribe: 'claude-haiku-x' }, lighter);
+  check('saving a setup whose row orchestrates saves the list too', JSON.stringify(saved1.listed) === JSON.stringify(lighter));
+  check('saving one without keeps no list: it is saved as before', !('listed' in setupOf('plain', three, {}, defaults)));
+  const back = parseSetups(withSetup([], saved1));
+  check('it round-trips: the rows with the tick, the picks and the listed roles', back.length === 1 && JSON.stringify(back[0]) === JSON.stringify(saved1), JSON.stringify(back[0]));
+  check('and launches as it did before it was saved', JSON.stringify(specsOf(custom(back[0]!.roles), back[0]!.listed!)) === JSON.stringify(specsOf(custom(on1), lighter)));
+  check('a saved list beside other setups keeps to its own', parseSetups(withSetup(parseSetups(withSetup([], saved1)), setupOf('plain', three, {}, defaults))).map((x) => `${x.name}:${'listed' in x}`).join() === 'pipe:true,plain:false');
+
+  // A setup saved before Amendment 142.
+  const old = JSON.stringify([{ name: 'before', roles: [{ role: 'developer', brief: 'b', dependsOnRoles: [] }, { role: 'reviewer', brief: '', dependsOnRoles: ['developer'] }], models: { developer: 'claude-x' } }]);
+  const was = parseSetups(old);
+  const expected: SavedSetup = { name: 'before', roles: [{ role: 'developer', brief: 'b', dependsOnRoles: [] }, { role: 'reviewer', brief: '', dependsOnRoles: ['developer'] }], models: { developer: 'claude-x' } };
+  check('an older saved setup loads as before: no tick, no list', JSON.stringify(was) === JSON.stringify([expected]) && !JSON.stringify(was).includes('orchestrat') && !JSON.stringify(was).includes('listed'));
+  check('and launches as before: no helpers, no roles, whatever list the screen holds', JSON.stringify(specsOf(custom(was[0]!.roles), defaults)) === JSON.stringify(specsOf(custom(was[0]!.roles), [])) && !JSON.stringify(specsOf(custom(was[0]!.roles), defaults)).includes('helper'));
+  check('and is written back as it was read', withSetup([], was[0]!) === JSON.stringify([expected]));
+
+  // A broken or hand-edited setting.
+  const messy = parseSetups(JSON.stringify([{
+    name: 'messy',
+    roles: [{ role: 'architect', brief: '', dependsOnRoles: [], orchestrates: true }, { role: 'developer', brief: '', dependsOnRoles: [], orchestrates: true }, { role: 'scribe', brief: '', dependsOnRoles: [], orchestrates: 'yes' }],
+    models: {},
+    listed: [{ id: 'developer', tier: 'sonnet' }, { id: 'developer', tier: 'opus' }, { id: 'Bad Name', tier: 'sonnet' }, { id: 'reviewer', tier: 'gpt' }, 'scribe', null, { id: 'validator', tier: 'haiku' }],
+  }]))[0]!;
+  check('two rows saved orchestrating read as one: the first', messy.roles.filter((r) => r.orchestrates).map((r) => r.role).join() === 'architect' && !('orchestrates' in messy.roles[2]!));
+  check('a list entry that is not a role and a tier, or is there twice, is left out', JSON.stringify(messy.listed) === JSON.stringify([{ id: 'developer', tier: 'sonnet' }, { id: 'validator', tier: 'haiku' }]));
+  const many = parseSetups(JSON.stringify([{ name: 'many', roles: [{ role: 'a', brief: '', dependsOnRoles: [], orchestrates: true }], models: {}, listed: Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, tier: 'sonnet' })) }]))[0]!;
+  check('no more than the daemon takes', many.listed!.length === 8);
+  const stray = parseSetups(JSON.stringify([{ name: 'stray', roles: [{ role: 'a', brief: '', dependsOnRoles: [] }], models: {}, listed: [{ id: 'developer', tier: 'sonnet' }] }]))[0]!;
+  check('a list with no row that orchestrates is not read', !('listed' in stray));
+
+  // What Spawn shows.
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check('the list goes under the Custom row that orchestrates, on an engine with helpers', /isCustom\s*\?\s*\(orchestratorRow\(custom\)\?\.role \?\? null\)/.test(route) && /!has\.helpers\s*\?\s*null/.test(route) && /listsRoles && r\.role === listsUnder && \(\s*<Pipeline/.test(route));
+  check("the tick is offered only where helpers are, as the preset's list is", /orchestrable=\{has\.helpers\}/.test(route));
+  check('saving takes the list, and loading puts it back (the default for one saved before)', /setupOf\(name, custom, ownPicks, listedEdit \?\? defaultListed\(personas\)\)/.test(route) && /setListedEdit\(s\.listed \? \[\.\.\.s\.listed\] : null\)/.test(route));
+  check("Custom's one-agent note says its own row launches plainly", /alone: `No role listed, so \$\{r\.role\} launches as an ordinary agent and nothing orchestrates/.test(route));
+  const editor = readFileSync(new URL('./CustomSetup.tsx', import.meta.url), 'utf8');
+  check('each Custom row has the tick, which sets one orchestrator through withOrchestrator', /\{orchestrable && \(\s*<label className="sp-corch"/.test(editor) && /onChange=\{\(e\) => onChange\(withOrchestrator\(roles, i, e\.target\.checked\)\)\}/.test(editor) && /checked=\{r\.orchestrates === true\}/.test(editor));
+  const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
+  check("the preset's own list component is the one used, its words unchanged without `alone`", /alone \?\? \(/.test(picker) && /No role listed, so this launches one architect agent and nothing orchestrates/.test(picker));
+  const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');
+  const at = css.indexOf('.sp-corch {');
+  const tick = at === -1 ? '' : css.slice(at, css.indexOf('}', at));
+  check("the tick's rule uses ink tokens only: no hex, no status colour", tick.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(tick) && [...tick.matchAll(/var\(--([a-z0-9-]+)\)/g)].every((m) => !['live', 'need', 'fail', 'done', 'you', 'queue', 'idle'].includes(m[1]!)));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

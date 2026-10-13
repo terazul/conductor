@@ -78,8 +78,10 @@ import {
   FIRST_ROLE,
   SETUPS_KEY,
   customProblems,
+  orchestratorRow,
   parseSetups,
   personaPicks,
+  setupOf,
   toPreset,
   withSetup,
   withoutSetup,
@@ -308,8 +310,19 @@ function Spawn() {
       ? { ...base, roles: arranged.roles }
       : base;
   const preset = orchestratedFor(ownRows, listed);
-  /** The chosen preset lists roles, whether or not any are left: the list stays editable when it is one agent. */
-  const listsRoles = !isCustom && base.orchestrated === true && has.helpers;
+  /*
+   * The row the roles are listed under: the orchestrated preset's one row, or the Custom row
+   * that orchestrates (Amendment 142, custom.ts `orchestrates`), whether or not any role is left,
+   * so the list stays editable when it is one agent. None on an engine that cannot start helpers.
+   */
+  const listsUnder: string | null = !has.helpers
+    ? null
+    : isCustom
+      ? (orchestratorRow(custom)?.role ?? null)
+      : base.orchestrated === true
+        ? (preset.roles[0]?.role ?? null)
+        : null;
+  const listsRoles = listsUnder !== null;
   /** Change a preset row's place or ticks for this launch; back to the preset's own is no change. */
   const arrange = (roles: PresetRole[]): void =>
     setArranged(sameStack(roles, base.roles) ? null : { presetId, roles });
@@ -677,6 +690,8 @@ function Spawn() {
                   setCustomName(s.name);
                   setLoadedFrom(s.name);
                   setPicks(s.models);
+                  // Its saved list, or the default one; a setup saved before has none (Amendment 142).
+                  setListedEdit(s.listed ? [...s.listed] : null);
                   setForgetting(null);
                 }}
               >
@@ -713,10 +728,12 @@ function Spawn() {
             onName={setCustomName}
             saved={saved.some((s) => s.name === customName.trim())}
             personas={personas}
+            orchestrable={has.helpers}
             onSave={() => {
               const name = customName.trim();
               // Your own picks only: a persona's model is the persona's, read at launch (Amendment 68).
-              writeSetting(SETUPS_KEY, withSetup(saved, { name, roles: custom, models: ownPicks }));
+              // With a row that orchestrates, the roles listed under it go too (Amendment 142).
+              writeSetting(SETUPS_KEY, withSetup(saved, setupOf(name, custom, ownPicks, listedEdit ?? defaultListed(personas))));
               setLoadedFrom(name);
             }}
           />
@@ -947,7 +964,7 @@ function Spawn() {
                    * the work, starts helpers with its own model and permissions, and hears
                    * what they report. Each helper takes a slot and a per-agent budget.
                    */}
-                  {has.helpers && !r.orchestrates && !listsRoles && (
+                  {has.helpers && !r.orchestrates && r.role !== listsUnder && (
                   <select
                     className="ui-select sp-helpers"
                     value={helpers[r.role] ?? 0}
@@ -969,7 +986,7 @@ function Spawn() {
                  * its row: editable here, sent with the launch. With none listed the row above is
                  * one plain agent, and this is where to add a role back.
                  */}
-                {listsRoles && i === 0 && (
+                {listsRoles && r.role === listsUnder && (
                   <Pipeline
                     listed={listed}
                     personas={personas}
@@ -977,6 +994,9 @@ function Spawn() {
                     claude={claude}
                     model={launchOn.model}
                     onChange={setListedEdit}
+                    {...(isCustom
+                      ? { alone: `No role listed, so ${r.role} launches as an ordinary agent and nothing orchestrates. Add a role to have it run a pipeline.` }
+                      : {})}
                   />
                 )}
                 {movable && i > 0 && (

@@ -307,12 +307,20 @@ export function readsOnly(r: PresetRole, personas?: readonly Persona[]): boolean
  * The preset as this launch runs it (Amendment 128). An orchestrated one with roles listed is
  * its one orchestrator row. With none it is one agent, and one agent needs no orchestrator: the
  * row is the full pipeline's architect, with no helpers, no list and nothing that says it
- * orchestrates. Any other preset is returned as it is.
+ * orchestrates. A Custom setup with a row that orchestrates and none listed keeps its rows, that
+ * one as an ordinary agent (Amendment 142). Any other preset is returned as it is.
  */
 export function orchestratedFor(preset: Preset, listed: readonly ListedRole[]): Preset {
   if (!preset.orchestrated || orchestrates(listed)) return preset;
-  const architect = presetById('full').roles.find((r) => r.role === 'architect')!;
   const { orchestrated: _gone, ...rest } = preset;
+  /*
+   * A Custom setup whose row orchestrates (Amendment 142, custom.ts `toPreset`) keeps its rows:
+   * the one that orchestrated is the agent you made, as you made it, and says nothing of it.
+   */
+  if (preset.id !== ORCHESTRATED_ID) {
+    return { ...rest, roles: preset.roles.map(({ orchestrates: _was, ...r }) => r) };
+  }
+  const architect = presetById('full').roles.find((r) => r.role === 'architect')!;
   return { ...rest, roles: [architect] };
 }
 
