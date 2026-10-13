@@ -16,6 +16,8 @@
  *   reconnecting an agent whose run ended because the model couldn't be reached is waiting to
  *                be tried again (Amendment 123)
  *   budget_over  an agent, or its job, is past its budget and still working: a warning (Amendment 124)
+ *   finished     a worktree job finished with its branch ahead of the target: merge it? (Amendment 144)
+ *   merged       its agent's setting merged it and cleaned up: information (Amendment 144)
  *
  * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -49,6 +51,7 @@ import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './re
 import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
+import { finishAlerts, onFinishesChanged } from './finish.js';
 
 /** Causes a person has to fix: the network or the login is broken, not busy. */
 const NEEDS_A_PERSON: ReadonlySet<RetryCause> = new Set(['unreachable', 'auth']);
@@ -129,6 +132,8 @@ export class Alerts {
     this.#off.push(onSettingsChanged((changed) => changed.includes(DAILY_KEY) && this.refresh()));
     // An agent starts or stops waiting to be tried again (Amendment 123).
     this.#off.push(onRetryChanged(() => this.refresh()));
+    // A job finished and was offered, or merged by itself (Amendment 144).
+    this.#off.push(onFinishesChanged(() => this.refresh()));
     // A note due tomorrow is due today after midnight, with nothing else changing.
     this.#atMidnight();
     // And every open page is told the new day's spend, so it reads 0 (Amendment 103).
@@ -153,6 +158,7 @@ export class Alerts {
       ...this.#blockedDeps(),
       ...this.#heldHandoffs(),
       ...this.#serversDown(),
+      ...finishAlerts(this.#db),
     ].sort((a, b) => a.since.localeCompare(b.since));
     return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
       (a) => !this.#dismissed(a.id),

@@ -145,6 +145,7 @@ import {
   type AgentPersona,
 } from './store.js';
 import { reportedWindow } from './windows.js';
+import { finishJob, type Finish } from './finish.js';
 
 const exec = promisify(execFile);
 
@@ -1879,8 +1880,27 @@ export class Supervisor implements AgentControl {
     );
     if (!allSettled) return;
 
-    setJobStatus(this.#db, jobId, anyFailed ? 'failed' : 'done');
+    const next = anyFailed ? 'failed' : 'done';
+    setJobStatus(this.#db, jobId, next);
     this.#pushEntities({ jobs: [getJob(this.#db, jobId)!] });
+    // Just finished (Amendment 144): merge and clean up if its agents asked, else offer it in
+    // Needs You. Only on the way into `done`, so a roll-up that changes nothing asks nothing.
+    if (next === 'done' && job.status !== 'done') this.#finished(jobId);
+  }
+
+  /** What each just-finished job's merge-or-offer is doing, while it runs (Amendment 144). */
+  #finishing = new Map<string, Promise<Finish>>();
+
+  #finished(jobId: string): void {
+    const run = finishJob(this.#db, jobId, (id) => this.deleteJob(id)).finally(() => {
+      if (this.#finishing.get(jobId) === run) this.#finishing.delete(jobId);
+    });
+    this.#finishing.set(jobId, run);
+  }
+
+  /** The finish of `jobId` in flight, if any: for the verify scripts, which wait on it. */
+  finishing(jobId: string): Promise<Finish> | undefined {
+    return this.#finishing.get(jobId);
   }
 
   // ── AgentControl, for the Arbiter ─────────────────────────────────────────

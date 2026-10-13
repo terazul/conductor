@@ -13,6 +13,8 @@ import { api } from '../lib/feed.js';
 import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
 import { alertTitle } from '../shell/describe.js';
+import { branchAction, previewMerge } from '../branches/endpoints.js';
+import { errorText } from '../lib/errors.js';
 
 export type AlertAction =
   /**
@@ -45,7 +47,15 @@ export type AlertAction =
    * try now, or give up and let it fail as it would have before retries.
    */
   | { id: 'retry_now'; agentId: string }
-  | { id: 'stop_retrying'; agentId: string };
+  | { id: 'stop_retrying'; agentId: string }
+  /**
+   * A job finished ahead of its target (Amendment 144). `merge_clean`: the merge, then Lane
+   * J's delete with `forgetJob`, after a confirm. `merge`: the merge alone; the job, its
+   * folder and its branch stay. `branches`: the project's Branches screen.
+   */
+  | { id: 'merge_clean'; projectId: string; branch: string; into: string; jobId: string }
+  | { id: 'merge'; projectId: string; branch: string; into: string }
+  | { id: 'branches'; projectId: string };
 
 /** The daemon's own resume nudge, so a continue from here reads like one from the composer. */
 export const CONTINUE_TEXT = 'Continue from where you stopped.';
@@ -184,7 +194,56 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
         ...(alert.projectId ? [{ id: 'project', projectId: alert.projectId } as const] : []),
         dismiss,
       ];
+
+    case 'finished': {
+      // Merge and clean up first: it is what the setting would have done (Amendment 144).
+      const branches: AlertAction[] = alert.projectId ? [{ id: 'branches', projectId: alert.projectId }] : [];
+      if (!alert.projectId || !alert.branch || !alert.into || !alert.jobId) return [...branches, dismiss];
+      const at = { projectId: alert.projectId, branch: alert.branch, into: alert.into };
+      return [{ id: 'merge_clean', ...at, jobId: alert.jobId }, { id: 'merge', ...at }, ...branches, dismiss];
+    }
+
+    case 'merged':
+      // Information: what the setting merged. Its agent, when it is still there to open.
+      return [...open, ...(alert.projectId ? [{ id: 'branches', projectId: alert.projectId } as const] : []), dismiss];
   }
+}
+
+/** The confirm before "merge and clean up" (Amendment 144): what goes, and that the agents can't be messaged after. */
+export function finishedConfirm(a: Pick<Extract<AlertAction, { id: 'merge_clean' }>, 'branch' | 'into' | 'jobId'>): string {
+  return `Merge ${a.branch} into ${a.into}, then remove job ${a.jobId}, its folder and its branch? Its agents can't be messaged afterwards; their transcripts stay.`;
+}
+
+/**
+ * The card's merge (Amendment 144): Lane J's preview first, refused on what it says (a
+ * reason, or conflicts, named), then the Branches screen's own merge into `into`. Answers
+ * the merge commit. The job, its folder and its branch stay.
+ */
+export async function mergeFinished(a: { projectId: string; branch: string; into: string }): Promise<string> {
+  const p = await previewMerge(a.projectId, a.branch, a.into);
+  if (p.reason) throw new Error(p.reason);
+  if (p.conflicts && p.conflicts.length > 0) throw new Error(`it would conflict with ${a.into} in ${p.conflicts.join(', ')} — merge it by hand`);
+  if (p.ahead === 0) throw new Error(`nothing to merge — ${a.into} already has all of ${a.branch}`);
+  const res = await branchAction(a.projectId, { action: 'merge', branch: a.branch, into: a.into });
+  if (!res.ok || !res.sha) {
+    throw new Error(res.conflict ? `it conflicted in ${res.conflict.files.join(', ')}, and the merge was undone` : 'the merge did not go in');
+  }
+  return res.sha;
+}
+
+/**
+ * "merge and clean up": the merge, then the branch's delete with `forgetJob` (Amendment 143),
+ * which removes the job as ✕ on the Project screen does, then its folder and branch. A refused
+ * clean-up says the merge went in.
+ */
+export async function mergeAndClean(a: { projectId: string; branch: string; into: string }): Promise<string> {
+  const sha = await mergeFinished(a);
+  try {
+    await branchAction(a.projectId, { action: 'delete', branch: a.branch, forgetJob: true });
+  } catch (err) {
+    throw new Error(`merged as ${sha.slice(0, 7)}, but not cleaned up: ${errorText(err)}`);
+  }
+  return sha;
 }
 
 /** The project an alert is about, when it is about one. An outage can span several. */

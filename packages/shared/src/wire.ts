@@ -187,6 +187,14 @@ export interface Autonomy {
    * than silently becoming 'low'.
    */
   effort?: EffortLevel;
+  /**
+   * "Merge into main and clean up when done" (Amendment 144). When its job, isolated in a
+   * worktree of its own, settles `done` with its branch ahead of the target, and the merge
+   * would be clean: the branch is merged, then the job, its folder and its branch are removed
+   * (Amendment 143's `delete` with `forgetJob`; the transcripts stay). Off, or when the merge
+   * can't run by itself, Needs You offers it instead. Optional; absent is off.
+   */
+  mergeWhenDone?: boolean;
 }
 
 export interface AgentSpec {
@@ -688,7 +696,11 @@ export type AlertKind =
   | 'blocked_dep'
   | 'handoff_held'
   | 'reconnecting'
-  | 'budget_over';
+  | 'budget_over'
+  /** A worktree job finished with its branch ahead of the target: merge it? (Amendment 144) */
+  | 'finished'
+  /** A finished job's branch was merged by itself, and cleaned up (Amendment 144). Information only. */
+  | 'merged';
 
 /**
  * Not a PendingRequest: a pending request is a tool call waiting for approve or deny,
@@ -743,6 +755,18 @@ export interface Alert {
    * Present only when true.
    */
   renewed?: boolean;
+  /**
+   * finished and merged (Amendment 144): the job's branch, the branch it goes into, and how
+   * many commits it had that one lacked when the job finished. finished: `detail` says why it
+   * wasn't merged by itself, when the agent's setting asked for that.
+   */
+  branch?: string;
+  into?: string;
+  ahead?: number;
+  /** merged: the merge commit. */
+  sha?: string;
+  /** merged: the job, its folder and its branch were removed too. When false, `detail` says why not. */
+  cleaned?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

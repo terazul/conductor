@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, handOffChip, handOffDraft, handOffProblem, jobRaiseTarget, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -710,6 +710,84 @@ console.log("\n10 · a budget is per day: the cards, and what a new day changes 
   check('the card tells what a renewed budget means: still paused, press continue', /alert\.kind === 'budget' && alert\.renewed &&/.test(card) && /Nothing resumes by itself while "continue at midnight"/.test(card));
   check('the warning\'s notification says daily', /is over its daily budget/.test(alerts));
   check('nothing here compares the lifetime figure with a budget', !/costUsd\s*>=?\s*\w*(cap|budget)/i.test(alerts + card));
+}
+
+console.log('\n11 · a job finished: merge it, merge and clean up, or open Branches (Amendment 144)');
+{
+  const finished: Alert = {
+    id: 'finished:7',
+    kind: 'finished',
+    cause: 'finished',
+    projectId: 'p1',
+    jobId: 'job_x',
+    agentIds: ['a1'],
+    since: '2026-10-13T12:00:00Z',
+    branch: 'conductor/job_x',
+    into: 'main',
+    ahead: 2,
+  };
+  const acts = alertActions(finished, []);
+  check(
+    'the card offers merge and clean up first, then merge, open Branches and dismiss',
+    acts.map((a) => a.id).join(' ') === 'merge_clean merge branches dismiss',
+    acts.map((a) => a.id).join(' '),
+  );
+  const clean = acts[0] as Extract<AlertAction, { id: 'merge_clean' }>;
+  check('they carry the project, the branch, where it goes and the job', clean.projectId === 'p1' && clean.branch === 'conductor/job_x' && clean.into === 'main' && clean.jobId === 'job_x');
+  check(
+    "the confirm says what goes, and that its agents can't be messaged afterwards, transcripts kept",
+    finishedConfirm(clean) === "Merge conductor/job_x into main, then remove job job_x, its folder and its branch? Its agents can't be messaged afterwards; their transcripts stay.",
+    finishedConfirm(clean),
+  );
+  check('a card with no branch on it offers only Branches and dismiss', alertActions({ ...finished, branch: undefined }, []).map((a) => a.id).join(' ') === 'branches dismiss');
+  const merged: Alert = { ...finished, id: 'merged:8', kind: 'merged', cause: 'merged and cleaned up', agentIds: [], sha: 'abcdef1234', cleaned: true };
+  check('the information card offers Branches and dismiss', alertActions(merged, []).map((a) => a.id).join(' ') === 'branches dismiss');
+  check('the titles read as the card does', alertTitle(finished, []).head === 'Finished: merge into' && alertTitle(finished, []).subject === 'main?' && alertTitle(merged, []).subject === 'was merged into main and cleaned up');
+  check('and the top bar has a word for each', alertWord(finished) === 'finished: merge?' && alertWord(merged) === 'merged');
+
+  // The calls behind the buttons, against a stand-in daemon that records them.
+  const realFetch = globalThis.fetch;
+  const calls: string[] = [];
+  let preview: Record<string, unknown> = { branch: 'conductor/job_x', into: 'main', ahead: 2, behind: 0, commits: [], conflicts: [], reason: null };
+  let deleteRefuses = false;
+  globalThis.fetch = (async (url: string, init?: { method?: string; body?: string }) => {
+    const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+    calls.push(`${init?.method ?? 'GET'} ${url}${body ? ` ${JSON.stringify(body)}` : ''}`);
+    if (url.includes('/branches/preview')) return new Response(JSON.stringify(preview), { status: 200 });
+    if (body?.['action'] === 'merge') return new Response(JSON.stringify({ ok: true, merged: ['conductor/job_x'], into: 'main', sha: 'feedface00', branches: {} }), { status: 200 });
+    if (body?.['action'] === 'delete') {
+      return deleteRefuses
+        ? new Response(JSON.stringify({ error: "job job_x's agents can still be messaged" }), { status: 409 })
+        : new Response(JSON.stringify({ ok: true, merged: [], removed: ['conductor/job_x'], forgotJobs: ['job_x'], branches: {} }), { status: 200 });
+    }
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  const sha = await mergeFinished(clean);
+  check('merge: the preview first, then the Branches merge into main, nothing else', sha === 'feedface00' && calls.length === 2 && /^GET \/api\/projects\/p1\/branches\/preview\?branch=conductor%2Fjob_x&into=main$/.test(calls[0]!) && calls[1] === 'POST /api/projects/p1/branches {"action":"merge","branch":"conductor/job_x","into":"main"}', calls.join(' | '));
+  calls.length = 0;
+  await mergeAndClean(clean);
+  check('merge and clean up: the preview, the merge, then delete with forgetJob', calls.length === 3 && calls[2] === 'POST /api/projects/p1/branches {"action":"delete","branch":"conductor/job_x","forgetJob":true}', calls.join(' | '));
+  calls.length = 0;
+  preview = { ...preview, conflicts: ['c.txt'] };
+  const refused = await mergeAndClean(clean).then(() => null, (e: Error) => e.message);
+  check('a conflict in the preview merges and removes nothing, naming the file', refused === 'it would conflict with main in c.txt — merge it by hand' && calls.length === 1, `${refused} ${calls.join(' | ')}`);
+  calls.length = 0;
+  preview = { ...preview, conflicts: [], reason: "main's checkout has changes — commit or discard the tracked changes in /r first" };
+  const said = await mergeFinished(clean).then(() => null, (e: Error) => e.message);
+  check("the preview's reason is the refusal, word for word", said === "main's checkout has changes — commit or discard the tracked changes in /r first" && calls.length === 1, said ?? '');
+  calls.length = 0;
+  preview = { ...preview, reason: null };
+  deleteRefuses = true;
+  const half = await mergeAndClean(clean).then(() => null, (e: Error) => e.message);
+  check('a refused clean-up says the merge went in, and why not the rest', half !== null && half === "merged as feedfac, but not cleaned up: job job_x's agents can still be messaged", half ?? '');
+  globalThis.fetch = realFetch;
+
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  check('merge and clean up asks first, with the confirm', /case 'merge_clean':\s*setConfirmClean\(a\)/.test(card) && /finishedConfirm\(confirmClean\)/.test(card));
+  check('the card dismisses itself after a merge', /await mergeFinished\(a\);\s*await dismissAlert\(alert\.id\)/.test(card));
+  check('open Branches goes to the project’s Branches screen', /case 'branches':\s*openBranches\(a\.projectId\)/.test(card));
+  check('the labels', /return 'merge and clean up'/.test(card) && /return 'open Branches'/.test(card) && /finished: \{ label: 'Finished'/.test(card));
 }
 
 console.log(
