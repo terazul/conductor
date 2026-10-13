@@ -902,6 +902,11 @@ export type ServerFrame =
   | { type: 'branches'; projectId: string }
   /** Amendment 111: every scheduled message, whenever one is added, sent, fails or is cancelled. */
   | { type: 'scheduled'; scheduled: ScheduledMessage[] }
+  /**
+   * Amendment 141: one scope's terminals, whole, whenever one is opened, exits or is closed,
+   * so a terminal opened in one browser tab is listed in the others. Never carries output.
+   */
+  | { type: 'terminals'; scope: TermScope; terminals: TermInfo[] }
   /** The gap was too large to replay — client should refetch the snapshot. */
   | { type: 'resync' }
   | { type: 'pong' };
@@ -1009,27 +1014,46 @@ export interface ApiError {
 export const WS_PATH = '/ws';
 export const DEFAULT_PORT = 7777;
 
-// ── A full terminal (Amendment 112) ──────────────────────────────────────────
+// ── A full terminal (Amendment 112; scopes, settings and bytes, Amendment 141) ────
 
-/** A terminal in an agent's folder: a real shell on a pseudo-terminal, kept by the daemon. */
+/**
+ * Whose a terminal is (Amendment 141). An agent's starts in its job folder and is shown on
+ * the Agent screen's terminal tab; a project's starts in the project folder and is shown in
+ * the Terminal dock under every screen (Ctrl-`). Both live by the same rules (service.ts).
+ */
+export type TermScope = { kind: 'agent'; agentId: string } | { kind: 'project'; projectId: string };
+
+/** A scope as one string, `agent:<id>` or `project:<id>`: a map key, the same on both sides. */
+export function termScopeKey(s: TermScope): string {
+  return s.kind === 'agent' ? `agent:${s.agentId}` : `project:${s.projectId}`;
+}
+
+/** A terminal: a real shell on a pseudo-terminal, kept by the daemon. */
 export interface TermInfo {
   id: string;
-  /** Where its shell started: the agent's job folder. */
+  /** Whose it is (Amendment 141). */
+  scope: TermScope;
+  /** Where its shell started: the agent's job folder, or the project folder. */
   cwd: string;
+  /** The shell that ran (Amendment 141), e.g. `/bin/zsh`. */
+  shell: string;
   startedAt: string;
   /** The shell has ended. It stays listed, with its last output, until closed. */
   exited: boolean;
   exitCode: number | null;
 }
 
-/** `GET /api/agents/:agentId/terminals`. `available: false` says why, and the runner is shown instead. */
+/**
+ * `GET /api/agents/:agentId/terminals` and (Amendment 141) `GET /api/projects/:projectId/terminals`.
+ * `available: false` says why, and the agent's tab shows the runner instead.
+ */
 export interface TermListResponse {
   available: boolean;
   reason?: string;
   terminals: TermInfo[];
 }
 
-/** `POST /api/agents/:agentId/terminals`. The size is the panel's, so the prompt is drawn at it. */
+/** `POST` to either list. The size is the panel's, so the prompt is drawn at it. */
 export interface TermCreateRequest {
   cols?: number;
   rows?: number;
@@ -1039,8 +1063,47 @@ export interface TermCreateResponse {
   id: string;
 }
 
-/** What the page sends down `/ws/term/:id`: keys and paste, and the panel's size. Output comes back as binary. */
-export type TermClientFrame = { t: 'in'; d: string } | { t: 'resize'; cols: number; rows: number };
+/** A shell this machine has, for the Settings screen's picker (Amendment 141). */
+export interface TermShell {
+  /** What runs, and what `conductor.terminal.shell` holds. */
+  path: string;
+  /** `zsh`, or `zsh · /usr/local/bin/zsh` when two have the same name. */
+  label: string;
+}
+
+/** `GET /api/terminals/shells`: the shells found, and the one used when the setting is empty. */
+export interface TermShellsResponse {
+  shells: TermShell[];
+  default: string;
+}
+
+/**
+ * What the page sends down `/ws/term/:id`: keys and paste (`in`), the panel's size, and
+ * (Amendment 141) `bin`, bytes that are not text, base64: xterm.js's `onBinary`, which is how
+ * a mouse report past column 95 arrives in the X10 encoding. Sent as `in` they would be UTF-8
+ * encoded on the way to the shell, and each byte over 127 would become two. Output comes back
+ * as binary frames.
+ */
+export type TermClientFrame =
+  | { t: 'in'; d: string }
+  | { t: 'bin'; d: string }
+  | { t: 'resize'; cols: number; rows: number };
+
+/**
+ * The terminal's settings (Amendment 141), in Settings (9) under Terminal. The daemon has a
+ * rule for each (daemon/src/terminal/prefs.ts); the page reads them (web/src/agent/Xterm.tsx).
+ */
+export const TERM_FONT_SIZE = { key: 'conductor.terminal.fontSize', min: 9, max: 24, fallback: 13 } as const;
+export const TERM_SCROLLBACK = { key: 'conductor.terminal.scrollback', min: 1000, max: 100000, fallback: 5000 } as const;
+export const TERM_SHELL_KEY = 'conductor.terminal.shell';
+
+/** Digits in a setting's range, or null for anything else (`5e3`, `13.0`, empty or unset included). */
+export function termNumber(raw: string | null | undefined, range: { min: number; max: number }): number | null {
+  const v = raw?.trim() ?? '';
+  if (!/^\d{1,7}$/.test(v)) return null;
+  const n = Number(v);
+  return n >= range.min && n <= range.max ? n : null;
+}
 
 /** `/ws/term/:id`, the socket for one terminal. */
 export const TERM_WS_PREFIX = '/ws/term/';

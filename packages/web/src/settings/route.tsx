@@ -19,7 +19,7 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useModels } from '../lib/models.js';
 import { ModelSelect } from '../shell/ui.js';
 import { chooseTheme, useTheme, type ThemeChoice } from '../shell/theme.js';
-import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL } from '../shell/panels.js';
+import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL, TERMINAL_DOCK } from '../shell/panels.js';
 import { EFFORTS, MODES, PILLS } from '../spawn/autonomy.js';
 import { PRESETS } from '../spawn/presets.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch, type LaunchDefaults } from '../spawn/defaults.js';
@@ -49,6 +49,15 @@ import {
   type CopilotLogin,
   type OpenRouterKeyState,
 } from '../lib/providers.js';
+import { listShells } from '../agent/term.js';
+import {
+  TERM_FONT_SIZE,
+  TERM_SCROLLBACK,
+  TERM_SHELL_KEY,
+  termNumberProblem,
+  termNumberValue,
+} from '../terminal/prefs.js';
+import type { TermShellsResponse } from '@conductor/shared';
 import './settings.css';
 
 /** The sizes and folds a reset puts back. Named here so nothing is missed by accident. */
@@ -59,6 +68,7 @@ const LAYOUT_KEYS = [
   PROJECT_COLUMN.key,
   PROJECT_DOCK.key,
   PREVIEW_DOCK.key,
+  TERMINAL_DOCK.key,
   'conductor.composerH',
   'conductor.filesTreeW',
 ];
@@ -169,6 +179,97 @@ function SlotsSection() {
           nobody: running agents finish, and nothing new starts until fewer than the limit are running.
         </p>
       )}
+    </>
+  );
+}
+
+/**
+ * One of the terminal's numbers (Amendment 141), as SlotsSection edits the slot limit: a draft
+ * that is written on Enter or when the field is left, and put back by Esc. The default is
+ * written as nothing, so the settings file keeps only what you chose.
+ */
+function TermNumber({ label, range, note }: { label: string; range: { key: string; min: number; max: number; fallback: number }; note: string }) {
+  const stored = useSetting(range.key);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? stored ?? String(range.fallback);
+  const problem = draft === null ? null : termNumberProblem(draft, range);
+  const commit = (): void => {
+    if (draft === null || problem) return;
+    writeSetting(range.key, termNumberValue(draft, range));
+    setDraft(null);
+  };
+  return (
+    <>
+      <label className="st-field">
+        <span>{label}</span>
+        <input
+          type="number"
+          min={range.min}
+          max={range.max}
+          value={shown}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            else if (e.key === 'Escape') setDraft(null);
+          }}
+        />
+        <span className="st-dim">
+          Default {range.fallback.toLocaleString('en-US')}, from {range.min.toLocaleString('en-US')} to {range.max.toLocaleString('en-US')}. {note}
+        </span>
+      </label>
+      {problem && <p className="st-err">{problem}</p>}
+    </>
+  );
+}
+
+/** The terminal (Amendment 141): its font size, its scrollback and the shell a new one runs. */
+function TerminalSection() {
+  const stored = useSetting(TERM_SHELL_KEY);
+  const [found, setFound] = useState<TermShellsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    listShells().then(
+      (r) => live && setFound(r),
+      (err: unknown) => live && setError(errorText(err)),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  // A setting naming a shell no longer here is passed over by the daemon; say so rather than hide it.
+  const missing = stored !== null && found !== null && !found.shells.some((s) => s.path === stored);
+  return (
+    <>
+      <TermNumber label="font size, in pixels" range={TERM_FONT_SIZE} note="An open terminal redraws at the new size." />
+      <TermNumber label="scrollback, in lines" range={TERM_SCROLLBACK} note="What a terminal keeps above the screen, and what a page reattaching is sent." />
+      <label className="st-field">
+        <span>shell</span>
+        <select
+          className="ui-select"
+          value={stored ?? ''}
+          disabled={found === null}
+          onChange={(e) => writeSetting(TERM_SHELL_KEY, e.target.value === '' ? null : e.target.value)}
+        >
+          <option value="">{found ? `the default (${found.default})` : 'the default'}</option>
+          {found?.shells.map((s) => (
+            <option key={s.path} value={s.path}>
+              {s.label}
+            </option>
+          ))}
+          {missing && <option value={stored}>{stored} (not on this machine)</option>}
+        </select>
+        <span className="st-dim">
+          The shells this machine has: <code>$SHELL</code> and <code>/etc/shells</code>. Run as a login shell. A new
+          terminal runs it; open ones keep theirs.
+        </span>
+      </label>
+      {missing && <p className="st-warn">That shell is not here any more, so new terminals run the default.</p>}
+      {error && <p className="st-err">{error}</p>}
+      <p className="st-dim">
+        <kbd>Ctrl-`</kbd> opens the Terminal dock under every screen, with the project's shells in its folder.
+      </p>
     </>
   );
 }
@@ -855,6 +956,9 @@ function Settings() {
         </Section>
         <Section title="Allowed always">
           <PermissionsSection />
+        </Section>
+        <Section title="Terminal">
+          <TerminalSection />
         </Section>
         <Section title="Look">
           <LookSection />

@@ -706,6 +706,7 @@ export class Supervisor implements AgentControl {
       this.#resumeWanted.delete(agent.id);
     }
 
+    terminals().closeProject(projectId); // the Terminal dock's shells, in its folder (Amendment 141)
     const keptOnDisk: string[] = [];
     for (const job of jobs) {
       terminals().closeJob(job.id); // Amendment 112

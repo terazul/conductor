@@ -48,6 +48,7 @@ import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, se
 import { sleepControl } from './sleep.js';
 import {
   TERM_TOKENS,
+  binaryFrame,
   endedLine,
   fallbackBanner,
   inputFrame,
@@ -64,6 +65,11 @@ import {
   type Tokens,
 } from './term.js';
 import { reconnectBar } from './reconnecting.js';
+import { dockKey, findHint, isMac, termKey } from '../terminal/keys.js';
+import { findPathLinks, termFileTarget } from '../terminal/paths.js';
+import { DOCK_OPEN_KEY, TERM_FONT_SIZE, TERM_SCROLLBACK, TERM_SHELL_KEY, dockFlipped, dockShown, fontSizeOf, scrollbackOf, termNumberProblem, termNumberValue } from '../terminal/prefs.js';
+import { onTerminals, receiveTerminals } from '../terminal/live.js';
+import { rawAround } from '../files/links.js';
 import { rerunControl, rerunDone, rerunSentence, roleList } from './rerun.js';
 import { ALL_ON, NONE, capabilitiesOf, controlsFor, offersMode, parseTokens, providerModelProblem, tokenWords } from '../lib/providers.js';
 
@@ -752,7 +758,7 @@ console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
   check('a dropped socket retries at 0.5, 1, 2, 4, 8 s, then every 10', [0, 1, 2, 3, 4, 5, 9].map(reconnectDelay).join(',') === '500,1000,2000,4000,8000,10000,10000');
   check('1000 is the shell ending, 4404 a terminal that is gone, anything else a dropped line', socketEnd(1000) === 'ended' && socketEnd(4404) === 'gone' && socketEnd(1006) === 'dropped' && socketEnd(1001) === 'dropped');
 
-  const t = (n: string, o: Partial<{ exited: boolean; exitCode: number | null }> = {}) => ({ id: n, cwd: '/w', startedAt: '2026-10-10T10:00:00Z', exited: false, exitCode: null, ...o });
+  const t = (n: string, o: Partial<{ exited: boolean; exitCode: number | null }> = {}) => ({ id: n, scope: { kind: 'agent' as const, agentId: 'a' }, cwd: '/w', shell: '/bin/zsh', startedAt: '2026-10-10T10:00:00Z', exited: false, exitCode: null, ...o });
   const three = [t('a'), t('b', { exited: true, exitCode: 3 }), t('c')];
   check('tabs read "terminal 1", "terminal 2 (exited)"', tabLabel(three[0]!, 0) === 'terminal 1' && tabLabel(three[1]!, 1) === 'terminal 2 (exited)');
   check('a tab says its folder and when it started, and how it ended', tabTitle(three[0]!) === '/w · started 2026-10-10T10:00:00Z' && /exited with 3/.test(tabTitle(three[1]!)));
@@ -809,13 +815,13 @@ console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
   const agentCss = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
   const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('when the daemon says available, the tab mounts Xterm on the terminal chosen', /<XtermView key=\{shown\.id\} termId=\{shown\.id\}/.test(panel) && /const shown = list\.terminals\.find\(\(t\) => t\.id === selected\)/.test(panel));
-  check('when it says not, the tab shows the old command runner under a banner with the reason', /if \(!list\.available\) \{[\s\S]*?\{fallbackBanner\(list\.reason\)\}[\s\S]*?<TerminalPanel agent=\{agent\} \/>/.test(panel));
+  check('when it says not, the tab shows the old command runner under a banner with the reason', /if \(!list\.available\) \{[\s\S]*?fallbackBanner\(list\.reason\)[\s\S]*?\{fallback\}/.test(panel) && /fallback=\{<TerminalPanel agent=\{agent\} \/>\}/.test(panel));
   check('the runner is not shown beside a working terminal', (panel.match(/<TerminalPanel /g) ?? []).length === 1);
   check('the Agent screen mounts the panel on its terminal tab, not the runner', /bottomTab === 'terminal' \? <TermPanel agent=\{agent\} \/>/.test(screen) && !/<TerminalPanel/.test(screen));
-  check('tabs: one per terminal, a + to open another, a × to close one, and the first visit opens one', /list\.terminals\.map\(\(t, i\) =>/.test(panel) && /className="ag-termx-new"/.test(panel) && /className="ag-termx-x"/.test(panel) && /!autoOpened\.has\(agent\.id\)/.test(panel));
-  check('a terminal closed on purpose stays closed: the first-visit open is once per agent, and not at all where one was already open', /autoOpened\.add\(agent\.id\)/.test(panel) && /if \(r\.terminals\.length > 0\) autoOpened\.add\(asked\)/.test(panel));
+  check('tabs: one per terminal, a + to open another, a × to close one, and the first visit opens one', /list\.terminals\.map\(\(t, i\) =>/.test(panel) && /className="ag-termx-new"/.test(panel) && /className="ag-termx-x"/.test(panel) && /!autoOpened\.has\(key\)/.test(panel));
+  check('a terminal closed on purpose stays closed: the first-visit open is once per scope, and not at all where one was already open', /autoOpened\.add\(key\)/.test(panel) && /if \(r\.terminals\.length > 0\) autoOpened\.add\(asked\)/.test(panel));
   check('the exited one says how, and offers a new terminal', /shown\?\.exited &&/.test(panel) && /↻ new terminal/.test(panel));
-  check('Xterm draws with xterm.js and fits the panel', /import \{ Terminal \} from '@xterm\/xterm'/.test(view) && /import \{ FitAddon \} from '@xterm\/addon-fit'/.test(view) && /new ResizeObserver/.test(view) && /import '@xterm\/xterm\/css\/xterm\.css'/.test(view));
+  check('Xterm draws with xterm.js and fits the panel', /import \{ Terminal, type ILink \} from '@xterm\/xterm'/.test(view) && /import \{ FitAddon \} from '@xterm\/addon-fit'/.test(view) && /new ResizeObserver/.test(view) && /import '@xterm\/xterm\/css\/xterm\.css'/.test(view));
   check('output is binary into the terminal; keys and size go down as frames', /t\.write\(new Uint8Array\(e\.data\)\)/.test(view) && /binaryType = 'arraybuffer'/.test(view) && /t\.onData\(\(d\) => send\(inputFrame\(d\)\)\)/.test(view) && /t\.onResize\(/.test(view) && /send\(resizeFrame\(t\.cols, t\.rows\)\)/.test(view));
   check('each attach starts from a clean screen, since the daemon replays the whole buffer', /s\.onopen = \(\) => \{[\s\S]*?t\.reset\(\)/.test(view));
   check('a dropped line retries; a close the daemon meant does not', /socketEnd\(e\.code\)/.test(view) && /reconnectDelay\(attempt\)/.test(view) && /if \(why !== 'dropped'\)/.test(view));
@@ -990,9 +996,89 @@ console.log("\n· the tab, the bar and the line read today's spend, and a new da
   check('the header and tab say daily', />budget reached today</.test(head) && /of its daily budget/.test(head));
 }
 
+
+console.log('\n· the terminal, the rest of the plan (Amendment 141)');
+{
+  // ── keys, per OS ──
+  type K = { type: string; key: string; code?: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean };
+  const k = (key: string, mods: Partial<K> = {}): K => ({ type: 'keydown', key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
+  const cmd = { metaKey: true };
+  const cs = { ctrlKey: true, shiftKey: true };
+  check('macOS: ⌘F finds, ⌘C copies, ⌘V pastes, ⌘K clears', termKey(k('f', cmd), true) === 'find' && termKey(k('c', cmd), true) === 'copy' && termKey(k('v', cmd), true) === 'paste' && termKey(k('k', cmd), true) === 'clear');
+  check('Ubuntu: Ctrl-Shift-F, -C, -V, -K, and Shift-Insert pastes (the key is a capital with Shift held)', termKey(k('F', cs), false) === 'find' && termKey(k('C', cs), false) === 'copy' && termKey(k('V', cs), false) === 'paste' && termKey(k('K', cs), false) === 'clear' && termKey(k('Insert', { shiftKey: true }), false) === 'paste');
+  check("the other OS's keys are the shell's: Ctrl-Shift-F on a Mac, ⌘F on Ubuntu", termKey(k('F', cs), true) === null && termKey(k('f', cmd), false) === null);
+  check("Ctrl-C, Ctrl-F, Ctrl-V and Ctrl-K alone are always the shell's (SIGINT, readline, literal-next, kill-line)", ['c', 'f', 'v', 'k'].every((x) => termKey(k(x, { ctrlKey: true }), false) === null && termKey(k(x, { ctrlKey: true }), true) === null));
+  check('⌘⇧F, ⌥⌘F and a keyup are not taken', termKey(k('f', { metaKey: true, shiftKey: true }), true) === null && termKey(k('f', { metaKey: true, altKey: true }), true) === null && termKey(k('f', { metaKey: true, type: 'keyup' }), true) === null);
+  check('Ctrl-` is the dock, on both, by key or by code; ⌘` (the Mac window switcher) is not', dockKey(k('`', { ctrlKey: true })) && dockKey(k('Dead', { ctrlKey: true, code: 'Backquote' })) && !dockKey(k('`', cmd)) && !dockKey(k('`')) && !dockKey(k('`', { ctrlKey: true, type: 'keyup' })));
+  check('a Mac is a Mac by its platform string, and the hint says its key', isMac('MacIntel') && isMac('iPad') && !isMac('Linux x86_64') && !isMac('Win32') && findHint(true) === '⌘F' && findHint(false) === 'Ctrl-Shift-F');
+
+  // ── paths that open in Files ──
+  const hits = (line: string) => findPathLinks(line).map((h) => ({ text: line.slice(h.start, h.end), path: h.path, line: h.line, col: h.col }));
+  const one = hits('error in src/app.ts:12:3 here')[0];
+  check('`src/app.ts:12:3` is a link, to line 12 column 3, and the link covers the whole of it', one?.text === 'src/app.ts:12:3' && one.path === 'src/app.ts' && one.line === 12 && one.col === 3, JSON.stringify(hits('error in src/app.ts:12:3 here')));
+  const tsc = hits('packages/web/src/x.tsx(40,7): error TS2345')[0];
+  check("tsc's `x.tsx(40,7)` is too", tsc?.path === 'packages/web/src/x.tsx' && tsc.line === 40 && tsc.col === 7 && tsc.text === 'packages/web/src/x.tsx(40,7)', JSON.stringify(tsc));
+  check('`README.md:3` (a line, no folder) and `./docs/a.md` (a folder, no line) are links', hits('see README.md:3')[0]?.line === 3 && hits('wrote ./docs/a.md')[0]?.path === './docs/a.md');
+  check('a full stop after a path is not part of it', hits('Updated docs/guide.md.')[0]?.path === 'docs/guide.md');
+  check('ordinary words are not: `node.js`, a version, a time, a bare folder name', hits('built with node.js v1.2.3 at 12:30 in src').length === 0, JSON.stringify(hits('built with node.js v1.2.3 at 12:30 in src')));
+  check('nor the path inside a URL, which web-links opens instead', hits('see https://example.com/a/b.ts:4 now').length === 0, JSON.stringify(hits('see https://example.com/a/b.ts:4 now')));
+  check('two on one line are two links', hits('a/x.ts:1 and b/y.ts:2').map((h) => h.path).join() === 'a/x.ts,b/y.ts');
+  check('relative to the folder the terminal started in, inside its worktree', termFileTarget('src/a.ts', '/w/job', '/w/job') === 'src/a.ts' && termFileTarget('./x/../y.ts', '/w/job', '/w/job') === 'y.ts' && termFileTarget('a.ts', '/w/job/pkg', '/w/job') === 'pkg/a.ts' && termFileTarget('../b.ts', '/w/job/pkg', '/w/job') === 'b.ts');
+  check('an absolute path inside it is a link; one in a folder with a longer name is not (`/w/job-evil`)', termFileTarget('/w/job/src/a.ts', '/w/job', '/w/job') === 'src/a.ts' && termFileTarget('/w/job-evil/a.ts', '/w/job', '/w/job') === null);
+  check('outside it is plain text: `..` past the root, `~`, another folder, a terminal started elsewhere', termFileTarget('../a.ts', '/w/job', '/w/job') === null && termFileTarget('~/a.ts', '/w/job', '/w/job') === null && termFileTarget('/etc/passwd', '/w/job', '/w/job') === null && termFileTarget('a.ts', '/tmp', '/w/job') === null);
+  check('Files marks the line asked for: the text split around it, the last line for one past the end', JSON.stringify(rawAround('a\nb\nc', 2)) === '{"before":"a\\n","line":"b","after":"\\nc"}' && rawAround('a\nb\nc', 1).before === '' && rawAround('a\nb\nc', 99).line === 'c' && rawAround('a\nb\nc', 99).after === '');
+
+  // ── settings, as the page reads them ──
+  check("the keys are the plan's", TERM_FONT_SIZE.key === 'conductor.terminal.fontSize' && TERM_SCROLLBACK.key === 'conductor.terminal.scrollback' && TERM_SHELL_KEY === 'conductor.terminal.shell');
+  check('font size: 9 to 24, 13 when unset or not one', fontSizeOf(null) === 13 && fontSizeOf('9') === 9 && fontSizeOf('24') === 24 && fontSizeOf('25') === 13 && fontSizeOf('8') === 13 && fontSizeOf('14.5') === 13 && fontSizeOf('big') === 13);
+  check('scrollback: 1,000 to 100,000, 5,000 when unset or not one', scrollbackOf(null) === 5000 && scrollbackOf('1000') === 1000 && scrollbackOf('100000') === 100000 && scrollbackOf('999') === 5000 && scrollbackOf('5e3') === 5000);
+  check('a field says what is wrong before the daemon refuses it', termNumberProblem('30', TERM_FONT_SIZE) === 'A whole number from 9 to 24.' && termNumberProblem('500', TERM_SCROLLBACK) === 'A whole number from 1,000 to 100,000.' && termNumberProblem('12', TERM_FONT_SIZE) === null);
+  check('the default is written as nothing, so the file keeps only what you chose', termNumberValue('13', TERM_FONT_SIZE) === null && termNumberValue(' 15 ', TERM_FONT_SIZE) === '15' && termNumberValue('5000', TERM_SCROLLBACK) === null);
+  check('the dock is down until opened, and flips', DOCK_OPEN_KEY === 'conductor.terminal.dock' && !dockShown(null) && dockShown('open') && dockFlipped(null) === 'open' && dockFlipped('open') === null);
+
+  // ── the socket: mouse reports as bytes ──
+  const bin = JSON.parse(binaryFrame('\x1b[M \xfc!')) as { t: string; d: string };
+  check('onBinary goes down as `bin`, base64 of the bytes themselves (0xfc stays one byte)', bin.t === 'bin' && [...Buffer.from(bin.d, 'base64')].join() === '27,91,77,32,252,33', JSON.stringify(bin));
+
+  // ── the hub frame reaches the panels showing that scope ──
+  const got: string[] = [];
+  const stop = onTerminals({ kind: 'project', projectId: 'p1' }, (l) => got.push(l.map((t) => t.id).join() || 'none'));
+  const info = (id: string) => ({ id, scope: { kind: 'project' as const, projectId: 'p1' }, cwd: '/p', shell: '/bin/zsh', startedAt: '2026-10-13T00:00:00Z', exited: false, exitCode: null });
+  receiveTerminals({ type: 'terminals', scope: { kind: 'project', projectId: 'p1' }, terminals: [info('t1')] });
+  receiveTerminals({ type: 'terminals', scope: { kind: 'project', projectId: 'p2' }, terminals: [info('t9')] });
+  receiveTerminals({ type: 'terminals', scope: { kind: 'agent', agentId: 'p1' }, terminals: [info('t8')] });
+  receiveTerminals({ type: 'terminals', scope: { kind: 'project', projectId: 'p1' }, terminals: [] });
+  stop();
+  receiveTerminals({ type: 'terminals', scope: { kind: 'project', projectId: 'p1' }, terminals: [info('t2')] });
+  check('a `terminals` frame reaches the panel for its scope only, and not after it lets go', got.join('|') === 't1|none', got.join('|'));
+
+  // ── wiring, from the source ──
+  const view = readFileSync(new URL('./Xterm.tsx', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('./TermPanel.tsx', import.meta.url), 'utf8');
+  const dock = readFileSync(new URL('../terminal/dock.tsx', import.meta.url), 'utf8');
+  const shellSrc = readFileSync(new URL('../shell/shell.tsx', import.meta.url), 'utf8');
+  const fleetDock = readFileSync(new URL('../fleet/dock.tsx', import.meta.url), 'utf8');
+  const settings = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
+  const storeSrc = readFileSync(new URL('../lib/store.ts', import.meta.url), 'utf8');
+  const pane = readFileSync(new URL('../files/FilePane.tsx', import.meta.url), 'utf8');
+  check('Xterm reads the font size and scrollback, and applies a change to an open terminal (a new font size re-fits)', /useSetting\(TERM_FONT_SIZE\.key\)/.test(view) && /useSetting\(TERM_SCROLLBACK\.key\)/.test(view) && /t\.options\.fontSize = fontSize;\s*refitRef\.current\(\);/.test(view) && /term\.current\.options\.scrollback = scrollback/.test(view) && !/fontSize: 13/.test(view) && !/scrollback: 5000/.test(view));
+  check('the add-ons: search, web links (a new tab), clipboard (write only), WebGL, Unicode 11', ['SearchAddon', 'WebLinksAddon', 'ClipboardAddon', 'WebglAddon', 'Unicode11Addon'].every((a) => new RegExp(`new ${a}\\(`).test(view)) && /window\.open\(uri, '_blank'/.test(view) && /readText: \(\) => ''/.test(view) && /t\.unicode\.activeVersion = '11'/.test(view));
+  check('WebGL falls back to the DOM renderer when the context is lost or WebGL is not there', /gl\.onContextLoss\(\(\) => \{\s*gl\.dispose\(\);/.test(view) && /try \{\s*const gl = new WebglAddon\(\);[\s\S]*?\} catch \{\s*setRenderer\('dom'\);/.test(view));
+  check('onBinary is sent, as bytes', /t\.onBinary\(\(d\) => send\(binaryFrame\(d\)\)\)/.test(view));
+  check('the key handler takes find, copy, paste and clear by the OS map, and lets Ctrl-` through to the dock', /termKey\(k, mac\)/.test(view) && /if \(dockKey\(k\)\) return false;/.test(view) && /setFinding\(true\)/.test(view));
+  check('the find bar: Enter next, Shift-Enter previous, Esc closes and gives the terminal its focus back', /find\(e\.shiftKey\)/.test(view) && /e\.key === 'Escape'[\s\S]*?closeFind\(\)/.test(view) && /const closeFind = \(\): void => \{[\s\S]*?term\.current\?\.focus\(\)/.test(view));
+  check('paths are links through a link provider, opening Files at the line', /registerLinkProvider\(/.test(view) && /findPathLinks\(text\)/.test(view) && /termFileTarget\(hit\.path, at\.cwd, at\.root\)/.test(view) && /navigate\(SCREEN\.files, \{ jobId: at\.filesRoot, path, \.\.\.\(hit\.line \? \{ line: String\(hit\.line\) \} : \{\}\) \}\)/.test(view));
+  check('and Files shows that line: raw, marked, scrolled to', /useWantedLine\(tabKey\)/.test(pane) && /className="c5-lit"/.test(pane) && /scrollIntoView\(\{ block: 'center' \}\)/.test(pane));
+  check('the tabs are one component for either scope, kept current by the hub frame', /export function TermTabs\(/.test(panel) && /return onTerminals\(scope,/.test(panel) && /case 'terminals':\s*\/\/[^\n]*\n\s*receiveTerminals\(frame\);/.test(storeSrc));
+  check("the dock: the project's terminals, its height dragged and kept, under every screen above the status bar", /<TermTabs[\s\S]*?scope=\{\{ kind: 'project', projectId: project\.id \}\}/.test(dock) && /usePanel\(TERMINAL_DOCK\)/.test(dock) && /<TerminalDock \/>\s*\n\s*<StatusBar \/>/.test(shellSrc));
+  check('opened with Ctrl-` anywhere, and from a status-bar button', /useDockKey\(\);/.test(shellSrc) && /<DockButton \/>/.test(shellSrc) && /if \(!dockKey\(e\) \|\| e\.repeat\) return;/.test(dock));
+  check("the Project screen's placeholder terminal tab is gone: it opens the dock", /\{ id: 'terminal', label: '▸ terminal', jump: 'terminal' \}/.test(fleetDock) && /if \(jump === 'terminal'\) return openDock\(\);/.test(fleetDock) && !/not yet assigned/.test(fleetDock));
+  check("Settings (9) has a Terminal section: the two numbers as the slot limit is edited, and the shell from the daemon's list", /<Section title="Terminal">\s*<TerminalSection \/>/.test(settings) && /range=\{TERM_FONT_SIZE\}/.test(settings) && /range=\{TERM_SCROLLBACK\}/.test(settings) && /listShells\(\)/.test(settings) && /onBlur=\{commit\}[\s\S]*?e\.key === 'Escape'\) setDraft\(null\)/.test(settings));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

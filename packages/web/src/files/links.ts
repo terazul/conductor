@@ -118,3 +118,16 @@ export function headingSlugs(texts: readonly string[]): string[] {
     return n === 0 ? base : `${base}-${n}`;
   });
 }
+
+/**
+ * A file's text split around line `n` (1-based; past the end is the last line), so the pane can
+ * mark the line a terminal's `src/a.ts:12` asked for (Amendment 141).
+ */
+export function rawAround(raw: string, n: number): { before: string; line: string; after: string } {
+  const lines = raw.split('\n');
+  const i = Math.min(Math.max(1, n), lines.length) - 1;
+  const before = lines.slice(0, i).join('\n');
+  const after = lines.slice(i + 1).join('\n');
+  return { before: i > 0 ? `${before}\n` : '', line: lines[i] ?? '', after: i < lines.length - 1 ? `\n${after}` : '' };
+}
+

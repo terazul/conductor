@@ -29,13 +29,16 @@ import { filesTouched } from '../shell/describe.js';
 import { DiffNums } from '../shell/ui.js';
 import { PROJECT_DOCK, usePanel } from '../shell/panels.js';
 import { Splitter } from '../shell/Splitter.js';
+import { openDock } from '../terminal/dock.js';
 
 export interface DockPaneProps {
   jobId: string | null;
 }
 
 /** Hand a tab off to the track that owns its content. */
-function handOff(jump: 'files' | 'preview', job: Job | null, server?: DevServer): void {
+function handOff(jump: 'files' | 'preview' | 'terminal', job: Job | null, server?: DevServer): void {
+  // The project's shells are in the Terminal dock under every screen (Amendment 141).
+  if (jump === 'terminal') return openDock();
   if (jump === 'preview') {
     if (server) openPreview(server);
     return;
@@ -54,7 +57,7 @@ interface TabDef {
   id: string;
   label: string;
   /** Hand off to the screen that owns this content instead of rendering a pane. */
-  jump?: 'files' | 'preview';
+  jump?: 'files' | 'preview' | 'terminal';
   owner?: string;
 }
 
@@ -62,7 +65,8 @@ const TABS: TabDef[] = [
   { id: 'plan', label: '▤ PLAN.md', owner: 'Track C — workspace' },
   { id: 'files', label: '▤ files', jump: 'files' },
   { id: 'preview', label: '◈ preview', jump: 'preview' },
-  { id: 'terminal', label: '▸ terminal', owner: 'not yet assigned' },
+  // Was a placeholder seam; the Terminal dock (terminal/dock.tsx, Amendment 141) is the pane now.
+  { id: 'terminal', label: '▸ terminal', jump: 'terminal' },
   { id: 'diff', label: '⑂ diff' },
 ];
 

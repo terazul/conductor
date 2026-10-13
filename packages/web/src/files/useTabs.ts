@@ -135,6 +135,30 @@ onNavigate(() => {
 export function followLink(params: NavParams, mounting: boolean): void {
   if (mounting && bootLink) return;
   update((s) => applyLink(s, params, Date.now(), keep));
+  // `&line=` (Amendment 141): a path a terminal printed as `src/a.ts:12`.
+  const line = Number(params['line']);
+  if (params['jobId'] && params['path'] && Number.isInteger(line) && line > 0) {
+    lineWanted.set(tabKey(params['jobId'], params['path']), line);
+    for (const l of lineListeners) l();
+  }
+}
+
+/** The line a link asked a tab to show, until its pane has shown it (Amendment 141). */
+const lineWanted = new Map<string, number>();
+const lineListeners = new Set<() => void>();
+
+function subscribeLines(fn: () => void): () => void {
+  lineListeners.add(fn);
+  return () => lineListeners.delete(fn);
+}
+
+export function useWantedLine(key: string): number | null {
+  return useSyncExternalStore(subscribeLines, () => lineWanted.get(key) ?? null);
+}
+
+/** The pane has scrolled to it: a later visit to the tab comes back where you left it, as before. */
+export function lineShown(key: string): void {
+  if (lineWanted.delete(key)) for (const l of lineListeners) l();
 }
 
 // ── unsaved edits ───────────────────────────────────────────────────────────
