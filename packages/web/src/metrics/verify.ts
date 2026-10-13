@@ -1,5 +1,6 @@
 /**
- * Validator checks for Amendment 122's web half (the Metrics screen).
+ * Validator checks for Amendment 122's web half (the Metrics screen), and Amendment 136's
+ * (the retry rate out of Claude's calls, time per turn, speed per model, the project picker).
  *
  * No daemon and no DOM: the rates and words are pure and are run on fixture responses;
  * the registration, the status bar, nav.ts and the stylesheet are read as source, because
@@ -11,14 +12,18 @@
 import { readFileSync } from 'node:fs';
 import type { MetricsBefore, MetricsCounts, MetricsDay, MetricsModelRow, MetricsResponse } from '@conductor/shared';
 import {
+  ALL_PROJECTS,
   BEFORE_NOTE,
   DAY_COLUMNS,
   DEFAULT_RANGE,
   HOW_COUNTED,
   MODEL_COLUMNS,
+  PROJECT_KEY,
   RANGES,
   RANGE_KEY,
+  asProject,
   asRange,
+  averageSpeed,
   beforeLine,
   beforeModelLine,
   cell,
@@ -30,7 +35,10 @@ import {
   isEmpty,
   modelCell,
   modelName,
+  otherEnginesRan,
   percent,
+  projectChoices,
+  projectNote,
   rangeLine,
   rate,
   ratio,
@@ -58,6 +66,7 @@ const counts = (over: Partial<MetricsCounts> = {}): MetricsCounts => ({
   costUsd: null,
   calls: 0,
   retries: 0,
+  claudeCalls: 0,
   runs: 0,
   failedRuns: 0,
   runMs: 0,
@@ -72,7 +81,7 @@ const opus: MetricsModelRow = {
   model: 'claude-opus-4-7',
   ...counts({
     inputTokens: 1_200_000, outputTokens: 80_000, cacheReadTokens: 900_000, costUsd: 14.5,
-    calls: 200, retries: 6, runs: 20, failedRuns: 2, runMs: 20 * 90_000, apiMs: 400_000, timedCalls: 200, timedOutputTokens: 80_000,
+    calls: 200, retries: 6, claudeCalls: 200, runs: 20, failedRuns: 2, runMs: 20 * 90_000, apiMs: 400_000, timedCalls: 200, timedOutputTokens: 80_000,
   }),
 };
 const gpt: MetricsModelRow = {
@@ -82,7 +91,7 @@ const gpt: MetricsModelRow = {
 };
 const total = counts({
   inputTokens: opus.inputTokens + gpt.inputTokens, outputTokens: opus.outputTokens + gpt.outputTokens, cacheReadTokens: opus.cacheReadTokens,
-  costUsd: 14.5, calls: 250, retries: 6, runs: 25, failedRuns: 2, runMs: opus.runMs + gpt.runMs, apiMs: 450_000, timedCalls: 225, timedOutputTokens: 85_000,
+  costUsd: 14.5, calls: 250, retries: 6, claudeCalls: 200, runs: 25, failedRuns: 2, runMs: opus.runMs + gpt.runMs, apiMs: 450_000, timedCalls: 225, timedOutputTokens: 85_000,
 });
 const day = (d: string, over: Partial<MetricsCounts>): MetricsDay => ({ day: d, ...counts(over) });
 const before: MetricsBefore = {
@@ -104,6 +113,7 @@ const resp = (over: Partial<MetricsResponse> = {}): MetricsResponse => ({
   models: [opus, gpt],
   days: [day('2026-10-10', { runs: 10, calls: 100 }), day('2026-10-09', { runs: 15, calls: 150, failedRuns: 2 })],
   before,
+  project: null,
   ...over,
 });
 
@@ -121,36 +131,65 @@ console.log('\n2 · derived figures use only what was measured');
 {
   const d = derive(opus);
   check('error rate is failed runs over runs', Math.abs((d.errorRate ?? 0) - 0.1) < 1e-9);
-  check('retry rate is retried calls over calls', Math.abs((d.retryRate ?? 0) - 0.03) < 1e-9);
+  check("retry rate is retried calls over Claude's calls", Math.abs((d.retryRate ?? 0) - 0.03) < 1e-9);
   check('time per run is the runs\' wall time over runs', d.avgRunMs === 90_000);
-  check('time per call is model-call time over the calls that were timed, and tokens per second over their tokens', d.apiPerCallMs === 2_000 && d.tokensPerSec === 200, JSON.stringify(d));
+  check('time per turn is model time over the turns that were timed, and tokens per second over their tokens', d.apiPerTurnMs === 2_000 && d.tokensPerSec === 200, JSON.stringify(d));
   const g = derive(gpt);
-  check('half the calls timed: the per-call time divides only those', g.apiPerCallMs === 2_000 && g.tokensPerSec === 100, JSON.stringify(g));
+  check('half the calls timed: the per-turn time divides only those', g.apiPerTurnMs === 2_000 && g.tokensPerSec === 100, JSON.stringify(g));
   const none = derive(counts({ calls: 10, runs: 2, runMs: 5000, outputTokens: 400 }));
-  check('an engine that reports no model-call time has no per-call time and no speed', none.apiPerCallMs === null && none.tokensPerSec === null && none.avgRunMs === 2500);
-  check('nothing at all is all dashes', ((e) => e.errorRate === null && e.retryRate === null && e.avgRunMs === null && e.apiPerCallMs === null && e.tokensPerSec === null)(derive(counts())));
+  check('an engine that reports no model time has no per-turn time and no speed', none.apiPerTurnMs === null && none.tokensPerSec === null && none.avgRunMs === 2500);
+  check('nothing at all is all dashes', ((e) => e.errorRate === null && e.retryRate === null && e.avgRunMs === null && e.apiPerTurnMs === null && e.tokensPerSec === null)(derive(counts())));
   check('speed needs both numbers: time without tokens is none', derive(counts({ apiMs: 5000, timedCalls: 2 })).tokensPerSec === null && derive(counts({ timedOutputTokens: 500 })).tokensPerSec === null);
+}
+
+console.log("\n2b · mixed engines: the retry rate is out of Claude's calls, speed is per model (Amendment 136)");
+{
+  const mixed = derive(total);
+  check(
+    "with Copilot's 50 calls in the range, the retry rate is 6 of Claude's 200 (3%), not 6 of all 250 (2.4%)",
+    Math.abs((mixed.retryRate ?? 0) - 0.03) < 1e-9 && percent(mixed.retryRate) === '3.0%',
+    `${mixed.retryRate}`,
+  );
+  check('no Claude calls, no retry rate: a dash, even with other engines\' calls', derive(counts({ calls: 40, runs: 2 })).retryRate === null && cell('retries', counts({ calls: 40 })) === '—');
+  check('Copilot alone ran: nobody could have retried, so its own row is a dash', modelCell('retries', gpt) === '—' && cell('retries', gpt) === '—');
+  check('which engines ran is read from the models', otherEnginesRan([opus, gpt]) && !otherEnginesRan([opus]) && !otherEnginesRan([]));
+  const avg = averageSpeed([opus, gpt]);
+  check(
+    "the range's speed is the models' own speeds averaged (200 and 100 → 150), not all tokens over all time (85k / 450 s ≈ 189)",
+    avg?.tps === 150 && avg.of === 2 && averageSpeed([opus])?.tps === 200 && averageSpeed([counts({ calls: 3 })]) === null && averageSpeed([]) === null,
+    JSON.stringify(avg),
+  );
 }
 
 console.log('\n3 · the five figures at the top');
 {
-  const t = tiles(total);
+  const t = tiles(total, [opus, gpt]);
   const by = (id: string) => t.find((x) => x.id === id)!;
   check('tokens, calls, time, errors and cost, in that order', t.map((x) => x.id).join() === 'tokens,calls,time,errors,cost');
   check('tokens: the sum, and in / out / cached', by('tokens').value === '1.6M' && by('tokens').sub === '1.5M in · 100k out · 900k cached', JSON.stringify(by('tokens')));
   check('calls say how many runs made them', by('calls').value === '250' && by('calls').sub === '25 runs');
   check(
-    'time: an average run, then time per call and speed over the calls that were timed, and says how many were',
-    by('time').value === '1m 18s' && by('time').sub === '2.0 s per call · 189 tok/s' && /225 of 250 calls/.test(by('time').title ?? ''),
+    'time: an average run, then model time per turn with subagents included, and the models\' average speed, and says how many calls were timed',
+    by('time').value === '1m 18s' && by('time').sub === '2.0 s per turn, subagents included · 150 tok/s (average of 2 models)' && /225 of 250 calls/.test(by('time').title ?? '') && /not the length of one API call/.test(by('time').title ?? ''),
     JSON.stringify(by('time')),
   );
-  check('errors: the failed share of runs, with both counts, and the retried share of calls', by('errors').value === '8.0%' && /2 of 25 runs failed/.test(by('errors').sub) && /6 of 250 calls retried \(2\.4%\)/.test(by('errors').sub), JSON.stringify(by('errors')));
-  check('errors are bad news only when a run failed', by('errors').bad === true && tiles(counts({ runs: 4 })).find((x) => x.id === 'errors')!.bad === false);
+  check(
+    "errors: the failed share of runs, with both counts, and, with another engine in the range, the retried share of Claude's calls, said so",
+    by('errors').value === '8.0%' && /2 of 25 runs failed/.test(by('errors').sub) && /6 of Claude's 200 calls retried \(3\.0%\)/.test(by('errors').sub) && /out of Claude's calls/.test(by('errors').title ?? ''),
+    JSON.stringify(by('errors')),
+  );
+  const claudeOnly = tiles(opus, [opus]);
+  const ce = claudeOnly.find((x) => x.id === 'errors')!;
+  check("with Claude alone, its calls are all the calls, and the tile does not say Claude's", /6 of 200 calls retried \(3\.0%\)/.test(ce.sub) && !/Claude/.test(ce.sub) && !/Claude's calls/.test(ce.title ?? ''), JSON.stringify(ce));
+  check('one model: its own speed, with no "average"', claudeOnly.find((x) => x.id === 'time')!.sub === '2.0 s per turn, subagents included · 200 tok/s', claudeOnly.find((x) => x.id === 'time')!.sub);
+  const copilotOnly = tiles(counts({ calls: 50, runs: 5 }), [gpt]).find((x) => x.id === 'errors')!;
+  check('Copilot alone: the tile says only Claude reports retries, not "0 of 50 retried"', /only Claude reports them/.test(copilotOnly.sub) && !/of 50/.test(copilotOnly.sub), copilotOnly.sub);
+  check('errors are bad news only when a run failed', by('errors').bad === true && tiles(counts({ runs: 4 }), []).find((x) => x.id === 'errors')!.bad === false);
   check('a stop of your own, a pause and a budget stop are not in the failed count: the tile says so', /stop, a pause and a budget stop/.test(by('errors').title ?? ''));
   check('cost is the dollars of the engines that report them', by('cost').value === '$14.50');
-  const tokenOnly = tiles(counts({ inputTokens: 10, outputTokens: 5, calls: 1, runs: 1 })).find((x) => x.id === 'cost')!;
+  const tokenOnly = tiles(counts({ inputTokens: 10, outputTokens: 5, calls: 1, runs: 1 }), [gpt]).find((x) => x.id === 'cost')!;
   check('with no engine reporting dollars, cost is a dash and says why', tokenOnly.value === '—' && /no engine here reports dollars/.test(tokenOnly.sub));
-  const empty = tiles(counts());
+  const empty = tiles(counts(), []);
   check('an empty range reads as dashes and zeros, with no NaN anywhere', empty.every((x) => !/NaN|undefined|Infinity/.test(`${x.value}${x.sub}`)) && empty.find((x) => x.id === 'errors')!.sub === 'no runs', JSON.stringify(empty));
 }
 
@@ -161,6 +200,9 @@ console.log('\n4 · the per-model and per-day rows');
   check('a Copilot row shows tokens and no dollars, and a dash for the cache and retries it never reports', m('cost', gpt) === '—' && m('cache', gpt) === '—' && modelCell('retries', gpt) === '—' && modelCell('retries', opus) === '3.0% · 6/200', MODEL_COLUMNS.map((c) => `${c.id}=${m(c.id, gpt)}`).join(' '));
   check('a row with no runs has a dash for errors, not 0%', m('errors', counts({ calls: 3 })) === '—');
   check('the columns have words on hover', [...MODEL_COLUMNS, ...DAY_COLUMNS].every((c) => c.label.length > 0 && c.title.length > 10));
+  const perTurn = MODEL_COLUMNS.find((c) => c.id === 'percall')!;
+  check('the time column is per turn, subagents included, and says it is not one API call', perTurn.label === 'Per turn' && /subagents included/.test(perTurn.title) && /not the length of one API call/.test(perTurn.title));
+  check("the retried column is out of Claude's calls", /out of Claude's calls/.test(MODEL_COLUMNS.find((c) => c.id === 'retries')!.title));
   check('the day table has runs, calls, tokens, time, failures and cost', DAY_COLUMNS.map((c) => c.id).join() === 'runs,calls,in,out,run,errors,cost');
   check("a model's name carries its engine unless it is Claude's", modelName(opus).engine === null && modelName(gpt).engine === 'Copilot' && modelName({ provider: 'openrouter', model: 'x' }).engine === 'OpenRouter', JSON.stringify(modelName(gpt)));
   check('a bar is the share of the range\'s tokens, 0 to 1', Math.abs(share(opus, total) - 1_280_000 / 1_600_000) < 1e-9 && share(opus, counts()) === 0 && share(total, total) === 1);
@@ -186,13 +228,36 @@ console.log('\n6 · before metrics were recorded');
   check('the explanations say how each figure is counted, including what is not an error', HOW_COUNTED.some((l) => /budget stop/.test(l)) && HOW_COUNTED.some((l) => /round-trips/.test(l)) && HOW_COUNTED.some((l) => /dollars/.test(l)));
 }
 
+console.log('\n6b · one project, or all of them (Amendment 136)');
+{
+  const projects = [
+    { id: 'prj_b', name: 'zeta' },
+    { id: 'prj_a', name: 'alpha' },
+  ];
+  check('the picker is All projects, then each project by name', projectChoices(projects).map((p) => `${p.id ?? '-'}:${p.label}`).join() === `-:${ALL_PROJECTS},prj_a:alpha,prj_b:zeta` && ALL_PROJECTS === 'All projects');
+  check('a remembered project that is still there is kept; one that is gone, or none, is all projects', asProject('prj_a', projects) === 'prj_a' && asProject('prj_gone', projects) === null && asProject(null, projects) === null && asProject('', projects) === null);
+  check('the choice is a setting of its own', PROJECT_KEY === 'conductor.metricsProject' && (PROJECT_KEY as string) !== RANGE_KEY);
+  const one = resp({ project: { id: 'prj_a', name: 'alpha' }, since: '2026-10-13', before: null });
+  const note = projectNote(one);
+  check('with a project, a short note says its counts start when this was added, and earlier runs are under All projects', note === 'Counts for alpha start on Tue 13 Oct, when per-project counting was added. Earlier runs are under All projects only.', note ?? 'null');
+  check('with all projects there is no note', projectNote(resp()) === null);
+  check('the explanations say a project\'s counts begin when they were added', HOW_COUNTED.some((l) => /per-project counting was added/.test(l)));
+  const endpoints = src('./endpoints.ts');
+  check('the request adds &projectId= only for a project', /projectId \? `&projectId=\$\{encodeURIComponent\(projectId\)\}` : ''/.test(endpoints));
+  const daemon = src('../../../daemon/src/routes/metrics.ts');
+  check("and the daemon's route answers 400 for a bad id and 404 for one that is not there", /code\(400\)[\s\S]*projectId/.test(daemon) && /code\(404\)/.test(daemon) && /getProject\(db, asked\)/.test(daemon));
+}
+
 console.log('\n7 · the screen is registered, reachable on 8, and in both themes');
 {
   const route = src('./route.tsx');
   const def = route.slice(route.indexOf('export const screen'));
   check("it is a tab on 8, after Branches and before Settings", /id: 'metrics'/.test(def) && /hotkey: '8'/.test(def) && /order: 80/.test(def) && !/tab: false/.test(def), def);
   check('its range is remembered as a setting, not in the browser', route.includes('RANGE_KEY') && RANGE_KEY === 'conductor.metricsRange' && !/localStorage/.test(route));
-  check('it draws the five tiles, a table of models, a table of days and the before section', /tiles\(resp\.total\)/.test(route) && /modelCell\(c\.id, m\)/.test(route) && /MODEL_COLUMNS/.test(route) && /DAY_COLUMNS/.test(route) && /resp\.before/.test(route) && /aria-label="by model"/.test(route));
+  check('its project is a setting too, read through asProject, and the picker writes it', route.includes('PROJECT_KEY') && /asProject\(useSetting\(PROJECT_KEY\), projects\)/.test(route) && /writeSetting\(PROJECT_KEY, e\.target\.value \|\| null\)/.test(route) && /projectChoices\(projects\)/.test(route) && /aria-label="project"/.test(route));
+  check('an answer for another project is never shown as this one', /\(resp\.project\?\.id \?\? null\) === projectId/.test(route) && /\[range, projectId\]/.test(route));
+  check('the note shows above the tiles when a project is picked', /projectNote\(resp\)/.test(route));
+  check('it draws the five tiles, a table of models, a table of days and the before section', /tiles\(resp\.total, resp\.models\)/.test(route) && /modelCell\(c\.id, m\)/.test(route) && /MODEL_COLUMNS/.test(route) && /DAY_COLUMNS/.test(route) && /resp\.before/.test(route) && /aria-label="by model"/.test(route));
   check('the range buttons are the three ranges and say which is open', /RANGES\.map/.test(route) && /aria-pressed=\{r\.id === range\}/.test(route));
   check('it re-reads on arrival, on focus, on a change of range, and when spend or a status changes', /addEventListener\('focus'/.test(route) && /\[load\]/.test(route) && /costToday/.test(route) && /a\.status/.test(route));
   const endpoints = src('./endpoints.ts');
@@ -236,7 +301,7 @@ console.log('\n7 · the screen is registered, reachable on 8, and in both themes
 
 console.log(
   failures === 0
-    ? '\nAmendment 122 web verify: PASS — every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per call and speed use only timed calls; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
-    : `\nAmendment 122 web verify: FAIL — ${failures} check(s) failed.\n`,
+    ? "\nAmendment 122/136 web verify: PASS — the retry rate is out of Claude's calls and says so when others ran; time is per turn, subagents included; speed is each model's own, averaged; the project picker is a setting, with a note on when its counts begin;" + ' every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per turn and speed use only timed turns; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
+    : `\nAmendment 122/136 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

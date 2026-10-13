@@ -32,11 +32,16 @@
  * Copilot and OpenRouter send one `assistant.usage` per call, with the model and, when the
  * runtime says, the call's duration: each is added as it arrives.
  *
+ * PER PROJECT (Amendment 136, migration 220). Every count is written twice, in one
+ * transaction: to `metrics_daily` as before, and to `metrics_project_daily` under the
+ * agent's project. A report for one project reads the second; the all-projects report reads
+ * the first, which also holds what was counted before the project table existed.
+ *
  * The pure parts (`foldModelUsage`, `resultDelta`, `primaryModel`, `matchModel`) take and
  * return plain values, so session/verify.ts drives them without a database.
  */
 
-import type { MetricsBefore, MetricsCounts, MetricsDay, MetricsModelRow, MetricsRange, MetricsResponse } from '@conductor/shared';
+import type { MetricsBefore, MetricsCounts, MetricsDay, MetricsModelRow, MetricsProject, MetricsRange, MetricsResponse } from '@conductor/shared';
 import { row, rows, tx, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { getAgent, getAgentProvider, localDay } from './store.js';
@@ -215,19 +220,50 @@ const COLUMNS: ReadonlyArray<keyof Bump> = [
   'timed_output_tokens',
 ];
 
-/** Add to today's row for this engine and model, making it when it is not there. */
-function bump(db: Db, provider: string, model: string, by: Bump): void {
+/**
+ * Add to today's row for this engine and model, making it when it is not there; and, when
+ * the work had a project, to that project's row too (Amendment 136). Every caller does
+ * this inside `atomically`, so the two tables never disagree.
+ */
+function bump(db: Db, projectId: string | null, provider: string, model: string, by: Bump): void {
   const present = COLUMNS.filter((c) => (by[c] ?? 0) > 0);
   if (present.length === 0) return;
   const cols = present.join(', ');
   const marks = present.map(() => '?').join(', ');
   const grow = present.map((c) => `${c} = ${c} + excluded.${c}`).join(', ');
   const values = present.map((c) => (c === 'cost_usd' ? by[c]! : Math.round(by[c]!)));
+  const day = localDay();
   db.prepare(
     `INSERT INTO metrics_daily (day, provider, model, ${cols}) VALUES (?, ?, ?, ${marks})
      ON CONFLICT(day, provider, model) DO UPDATE SET ${grow}`,
-  ).run(localDay(), provider, model, ...values);
+  ).run(day, provider, model, ...values);
+  if (projectId) {
+    db.prepare(
+      `INSERT INTO metrics_project_daily (day, project_id, provider, model, ${cols}) VALUES (?, ?, ?, ?, ${marks})
+       ON CONFLICT(project_id, day, provider, model) DO UPDATE SET ${grow}`,
+    ).run(day, projectId, provider, model, ...values);
+  }
 }
+
+/**
+ * One unit of writes, whether or not the caller is already in a transaction: a SAVEPOINT
+ * nests where `tx`'s BEGIN cannot, and a status event (which counts a failed run) can be
+ * heard from inside someone else's transaction.
+ */
+function atomically(db: Db, fn: () => void): void {
+  db.exec('SAVEPOINT metrics_bump');
+  try {
+    fn();
+    db.exec('RELEASE metrics_bump');
+  } catch (err) {
+    db.exec('ROLLBACK TO metrics_bump');
+    db.exec('RELEASE metrics_bump');
+    throw err;
+  }
+}
+
+/** The project an agent's work counts for, or null when the agent is not there. */
+const projectOf = (db: Db, agentId: string): string | null => getAgent(db, agentId)?.projectId ?? null;
 
 interface AgentState {
   baselined: boolean;
@@ -264,11 +300,18 @@ function baselineOf(db: Db, agentId: string): Map<string, Tokens> {
   return out;
 }
 
+/** What a run's calls, time and outcome are credited to. */
+interface Credit {
+  projectId: string | null;
+  provider: string;
+  model: string;
+}
+
 /** In memory, per agent: what the run now under way is credited to, and what it was retried through. */
-const runModel = new Map<string, { provider: string; model: string }>();
+const runModel = new Map<string, Credit>();
 const retried = new Map<string, number>();
 /** A run that has ended and not yet been settled: a `failed` status right after it is its failure. */
-const unsettled = new Map<string, { provider: string; model: string }>();
+const unsettled = new Map<string, Credit>();
 
 export interface ClaudeResult {
   agentId: string;
@@ -300,6 +343,7 @@ export interface Recorded {
  */
 export function recordClaudeResult(db: Db, r: ClaudeResult): Recorded {
   const provider = getAgentProvider(db, r.agentId);
+  const projectId = projectOf(db, r.agentId);
   return tx(db, () => {
     const state = stateOf(db, r.agentId);
     const reported = foldModelUsage(r.modelUsage);
@@ -328,9 +372,9 @@ export function recordClaudeResult(db: Db, r: ClaudeResult): Recorded {
     let output = 0;
     for (const [m, t] of added) {
       output += t.output;
-      bump(db, provider, m, { input_tokens: t.input, output_tokens: t.output, cache_read_tokens: t.cacheRead, cost_usd: t.costUsd });
+      bump(db, projectId, provider, m, { input_tokens: t.input, output_tokens: t.output, cache_read_tokens: t.cacheRead, cost_usd: t.costUsd });
     }
-    bump(db, provider, model, {
+    bump(db, projectId, provider, model, {
       calls: r.numTurns,
       api_ms: apiMs ?? 0,
       timed_calls: apiMs !== null ? r.numTurns : 0,
@@ -348,7 +392,7 @@ export function recordClaudeResult(db: Db, r: ClaudeResult): Recorded {
       db.prepare('UPDATE metrics_agent SET baselined = 1, api_ms = ? WHERE agent_id = ?').run(Math.round(delta.nextApiMs), r.agentId);
     }
 
-    runModel.set(r.agentId, { provider, model });
+    runModel.set(r.agentId, { projectId, provider, model });
     return { model, calls: r.numTurns, apiMs };
   });
 }
@@ -367,10 +411,11 @@ export interface CallUsage {
 /** Add one Copilot or OpenRouter call. Before `setAgentUsage`, as `recordClaudeResult`. */
 export function recordCall(db: Db, c: CallUsage): Recorded {
   const provider = getAgentProvider(db, c.agentId);
+  const projectId = projectOf(db, c.agentId);
   const timed = typeof c.durationMs === 'number' && Number.isFinite(c.durationMs) && c.durationMs > 0;
   return tx(db, () => {
     stateOf(db, c.agentId);
-    bump(db, provider, c.model, {
+    bump(db, projectId, provider, c.model, {
       input_tokens: c.inputTokens,
       output_tokens: c.outputTokens,
       cache_read_tokens: c.cacheReadTokens,
@@ -381,7 +426,7 @@ export function recordCall(db: Db, c: CallUsage): Recorded {
     });
     // The run is credited to the first model it called, which is the agent's own: a
     // sub-agent's calls, on whatever model it chose, come after.
-    if (!runModel.has(c.agentId)) runModel.set(c.agentId, { provider, model: c.model });
+    if (!runModel.has(c.agentId)) runModel.set(c.agentId, { projectId, provider, model: c.model });
     return { model: c.model, calls: 1, apiMs: timed ? Math.round(c.durationMs!) : null };
   });
 }
@@ -395,13 +440,13 @@ export function recordRunEnd(db: Db, agentId: string, ms: number): void {
   try {
     const agent = getAgent(db, agentId);
     const provider = getAgentProvider(db, agentId);
-    const credited =
+    const credited: Credit =
       runModel.get(agentId) ??
-      { provider, model: matchModel(agent?.model ?? 'unknown', [...baselineOf(db, agentId).keys()]) };
+      { projectId: agent?.projectId ?? null, provider, model: matchModel(agent?.model ?? 'unknown', [...baselineOf(db, agentId).keys()]) };
     runModel.delete(agentId);
     const retries = retried.get(agentId) ?? 0;
     retried.delete(agentId);
-    bump(db, credited.provider, credited.model, { runs: 1, run_ms: Math.max(0, ms), retries });
+    atomically(db, () => bump(db, credited.projectId, credited.provider, credited.model, { runs: 1, run_ms: Math.max(0, ms), retries }));
     unsettled.set(agentId, credited);
   } catch (err) {
     console.error('[metrics] could not count a run', err);
@@ -414,7 +459,7 @@ function noteStatus(db: Db, agentId: string, status: string): void {
   unsettled.delete(agentId);
   if (status !== 'failed' || !run) return;
   try {
-    bump(db, run.provider, run.model, { failed_runs: 1 });
+    atomically(db, () => bump(db, run.projectId, run.provider, run.model, { failed_runs: 1 }));
   } catch (err) {
     console.error('[metrics] could not count a failed run', err);
   }
@@ -461,6 +506,7 @@ const empty = (): MetricsCounts => ({
   costUsd: null,
   calls: 0,
   retries: 0,
+  claudeCalls: 0,
   runs: 0,
   failedRuns: 0,
   runMs: 0,
@@ -468,6 +514,12 @@ const empty = (): MetricsCounts => ({
   timedCalls: 0,
   timedOutputTokens: 0,
 });
+
+/**
+ * The one engine whose calls can be retried as far as anyone can tell: only the Claude
+ * backend emits `api_retry` (backends/claude.ts), so only its calls are the retry rate's whole.
+ */
+const RETRIES_REPORTED_BY = 'claude';
 
 /** Fold one stored row in. Dollars only from an engine that reports them. */
 function add(into: MetricsCounts, r: DailyRow, dollars: boolean): void {
@@ -477,6 +529,7 @@ function add(into: MetricsCounts, r: DailyRow, dollars: boolean): void {
   if (dollars) into.costUsd = (into.costUsd ?? 0) + r.cost_usd;
   into.calls += r.calls;
   into.retries += r.retries;
+  if (r.provider === RETRIES_REPORTED_BY) into.claudeCalls += r.calls;
   into.runs += r.runs;
   into.failedRuns += r.failed_runs;
   into.runMs += r.run_ms;
@@ -491,9 +544,12 @@ export function addDays(day: string, n: number): string {
   return localDay(new Date(y, m - 1, d + n));
 }
 
-/** The day recording began, in the daemon's local time. */
-export function sinceDay(db: Db): string {
-  const r = row<{ v: string }>(db.prepare("SELECT v FROM metrics_meta WHERE k = 'since'").get());
+/**
+ * The day recording began, in the daemon's local time: `since` for everything, or
+ * `project_since` for the per-project counts (migration 220), which began later.
+ */
+export function sinceDay(db: Db, key: 'since' | 'project_since' = 'since'): string {
+  const r = row<{ v: string }>(db.prepare('SELECT v FROM metrics_meta WHERE k = ?').get(key));
   const at = r ? new Date(r.v) : null;
   return at && !Number.isNaN(at.getTime()) ? localDay(at) : localDay();
 }
@@ -563,18 +619,28 @@ function beforeMetrics(db: Db, dollars: (provider: string) => boolean): MetricsB
  * The report for a range: totals, one row per engine and model, one row per day, and for
  * `all` the agents from before recording. `dollars` says which engines report them, so an
  * engine that does not shows tokens and no cost rather than $0.00.
+ *
+ * With a `project` (Amendment 136) it reads that project's own counts instead, which begin
+ * at migration 220: `since` is then that day, and there is no "before" line, since the
+ * agents' rows from before recording cannot say which runs were whose.
  */
 export function metricsReport(
   db: Db,
   range: MetricsRange,
   dollars: (provider: string) => boolean,
-  today: string = localDay(),
+  opts: { today?: string; project?: MetricsProject | null } = {},
 ): MetricsResponse {
-  const since = sinceDay(db);
+  const today = opts.today ?? localDay();
+  const project = opts.project ?? null;
+  const since = sinceDay(db, project ? 'project_since' : 'since');
   // `all` has no lower bound of its own: it starts at the earliest day anything was recorded.
   const lower = range === 'all' ? '0000-00-00' : rangeStart(range, today, since);
   const found = rows<DailyRow>(
-    db.prepare('SELECT * FROM metrics_daily WHERE day >= ? AND day <= ? ORDER BY day DESC').all(lower, today),
+    project
+      ? db
+          .prepare('SELECT * FROM metrics_project_daily WHERE project_id = ? AND day >= ? AND day <= ? ORDER BY day DESC')
+          .all(project.id, lower, today)
+      : db.prepare('SELECT * FROM metrics_daily WHERE day >= ? AND day <= ? ORDER BY day DESC').all(lower, today),
   );
   const from = range === 'all' ? [rangeStart('all', today, since), ...found.map((r) => r.day)].sort()[0]! : lower;
   const total = empty();
@@ -600,6 +666,7 @@ export function metricsReport(
     total,
     models: [...byModel.values()].sort((a, b) => weight(b) - weight(a) || b.calls - a.calls || a.model.localeCompare(b.model)),
     days: [...byDay.values()],
-    before: range === 'all' ? beforeMetrics(db, dollars) : null,
+    before: range === 'all' && !project ? beforeMetrics(db, dollars) : null,
+    project,
   };
 }

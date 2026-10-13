@@ -1065,8 +1065,14 @@ export interface MetricsCounts {
   costUsd: number | null;
   /** Model round-trips. */
   calls: number;
-  /** Model calls the SDK retried (`api_retry` events). */
+  /** Model calls the SDK retried (`api_retry` events). Only Claude reports them. */
   retries: number;
+  /**
+   * The calls made by Claude, the one engine that reports a retry: the retry rate's whole
+   * (Amendment 136). Equal to `calls` when nothing else ran; dividing by `calls` with a
+   * Copilot or OpenRouter agent in the range would count calls nobody could have retried.
+   */
+  claudeCalls: number;
   /** Runs that ended, however they ended. */
   runs: number;
   /** Runs that ended `failed`. Your own stop, a pause and a budget stop are not among them. */
@@ -1122,8 +1128,20 @@ export interface MetricsResponse {
   models: MetricsModelRow[];
   /** Newest first; only days with something in them. */
   days: MetricsDay[];
-  /** Present for `all`, when there is anything from before. */
+  /** Present for `all`, when there is anything from before. Never for one project. */
   before: MetricsBefore | null;
+  /**
+   * The project these counts are for (`?projectId=`, Amendment 136), or null for all of
+   * them. With a project, `since` is the day per-project counting began: earlier counts
+   * have no project and are only in the all-projects view.
+   */
+  project: MetricsProject | null;
+}
+
+/** GET /api/metrics?projectId= — which project the report is for. 404 for one that is not there. */
+export interface MetricsProject {
+  id: string;
+  name: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
