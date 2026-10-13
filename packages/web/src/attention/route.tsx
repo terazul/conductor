@@ -366,7 +366,7 @@ function Attention() {
     <div className="atn-screen">
       <div className="atn-pane">
         <div className="atn-head">
-          <span className="ui-crumb">
+          <span className="ui-crumb is-agent">
             {focused.projectName}
             <i>/</i>
             <b>{focused.agentRole}</b>

@@ -93,7 +93,7 @@ console.log('\nE · the Agent crumb-as-button keeps ag-crumb alongside the share
   check('agent.tsx has "ui-crumb ag-crumb is-agent"', /className="ui-crumb ag-crumb is-agent"/.test(agent));
 }
 
-console.log('\nF · the Project and Agent screens have their own backdrop; every other screen stays on `--here` (Amendment 127)');
+console.log('\nF · the Project and Agent screens have their own backdrop, Needs You\'s project / role label shares Agent\'s (Amendment 135); every other screen stays on `--here` (Amendment 127)');
 {
   const ui = src('../shell/ui.css');
   check(
@@ -112,9 +112,20 @@ console.log('\nF · the Project and Agent screens have their own backdrop; every
   const crumbs = (path: string): string[] => src(path).match(/className="[^"]*crumb[^"]*"/g) ?? [];
   check('Project\'s label is "ui-crumb is-project"', crumbs('../fleet/project.tsx').join('|') === 'className="ui-crumb is-project"', crumbs('../fleet/project.tsx').join('|'));
   check('Agent\'s label is "ui-crumb ag-crumb is-agent"', crumbs('../agent/agent.tsx').join('|') === 'className="ui-crumb ag-crumb is-agent"', crumbs('../agent/agent.tsx').join('|'));
-  const others = ['../fleet/fleet.tsx', '../attention/route.tsx', '../preview/route.tsx', '../files/route.tsx', '../files/FilePane.tsx', '../branches/route.tsx'];
+  // Needs You's `project / role` header names the agent whose request is in focus, so it wears the
+  // Agent screen's backdrop (Amendment 135); its `needs you / …` headers name the screen, and stay.
+  const needs = src('../attention/route.tsx');
+  const needsAgent = needs.match(/<span className="([^"]*)">\s*\{focused\.projectName\}/)?.[1] ?? '';
+  check('Needs You\'s project / role label is "ui-crumb is-agent"', needsAgent === 'ui-crumb is-agent', needsAgent);
+  const needsRest = crumbs('../attention/route.tsx').filter((c) => c !== 'className="ui-crumb is-agent"');
+  check(
+    'Needs You has one is-agent label, and its two "needs you / …" labels keep --here',
+    crumbs('../attention/route.tsx').length === 3 && needsRest.length === 2 && needsRest.every((c) => c === 'className="ui-crumb"'),
+    crumbs('../attention/route.tsx').join('|'),
+  );
+  const others = ['../fleet/fleet.tsx', '../preview/route.tsx', '../files/route.tsx', '../files/FilePane.tsx', '../branches/route.tsx'];
   const strays = others.filter((p) => /\bis-(project|agent)\b/.test(crumbs(p).join(' ')));
-  check('Fleet, Needs You, Preview, Files and Branches keep --here', strays.length === 0, strays.join(', '));
+  check('Fleet, Preview, Files and Branches keep --here', strays.length === 0, strays.join(', '));
 }
 
 console.log(failures === 0 ? '\ncrumb verify: PASS\n' : `\ncrumb verify: FAIL — ${failures} check(s) failed.\n`);
