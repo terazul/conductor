@@ -22,6 +22,7 @@ import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
+import { timingSafeEqual } from 'node:crypto';
 import { WS_PATH, DEFAULT_PORT } from '@conductor/shared';
 import { openDb } from './db/index.js';
 import { initEventLog } from './eventlog.js';
@@ -42,6 +43,27 @@ const PORT = Number(process.env.CONDUCTOR_PORT ?? DEFAULT_PORT);
  * turning it on is an I5 hardening item, not a v1 feature.
  */
 const TOKEN = process.env.CONDUCTOR_TOKEN ?? null;
+
+/**
+ * Whether `given` is the token, in constant time. A different length is refused
+ * before comparing, which timingSafeEqual requires; it reveals only the length.
+ */
+function isToken(given: string | null | undefined): boolean {
+  if (!TOKEN || given == null) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The two sockets a browser opens: the feed and a terminal (Amendment 137). A browser
+ * cannot set Authorization on a WebSocket, so these carry the token as `?token=`.
+ */
+function isBrowserSocket(url: string, upgrade: string | undefined): boolean {
+  if (upgrade?.toLowerCase() !== 'websocket') return false;
+  const path = url.split('?', 1)[0]!;
+  return path === WS_PATH || path.startsWith('/ws/term/');
+}
 
 async function registerRoutes(app: FastifyInstance): Promise<void> {
   const dir = join(HERE, 'routes');
@@ -95,8 +117,17 @@ export async function build(): Promise<FastifyInstance> {
     app.addHook('onRequest', async (req, reply) => {
       // The proxy path is loaded by an iframe, which cannot set headers.
       if (req.url.startsWith('/preview/')) return;
+      if (isBrowserSocket(req.url, req.headers.upgrade)) {
+        // The socket's credential is its ?token= (Amendment 137); verifyClient checks it again.
+        const token = new URL(req.url, 'http://localhost').searchParams.get('token');
+        if (isToken(token)) return;
+        // As for the guard's refusal above: answer on the raw socket and end it.
+        reply.hijack();
+        req.raw.socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+        return;
+      }
       const header = req.headers.authorization;
-      if (header !== `Bearer ${TOKEN}`) {
+      if (!isToken(header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : null)) {
         await reply.code(401).send({ error: 'unauthorized' });
       }
     });
@@ -109,7 +140,7 @@ export async function build(): Promise<FastifyInstance> {
       verifyClient: TOKEN
         ? (info, done) => {
             const url = new URL(info.req.url ?? '/', 'http://localhost');
-            done(url.searchParams.get('token') === TOKEN);
+            done(isToken(url.searchParams.get('token')));
           }
         : undefined,
     },

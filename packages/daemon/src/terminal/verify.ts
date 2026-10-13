@@ -7,7 +7,8 @@
  * more than 512 KB of it), that DELETE ends the shell and what it was running, that 16 is the
  * most live at once, that an unknown id is 404, that a foreign Origin is refused on the
  * socket, that removing an agent, a job or a project ends its shells, that stopping the
- * daemon does, and that a page which cannot keep up pauses the shell instead of filling
+ * daemon does, that with CONDUCTOR_TOKEN set a page opens this socket and the feed with
+ * ?token= alone (Amendment 137), and that a page which cannot keep up pauses the shell instead of filling
  * memory. If no PTY loads on this machine it prints a SKIP line, and checks that the command
  * runner is what the Agent screen is left with.
  *
@@ -482,7 +483,7 @@ async function main(): Promise<void> {
   check('after the daemon closes, the shell and its command are gone', await until(() => !alive(lastPid), 4_000) && mgr.live === 0, `pid ${lastPid}`);
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n15 · with CONDUCTOR_TOKEN set, the terminal socket is checked as /ws is');
+  console.log('\n15 · with CONDUCTOR_TOKEN set, a browser opens both sockets with ?token= alone (Amendment 137)');
   {
     // The token is read once, when index.ts loads, so a daemon that has one is another process.
     const TOKEN_PORT = 7830;
@@ -507,20 +508,37 @@ async function main(): Promise<void> {
     }
     check('a daemon with a token answers 401 to a request without it', up);
     if (up) {
-      const reaches = (query: string, bearer: boolean) =>
+      // A browser cannot set Authorization on a WebSocket; Node's can, so the header is
+      // sent only where a check says so, and Origin is set as a page would set it.
+      const reaches = (path: string, query: string, opts: { bearer?: boolean; origin?: string } = {}) =>
         new Promise<boolean>((resolve) => {
-          const init = bearer ? ({ headers: { authorization: 'Bearer sekret' } } as unknown as string[]) : undefined;
-          const ws = new WebSocket(`ws://127.0.0.1:${TOKEN_PORT}/ws/term/term_none${query}`, init);
+          const headers: Record<string, string> = {};
+          if (opts.bearer) headers['authorization'] = 'Bearer sekret';
+          if (opts.origin) headers['origin'] = opts.origin;
+          const init = Object.keys(headers).length ? ({ headers } as unknown as string[]) : undefined;
+          const ws = new WebSocket(`ws://127.0.0.1:${TOKEN_PORT}${path}${query}`, init);
           ws.onopen = () => {
             ws.close();
             resolve(true);
           };
           ws.onerror = () => resolve(false);
         });
-      check('the terminal socket is refused with no token', (await reaches('', false)) === false);
-      check('and with a wrong ?token=, whatever else it sends', (await reaches('?token=wrong', true)) === false);
-      check('and with the right ?token= but no credential on the request, exactly as /ws is', (await reaches('?token=sekret', false)) === false);
-      check('and reached with both', (await reaches('?token=sekret', true)) === true);
+      for (const [name, path] of [['the feed socket', '/ws'], ['the terminal socket', '/ws/term/term_none']] as const) {
+        check(`${name} is reached with the right ?token= alone, as a browser sends it`, (await reaches(path, '?token=sekret')) === true);
+        check(`${name} is refused with no token`, (await reaches(path, '')) === false);
+        check(`${name} is refused with a bearer header but no ?token=`, (await reaches(path, '', { bearer: true })) === false);
+        check(`${name} is refused with a wrong ?token= of the same length`, (await reaches(path, '?token=sekreT')) === false);
+        check(`${name} is refused with a wrong ?token=, even with the bearer header`, (await reaches(path, '?token=wrong', { bearer: true })) === false);
+        check(`${name} is refused with a ?token= shorter or longer than the token`, (await reaches(path, '?token=sekre')) === false && (await reaches(path, '?token=sekrett')) === false);
+        check(`${name} is refused from a foreign Origin, even with the right ?token= (the guard runs first)`, (await reaches(path, '?token=sekret', { origin: 'https://evil.example' })) === false);
+        check(`${name} is reached from a local Origin with the right ?token=`, (await reaches(path, '?token=sekret', { origin: 'http://localhost:5173' })) === true);
+      }
+      const get = (path: string, bearer: boolean) =>
+        fetch(`http://127.0.0.1:${TOKEN_PORT}${path}`, bearer ? { headers: { authorization: 'Bearer sekret' } } : {}).then((r) => r.status);
+      check('a plain HTTP request is not let in by ?token= (still 401)', (await get('/api/health?token=sekret', false)) === 401);
+      check('nor a GET to the socket paths without an upgrade', (await get('/ws?token=sekret', false)) === 401 && (await get('/ws/term/term_none?token=sekret', false)) === 401);
+      check('a plain HTTP request with the bearer header is answered', (await get('/api/health', true)) === 200);
+      check('and a wrong bearer header is 401', (await fetch(`http://127.0.0.1:${TOKEN_PORT}/api/health`, { headers: { authorization: 'Bearer sekreT' } }).then((r) => r.status)) === 401);
     }
     stop();
   }
