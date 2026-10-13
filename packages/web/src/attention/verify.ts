@@ -560,6 +560,12 @@ console.log('\n8 · an agent waiting to be tried again (Amendment 123)');
   const n = alertNotice(waiting, [agent()], [{ id: 'p1', name: 'demo' } as Project]);
   check('a notification says what is wrong and which retry', n.title === "demo · can't reach the model API" && n.body === 'retry 3 of 5 · builder', `${n.title} / ${n.body}`);
 
+  // From the first retry (Amendment 140, Q3): the card is there, and chimes at once as any alert does.
+  const firstTry: Alert = { ...waiting, id: 'reconnecting:a1:7', attempt: 1, retryAt: '2026-10-10T12:00:05Z' };
+  check('the first retry\'s card chimes at once, as every alert does', dueForChime([], [firstTry], Date.parse('2026-10-10T12:00:00Z'), new Set()).join() === 'alert:reconnecting:a1:7');
+  check('and only once for the bout: the second retry updates the same card, so it does not chime again', dueForChime([], [{ id: firstTry.id }], Date.parse('2026-10-10T12:00:06Z'), new Set(['alert:reconnecting:a1:7'])).length === 0);
+  check('its notice says the first of five', alertNotice(firstTry, [agent()], [{ id: 'p1', name: 'demo' } as Project]).body === 'retry 1 of 5 · builder');
+
   // The wiring: source checks, since the card is not rendered in Node.
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
   const ep = readFileSync(new URL('../agent/endpoints.ts', import.meta.url), 'utf8');
@@ -645,7 +651,7 @@ console.log("\n9 · an agent's budget warns: the card for it, and the one that s
   check('the card has a label for the kind, in amber like a stop', /budget_over: \{ label: 'Over its daily budget', tone: 'var\(--need\)' \}/.test(card));
   check('a raise that only raises does not continue; one that continues still does', /if \(a\.onlyRaise\) void cmd\.run\('Raising the budget', \(\) => raiseBudget\(agent, a\.to, a\.unit\)/.test(card) && /raiseAndContinue\(agent, a\.to, a\.unit\)/.test(card));
   check('a token raise sends budgetTokens, a dollar one budgetUsd', /unit === 'tokens' \? \{ budgetTokens: to \} : \{ budgetUsd: to \}/.test(api));
-  check('the card says it is only a warning, and the ceiling', /A warning only:/.test(card) && /twice the budget/.test(card) && /k="stops at"/.test(card));
+  check('the card says it is only a warning, and the ceiling, in the words of the one set (Amendment 140)', /A warning only:/.test(card) && /\{` \$\{ceilingWords\(\)\} `\}the budget/.test(card) && /k="stops at"/.test(card));
 }
 
 console.log("\n10 · a budget is per day: the cards, and what a new day changes (Amendment 129)");
@@ -701,7 +707,7 @@ console.log("\n10 · a budget is per day: the cards, and what a new day changes 
 
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
   const alerts = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
-  check('the card tells what a renewed budget means: still paused, press continue', /alert\.kind === 'budget' && alert\.renewed &&/.test(card) && /Nothing resumes by itself/.test(card));
+  check('the card tells what a renewed budget means: still paused, press continue', /alert\.kind === 'budget' && alert\.renewed &&/.test(card) && /Nothing resumes by itself while "continue at midnight"/.test(card));
   check('the warning\'s notification says daily', /is over its daily budget/.test(alerts));
   check('nothing here compares the lifetime figure with a budget', !/costUsd\s*>=?\s*\w*(cap|budget)/i.test(alerts + card));
 }

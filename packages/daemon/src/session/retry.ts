@@ -5,8 +5,8 @@
  * (`api_retry`, Amendment 28). When the SDK gave up, the run ended with an error and the agent
  * was `failed` at once, and a failed agent fails its job. Now an agent whose run ended because
  * waiting can help (no network, throttled or overloaded, a server error) waits 5 s, 15 s,
- * 30 s, 60 s and 5 min, resuming its own session after each, and is `failed` only when the
- * fifth try fails too.
+ * 30 s, 60 s and 5 min (by default; `conductor.retryDelays` sets them, Amendment 140),
+ * resuming its own session after each, and is `failed` only when the last try fails too.
  *
  * Everything that decides is in this file and takes no I/O, so session/verify.ts drives it
  * with a fake clock:
@@ -20,17 +20,33 @@
  * `#settle` asks it and acts on the answer; Alerts reads the waits to raise the card.
  */
 
-import type { RetryCause } from '@conductor/shared';
+import { RETRY_CARD_FROM, RETRY_DELAYS_DEFAULT_S, RETRY_DELAYS_KEY, parseRetryDelays, retryDelaysProblem, type RetryCause } from '@conductor/shared';
+import { readSettings, settingRule } from '../settings.js';
 
-/** How long to wait before each try: 5 s, 15 s, 30 s, 60 s, 5 min. Five tries at most, then the agent is `failed`. */
-export const RETRY_DELAYS_MS: readonly number[] = [5_000, 15_000, 30_000, 60_000, 300_000];
+/** How long to wait before each try with no setting: 5 s, 15 s, 30 s, 60 s, 5 min. Five tries, then the agent is `failed`. */
+export const RETRY_DELAYS_MS: readonly number[] = RETRY_DELAYS_DEFAULT_S.map((s) => s * 1000);
+/** How many tries with no setting. The setting's own count is `retryDelaysMs().length`. */
 export const MAX_RETRIES = RETRY_DELAYS_MS.length;
 
 /**
- * The first retry is a blip and waits only 5 s: it is on the agent's line, not in Needs You.
- * From the second, the card is there, as a connection alert is from the second attempt.
+ * The schedule in force (Amendment 140): `conductor.retryDelays`, one to five delays in
+ * seconds, else the default above. Read when each wait is decided, so a change applies to the
+ * next failure; a wait already started keeps its time. The one place the settings file is
+ * read in this file, and a cached read (settings.ts:46), so `decideRetry` stays a rule.
  */
-export const RETRY_ALERT_FROM = 2;
+export function retryDelaysMs(): readonly number[] {
+  const s = parseRetryDelays(readSettings()[RETRY_DELAYS_KEY]);
+  return s ? s.map((n) => n * 1000) : RETRY_DELAYS_MS;
+}
+
+settingRule(RETRY_DELAYS_KEY, retryDelaysProblem);
+
+/**
+ * The card in Needs You is there from the first retry (Amendment 140, Q3 of wave 10). It was
+ * from the second (Amendment 123), the first being a 5 s blip; but with the delays a setting
+ * the first can be long, and an agent that has stopped working is worth a look at once.
+ */
+export const RETRY_ALERT_FROM = RETRY_CARD_FROM;
 
 // ── why it failed ───────────────────────────────────────────────────────────
 
@@ -140,6 +156,8 @@ export interface EndedRun {
   userStopped: boolean;
   /** Tries already made since the model last answered this agent. */
   used: number;
+  /** The delays to use; the setting's (`retryDelaysMs`) when not given. */
+  delays?: readonly number[];
 }
 
 /**
@@ -160,8 +178,9 @@ export function decideRetry(r: EndedRun): RetryVerdict {
   const cause = failureCause(r.failure);
   if (cause === null) return no('not_api');
   if (cause === 'auth') return no('needs_a_person');
-  if (r.used >= MAX_RETRIES) return no('out_of_tries');
-  return { retry: true, cause, attempt: r.used + 1, of: MAX_RETRIES, delayMs: RETRY_DELAYS_MS[r.used]! };
+  const delays = r.delays ?? retryDelaysMs();
+  if (r.used >= delays.length) return no('out_of_tries');
+  return { retry: true, cause, attempt: r.used + 1, of: delays.length, delayMs: delays[r.used]! };
 }
 
 // ── words ───────────────────────────────────────────────────────────────────

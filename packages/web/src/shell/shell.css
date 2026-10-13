@@ -886,3 +886,13 @@
   color: var(--ink3);
   line-height: 1.5;
 }
+
+/*
+ * A row's budget meter (Amendment 140): the Fleet lane's `.pj-meter` (fleet/fleet.css:1035),
+ * its tones and colours unchanged, held to a short fixed width so the label keeps the room.
+ */
+.pj-meter.sh-nav-meter {
+  flex: none;
+  width: 28px;
+  min-width: 28px;
+}

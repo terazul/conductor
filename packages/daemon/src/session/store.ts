@@ -594,6 +594,19 @@ export function lastStatusNote(db: Db, agentId: string): string | null {
   return typeof p.error === 'string' ? p.error : null;
 }
 
+/**
+ * The local day (`localDay`) the agent's last status event was written on, or null for none.
+ * A daemon started after midnight tells by this which budget pauses are from an earlier day
+ * (Amendment 140): it had no day turn to see.
+ */
+export function lastStatusDay(db: Db, agentId: string): string | null {
+  const r = row<{ ts: string }>(
+    db.prepare(`SELECT ts FROM events WHERE agent_id = ? AND kind = 'status' ORDER BY seq DESC LIMIT 1`).get(agentId),
+  );
+  const t = r ? Date.parse(r.ts) : NaN;
+  return Number.isFinite(t) ? localDay(new Date(t)) : null;
+}
+
 export function listAgents(db: Db): Agent[] {
   return readAgents(db);
 }

@@ -18,6 +18,10 @@
  *    Files screen's own `useFileTree` the first time it's opened; a file row opens that
  *    file on the Files screen. No change marks here, unlike the Files tree itself.
  *
+ * An agent's row has its budget meter, the Fleet lane's thin bar in the Fleet's tones
+ * (`pj-meter` with `data-tone`, fleet/fleet.css:1035), and a job's heading the sum of its
+ * agents' (Amendment 140). No budget, no bar: a job with no budgeted agent has none.
+ *
  * Amber in this panel is only ever a count of things waiting on you — that heading, the
  * project's name, an agent's row — never a selection or a hover (CONTRACT §5.1).
  *
@@ -47,6 +51,7 @@ import {
   currentProject,
   isOpen,
   jobShown,
+  meterTitle,
   navDirId,
   navDrop,
   navFileLink,
@@ -66,6 +71,8 @@ import {
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
 import { Chevron, Dot, OrchestratorMark, STATUS_WORD, tildePath } from './ui.js';
+import type { Budget } from './autonomy.js';
+import '../fleet/fleet.css';
 
 /** The screen up now and its params, kept current by every navigation. */
 export function useRoute(): { id: string; params: NavParams } {
@@ -121,6 +128,19 @@ function Submenu({
   );
 }
 
+/**
+ * The thin budget bar of a row (Amendment 140): the Fleet lane's `pj-meter`, with the same
+ * `data-tone`, sized for the panel by `sh-nav-meter` (shell.css). Nothing for no budget.
+ */
+function NavMeter({ budget, whose }: { budget: Budget | null; whose: string }) {
+  if (!budget) return null;
+  return (
+    <span className="pj-meter sh-nav-meter" data-tone={budget.tone} title={meterTitle(budget, whose)} aria-label={meterTitle(budget, whose)}>
+      <i style={{ width: `${Math.round(budget.fraction * 100)}%` }} />
+    </span>
+  );
+}
+
 function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectId: string; selected: boolean }) {
   return (
     <button
@@ -137,6 +157,7 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
           you open the agent, and again when it finishes again (Amendment 105). */}
       {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
       {a.finished && <span className="sh-nav-tag is-done">finished</span>}
+      <NavMeter budget={a.budget} whose={`${a.label}'s daily budget`} />
       {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
     </button>
   );
@@ -175,6 +196,7 @@ function JobGroup({
         ) : (
           job.status === 'working' && <span className="sh-nav-tag is-live">working</span>
         )}
+        <NavMeter budget={job.budget} whose="its agents' daily budgets together" />
         {job.needs > 0 && <span className="sh-nav-need">{job.needs}</span>}
       </button>
       {shown && (

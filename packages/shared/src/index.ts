@@ -8,3 +8,4 @@ export * from './wire.js';
 export * from './stack.js';
 export * from './rerun.js';
 export * from './budget.js';
+export * from './retry.js';
