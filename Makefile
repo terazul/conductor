@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help init install dock undock start stop restart status browser logs fixture attention test clean manual zip
+.PHONY: help init install check-install dock undock start stop restart status browser logs fixture attention test clean manual zip
 
 # Conductor — process control.
 #
@@ -85,7 +85,14 @@ manual:
 $(RUN):
 	@mkdir -p $(RUN)
 
-start: $(RUN)
+# Before anything starts: is node_modules the install pnpm-lock.yaml asks for? After a pull that
+# adds a package it isn't, and Vite would say "Failed to resolve import". This says so and starts
+# nothing; CONDUCTOR_AUTO_INSTALL=1 installs instead (Amendment 134). restart checks before it
+# stops, so a stale install doesn't take down what is running.
+check-install:
+	@node scripts/check-install.mjs
+
+start: check-install $(RUN)
 	@if [ -s $(DAEMON_PID) ] && kill -0 $$(cat $(DAEMON_PID)) 2>/dev/null; then \
 		echo 'daemon already running (make restart to bounce it)'; \
 	else \
@@ -136,7 +143,7 @@ stop:
 	@sleep 1
 	@echo 'stopped'
 
-restart: stop start
+restart: check-install stop start
 
 browser:
 	@if ! curl -fsS -o /dev/null --max-time 2 $(URL) 2>/dev/null; then \
