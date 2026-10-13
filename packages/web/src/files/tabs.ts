@@ -99,7 +99,11 @@ export function parseDirRoot(root: string): { projectId: string; dir: string } |
 }
 
 /** Where a root's reads live: a job's worktree, or a project's directory. */
-export function rootEndpoint(root: string, what: 'tree' | 'file' | 'image' | 'diff', path?: string): string {
+export function rootEndpoint(
+  root: string,
+  what: 'tree' | 'file' | 'image' | 'diff' | 'folders' | 'rename' | 'entry',
+  path?: string,
+): string {
   const d = parseDirRoot(root);
   const q = new URLSearchParams();
   if (d) q.set('dir', d.dir);
@@ -328,6 +332,62 @@ export function toggleFolder(s: FilesState, jobId: string, path: string, open: b
         opened: [...f.opened.filter((p) => p !== path), path].slice(-MAX_FOLDERS),
       };
   return { ...s, folders: { ...s.folders, [jobId]: next } };
+}
+
+// ── renames and deletes (Amendment 138) ─────────────────────────────────────
+
+/** Is `path` the entry `at`, or inside it? `at` is a file or a folder's tree path. */
+export function isUnder(path: string, at: string): boolean {
+  return path === at || path.startsWith(`${at}/`);
+}
+
+/** Where `path` is after `from` became `to`, or null when the rename didn't move it. */
+export function renamedPath(path: string, from: string, to: string): string | null {
+  return isUnder(path, from) ? `${to}${path.slice(from.length)}` : null;
+}
+
+/** Keys of the open tabs at or under `path` in `root`: what a delete of it closes. */
+export function tabsUnder(s: FilesState, root: string, path: string): string[] {
+  return s.tabs.filter((t) => t.jobId === root && t.path !== null && isUnder(t.path, path)).map(keyOf);
+}
+
+/**
+ * Open tabs follow a rename: a tab on `from`, or on anything in it when it is a folder,
+ * is now on the new path, in the same place in the strip with its view and scroll. The
+ * front tab stays in front under its new key, and the folders you opened and closed
+ * under it keep that state. A tab already open on the new path (which can only be a
+ * deleted file's) gives way to the one that moved there.
+ */
+export function renameTabs(s: FilesState, root: string, from: string, to: string): FilesState {
+  if (from === to) return s;
+  const moved = new Map<string, string>();
+  const tabs: Tab[] = [];
+  for (const t of s.tabs) {
+    const next = t.jobId === root && t.path !== null ? renamedPath(t.path, from, to) : null;
+    if (next === null) {
+      tabs.push(t);
+      continue;
+    }
+    moved.set(keyOf(t), tabKey(root, next));
+    tabs.push({ ...t, path: next });
+  }
+  if (moved.size === 0 && !s.folders[root]) return s;
+  const arrived = new Set(moved.values());
+  const kept = tabs.filter((t, i) => !arrived.has(keyOf(t)) || moved.has(keyOf(s.tabs[i]!)));
+  const f = s.folders[root];
+  const follow = (list: string[]): string[] => list.map((p) => renamedPath(p, from, to) ?? p);
+  return {
+    ...s,
+    tabs: kept,
+    // A front tab displaced from the new path hands its key, and the front, to the one that moved.
+    active: s.active !== null ? (moved.get(s.active) ?? s.active) : null,
+    folders: f ? { ...s.folders, [root]: { collapsed: follow(f.collapsed), opened: follow(f.opened) } } : s.folders,
+  };
+}
+
+/** Close every tab at or under `path` in `root`, as a delete of it must. */
+export function closeUnder(s: FilesState, root: string, path: string): FilesState {
+  return tabsUnder(s, root, path).reduce(closeTab, s);
 }
 
 // ── deep links ──────────────────────────────────────────────────────────────

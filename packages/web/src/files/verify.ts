@@ -17,14 +17,18 @@ import {
   applyLink,
   arrive,
   closeTab,
+  closeUnder,
   dirRoot,
   inColumn,
+  isUnder,
   keyOf,
   linkOf,
   openTab,
   parseDirRoot,
   parseState,
   pickDone,
+  renameTabs,
+  renamedPath,
   rootEndpoint,
   selectJob,
   selectProject,
@@ -33,6 +37,7 @@ import {
   setView,
   tabKey,
   tabLabels,
+  tabsUnder,
   toggleFolder,
   type FilesState,
 } from './tabs.js';
@@ -543,7 +548,7 @@ console.log('\na new file from the tree (Amendment 121)');
   const form = readFileSync(new URL('./NewFileForm.tsx', import.meta.url), 'utf8');
   check('Escape puts the box away, Enter makes the file', /e\.key === 'Escape'[\s\S]*?onCancel\(\)/.test(form) && /e\.key === 'Enter'[\s\S]*?submit\(\)/.test(form));
   check('arrow keys in the box are not taken by the tree', /onKeyDown=\{\(e\) => \{\s*e\.stopPropagation\(\)/.test(form));
-  check('a refusal shows under the box, as an alert, in the daemon\'s words', /setError\(errorText\(err\)\)/.test(form) && /role="alert"/.test(form) && /checkName\(value\)/.test(form));
+  check('a refusal shows under the box, as an alert, in the daemon\'s words', /setError\(errorText\(err\)\)/.test(form) && /role="alert"/.test(form) && /const named = k\.check\(value\)/.test(form) && /file: \{ start: prefill, check: \(v\) => checkName\(v\)/.test(form));
   check('a refusal leaves what was typed to be fixed, and clears when it is edited', /setBusy\(false\)/.test(form) && /onChange=\{\(e\) => \{\s*setValue\(e\.target\.value\);\s*setError\(null\)/.test(form));
 
   // Making it: the request, the refresh, the tab.
@@ -628,9 +633,226 @@ console.log('\na new file from the tree (Amendment 121)');
   check('it is drawn in existing tokens only, so both themes get it', !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(mine) && /var\(--fail\)/.test(mine) && /var\(--live\)/.test(mine));
 }
 
+console.log('\nnew folder, rename and delete (Amendment 138)');
+{
+  // ── tabs follow a rename, as pure functions ──
+  const base = [
+    ['j', 'docs/a.md'],
+    ['j', 'docs/sub/b.md'],
+    ['j', 'docs2/c.md'],
+    ['j', 'other.md'],
+    ['k', 'docs/a.md'],
+  ].reduce<FilesState>((st, [root, p], i) => openTab(st, root!, p!, 100 + i), EMPTY);
+  const front = activate(base, tabKey('j', 'docs/sub/b.md'), 200);
+  const withFolders = toggleFolder(toggleFolder(front, 'j', 'docs/sub', true), 'j', 'docs2', false);
+  check('a path is under a folder only by whole segments', isUnder('docs/a.md', 'docs') && isUnder('docs', 'docs') && !isUnder('docs2/c.md', 'docs'));
+  check('renamedPath moves what is in the folder and nothing beside it', renamedPath('docs/sub/b.md', 'docs', 'notes') === 'notes/sub/b.md' && renamedPath('docs2/c.md', 'docs', 'notes') === null && renamedPath('docs', 'docs', 'notes') === 'notes');
+
+  const moved = renameTabs(withFolders, 'j', 'docs', 'notes');
+  check('a folder renamed: its tabs follow, in the same places in the strip', keys(moved) === 'j:notes/a.md j:notes/sub/b.md j:docs2/c.md j:other.md k:docs/a.md', keys(moved));
+  check('the front tab stays in front under its new path', moved.active === tabKey('j', 'notes/sub/b.md'), moved.active ?? 'null');
+  check('a tab in another root with the same path is not touched', moved.tabs.some((t) => t.jobId === 'k' && t.path === 'docs/a.md'));
+  check('folders you opened and closed under it keep that state', moved.folders['j']!.collapsed.includes('notes/sub') && !moved.folders['j']!.collapsed.includes('docs/sub') && moved.folders['j']!.opened.includes('docs2'));
+  const kept = moved.tabs.find((t) => t.path === 'notes/sub/b.md')!;
+  const was = withFolders.tabs.find((t) => t.path === 'docs/sub/b.md')!;
+  check('and each keeps its view, scroll and when it was seen', kept.view === was.view && kept.seen === was.seen && kept.scroll === was.scroll);
+  const fileMoved = renameTabs(withFolders, 'j', 'other.md', 'x/other.md');
+  check('a file renamed into a new folder: its tab follows', keys(fileMoved).includes('j:x/other.md') && !keys(fileMoved).includes('j:other.md'));
+  check('a rename that touches no tab and no folders is a no-op', renameTabs(base, 'k', 'nope', 'nope2') === base && renameTabs(base, 'j', 'a', 'a') === base);
+  const clash = openTab(withFolders, 'j', 'notes/a.md', 300);
+  const onto = renameTabs(clash, 'j', 'docs', 'notes');
+  check('a tab already on the new path gives way to the one that moved there', onto.tabs.filter((t) => t.jobId === 'j' && t.path === 'notes/a.md').length === 1 && onto.active === tabKey('j', 'notes/a.md'), keys(onto));
+
+  // ── and close on a delete ──
+  check('tabsUnder finds the tabs at and under a path, in one root', tabsUnder(front, 'j', 'docs').join('|') === [tabKey('j', 'docs/a.md'), tabKey('j', 'docs/sub/b.md')].join('|'));
+  const closed = closeUnder(front, 'j', 'docs');
+  check('a folder deleted: its tabs close, the rest stay', keys(closed) === 'j:docs2/c.md j:other.md k:docs/a.md', keys(closed));
+  check('and the front goes to the tab you were on before', closed.active === tabKey('k', 'docs/a.md'), closed.active ?? 'null');
+  check('a file deleted closes only its tab', keys(closeUnder(front, 'j', 'other.md')) === 'j:docs/a.md j:docs/sub/b.md j:docs2/c.md k:docs/a.md');
+
+  // ── the live store: edits move with a rename, go with a delete ──
+  const { followRename, closeDeleted, unsavedUnder, putEdit, editOf, keep, getFiles, update } = await import('./useTabs.js');
+  update((st) => openTab(openTab(st, 'jr', 'src/x.ts', 1), 'jr', 'src/y.ts', 2));
+  putEdit(tabKey('jr', 'src/x.ts'), { draft: 'typed', base: 'saved' });
+  check('an unsaved edit is found under its folder', unsavedUnder('jr', 'src').join() === tabKey('jr', 'src/x.ts') && unsavedUnder('jr', 'src/y.ts').length === 0);
+  followRename('jr', 'src', 'lib');
+  const after = editOf(tabKey('jr', 'lib/x.ts'));
+  check('after a rename the edit is under the new path, still unsaved', after?.draft === 'typed' && keep(tabKey('jr', 'lib/x.ts')) && editOf(tabKey('jr', 'src/x.ts')) === null);
+  check('and the tabs are on the new paths', getFiles().tabs.some((t) => t.jobId === 'jr' && t.path === 'lib/y.ts') && !getFiles().tabs.some((t) => t.jobId === 'jr' && t.path?.startsWith('src/')));
+  closeDeleted('jr', 'lib');
+  check('a delete closes them, and their edits go with them', !getFiles().tabs.some((t) => t.jobId === 'jr') && editOf(tabKey('jr', 'lib/x.ts')) === null && !keep(tabKey('jr', 'lib/x.ts')));
+
+  // ── the double confirm, as a pure function ──
+  const { countTreeFiles, deleteSteps, onYes, shownName } = await import('./deleting.js');
+  const t = (o: Partial<Parameters<typeof deleteSteps>[0]>): Parameters<typeof deleteSteps>[0] => ({
+    path: 'docs/notes',
+    type: 'dir',
+    files: 12,
+    treeFiles: 10,
+    tracked: 4,
+    unsaved: [],
+    ...o,
+  });
+  const file = deleteSteps(t({ path: 'docs/a.md', type: 'file', files: 1, tracked: 1 }));
+  check('a file is one confirm, naming it', file.length === 1 && file[0]!.ask === 'Delete a.md?' && file[0]!.last && !file[0]!.recursive);
+  check('saying whether git has it', /Git has this file/.test(file[0]!.notes.join(' ')) && /Git does not have this file/.test(deleteSteps(t({ type: 'file', files: 1, tracked: 0 }))[0]!.notes.join(' ')) && /no git here/.test(deleteSteps(t({ type: 'file', files: 1, tracked: null }))[0]!.notes.join(' ')));
+  check('and a file can be deleted before the daemon has counted it', deleteSteps(t({ type: 'file', files: null, tracked: null }))[0]!.ready && deleteSteps(t({ type: 'file', files: null, tracked: null }))[0]!.notes.length === 0);
+  const empty = deleteSteps(t({ files: 0, treeFiles: 0, tracked: 0 }));
+  check('an empty folder is one confirm, not recursive', empty.length === 1 && /empty folder notes\//.test(empty[0]!.ask) && empty[0]!.last && !empty[0]!.recursive);
+  const full = deleteSteps(t({}));
+  check('a folder with files is two steps', full.length === 2 && !full[0]!.last && full[1]!.last);
+  check('the first names the folder and how many files it holds', full[0]!.ask === 'Delete notes/ and the 12 files in it?', full[0]!.ask);
+  check('the second asks "Are you sure?" and repeats the count', /^Are you sure\? 12 files go with notes\//.test(full[1]!.ask) && /12 files/.test(full[1]!.yes), full[1]!.ask);
+  check('git is said of the files: some of them, all of them, none', /Git has 4 files of them; the other 8 files cannot be brought back/.test(full[0]!.notes.join(' ')) && /Git has all of them/.test(deleteSteps(t({ tracked: 12 }))[0]!.notes.join(' ')) && /Git has none/.test(deleteSteps(t({ tracked: 0 }))[0]!.notes.join(' ')));
+  check('a yes on the first shows the second; only the second sends, and with recursive', JSON.stringify(onYes(full, 0)) === '{"next":1}' && JSON.stringify(onYes(full, 1)) === '{"send":{"recursive":true}}');
+  check('a file and an empty folder send at once, without recursive', JSON.stringify(onYes(file, 0)) === '{"send":{"recursive":false}}' && JSON.stringify(onYes(empty, 0)) === '{"send":{"recursive":false}}');
+  const counting = deleteSteps(t({ files: null, tracked: null }));
+  check("until the daemon has counted, a folder shows the tree's count and the button waits", /the 10 files/.test(counting[0]!.ask) && !counting[0]!.ready && onYes(counting, 0) === null && counting[0]!.yes === 'counting…');
+  check('one file is said as one', /^Are you sure\? 1 file goes with/.test(deleteSteps(t({ files: 1, tracked: 0 }))[1]!.ask));
+  const capped = deleteSteps(t({ files: 50_000, capped: true }));
+  check('a capped count says "at least", in both steps', /the at least 50,000 files/.test(capped[0]!.ask) && /^Are you sure\? At least 50,000 files go/.test(capped[1]!.ask), capped.map((s) => s.ask).join(' | '));
+  check('unsaved edits that close with it are named', /Your unsaved edits to docs\/notes\/a\.md, docs\/notes\/b\.md go with it\./.test(deleteSteps(t({ unsaved: ['docs/notes/a.md', 'docs/notes/b.md'] }))[0]!.notes.join(' ')));
+  check('a folder is named with its /', shownName('a/b', 'dir') === 'b/' && shownName('a/b.md', 'file') === 'b.md');
+  const counted: FileNode = { path: 'd', name: 'd', type: 'dir', children: [
+    { path: 'd/a', name: 'a', type: 'file' },
+    { path: 'd/gone', name: 'gone', type: 'file', change: { added: 0, removed: 1, created: false, at: '', deleted: true } },
+    { path: 'd/e', name: 'e', type: 'dir', children: [{ path: 'd/e/b', name: 'b', type: 'file' }] },
+  ] };
+  check("the tree's count leaves out files already deleted", countTreeFiles(counted) === 2);
+
+  // ── naming a folder, and a rename ──
+  const { DEFAULT_FOLDER, checkFolderName, prefillFolder, prefillRename } = await import('./naming.js');
+  const pf = prefillFolder('docs');
+  check('a new folder starts at new-folder in the folder that asked, its name selected', pf.value === `docs/${DEFAULT_FOLDER}` && pf.value.slice(pf.from, pf.to) === DEFAULT_FOLDER && prefillFolder('').value === DEFAULT_FOLDER);
+  const pr = prefillRename('docs/notes/plan.md', 'file');
+  check("a rename starts at the whole path, the file's name selected without its extension", pr.value === 'docs/notes/plan.md' && pr.value.slice(pr.from, pr.to) === 'plan');
+  const prd = prefillRename('docs/v1.2', 'dir');
+  check("a folder's whole name is selected, dots and all", prd.value.slice(prd.from, prd.to) === 'v1.2');
+  const fold = (raw: string): string => {
+    const c = checkFolderName(raw);
+    return c.ok ? c.path : `refused: ${c.reason}`;
+  };
+  check('a folder name may end in /', fold('docs/new/') === 'docs/new' && fold('a') === 'a');
+  check('and is refused for what a file name is', fold('../x').startsWith('refused') && fold('.git/x').startsWith('refused') && fold('/x').startsWith('refused') && fold('/').startsWith('refused'));
+  check('in words about a folder', fold('') === 'refused: Type a name for the folder.' && checkName('').ok === false);
+
+  // ── the tree, drawn with the verbs ──
+  const { FileTree } = await import('./FileTree.js');
+  const leaf = (path: string, extra: Partial<FileNode> = {}): FileNode => ({ path, name: path.split('/').pop()!, type: 'file', ...extra });
+  const top: FileNode = { path: '', name: '', type: 'dir', children: [
+    { path: 'docs', name: 'docs', type: 'dir', children: [leaf('docs/a.md')] },
+    leaf('old.md', { change: { added: 0, removed: 2, created: false, at: '', deleted: true } }),
+    leaf('README.md'),
+  ] };
+  const noop = async (): Promise<void> => {};
+  const verbs = (o: Record<string, unknown> = {}) => ({
+    folderIn: null,
+    onFolder: () => {},
+    onMakeFolder: noop,
+    renaming: null,
+    onRename: () => {},
+    onRenamed: noop,
+    onDelete: () => {},
+    deleting: null,
+    confirm: null,
+    onCancel: () => {},
+    ...o,
+  });
+  const draw = (v: Record<string, unknown> | undefined, extra: Record<string, unknown> = {}): string =>
+    renderToStaticMarkup(createElement(FileTree, {
+      root: top, selected: null, onSelect: () => {}, folders: undefined, onToggle: () => {},
+      touches: new Map(), roles: new Map(), now: 0,
+      adding: null, onAdd: () => {}, onCreate: noop, onCancelAdd: () => {},
+      ...(v ? { verbs: v as never } : {}), ...extra,
+    }));
+  const bare = draw(undefined);
+  check('without verbs the tree is as Amendment 121 left it: no rename, no delete', !bare.includes('c5-act') && !bare.includes('c5-filerow'));
+  const drawn = draw(verbs());
+  const labels = [...drawn.matchAll(/aria-label="((?:New folder in|Rename|Delete) [^"]*)"/g)].map((m) => m[1]);
+  check('a folder row has new folder, rename and delete', ['New folder in docs', 'Rename docs', 'Delete docs'].every((l) => labels.includes(l)), labels.join(', '));
+  check('a file row has rename and delete, and no new folder', labels.includes('Rename README.md') && labels.includes('Delete README.md') && !labels.some((l) => l === 'New folder in README.md'));
+  check('a deleted file (not on disk) has neither', !labels.some((l) => l?.endsWith('old.md')));
+  check('the + stays first after the folder\'s button, the new ones after it', /<div class="c5-dirrow"><button[^>]*class="c5-row dir"[^>]*>(?:(?!<\/button>).)*<\/button><button[^>]*c5-add[^>]*>\+<\/button><button[^>]*c5-act[^>]*aria-label="New folder in docs"/.test(drawn));
+  check('each is a sibling of the row button, never inside it', /<div class="c5-filerow"><button[^>]*class="c5-row"[^>]*>(?:(?!<\/button>).)*README\.md(?:(?!<\/button>).)*<\/button><button[^>]*c5-act/.test(drawn));
+  const renaming = draw(verbs({ renaming: 'README.md' }));
+  check('rename puts the name box in the row\'s place, the name selected for typing', renaming.includes('value="README.md"') && renaming.includes('aria-label="new name for the file README.md"') && !/class="c5-row"[^>]*data-path="README\.md"/.test(renaming));
+  const renamingDir = draw(verbs({ renaming: 'docs' }));
+  check('a folder renames in place too', renamingDir.includes('aria-label="new name for the folder docs"') && !renamingDir.includes('class="c5-dirrow"'));
+  const folderBox = draw(verbs({ folderIn: 'docs' }));
+  check("new folder opens its box under the folder's row", folderBox.includes('value="docs/new-folder"') && folderBox.indexOf('value="docs/new-folder"') > folderBox.indexOf('>docs/<') && folderBox.includes('aria-label="name of the new folder in docs"'));
+  const rootFolder = draw(verbs({ folderIn: '' }));
+  check("the root's new-folder box is first", rootFolder.indexOf('value="new-folder"') > -1 && rootFolder.indexOf('value="new-folder"') < rootFolder.indexOf('c5-dirrow'));
+  const confirming = draw(verbs({ deleting: 'docs', confirm: createElement('span', { className: 'probe' }, 'ASK') }));
+  check('the confirm sits under the row it is about', confirming.indexOf('c5-delrow') > confirming.indexOf('>docs/<') && confirming.indexOf('c5-delrow') < confirming.indexOf('a.md') && (confirming.match(/c5-delrow/g) ?? []).length === 1);
+  const treeSrc = readFileSync(new URL('./FileTree.tsx', import.meta.url), 'utf8');
+  check('F2 renames, and Delete or ⌘⌫ deletes, the focused row', /const del = e\.key === 'Delete' \|\| \(e\.key === 'Backspace' && e\.metaKey\);\s*if \(verbs && \(e\.key === 'F2' \|\| del\)\)/.test(treeSrc) && /verbs\.onRename\(node\.path\)/.test(treeSrc) && /verbs\.onDelete\(node\)/.test(treeSrc));
+
+  // ── the client calls ──
+  const { createFolder, renameEntry, deleteEntry, entryInfo, askedOf } = await import('./useWorkspace.js');
+  const real = globalThis.fetch;
+  const sent: { url: string; method: string; body: Record<string, unknown> }[] = [];
+  let reply: { status: number; body: unknown } = { status: 200, body: {} };
+  globalThis.fetch = (async (url: string, init?: { method?: string; body?: string }) => {
+    sent.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(init.body) : {} });
+    return { ok: reply.status < 400, status: reply.status, json: async () => reply.body };
+  }) as unknown as typeof fetch;
+  try {
+    const dir = dirRoot('prj_v', '/Users/me/code');
+    const q = '?dir=%2FUsers%2Fme%2Fcode';
+    const asked0 = askedOf('jv');
+    reply = { status: 201, body: { path: 'notes' } };
+    await createFolder('jv', 'notes');
+    await createFolder(dir, 'notes');
+    check('new folder is a POST of { path } to …/folders, for a job and a project folder', sent[0]?.method === 'POST' && sent[0].url === '/api/jobs/jv/folders' && JSON.stringify(sent[0].body) === '{"path":"notes"}' && sent[1]?.url === `/api/projects/prj_v/dir/folders${q}`, `${sent[0]?.url} ${sent[1]?.url}`);
+    reply = { status: 200, body: { from: 'a.md', to: 'b.md', type: 'file' } };
+    await renameEntry('jv', 'a.md', 'b.md');
+    check('rename is a POST of { from, to } to …/rename', sent[2]?.method === 'POST' && sent[2].url === '/api/jobs/jv/rename' && JSON.stringify(sent[2].body) === '{"from":"a.md","to":"b.md"}');
+    reply = { status: 200, body: { path: 'a', type: 'dir', files: 3, folders: 0, tracked: 1 } };
+    await entryInfo(dir, 'a b');
+    check('what a delete would take is a GET of …/entry?path=', sent[3]?.method === 'GET' && sent[3].url === `/api/projects/prj_v/dir/entry${q}&path=a+b`, sent[3]?.url);
+    reply = { status: 200, body: { path: 'a', type: 'dir', files: 3 } };
+    await deleteEntry('jv', 'a', false);
+    await deleteEntry('jv', 'a', true);
+    await deleteEntry(dir, 'a', true);
+    check('delete is a DELETE of …/entry?path=, with recursive=1 only when asked', sent[4]?.method === 'DELETE' && sent[4].url === '/api/jobs/jv/entry?path=a' && sent[5]?.url === '/api/jobs/jv/entry?path=a&recursive=1' && sent[6]?.url === `/api/projects/prj_v/dir/entry${q}&path=a&recursive=1`, `${sent[4]?.url} ${sent[5]?.url} ${sent[6]?.url}`);
+    check('each change re-reads its tree; asking what a delete would take does not', askedOf('jv') === asked0 + 4);
+    reply = { status: 409, body: { error: 'a is not empty: it holds 3 files' } };
+    let refused: unknown = null;
+    await deleteEntry('jv', 'a', false).catch((e: unknown) => {
+      refused = e;
+    });
+    const { errorText } = await import('../lib/errors.js');
+    check("a refusal rejects with the daemon's sentence and re-reads nothing", errorText(refused) === 'a is not empty: it holds 3 files' && askedOf('jv') === asked0 + 4);
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  // ── the screen's wiring, read from source ──
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check('a rename moves the open tabs to where the daemon put it', /const done = await renameEntry\(r\.root, from, to\);\s*followRename\(r\.root, done\.from, done\.to\);/.test(route));
+  check('the root heading has new folder beside its +', /onClick=\{\(\) => verbs\.onFolder\(''\)\}[\s\S]{0,200}aria-label=\{`New folder in \$\{r\.name\}`\}/.test(route));
+  check('the tree is handed the verbs', /onCancelAdd=\{\(\) => setAdding\(null\)\}\s*verbs=\{verbs\}/.test(route));
+  const confirm = readFileSync(new URL('./DeleteConfirm.tsx', import.meta.url), 'utf8');
+  check('the confirm closes the tabs it took only once the delete has landed', /await deleteEntry\(root, node\.path, what\.send\.recursive\);\s*closeDeleted\(root, node\.path\);/.test(confirm));
+  check('it asks the daemon what is on disk, and starts on the safe choice', /entryInfo\(root, node\.path\)/.test(confirm) && /keep\.current\?\.focus\(\)/.test(confirm) && /e\.key === 'Escape'/.test(confirm));
+  const css = readFileSync(new URL('./files.css', import.meta.url), 'utf8');
+  const ours = css.slice(css.indexOf('new folder, rename and delete (Amendment 138)'));
+  check('the actions show on hover and focus, and always where there is no hover', /\.c5-filerow:focus-within \.c5-act/.test(ours) && /@media \(hover: none\)\s*\{\s*\.c5-act\s*\{\s*opacity: 1;/.test(ours));
+  check('drawn in existing tokens only', ours.length > 0 && !/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(ours) && /var\(--fail\)/.test(ours));
+
+  // ── the navigator's folders get a + ──
+  const nav = readFileSync(new URL('../shell/Navigator.tsx', import.meta.url), 'utf8');
+  check("the navigator's folder rows have a +, beside the row's button", /<div className="sh-nav-dirrow">\s*<button[\s\S]*?<\/button>\s*<AddButton dir=\{kid\.path\}/.test(nav));
+  check('and so does each folder node', /<\/button>\s*<AddButton dir="" label=\{folder\.name\} add=\{add\} \/>/.test(nav));
+  check('it is labelled, and opens the same NewFileForm in place', /aria-label=\{`New file in \$\{label\}`\}/.test(nav) && /<NewFileForm key=\{`n:\$\{dir\}`\} dir=\{dir\}/.test(nav));
+  check('the new file opens in Files, ready to type', /const made = await createFile\(folder\.root, path\);\s*openNew\(folder\.root, made\.path, made\.raw, !isImagePath\(made\.path\)\);[\s\S]{0,60}navigate\(SCREEN\.files, navFileLink\(folder\.root, made\.path\)\)/.test(nav));
+  const shellCss = readFileSync(new URL('../shell/shell.css', import.meta.url), 'utf8');
+  check('its + shows on hover and focus, and always where there is no hover', /\.sh-nav-dirrow:hover \.sh-nav-add,\s*\.sh-nav-dirrow:focus-within \.sh-nav-add/.test(shellCss) && /@media \(hover: none\)\s*\{\s*\.sh-nav-add\s*\{\s*opacity: 1;/.test(shellCss));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94).\n'
+    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94); new folder, rename and delete, with tabs that follow a rename and close on a delete, a double confirm for a folder with files in it, and a + on the navigator\'s folders (Amendment 138).\n'
     : `\nTrack C files verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

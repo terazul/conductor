@@ -24,7 +24,7 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { isAbsolute, normalize, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { toPosix } from './git.js';
 
 export class PathEscape extends Error {
@@ -131,6 +131,52 @@ export function resolveForWrite(root: string, rel: string): { abs: string; paren
     if (err instanceof PathEscape) throw err;
     return { abs, parent: resolve(abs, '..') };
   }
+}
+
+/**
+ * Resolve a worktree-relative path for MAKING, RENAMING or DELETING an entry (Amendment 138).
+ *
+ * Not `resolveForWrite`, which follows a link that exists to what it points at: right for
+ * writing a file's bytes, wrong here, where deleting `docs/link` must take the link and
+ * leave its target. So the PARENT is canonicalised (the nearest ancestor that exists,
+ * realpath'd, with the missing segments put back) and the last segment is kept as typed.
+ *
+ * The same refusals as a write, and two more that a write gets by accident:
+ *   - the root itself (`.`, `a/..`), which no verb may make, move or delete;
+ *   - a `.git` reached through a link (`hooks -> .git/hooks`, then `hooks/x`): the typed
+ *     segments are clean, so the check is made again on the canonical path.
+ */
+export function resolveEntry(root: string, rel: string): string {
+  assertSaneInput(rel);
+  const lexical = resolve(root, rel);
+  if (!contains(root, lexical)) throw new PathEscape(rel, 'resolves outside the worktree');
+  if (lexical === root) throw new PathEscape(rel, 'that is the worktree itself');
+
+  let probe = dirname(lexical);
+  const missing: string[] = [];
+  let parent: string;
+  for (;;) {
+    try {
+      parent = join(realpathSync(probe), ...missing.reverse());
+      break;
+    } catch {
+      const up = dirname(probe);
+      if (up === probe) throw new PathEscape(rel, 'no existing ancestor inside the worktree');
+      missing.push(basename(probe));
+      probe = up;
+    }
+  }
+
+  const abs = join(parent, basename(lexical));
+  if (!contains(root, parent) || abs === root) {
+    throw new PathEscape(rel, 'a parent directory leaves the worktree');
+  }
+  for (const s of relative(root, abs).split(sep)) {
+    if (FORBIDDEN_SEGMENTS.has(s.toLowerCase())) {
+      throw new PathEscape(rel, `${s} is off limits — writing there is arbitrary code execution`);
+    }
+  }
+  return abs;
 }
 
 /** Worktree-relative POSIX form, for the wire. */

@@ -38,7 +38,9 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
 import { useUnseenAgents, useUnseenJobs } from '../lib/seen.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
-import { useFileTree } from '../files/useWorkspace.js';
+import { createFile, isImagePath, useFileTree } from '../files/useWorkspace.js';
+import { NewFileForm } from '../files/NewFileForm.js';
+import { openNew } from '../files/useTabs.js';
 import { SCREEN, openAgent, openProject, recall } from './nav.js';
 import {
   NAV_TREE_KEY,
@@ -196,21 +198,61 @@ interface NavDrag {
 }
 
 /**
+ * A new file from the navigator (Amendment 138): which folder's name box is open, under
+ * one of a project's folders, and how to make the file. The box is the Files tree's own
+ * (`NewFileForm`, Amendment 121) and the file is made the same way (`createFile`); once
+ * made it opens in Files, ready to type (`openNew`), and the box goes.
+ */
+interface NavAdd {
+  /** The folder whose box is open, as a tree path ('' is the folder itself), or null. */
+  at: string | null;
+  open: (dir: string) => void;
+  create: (path: string) => Promise<void>;
+  cancel: () => void;
+}
+
+/** The + beside a folder's row: a sibling of the row's button, as in the Files tree. */
+function AddButton({ dir, label, add }: { dir: string; label: string; add: NavAdd }) {
+  return (
+    <button
+      type="button"
+      className="sh-nav-add"
+      onClick={() => add.open(dir)}
+      title={`New file in ${label}`}
+      aria-label={`New file in ${label}`}
+      aria-pressed={add.at === dir}
+    >
+      +
+    </button>
+  );
+}
+
+/** The name box, under the folder that asked. */
+function AddForm({ dir, add }: { dir: string; add: NavAdd }) {
+  return add.at === dir ? (
+    <NewFileForm key={`n:${dir}`} dir={dir} indent={0} onCreate={add.create} onCancel={add.cancel} />
+  ) : null;
+}
+
+/**
  * One directory's children, inside a Files folder's tree (Amendment 92). Dirs first,
  * then files: the order the daemon already builds the tree in (`workspace/tree.ts`'s
  * `finish`), so this walks `node.children` as given rather than sorting again. A dir
- * row opens and closes a nested copy of this same list; a file row opens the file.
+ * row opens and closes a nested copy of this same list; a file row opens the file. A
+ * dir row has a + (Amendment 138).
  */
 function FileRows({
   node,
   projectId,
   root,
   open,
+  add,
 }: {
   node: FileNode;
   projectId: string;
   root: string;
   open: ReadonlySet<string>;
+  add: NavAdd;
 }) {
   return (
     <>
@@ -232,21 +274,25 @@ function FileRows({
         const shown = isOpen(open, id);
         return (
           <div className="sh-nav-dir" key={`d:${kid.path}`}>
-            <button
-              type="button"
-              className="sh-nav-row"
-              aria-expanded={shown}
-              onClick={() => toggle(id)}
-              title={`${shown ? 'Close' : 'Open'} ${kid.name}`}
-            >
-              <Chevron open={shown} />
-              <span className="sh-nav-label">{kid.name}</span>
-              {/* A nested repo's branch, as a quiet mark beside its folder (Amendment 94). */}
-              {kid.repo && <span className="sh-nav-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
-            </button>
+            <div className="sh-nav-dirrow">
+              <button
+                type="button"
+                className="sh-nav-row"
+                aria-expanded={shown}
+                onClick={() => toggle(id)}
+                title={`${shown ? 'Close' : 'Open'} ${kid.name}`}
+              >
+                <Chevron open={shown} />
+                <span className="sh-nav-label">{kid.name}</span>
+                {/* A nested repo's branch, as a quiet mark beside its folder (Amendment 94). */}
+                {kid.repo && <span className="sh-nav-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
+              </button>
+              <AddButton dir={kid.path} label={kid.path} add={add} />
+            </div>
+            <AddForm dir={kid.path} add={add} />
             {shown && (
               <div className="sh-nav-items">
-                <FileRows node={kid} projectId={projectId} root={root} open={open} />
+                <FileRows node={kid} projectId={projectId} root={root} open={open} add={add} />
               </div>
             )}
           </div>
@@ -266,21 +312,27 @@ function FolderTree({
   projectId,
   root,
   open,
+  add,
 }: {
   projectId: string;
   root: string;
   open: ReadonlySet<string>;
+  add: NavAdd;
 }) {
   const tree = useFileTree(root);
   if (tree.error) return <span className="sh-nav-none">{tree.error}</span>;
   if (!tree.data) return <span className="sh-nav-none">{tree.loading ? 'loading…' : 'no files'}</span>;
-  return <FileRows node={tree.data.root} projectId={projectId} root={root} open={open} />;
+  return <FileRows node={tree.data.root} projectId={projectId} root={root} open={open} add={add} />;
 }
 
 /**
  * One of a project's folders under Files (Amendment 92): opens and closes like any
  * other node, and while open shows its directories as a tree, folders first, then
  * files. A file row opens that file on the Files screen; nothing here changes marks.
+ *
+ * It and each folder in it have a + on hover or focus (Amendment 138), which opens the
+ * Files tree's name box in place. The file is made where you were looking and opened in
+ * Files ready to type; the panel stays as it was.
  */
 function FolderNode({
   project,
@@ -293,22 +345,38 @@ function FolderNode({
 }) {
   const id = navDirId(project.id, folder.root, '');
   const shown = isOpen(open, id);
+  const [at, setAt] = useState<string | null>(null);
+  const add: NavAdd = {
+    at,
+    open: (dir) => setAt(at === dir ? null : dir),
+    create: async (path) => {
+      const made = await createFile(folder.root, path);
+      openNew(folder.root, made.path, made.raw, !isImagePath(made.path));
+      setAt(null);
+      navigate(SCREEN.files, navFileLink(folder.root, made.path));
+    },
+    cancel: () => setAt(null),
+  };
   return (
     <div className="sh-nav-dir">
-      <button
-        type="button"
-        className="sh-nav-row"
-        aria-expanded={shown}
-        onClick={() => toggle(id)}
-        title={`${shown ? 'Close' : 'Open'} ${tildePath(folder.dir)}`}
-      >
-        <Chevron open={shown} />
-        <span className="sh-nav-label">{folder.name}</span>
-        {folder.main && <span className="sh-nav-tag">main</span>}
-      </button>
+      <div className="sh-nav-dirrow">
+        <button
+          type="button"
+          className="sh-nav-row"
+          aria-expanded={shown}
+          onClick={() => toggle(id)}
+          title={`${shown ? 'Close' : 'Open'} ${tildePath(folder.dir)}`}
+        >
+          <Chevron open={shown} />
+          <span className="sh-nav-label">{folder.name}</span>
+          {folder.main && <span className="sh-nav-tag">main</span>}
+        </button>
+        <AddButton dir="" label={folder.name} add={add} />
+      </div>
+      <AddForm dir="" add={add} />
       {shown && (
         <div className="sh-nav-items">
-          <FolderTree projectId={project.id} root={folder.root} open={open} />
+          <FolderTree projectId={project.id} root={folder.root} open={open} add={add} />
         </div>
       )}
     </div>

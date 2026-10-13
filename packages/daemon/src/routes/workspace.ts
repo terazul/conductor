@@ -17,6 +17,15 @@
  *   GET  /api/projects/:projectId/dir/{tree,file,image,diff}?dir=…[&path=…]
  *   PUT  /api/projects/:projectId/dir/file?dir=…
  *
+ * New folders, renames and deletes (Amendment 138), for either kind of root, through the
+ * same gate and lock as a write (service.ts, "folders, renames and deletes"):
+ *   POST   …/folders  ← CreateFolderRequest → CreateFolderResponse (201)
+ *   POST   …/rename   ← RenameRequest       → RenameResponse
+ *   GET    …/entry?path=                    → EntryResponse
+ *   DELETE …/entry?path=[&recursive=1]      → DeleteEntryResponse
+ * `folders`, plural: `POST /api/jobs/:jobId/folder` is already Amendment 114's (put back a
+ * job's deleted worktree, routes/session.ts), and a new folder is one more in the list.
+ *
  * Plus three BOOTSTRAP endpoints that are this track's own and are deliberately
  * NOT in the frozen contract (ruled on in CONTRACT.md Amendment 2 — enshrining a
  * temporary in `wire.ts` is worse than leaving it clearly marked):
@@ -35,7 +44,13 @@
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { Isolation, WriteFileRequest } from '@conductor/shared';
+import type {
+  CreateFolderRequest,
+  Isolation,
+  RenameRequest,
+  WriteFileRequest,
+} from '@conductor/shared';
+import type { WorkspaceRecord } from '../workspace/service.js';
 import { initWorkspace, WorkspaceError, workspace } from '../workspace/service.js';
 import { PathEscape } from '../workspace/paths.js';
 import { GitError } from '../workspace/git.js';
@@ -51,10 +66,12 @@ interface DirParams {
 interface DirQuery {
   dir?: string;
   path?: string;
+  recursive?: string;
 }
 
 interface PathQuery {
   path?: string;
+  recursive?: string;
 }
 
 interface OpenBody {
@@ -93,6 +110,19 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
  */
 const CREATE_ONLY_BAD = 'createOnly must be true or false';
 const createOnlyOk = (v: unknown): boolean => v === undefined || typeof v === 'boolean';
+
+/**
+ * `recursive` on a delete, read as strictly as `createOnly` and for the same reason: it is
+ * the flag that takes a whole folder, so `recursive=yes` is a 400, not a guess either way.
+ */
+function recursiveOf(v: unknown): boolean | null {
+  if (v === undefined || v === '0' || v === 'false') return false;
+  if (v === '1' || v === 'true') return true;
+  return null;
+}
+const RECURSIVE_BAD = 'recursive must be 1 or 0';
+
+const isName = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
 /** `image` and its headers, for either kind of root. */
 function sendImage(reply: FastifyReply, img: { buf: Buffer; mime: string }): FastifyReply {
@@ -198,6 +228,81 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
     },
   );
 
+  // ── folders, renames and deletes (Amendment 138) ─────────────────────────
+  //
+  // One handler per verb, given the root: a job's (`workspace().resolve`) or a project
+  // folder's (`root()` below). The two route trees differ only in how they name it.
+
+  type RootOf = (
+    req: { params: JobParams & DirParams; query: DirQuery },
+    reply: FastifyReply,
+  ) => WorkspaceRecord | null;
+  const verbs = (prefix: string, rootOf: RootOf): void => {
+    app.post<{ Params: JobParams & DirParams; Querystring: DirQuery; Body: CreateFolderRequest }>(
+      `${prefix}/folders`,
+      async (req, reply) => {
+        if (!req.body || !isName(req.body.path)) {
+          return reply.code(400).send({ error: 'body must be { path: string }' });
+        }
+        try {
+          const ws = rootOf(req, reply);
+          return ws ? reply.code(201).send(await workspace().mkdirOf(ws, req.body.path)) : reply;
+        } catch (err) {
+          return fail(reply, err);
+        }
+      },
+    );
+
+    app.post<{ Params: JobParams & DirParams; Querystring: DirQuery; Body: RenameRequest }>(
+      `${prefix}/rename`,
+      async (req, reply) => {
+        if (!req.body || !isName(req.body.from) || !isName(req.body.to)) {
+          return reply.code(400).send({ error: 'body must be { from: string, to: string }' });
+        }
+        try {
+          const ws = rootOf(req, reply);
+          return ws ? await workspace().renameOf(ws, req.body.from, req.body.to) : reply;
+        } catch (err) {
+          return fail(reply, err);
+        }
+      },
+    );
+
+    app.get<{ Params: JobParams & DirParams; Querystring: DirQuery }>(
+      `${prefix}/entry`,
+      async (req, reply) => {
+        if (!isName(req.query.path)) {
+          return reply.code(400).send({ error: 'path query parameter is required' });
+        }
+        try {
+          const ws = rootOf(req, reply);
+          return ws ? await workspace().entryOf(ws, req.query.path) : reply;
+        } catch (err) {
+          return fail(reply, err);
+        }
+      },
+    );
+
+    app.delete<{ Params: JobParams & DirParams; Querystring: DirQuery }>(
+      `${prefix}/entry`,
+      async (req, reply) => {
+        if (!isName(req.query.path)) {
+          return reply.code(400).send({ error: 'path query parameter is required' });
+        }
+        const recursive = recursiveOf(req.query.recursive);
+        if (recursive === null) return reply.code(400).send({ error: RECURSIVE_BAD });
+        try {
+          const ws = rootOf(req, reply);
+          return ws ? await workspace().removeOf(ws, req.query.path, recursive) : reply;
+        } catch (err) {
+          return fail(reply, err);
+        }
+      },
+    );
+  };
+
+  verbs('/api/jobs/:jobId', (req) => workspace().resolve(req.params.jobId));
+
   // ── a project's directories (Amendment 39) ───────────────────────────────
 
   /** The directory a request names, or a 400 already sent. */
@@ -285,6 +390,8 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       }
     },
   );
+
+  verbs('/api/projects/:projectId/dir', root);
 
   // ── bootstrap: expected to be gated or removed at I4 ─────────────────────
 

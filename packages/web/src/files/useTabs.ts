@@ -22,13 +22,17 @@ import { readSetting, whenSettingsLoaded, writeSetting } from '../lib/settings.j
 import {
   EMPTY,
   applyLink,
+  closeUnder,
   keyOf,
   linkOf,
   openTab,
   parseState,
+  renameTabs,
+  renamedPath,
   serialize,
   setScroll,
   tabKey,
+  tabsUnder,
   type FilesState,
   type View,
 } from './tabs.js';
@@ -206,6 +210,48 @@ export function openNew(root: string, path: string, raw: string, edit: boolean):
 /** The unsaved edit of a tab, if it has one, outside a component. */
 export function editOf(key: string): Edit | null {
   return edits.get(key) ?? null;
+}
+
+// ── renames and deletes (Amendment 138) ─────────────────────────────────────
+
+/**
+ * A file or folder in `root` was renamed: its tabs move to the new path (`renameTabs`),
+ * and so do their unsaved edits, moved BEFORE the tabs so the closed-tab sweep in
+ * `update` finds them under the new keys and keeps them. What you were typing stays in
+ * the editor; the file under it has the same bytes it had, so nothing is a conflict.
+ */
+export function followRename(root: string, from: string, to: string): void {
+  let changed = false;
+  for (const t of state.tabs) {
+    if (t.jobId !== root || t.path === null) continue;
+    const next = renamedPath(t.path, from, to);
+    if (next === null) continue;
+    const old = keyOf(t);
+    const key = tabKey(root, next);
+    const edit = edits.get(old);
+    if (edit) {
+      edits.delete(old);
+      edits.set(key, edit);
+      changed = true;
+    }
+    if (focusWanted.delete(old)) focusWanted.add(key);
+  }
+  if (changed) editsChanged();
+  update((s) => renameTabs(s, root, from, to));
+}
+
+/**
+ * A file or folder in `root` was deleted: its tabs close, and their edits with them.
+ * The confirm that asked has already named any unsaved ones (`DeleteConfirm`), as the
+ * strip's own close does for one tab.
+ */
+export function closeDeleted(root: string, path: string): void {
+  update((s) => closeUnder(s, root, path));
+}
+
+/** The open tabs at or under `path` in `root` with an unsaved edit: what a delete would lose. */
+export function unsavedUnder(root: string, path: string): string[] {
+  return tabsUnder(state, root, path).filter((k) => dirty.has(k));
 }
 
 export function useEdit(key: string): Edit | null {

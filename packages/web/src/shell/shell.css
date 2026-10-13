@@ -636,6 +636,59 @@
   flex: none;
 }
 
+/*
+ * A folder's row with its + (Amendment 138): the + is a sibling of the row's button, so
+ * the row keeps its width and the + takes a slot at its end, shown on hover and on focus
+ * as the Files tree's is (`.c5-add`, files.css), and always where there is no hover.
+ */
+.sh-nav-dirrow {
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+}
+
+.sh-nav-dirrow > .sh-nav-row {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.sh-nav-add {
+  flex: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  width: 20px;
+  padding: 0;
+  line-height: 1.4;
+  text-align: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink3);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.sh-nav-dirrow:hover .sh-nav-add,
+.sh-nav-dirrow:focus-within .sh-nav-add,
+.sh-nav-add:focus-visible,
+.sh-nav-add[aria-pressed='true'] {
+  opacity: 1;
+}
+
+.sh-nav-add:hover,
+.sh-nav-add:focus-visible {
+  outline: none;
+  color: var(--ink);
+  border-color: var(--line2);
+}
+
+@media (hover: none) {
+  .sh-nav-add {
+    opacity: 1;
+  }
+}
+
 /* ── status bar ────────────────────────────────────────────────────────────── */
 
 .sh-statusbar {

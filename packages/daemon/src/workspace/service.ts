@@ -16,21 +16,28 @@ import {
   linkSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, extname, join } from 'node:path';
+import { basename, dirname, extname, join, sep } from 'node:path';
 import type {
+  CreateFolderResponse,
+  DeleteEntryResponse,
   DiffResponse,
+  EntryResponse,
   FileContentResponse,
   FileTreeResponse,
   Isolation,
   Job,
   Project,
+  RenameResponse,
   Snapshot,
 } from '@conductor/shared';
 import { registerSnapshotContributor } from '../hub.js';
@@ -41,11 +48,11 @@ import { KeyedLock } from './lock.js';
 import { WorkspaceStore, type WorkspaceRecord } from './store.js';
 import { NO_GIT_BRANCH, WorktreeMgr, type EnsureRequest } from './worktree.js';
 import { Watcher } from './watcher.js';
-import { canonicalRoot, relativePosix, resolveForRead, resolveForWrite } from './paths.js';
+import { canonicalRoot, relativePosix, resolveEntry, resolveForRead, resolveForWrite } from './paths.js';
 import { MAX_TEXT_BYTES, looksBinary, scanChanges } from './changes.js';
 import { buildTree } from './tree.js';
 import { isMarkdown, renderMarkdown } from './markdown.js';
-import { diff as gitDiff, diffUntracked, isRepo, readBlob, status, storedCopy } from './git.js';
+import { diff as gitDiff, diffUntracked, isRepo, readBlob, status, storedCopy, trackedCount } from './git.js';
 
 /** Open watchers cost file descriptors. Past this, new jobs read without watching. */
 const MAX_WATCHERS = 24;
@@ -594,6 +601,217 @@ export class WorkspaceService {
     return this.fileOf(ws, path);
   }
 
+  // ── folders, renames and deletes (Amendment 138) ─────────────────────────
+  //
+  // Each takes the same lock as a write, on the same key, and every path crosses
+  // `resolveEntry` (paths.ts), which is the write gate with one difference: a link is
+  // the link, not what it points at. Files changed by a rename or a delete are told to
+  // the watcher, as a write's are (`Watcher.touchAll`), so a job's tree and the log
+  // hear of it at once; a project folder has no watcher and the screen re-reads it.
+
+  /** The lock a root's writes take: a job, or a project folder's path. */
+  #lockKey(ws: WorkspaceRecord): string {
+    return ws.jobId.startsWith(DIR_KEY) ? `dir:${ws.path}` : `job:${ws.jobId}`;
+  }
+
+  async mkdir(jobId: string, relPath: string): Promise<CreateFolderResponse> {
+    return this.mkdirOf(this.resolve(jobId), relPath);
+  }
+
+  /** Make a folder, and the ones above it. Anything at the name (a file, a folder, a link) is a 409. */
+  async mkdirOf(ws: WorkspaceRecord, relPath: string): Promise<CreateFolderResponse> {
+    const abs = resolveEntry(ws.path, relPath);
+    const path = relativePosix(ws.path, abs);
+    await this.#lock.run(this.#lockKey(ws), async () => {
+      if (taken(abs)) throw new WorkspaceError(409, `${path} already exists`);
+      try {
+        mkdirSync(abs, { recursive: true });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST' || code === 'ENOTDIR') {
+          throw new WorkspaceError(409, `${path} cannot be made: a folder in that name is a file`);
+        }
+        throw new WorkspaceError(500, `could not make ${path}: ${errText(err)}`);
+      }
+    });
+    return { path };
+  }
+
+  async rename(jobId: string, from: string, to: string): Promise<RenameResponse> {
+    return this.renameOf(this.resolve(jobId), from, to);
+  }
+
+  /**
+   * Rename or move a file or a folder. `to` taken is a 409, unless it is `from` itself
+   * under another case on a filesystem that ignores case (same inode, names equal but
+   * for case), which is the rename someone fixing `readme.md` means. Folders above `to`
+   * are made. A plain file is moved with a hard link and an unlink, so a name an agent
+   * took since the check is not replaced (the same reason as `publishNew`); a folder, a
+   * link and a case-only rename use `rename`.
+   */
+  async renameOf(ws: WorkspaceRecord, fromRel: string, toRel: string): Promise<RenameResponse> {
+    const src = resolveEntry(ws.path, fromRel);
+    const dst = resolveEntry(ws.path, toRel);
+    const from = relativePosix(ws.path, src);
+    const to = relativePosix(ws.path, dst);
+    let type: 'file' | 'dir' = 'file';
+    let moved: string[] = [];
+
+    await this.#lock.run(this.#lockKey(ws), async () => {
+      let st;
+      try {
+        st = lstatSync(src);
+      } catch {
+        throw new WorkspaceError(404, `${from} does not exist`);
+      }
+      type = st.isDirectory() ? 'dir' : 'file';
+      if (src === dst) throw new WorkspaceError(400, `${from} already has that name`);
+      if (type === 'dir' && dst.startsWith(src + sep)) {
+        throw new WorkspaceError(400, `${from} cannot be moved into itself`);
+      }
+
+      let caseOnly = false;
+      if (taken(dst)) {
+        const there = lstatSync(dst);
+        caseOnly =
+          src.toLowerCase() === dst.toLowerCase() && there.ino === st.ino && there.dev === st.dev;
+        if (!caseOnly) throw new WorkspaceError(409, `${to} already exists`);
+      }
+
+      try {
+        mkdirSync(dirname(dst), { recursive: true });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST' || code === 'ENOTDIR') {
+          throw new WorkspaceError(409, `${to} cannot be made: a folder in that name is a file`);
+        }
+        throw new WorkspaceError(500, `could not make the folders for ${to}: ${errText(err)}`);
+      }
+
+      moved = type === 'dir' ? filesUnder(src, '').files : [''];
+      try {
+        if (st.isFile() && !caseOnly) moveNew(src, dst, to);
+        else renameSync(src, dst);
+      } catch (err) {
+        if (err instanceof WorkspaceError) throw err;
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOTEMPTY' || code === 'EEXIST') throw new WorkspaceError(409, `${to} already exists`);
+        // Into itself under another case, on a filesystem blind to case: the prefix check
+        // above compares case, and the kernel refuses it.
+        if (code === 'EINVAL') throw new WorkspaceError(400, `${from} cannot be moved into itself`);
+        throw new WorkspaceError(500, `could not rename ${from}: ${errText(err)}`);
+      }
+    });
+
+    const at = (base: string, rel: string): string => (rel ? `${base}/${rel}` : base);
+    await this.#watcherFor(ws)?.touchAll([
+      ...moved.map((r) => ({ path: at(from, r), deleted: true })),
+      ...moved.map((r) => ({ path: at(to, r), deleted: false })),
+    ]);
+    return { from, to, type };
+  }
+
+  async entry(jobId: string, relPath: string): Promise<EntryResponse> {
+    return this.entryOf(this.resolve(jobId), relPath);
+  }
+
+  /**
+   * What a delete of `relPath` would take: how many files and folders are under it on
+   * disk, ignored ones included, since a recursive delete takes those too and the tree
+   * does not list them; and how many of the files git has. Read-only, so no lock.
+   */
+  async entryOf(ws: WorkspaceRecord, relPath: string): Promise<EntryResponse> {
+    const abs = resolveEntry(ws.path, relPath);
+    const path = relativePosix(ws.path, abs);
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      throw new WorkspaceError(404, `${path} does not exist`);
+    }
+    const type = st.isDirectory() ? 'dir' : 'file';
+    const under = type === 'dir' ? filesUnder(abs, '') : { files: [''], folders: 0, capped: false, repos: [] };
+    let tracked: number | null = null;
+    if (await isRepo(ws.path)) {
+      try {
+        tracked = await trackedCount(ws.path, path);
+      } catch {
+        tracked = null;
+      }
+    }
+    return {
+      path,
+      type,
+      files: under.files.length,
+      folders: under.folders,
+      ...(under.capped ? { capped: true as const } : {}),
+      tracked,
+    };
+  }
+
+  async remove(jobId: string, relPath: string, recursive: boolean): Promise<DeleteEntryResponse> {
+    return this.removeOf(this.resolve(jobId), relPath, recursive);
+  }
+
+  /**
+   * Delete a file, a link (never what it points at), an empty folder, or with
+   * `recursive` a folder and everything in it (Q2 in the wave 10 plan: yes, after the
+   * screen has asked twice). A folder that is not empty, without `recursive`, is a 409
+   * and nothing goes. A folder with a git repository anywhere inside is a 409 even with
+   * it: its history may be the only copy, and that is not a thing to lose from a tree.
+   * The root is refused by the gate before this is reached.
+   */
+  async removeOf(ws: WorkspaceRecord, relPath: string, recursive: boolean): Promise<DeleteEntryResponse> {
+    const abs = resolveEntry(ws.path, relPath);
+    const path = relativePosix(ws.path, abs);
+    let type: 'file' | 'dir' = 'file';
+    let gone: string[] = [];
+
+    await this.#lock.run(this.#lockKey(ws), async () => {
+      let st;
+      try {
+        st = lstatSync(abs);
+      } catch {
+        throw new WorkspaceError(404, `${path} does not exist`);
+      }
+      try {
+        if (!st.isDirectory()) {
+          gone = [''];
+          unlinkSync(abs);
+          return;
+        }
+        type = 'dir';
+        const under = filesUnder(abs, '');
+        const empty = readdirSync(abs).length === 0;
+        if (!empty && !recursive) {
+          throw new WorkspaceError(
+            409,
+            `${path} is not empty: it holds ${under.capped ? 'at least ' : ''}${plural(under.files.length, 'file')}`,
+          );
+        }
+        if (under.repos.length > 0) {
+          throw new WorkspaceError(
+            409,
+            `${path} holds a git repository (${path}/${under.repos[0]!}); delete it outside Conductor`,
+          );
+        }
+        gone = under.files;
+        if (empty) rmdirSync(abs);
+        else rmSync(abs, { recursive: true });
+      } catch (err) {
+        if (err instanceof WorkspaceError) throw err;
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOTEMPTY') throw new WorkspaceError(409, `${path} is not empty`);
+        throw new WorkspaceError(500, `could not delete ${path}: ${errText(err)}`);
+      }
+    });
+
+    await this.#watcherFor(ws)?.touchAll(
+      gone.map((r) => ({ path: r ? `${path}/${r}` : path, deleted: true })),
+    );
+    return { path, type, files: gone.length };
+  }
+
   // ── helpers ──────────────────────────────────────────────────────────────
 
   async #diffForPath(ws: WorkspaceRecord, path: string): Promise<string> {
@@ -661,6 +879,71 @@ export function publishNew(tmp: string, abs: string, path: string): void {
   }
   rmSync(tmp, { force: true });
 }
+
+/**
+ * `rename` for a plain file that will not replace one (Amendment 138): link the new name,
+ * which fails with EEXIST if something took it since the check, then drop the old. With
+ * no hard links (or across devices) it falls back to the rename, and the check made
+ * under the lock stands.
+ */
+function moveNew(src: string, dst: string, to: string): void {
+  try {
+    linkSync(src, dst);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') throw new WorkspaceError(409, `${to} already exists`);
+    if (code === 'EPERM' || code === 'ENOTSUP' || code === 'EOPNOTSUPP' || code === 'EXDEV') {
+      renameSync(src, dst);
+      return;
+    }
+    throw err;
+  }
+  unlinkSync(src);
+}
+
+/** Past this many entries a count stops and says it stopped (`EntryResponse.capped`). */
+const MAX_COUNT = 50_000;
+
+/**
+ * Every file under a folder on disk, relative to it, plus how many folders and where any
+ * `.git` is (Amendment 138). Links are counted as files and never followed, so a link to
+ * a big folder elsewhere is one entry, which is also what deleting it takes.
+ */
+function filesUnder(
+  abs: string,
+  rel: string,
+  acc = { files: [] as string[], folders: 0, capped: false, repos: [] as string[] },
+): { files: string[]; folders: number; capped: boolean; repos: string[] } {
+  let entries;
+  try {
+    entries = readdirSync(abs, { withFileTypes: true });
+  } catch {
+    return acc;
+  }
+  for (const e of entries) {
+    if (acc.files.length + acc.folders >= MAX_COUNT) {
+      acc.capped = true;
+      return acc;
+    }
+    const childRel = rel ? `${rel}/${e.name}` : e.name;
+    if (e.name.toLowerCase() === '.git') {
+      // Named, not opened: what is in it is the repository, not files of this folder.
+      acc.repos.push(childRel);
+      continue;
+    }
+    if (e.isDirectory()) {
+      acc.folders += 1;
+      filesUnder(join(abs, e.name), childRel, acc);
+    } else {
+      acc.files.push(childRel);
+    }
+  }
+  return acc;
+}
+
+const plural = (n: number, word: string): string => `${n.toLocaleString('en')} ${word}${n === 1 ? '' : 's'}`;
+
+const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** Where a symlink points when nothing is there. Null for anything that isn't a link. */
 function danglingTarget(abs: string): string | null {

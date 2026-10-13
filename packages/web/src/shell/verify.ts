@@ -416,7 +416,7 @@ console.log('\n9 · Files opens into a folder\'s directories as a tree (Amendmen
   check('a file row navigates with navFileLink, through SCREEN.files', /navigate\(SCREEN\.files, navFileLink\(root, kid\.path\)\)/.test(nav));
   check('folders and files alike open and close by the same toggle every other nav node uses', /onClick=\{\(\) => toggle\(id\)\}/.test(nav));
   check('every toggle says whether it is open', /aria-expanded=\{shown\}/.test(nav));
-  check('the tree is fetched with the Files screen\'s own hook, not a second one', /import \{ useFileTree \} from '\.\.\/files\/useWorkspace\.js'/.test(nav) && /useFileTree\(root\)/.test(nav));
+  check('the tree is fetched with the Files screen\'s own hook, not a second one', /import \{[^}]*\buseFileTree\b[^}]*\} from '\.\.\/files\/useWorkspace\.js'/.test(nav) && /useFileTree\(root\)/.test(nav));
   check('no change marks: nothing here reads a node\'s change', !/kid\.change|node\.change/.test(nav));
   check('applyLink reads the same shape a file row sends', /path\s*\?\s*openTab\(s, jobId, path, now, keep\)/.test(tabs));
 }
