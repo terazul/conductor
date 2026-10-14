@@ -196,6 +196,19 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 145 — post-merge, applied. **What needs you is seen in light mode too.**
+
+Reported 14 Oct: "the Needs you banner / text is not highlighted enough in the light mode". The rail's
+backdrop was `--need` mixed 13% into transparency (`shell/shell.css`, `.sh-alert.is-live`); in light,
+`--need` is a dark brown (`#8a4d00`), so the mix was a beige close to the page, and the navigator's
+Needs you heading had only its text colour.
+- **Token** `--need-wash` (`shared/src/tokens.css`): dark `#3a2b17`, light `#ffcf6b`, a clear amber.
+- **Rail.** Backdrop `--need-wash`, fading only after 55%, with a 4 px `--need` bar at the left; the
+  label at 600, the note in `--ink2`. Hover saturates it.
+- **Navigator.** `.sh-nav-head.is-need` gets the same backdrop and a 3 px bar.
+- **Verify:** `lib/verify.ts`: in both themes `--need`, `--ink`, `--ink2` are ≥ 4.5:1 on `--need-wash`
+  (light `--need` 4.58), and `--need-wash` stands off `--bg` and `--bg2` by ≥ 1.15:1 (light 1.20).
+
 ### Amendment 144 — post-merge, applied. **Merge and clean up when a job finishes, by the agent's setting or a card.**
 
 Daemon (`session/finish.ts` new, `session/supervisor.ts`, `session/alerts.ts`, `routes/session.ts`,

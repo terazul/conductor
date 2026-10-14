@@ -19,6 +19,14 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [ ] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
+  time, a **queue** choice: the message waits until the agent's turn ends (it is `done`, or stops to
+  wait on you after finishing what it was doing), then goes as if you had pressed send. Several
+  queued messages go one per turn, in order, each when the agent is done with the one before. They
+  show in the same list above the message box (Amendment 111's scheduled messages), as **⏲ when
+  done**, cancellable. Settle: whether a queued message also waits for a question it asked you, and
+  whether "done" means its turn or its whole job.
+
 - [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
   and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
@@ -93,7 +101,7 @@ header, the terminal's fixed font and missing add-ons, Custom's missing orchestr
 navigator's missing marks and meters, the in-memory window registry, the fixed 2× ceiling, and the
 stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
 
-- [ ] **Terminal (112).** *13 Oct, Amendment 141: settings, find, links, clipboard, WebGL, mouse, paths into Files, the Terminal dock, the terminals frame and the headless mirror are built; still to check by hand in a browser and on Ubuntu; tmux is not wanted (Q5).* Only macOS arm64 ran; Ubuntu is untried, and so are `vim`, `htop` and `less`
+- [x] **Terminal (112).** *14 Oct: checked by hand, it works on Ubuntu and macOS.* *13 Oct, Amendment 141: settings, find, links, clipboard, WebGL, mouse, paths into Files, the Terminal dock, the terminals frame and the headless mirror are built; still to check by hand in a browser and on Ubuntu; tmux is not wanted (Q5).* Only macOS arm64 ran; Ubuntu is untried, and so are `vim`, `htop` and `less`
   in the browser. Left out of the first version, from `docs/plans/full-terminal.md`:
   - a Terminal dock under every screen (D8b), and shells that survive a daemon restart (tmux, where
     installed);
