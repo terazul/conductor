@@ -328,10 +328,10 @@ console.log("\n7 · the projects come in the Fleet's order, and a drag sets your
   const nav = src('./Navigator.tsx');
   const fl = src('../fleet/fleet.tsx');
   check('the panel reads the Fleet\'s two settings', /useSetting\(SORT_KEY\)/.test(nav) && /useSetting\(ORDER_KEY\)/.test(nav) && SORT_KEY === 'conductor.fleetSort' && ORDER_KEY === 'conductor.fleetOrder');
-  check('and orders its tree by navProjects', /navProjects\(projects, rawSort, rawOrder, agents, pending\)/.test(nav) && /navTree\(ordered,/.test(nav));
+  check('and orders its tree by navProjects', /navProjects\(projects, rawSort, rawOrder, agents, pending, spent\)/.test(nav) && /navTree\(ordered,/.test(nav));
   check("a drop writes your order and the sort, as the Fleet's place() does", /writeSetting\(ORDER_KEY, JSON\.stringify\(w\.order\)\)/.test(nav) && /writeSetting\(SORT_KEY, w\.sort\)/.test(nav) && /navDrop\(ordered,/.test(nav));
   check('a project row drags with HTML5 drag, as a Fleet card does', /draggable/.test(nav) && /onDragStart=/.test(nav) && /onDragOver=/.test(nav) && /onDrop=/.test(nav));
-  check('fleet.tsx builds its facts with sortFacts, not its own loop', /useMemo\(\(\) => sortFacts\(projects, agents, pending\)/.test(fl) && !/SORT_RANK/.test(fl));
+  check('fleet.tsx builds its facts with sortFacts, not its own loop', /useMemo\(\(\) => sortFacts\(projects, agents, pending, spent\)/.test(fl) && !/SORT_RANK/.test(fl));
   check('and sorts as the panel does', /fleetSort\(useSetting\(SORT_KEY\), order\)/.test(fl) && /sortProjects\(projects, sort, order, facts\)/.test(fl));
   const css = src('./shell.css');
   check('the drag cue is drawn, never in amber', /\.sh-nav-proj\.is-drop\s*\{/.test(css) && /\.sh-nav-proj\.is-dragging\s*\{/.test(css) && !/is-drop[^}]*--need/.test(css));

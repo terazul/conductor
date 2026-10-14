@@ -42,6 +42,7 @@ import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } 
 import { scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
+import { agentPairWords } from '../shell/spend.js';
 import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
@@ -267,6 +268,8 @@ export function Composer({ agent }: { agent: Agent }) {
   // What it spent today, in both units: the budget counts these, and the lifetime `costUsd` is
   // shown as information beside them (Amendment 129).
   const { usd: todayUsd, tokens: todayTokens } = spentOn(agent);
+  // Today and over its whole life, side by side, in its engine's unit (Amendment 146).
+  const pair = agentPairWords(agent, caps.costUsd);
 
   const submit = async () => {
     const body = text.trim();
@@ -725,8 +728,11 @@ export function Composer({ agent }: { agent: Agent }) {
               tokens
             </label>
             {spend && <BudgetMeter spend={spend} />}
-            <span className="ag-budget-spent" data-tone={spend?.tone} title="Spent today. It starts again at midnight.">
-              {tokenWords(todayTokens)} used today
+            <span className="ag-budget-spent" data-tone={spend?.tone} title="Used today, which the budget counts. It starts again at midnight.">
+              {pair.today}
+            </span>
+            <span className="ag-budget-total" title="Used over its whole life: input plus output tokens. The budget does not count it.">
+              · {pair.total}
             </span>
           </div>
           ) : (
@@ -763,9 +769,12 @@ export function Composer({ agent }: { agent: Agent }) {
             <span
               className="ag-budget-spent"
               data-tone={spend?.tone}
-              title={`Spent today. It starts again at midnight. Over its whole life: ${fmtMoney(agent.costUsd)}.`}
+              title="Spent today, which the budget counts. It starts again at midnight."
             >
-              {fmtMoney(todayUsd)} spent today
+              {pair.today}
+            </span>
+            <span className="ag-budget-total" title="Spent over its whole life. The budget does not count it.">
+              · {pair.total}
             </span>
             {autonomy.budgetUsd !== null &&
               BUDGET_RAISES.map((n) => (

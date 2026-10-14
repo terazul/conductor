@@ -270,9 +270,10 @@ export function navProjects<P extends { id: string; name: string; createdAt: str
   rawOrder: string | null,
   agents: Parameters<typeof sortFacts>[1],
   pending: Parameters<typeof sortFacts>[2],
+  spent?: Parameters<typeof sortFacts>[3],
 ): P[] {
   const order = parseOrder(rawOrder);
-  return sortProjects(projects, fleetSort(rawSort, order), order, sortFacts(projects, agents, pending));
+  return sortProjects(projects, fleetSort(rawSort, order), order, sortFacts(projects, agents, pending, spent));
 }
 
 /**

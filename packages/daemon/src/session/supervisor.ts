@@ -95,7 +95,7 @@ import {
   agentsForJob,
   agentsThatSpentOn,
   DEFAULT_AUTONOMY,
-  costToday,
+  spendFigures,
   defaultBranchIsSet,
   deleteAgent,
   deleteJob,
@@ -530,7 +530,8 @@ export class Supervisor implements AgentControl {
       agents: listAgents(this.#db),
       pending: arbiter().pending(),
       slots: this.slots,
-      costToday: costToday(this.#db),
+      // Today's spend, the fleet's all-time total and each project's pair (Amendment 146).
+      ...spendFigures(this.#db),
     }));
   }
 

@@ -15,6 +15,7 @@ import { ceilingWords, type Agent, type Job } from '@conductor/shared';
 import { budgetOf, budgetWords, scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { filesTouched, latestTodo } from '../shell/describe.js';
 import { DiffNums, fmtElapsed, fmtMoney, fmtTokens } from '../shell/ui.js';
+import { agentPairWords } from '../shell/spend.js';
 import { CLAUDE, capabilitiesOf, providerLabel, providerOf, tokenWords, useProviders } from '../lib/providers.js';
 import type { Event } from '@conductor/shared';
 import { OUTSIDE, type FileLinks } from './links.js';
@@ -41,6 +42,7 @@ export function Inspector({
   const budget = budgetOf(agent);
   // An engine that reports no dollars shows no spend, and its cap is in tokens (Amendment 80).
   const dollars = capabilitiesOf(agent, useProviders()).costUsd;
+  const pair = agentPairWords(agent, dollars);
   const autonomy = agent.autonomy;
   const todo = latestTodo(events);
   const files = filesTouched(events);
@@ -75,13 +77,12 @@ export function Inspector({
             <span>{elapsedMs === null ? '—' : fmtElapsed(elapsedMs)}</span>
           </div>
           <div className="pj-kv">
-            {/* Its whole life: information. What the budget counts is today's, in the bar below (Amendment 129). */}
-            <span title="Everything this agent has spent, over its whole life. The budget counts only today.">lifetime</span>
-            {dollars ? (
-              <span>{fmtMoney(agent.costUsd)}</span>
-            ) : (
-              <span title={`${providerLabel(agent.provider)} reports tokens, not dollars`}>not reported</span>
-            )}
+            {/* Today (what the budget counts) and its whole life, side by side (Amendment 146); in
+                tokens on an engine that reports no dollars. */}
+            <span title="What this agent spent today, which its budget counts and which starts again at midnight; and over its whole life.">spent</span>
+            <span title={dollars ? undefined : `${providerLabel(agent.provider)} reports tokens, not dollars`}>
+              {pair.today} · {pair.total}
+            </span>
           </div>
           {agent.sdkSessionId && (
             <div className="pj-kv">

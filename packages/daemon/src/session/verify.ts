@@ -33,7 +33,7 @@
 
 import { TURN_END_LINE } from './background.js';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -51,6 +51,7 @@ import type {
   Snapshot,
   RuleView,
   ProjectNote,
+  ProjectSpend,
   TerminalRun,
   ProviderInfo,
   ProviderModelList,
@@ -73,6 +74,9 @@ import {
   addSpendToday,
   agentsThatSpentOn,
   costToday,
+  costTotal,
+  listProjects,
+  projectSpend,
   getAgent,
   jobCostToday,
   spentToday as agentSpentToday,
@@ -6963,6 +6967,132 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log("\n28 · each agent, project and the fleet keep a total beside today's, and removing an agent keeps it (Amendment 146)");
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    await until(() => eyes.frames.some((f) => f.type === 'hello'));
+    const hello = eyes.frames.find((f) => f.type === 'hello');
+    check(
+      "the snapshot carries the fleet's all-time total and each project's pair",
+      hello?.type === 'hello' && typeof hello.snapshot.costTotal === 'number' && Array.isArray(hello.snapshot.projectSpend) && hello.snapshot.projectSpend.length === listProjects(db).length,
+      JSON.stringify(hello?.type === 'hello' ? hello.snapshot.projectSpend : null),
+    );
+    const T1 = '2034-03-10';
+    const T2 = '2034-03-11';
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2034, 2, 10, 12, 0, 0);
+    setDayClock(() => now);
+    watch?.check();
+    check('the fake clock sets today', localDay() === T1, localDay());
+
+    const tpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'totals146' })).body.project.id;
+    insertJob(db, { id: 'job_t146', projectId: tpid, prompt: 'the totals prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    const tfix = (id: string, a: Partial<Agent>): void => fixture(id, 'job_t146', { projectId: tpid, ...a });
+    const mine = (): ProjectSpend => projectSpend(db).find((p) => p.projectId === tpid) ?? { projectId: tpid, today: 0, total: 0, tokensToday: 0, tokensTotal: 0 };
+    const base = { project: mine(), fleet: costTotal(db) };
+
+    // ── a credited run raises the agent's, the project's and the fleet's totals ──
+    tfix('t_a', { status: 'queued' });
+    const mark = eyes.frames.length;
+    let at = runs.length;
+    sup.pump();
+    await until(() => runs.length === at + 1);
+    runs[at]!.finish({ cost: 6, reason: 'completed' });
+    await until(() => getAgent(db, 't_a')?.status === 'done');
+    check("the agent: $6 today and $6 over its life", near(getAgent(db, 't_a')?.spentToday?.usd, 6) && near(getAgent(db, 't_a')?.costUsd, 6));
+    check("its project: $6 more today and in total", near(mine().today - base.project.today, 6) && near(mine().total - base.project.total, 6), JSON.stringify(mine()));
+    check("the fleet's all-time total: $6 more", near(costTotal(db) - base.fleet, 6), `${costTotal(db)} vs ${base.fleet}`);
+    check(
+      'and every page is told all three in the cost frame',
+      await until(() =>
+        eyes.frames.slice(mark).some((f) => f.type === 'cost' && near(f.costTotal, costTotal(db)) && f.projectSpend?.some((p) => p.projectId === tpid && near(p.total, mine().total)) === true),
+      ),
+    );
+    check('a project that spent nothing is listed with zeros', projectSpend(db).length === listProjects(db).length);
+
+    // tokens, for an engine that reports no dollars
+    tfix('t_tok', { provider: 'copilot', model: 'gpt-5-mini' } as Partial<Agent>);
+    addSpendToday(db, 't_tok', { tokens: 1200 });
+    check("a token engine's day grows its project's tokens today and in total", mine().tokensToday - base.project.tokensToday === 1200 && mine().tokensTotal - base.project.tokensTotal === 1200, JSON.stringify(mine()));
+    check('a credit to an agent that is gone records nothing anywhere', (() => {
+      const before = JSON.stringify(projectSpend(db));
+      addSpendToday(db, 't_nobody', { usd: 5, tokens: 5 });
+      return JSON.stringify(projectSpend(db)) === before;
+    })());
+
+    // ── removing the agent keeps the project's and the fleet's ──
+    const kept = { project: mine(), fleet: costTotal(db) };
+    const gone = await fetch(`${BASE}/api/agents/t_a`, { method: 'DELETE' });
+    check('removing the agent → 200, and its own days go with it', gone.status === 200 && getAgent(db, 't_a') === undefined && agentsThatSpentOn(db, T1).every((id) => id !== 't_a'));
+    check("its project's today and total are what they were", near(mine().today, kept.project.today) && near(mine().total, kept.project.total), JSON.stringify(mine()));
+    check("and the fleet's total", near(costTotal(db), kept.fleet));
+    const jobGone = await fetch(`${BASE}/api/jobs/job_t146`, { method: 'DELETE' });
+    check('removing the whole job keeps them too', [200, 204].includes(jobGone.status) && near(mine().total, kept.project.total) && mine().tokensTotal === kept.project.tokensTotal, `${jobGone.status} ${JSON.stringify(mine())}`);
+
+    // ── the day change resets today, not the totals ──
+    const turn = eyes.frames.length;
+    now = new Date(2034, 2, 11, 0, 0, 20);
+    check('the day turns', watch?.check() === true && localDay() === T2);
+    check("today reads zero for the project and the fleet", mine().today === 0 && mine().tokensToday === 0 && costToday(db) === 0);
+    check('the totals do not move', near(mine().total, kept.project.total) && mine().tokensTotal === kept.project.tokensTotal && near(costTotal(db), kept.fleet));
+    check(
+      "and the day change's cost frame says so",
+      await until(() => eyes.frames.slice(turn).some((f) => f.type === 'cost' && f.costToday === 0 && near(f.costTotal, kept.fleet) && f.projectSpend?.some((p) => p.projectId === tpid && p.today === 0 && near(p.total, kept.project.total)) === true)),
+    );
+
+    // ── the backfill, on a database from before 240 ──
+    {
+      const old = new DatabaseSync(':memory:');
+      old.exec('PRAGMA foreign_keys = ON');
+      const dir = new URL('../db/migrations/', import.meta.url);
+      const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+      for (const f of files.filter((f) => f < '240')) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+      old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('bp1', 'one', '/tmp/bp1', 'x'), ('bp2', 'two', '/tmp/bp2', 'x'), ('bp3', 'three', '/tmp/bp3', 'x')`);
+      old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES
+        ('bj1', 'bp1', 'p', 'in_place', '/tmp/bp1', 'main', 'done', 'x'), ('bj2', 'bp2', 'p', 'in_place', '/tmp/bp2', 'main', 'done', 'x'), ('bj3', 'bp3', 'p', 'in_place', '/tmp/bp3', 'main', 'done', 'x')`);
+      const ag = old.prepare(`INSERT INTO agents (id, job_id, project_id, role, model, status, cost_usd, input_tokens, output_tokens, provider) VALUES (?, ?, ?, 'builder', 'm', 'done', ?, ?, ?, ?)`);
+      ag.run('ba1', 'bj1', 'bp1', 10, 500, 300, 'claude');   // $10 in its life, of which $3 today and $2 the day before
+      ag.run('ba2', 'bj1', 'bp1', 4, 0, 0, 'claude');        // $4, from before 129: no days at all
+      ag.run('ba3', 'bj1', 'bp1', 0, 600, 400, 'copilot');   // 1000 tokens in its life, 250 of them today
+      ag.run('ba4', 'bj2', 'bp2', 7, 0, 0, 'claude');        // a second project
+      const sd = old.prepare('INSERT INTO agent_spend_daily (agent_id, day, cost_usd, tokens) VALUES (?, ?, ?, ?)');
+      sd.run('ba1', '2034-03-10', 3, 0);
+      sd.run('ba1', '2034-03-09', 2, 0);
+      sd.run('ba3', '2034-03-10', 0, 250);
+      old.exec(readFileSync(new URL('240_spend_totals.sql', dir), 'utf8'));
+      const got = old.prepare('SELECT project_id, day, cost_usd, tokens FROM project_spend_daily ORDER BY project_id, day').all() as Array<{ project_id: string; day: string; cost_usd: number; tokens: number }>;
+      const at1 = (p: string, d: string) => got.find((r) => r.project_id === p && r.day === d);
+      check('the backfill copies every dated day of the agents, per project', near(at1('bp1', '2034-03-10')?.cost_usd, 3) && at1('bp1', '2034-03-10')?.tokens === 250 && near(at1('bp1', '2034-03-09')?.cost_usd, 2), JSON.stringify(got));
+      check(
+        "and a 'before' row with the rest of the lifetime: $14 less the $5 dated, 1000 tokens less the 250",
+        at1('bp1', '0000-00-00')?.cost_usd === 9 && at1('bp1', '0000-00-00')?.tokens === 750,
+        JSON.stringify(at1('bp1', '0000-00-00')),
+      );
+      check("so the project's total starts at its agents' lifetime, and today at today's", near(got.filter((r) => r.project_id === 'bp1').reduce((n, r) => n + r.cost_usd, 0), 14) && got.filter((r) => r.project_id === 'bp1').reduce((n, r) => n + r.tokens, 0) === 1000);
+      check('a project whose agents had no days gets its lifetime as before', at1('bp2', '0000-00-00')?.cost_usd === 7 && got.filter((r) => r.project_id === 'bp2').length === 1);
+      check('a project that spent nothing gets no row', got.every((r) => r.project_id !== 'bp3'));
+      // Read the way the daemon reads it, with today at 2034-03-10.
+      const readNow = now;
+      now = new Date(2034, 2, 10, 9, 0, 0);
+      const bp1 = projectSpend(old).find((p) => p.projectId === 'bp1');
+      now = readNow;
+      check("and projectSpend reads it: today $3 and 250 tokens, in all $14 and 1000", near(bp1?.today, 3) && bp1?.tokensToday === 250 && near(bp1?.total, 14) && bp1?.tokensTotal === 1000, JSON.stringify(bp1));
+      old.close();
+    }
+
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2034-01-01'").run();
+    db.prepare("DELETE FROM project_spend_daily WHERE day >= '2034-01-01'").run();
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -6970,7 +7100,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

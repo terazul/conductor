@@ -39,7 +39,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FileNode } from '@conductor/shared';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
+import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects } from '../lib/store.js';
 import { useUnseenAgents, useUnseenJobs } from '../lib/seen.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
 import { createFile, isImagePath, useFileTree } from '../files/useWorkspace.js';
@@ -551,9 +551,10 @@ export function Navigator() {
   // The Fleet's Sort by and your order, read as the Fleet reads them (Amendment 69).
   const rawSort = useSetting(SORT_KEY);
   const rawOrder = useSetting(ORDER_KEY);
+  const spent = useProjectSpend();
   const ordered = useMemo(
-    () => navProjects(projects, rawSort, rawOrder, agents, pending),
-    [projects, rawSort, rawOrder, agents, pending],
+    () => navProjects(projects, rawSort, rawOrder, agents, pending, spent),
+    [projects, rawSort, rawOrder, agents, pending, spent],
   );
   const tree = useMemo(
     () => navTree(ordered, agents, pending, alerts, jobs, finished, unseenAgents),

@@ -369,6 +369,12 @@
   color: var(--ink3);
 }
 
+/* The project's spend today and in total (Amendment 146). */
+.fl-card-spend {
+  white-space: nowrap;
+  cursor: help;
+}
+
 .fl-card-actions {
   margin-left: auto;
   display: flex;
@@ -640,6 +646,26 @@
 }
 
 /* The column head is the project's name; the projects list is the navigator's now (Amendment 66). */
+/* An agent's lane: today and over its whole life (Amendment 146). */
+.pj-spendpair {
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* The Project screen header's spend, today and in total (Amendment 146). */
+.pj-headspend {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.pj-headspend b {
+  font-weight: 500;
+  color: var(--ink2);
+}
+
 .pj-colname {
   font-family: var(--sans);
   font-size: var(--fs-md);
