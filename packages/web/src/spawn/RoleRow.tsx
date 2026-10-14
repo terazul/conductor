@@ -113,7 +113,7 @@ export function RoleRow({
           className="ui-select sp-cpersona"
           value={shownPersona?.id ?? ''}
           aria-label={`${label}'s persona`}
-          title="What this agent is: its brief, system prompt, model, tool rules and skills. Settings → Personas edits them."
+          title="What this agent is: its brief, system prompt, model and skills, and whether it may write files. Settings → Personas edits them."
           onChange={(e) => onPersona(e.target.value)}
         >
           <option value="">no persona</option>

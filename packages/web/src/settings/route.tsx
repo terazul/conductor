@@ -647,12 +647,11 @@ function LaunchSection() {
 
 const TIERS: ModelTier[] = ['opus', 'sonnet', 'haiku'];
 
-/** The five tool rules, worded as the launch's pills are. */
+/**
+ * The one tool rule a persona has: whether it writes (Amendment 147). Shell, push, network and
+ * MCP are the launch's pills on Spawn whatever a persona says, so the editor doesn't offer them.
+ */
 const TOOL_RULES: { id: keyof PersonaTools; label: string; hint: string }[] = [
-  { id: 'bash', label: 'run shell unattended', hint: 'On: shell commands run without asking. Off: each one waits for you.' },
-  { id: 'push', label: 'allow git push', hint: 'Off adds a deny rule on `git push` that survives every permission mode.' },
-  { id: 'network', label: 'allow network', hint: 'Off blocks WebFetch and WebSearch.' },
-  { id: 'mcp', label: 'allow MCP tools', hint: "On: your MCP servers' tools run without asking. Off: each one waits for you." },
   { id: 'write', label: 'write files', hint: 'Off makes it a reading persona: the write tools are denied, whatever the launch says.' },
 ];
 
@@ -759,7 +758,7 @@ function PersonaEditor({
         </div>
       </div>
       <div className="st-field">
-        <span>tool rules — the launch's leaves it to the pills</span>
+        <span>tool rules — shell, push, network and MCP are the launch's pills</span>
         <div className="st-rulegrid">
           {TOOL_RULES.map((r) => (
             <div key={r.id} className="st-rulerow">

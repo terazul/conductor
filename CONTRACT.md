@@ -196,6 +196,54 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 147 — post-merge, applied. **What you click on Spawn is what runs: a persona's tool rules no longer go over the pills.**
+
+Found (14 Oct), the TODO.md item "A Custom launch loses the interaction, guardrails and effort
+you chose": on Spawn with **custom…**, the **interaction**, **guardrails** and **effort**
+clicked there were not always what the launched agents ran with.
+
+**Root cause.** On Spawn, each row's tool rules were laid over the pills you clicked: through
+`pillsWith` (`spawn/personas.ts`, now removed) inside `toAgentSpecs` (`spawn/presets.ts`), and
+through `withTools` in `spawn/stack.ts` for a job's "+ agent" (also removed). So the built-in
+architect persona `{bash: true, network: true, push: false}` always ran shell and network
+unattended and could never push, whatever the launch's pills said — seen in this very job,
+where the architect had `git push` denied while its helpers did not.
+
+Effort and the interaction mode were traced end to end and were never lost: the daemon keeps
+them as sent (`session/supervisor.ts:170`, `:1748`), the runner passes them to the SDK
+(`session/backends/claude.ts:213`, `:240`), and the composer shows the stored values. What
+looked like lost effort and interaction came from the persona override above, and from the
+read-only pin on a reading role, which nothing on the row said.
+
+**The rule now:**
+1. A persona's `bash`, `push`, `network` and `mcp` no longer change an agent's autonomy
+   anywhere: a Custom row, a preset row, a role an orchestrated stack lists, and a job's "+
+   agent". The launch's pills, effort and mode are what run (`rowAutonomy`, `spawn/presets.ts`).
+2. Only a persona's `write: false` still counts, making the row a reading row as a reading role
+   already is: write tools denied, nothing auto-accepted, no unattended shell, no MCP, and mode
+   `plan` if that was chosen, else `default`.
+3. Each Spawn plan row, and each role an orchestrated stack lists (`Pipeline.tsx`), shows a
+   short note under it when the pin changes what was clicked — `rowOverrides`
+   (`spawn/presets.ts`): for example `reads only (reviewer): no file edits, asks before shell,
+   no MCP, mode ask me`. A writing row says nothing.
+4. Settings → Personas now offers only **write files**; the shell, push, network and MCP
+   buttons are gone, since they did nothing any more (`TOOL_RULES`, `settings/route.tsx`).
+   Stored values for those keys still parse and are kept on save (`PersonaTools`,
+   `spawn/personas.ts`), but are ignored.
+
+**Backwards compatible.** A persona saved with `bash`, `push`, `network` or `mcp` set still
+round-trips through the editor and the setting; those fields are simply never read again. A
+job already running keeps the autonomy it launched with, untouched.
+
+**Verified:** `spawn/verify.ts` §25 (new, 26 checks): a Custom row, a preset row and a listed
+role all follow the pills rather than the persona's `bash`/`push`/`network`/`mcp`, including
+the Full preset's architect taken by role name and a job's "+ agent"; a reading role or a
+`write: false` persona is still pinned, by role name and by a writing role given a reading
+persona alike; `rowOverrides` says nothing for a writing row and the right words for a pinned
+one, naming the role or the persona; and the plan rows and the listed roles render it.
+`lib/verify.ts` §29 and `settings/route.tsx` check the editor offers one tool rule, not five.
+`make test`: 27 PASS.
+
 ### Amendment 146 — post-merge, applied. **Every agent, project and the fleet show what was spent today and over its whole life; removing an agent or a job no longer lowers a total.**
 
 Daemon (migration `db/migrations/240_spend_totals.sql` new, `session/store.ts`, `daily.ts`, `hub.ts`,
@@ -1565,7 +1613,8 @@ itself Amendment 96, its line numbers predated the merge) and marked built.
   prompt is a line of purpose, five or six rules about *how* to work, and a closing line "End with:"
   and the headings of its reply. A prompt is 830 to 1,340 characters, about 300 tokens.
 - **Why the system prompt.** A preset keeps its own brief and takes only the persona's system
-  prompt, skills and tool rules, so the system prompt is the one field that reaches every stack
+  prompt and skills (and, apart from `write: false`, no tool rule — Amendment 147), so the
+  system prompt is the one field that reaches every stack
   (Claude appends it to Claude Code's, `backends/claude.ts`; Copilot and OpenRouter send it as an
   appended system message, `backends/copilot.ts`).
 - **The closing headings are the hand-off.** Since Amendment 104 an agent that others wait for calls
@@ -3376,9 +3425,10 @@ so all of this reads the job's agent rows, the same for a built-in or a custom s
     list elsewhere) and a cap (dollars or tokens, `parseCap`, required);
   - `addAgentProblems` says what's wrong before the daemon is asked;
   - `addAgentSpec` builds the request. Its autonomy (`addedAutonomy`) is a sibling's that reads
-    alike, never a reader's for a writer, else Spawn's defaults. The persona's tool rules go
-    over it, a reading role or persona is pinned as `toAgentSpecs` pins one, and the cap is its
-    own. Escape closes the editor.
+    alike, never a reader's for a writer, else Spawn's defaults. The persona's tool rules went
+    over it (superseded by Amendment 147: the launch's pills decide, not the persona), a reading
+    role or persona is pinned as `toAgentSpecs` pins one, and the cap is its own. Escape closes
+    the editor.
   - Picking a persona renames a row not named by hand (`untouchedRole`, now shared with Custom).
 - **Web: remove from stack.** Terminate's confirm on the Agent screen offers **remove from
   stack** beside **✕ terminate**. The banner under the header says what moves
@@ -4054,6 +4104,8 @@ Asked for: "update the default personas, include architect in the personas."
 **Verified:** `spawn/verify.ts` §14 checks it is built in and first, its model, prompt and
 brief, its tool rules, that a Custom architect row launches with its system prompt, shell
 and no push, and that new rows still take validator after builder. `make test`: 10 PASS.
+(§14's shell-and-no-push check is gone under Amendment 147: a Custom architect row now
+follows the launch's pills, not the persona's tool rules.)
 
 ### Amendment 69 — post-merge, applied. **The navigator lists projects in the Fleet's order, and a drag there sets yours.**
 
@@ -4093,6 +4145,9 @@ Asked for (TODO.md): add, edit and delete agent personas, and pick one per Custo
   - saved setups store a persona by id, and a row can override the brief and model for
     one launch.
 
+(The tool-rules part of this is superseded by Amendment 147: only a persona's `write: false`
+still applies; shell, push, network and MCP are the launch's pills alone.)
+
 Built in three lanes, as planned in `docs/plans/personas-and-nav-order.md`, after a serial
 step 0 that fixed the shared contract.
 
@@ -4102,7 +4157,7 @@ step 0 that fixed the shared contract.
   setting. That setting stores only the edits to built-ins, plus your own personas
   whole, so a later build's built-ins still reach you. The file also has `personasFrom`,
   `withPersona`, `resetPersona`, `withoutPersona`, `newPersonaId`, `personaFor`, `isEdited`
-  and `pillsWith`.
+  and `pillsWith` (`pillsWith` removed in Amendment 147).
 - **Lane B (daemon and editor):**
   - Migration `100_persona.sql` adds `agents.persona`, `system_prompt` and `skills`.
   - `parseAgentSpecs` validates them: an id of `[a-z0-9-]{1,60}`, a system prompt of at
@@ -4115,12 +4170,15 @@ step 0 that fixed the shared contract.
     yours **yours**, and offers edit, reset (edited built-ins only), delete with a
     confirm (yours only) and **+ new persona**. The editor covers every field, with
     three-way tool rules and a model chooser of the launch's choice, a tier, or an
-    exact id via `ModelSelect`.
+    exact id via `ModelSelect`. (Amendment 147 cut this to one three-way tool rule,
+    **write files**; the other four did nothing and are gone from the editor.)
 - **Lane C (presets and Custom):**
   - `toAgentSpecs(…, personas?)`: a role's persona (`personaOf`, from `r.persona ?? r.role`;
     `''` means none) gives the spec `persona`, `systemPrompt` and `skills`. Its tool rules
     go over the pills through `pillsWith`, and `write: false` makes the role read-only.
     A persona can't make a reading role write. Without personas, the output is unchanged.
+    (Amendment 147: `pillsWith` is gone, and only `write: false` still acts — the launch's
+    pills decide the rest.)
   - `custom.ts`: `CustomRole.persona?` is stored by id in saved setups. `rowPersona` is
     the persona a row runs as (its pick, else the one named like its role, `''` for
     none), and the launch and the picker both use it, so they can't disagree. A row

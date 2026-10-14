@@ -333,9 +333,11 @@ to** it in the plan, to put it back. An agent can only wait for one above it.
 
 **custom…** opens an editor with one row per agent:
 - Pick a **persona** for the row: it fills in the role name, brief and model, and brings
-  its system prompt, tool rules and skills. A row named like a persona, such as the first
-  `developer` row, runs as that persona, and its picker says so; pick **no persona** for a
-  plain role.
+  its system prompt and skills. Its tool rules no longer change what the row runs with —
+  only **write: false** does, pinning the row as a reading row (Amendment 147); the plan row
+  then says so underneath, for example "reads only (reviewer): no file edits". A row named
+  like a persona, such as the first `developer` row, runs as that persona, and its picker
+  says so; pick **no persona** for a plain role.
 - Give each row a role: keep the persona's or type your own, like `developer-api`. Two
   rows can share a persona.
 - Optionally give it a brief of its own, on top of the job prompt; empty uses the
@@ -353,8 +355,10 @@ to** it in the plan, to put it back. An agent can only wait for one above it.
 
 **Personas** (Settings → **Personas**) are what each role is. Each one holds a name, a
 description, a brief, a **system prompt** (added to Claude Code's own, not replacing it),
-a default model, tool rules (shell, push, network, MCP tools, write: each on, off or the
-launch's choice) and **skills** to preload. With skills listed, the agent is offered only
+a default model, one tool rule — **write files**, on, off or the launch's choice — and
+**skills** to preload. Shell, push, network and MCP are the launch's pills alone now,
+whatever a persona stores for them (Amendment 147); only **write: false** still acts,
+pinning the row as a reading role. With skills listed, the agent is offered only
 those skills. The built-ins (architect, developer, validator, reviewer, scribe, debugger,
 analyst) can be edited, and **reset** puts one back as it shipped; they can't be deleted.
 Builder, documenter and uiux were built-ins until 6 Oct. An edit you made to builder is now
@@ -364,10 +368,12 @@ anyone builds: it reads the code, weighs two or three options, picks one, and wr
 plan and an ADR in `docs/adr/` without changing source code. It runs on opus, may run
 shell and write its documents, and never pushes. In a Custom setup, put a developer after
 it (waiting for it), and the developer starts from its plan. Presets use the persona of
-the same role for its system prompt, skills and tool rules, and keep their own brief and
-model. A persona with **write: off** reads only, and a reading role (reviewer, debugger,
-analyst) never writes, whatever its persona says. Editing a persona changes what new
-launches and saved setups get. A running or sleeping agent keeps what it launched with.
+the same role for its system prompt and skills, and keep their own brief and model. A
+persona with **write: off** reads only, and a reading role (reviewer, debugger, analyst)
+never writes, whatever its persona says. When a persona or a reading role pins a row read-
+only, the plan says so underneath: "reads only (reviewer): no file edits, asks before
+shell, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
+get. A running or sleeping agent keeps what it launched with.
 
 **What the built-in roles are told** (since 10 Oct, each has a system prompt; the text is in
 Settings → **Personas**). Every one is a line of purpose, a few rules about *how* to work, and
@@ -583,7 +589,6 @@ screen names the engine. Some things are different:
 
 ### Choose how much rope
 
-
 **First, how the agents interact with you** — one choice for the whole launch:
 **ask me** (every edit and every command the pills don't allow waits for you),
 **auto-accept edits** (the default: edits go ahead, commands still ask), **plan first**
@@ -591,7 +596,8 @@ screen names the engine. Some things are different:
 worth asking), or **⚠ bypass permissions**, which says plainly that nothing will ask you
 and nothing will reach Needs You. The pills below still decide the tool rules in every
 mode, so no push and no network hold even under bypass, and a reading role stays
-read-only whatever you pick. The default is in **Settings** → launch defaults, and a
+read-only whatever you pick — a persona's **write: off** pins a row the same way, and the
+plan says so underneath it. The default is in **Settings** → launch defaults, and a
 running agent's mode can still be changed from its composer.
 Every switch in this row reads the same way: **on means the agent may do it
 unattended.** A ⚠ appears on a switch that is *off* and will therefore stop and ask you.
@@ -649,9 +655,10 @@ that was stopped). Under it:
   dollars. It is required, as on Spawn, and the job's budget grows by it.
 
 It runs on the job's engine, with the job's permissions (taken from an agent in it that
-writes, or reads, as this one will), plus its persona's tool rules. A reading role, or a
-reading persona, is kept read-only. Change its permissions afterwards in its inspector, as
-for any agent.
+writes, or reads, as this one will). Its persona's tool rules don't change that, apart
+from **write: off** (Amendment 147): a reading role, or a reading persona, is kept
+read-only regardless. Change its permissions afterwards in its inspector, as for any
+agent.
 
 **+ add** checks it first and says what's wrong: a role already in the job, a loop (it would
 wait for an agent that waits for it), feeding an agent that has already started, or no cap.
