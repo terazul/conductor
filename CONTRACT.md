@@ -196,6 +196,47 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 148 — post-merge, applied. **A run that throws before it begins gives its slot back and fails as a launch, rather than holding the slot for good and crashing the daemon.**
+
+Daemon only (`session/supervisor.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of
+docs/plans/wave-11.md … following §0"; this is the plan's item A1 (lane S1, §2 "a throw before
+`try` leaks a slot"). Amends Amendment 47 (the slot limit) and F13/F20 (a failure has its reason):
+the failed launch they describe now also covers what throws before the run. Nothing a person sees
+changed, so `docs/MANUAL.md` is unchanged.
+
+- **What was wrong.** `#launch` took the slot (`this.#active.add`, `supervisor.ts:1225`) and only
+  then opened its `try` at the call to `runner.run`. In between ran `#openRun`, the status writes,
+  `emit`, `#pushEntities` and `createBackend` with its arguments (`#reachable`, `#rolesScope`,
+  `personaScope`). A throw there skipped the `finally` that frees the slot, left the row `working`
+  so `pump` passed over it for good, and rejected a promise every caller had dropped with `void`,
+  which on Node 22 ends the process. `#launchWithPrompt` had the same shape (`:2144`).
+- **The `try` starts at the slot** (`supervisor.ts:1230`, `:2149`). Everything after `#active.add`
+  is inside the `try` whose `finally` frees the slot (`:1282`, `:2192`), so a throw anywhere before
+  the run ends through the catch that was already there: `launch_failed` from `#launch` (`:1273`),
+  `resume_failed` from `#launchWithPrompt` (`:2185`), with what was thrown as its detail, then
+  `recordRunEnd`, `#settle` and `pump` as for any failed run. No second failure path. The code
+  moved is unchanged, only indented; `began` is now read just before it rather than after.
+- **Nothing is launched and forgotten.** The five `void` calls — `pump` (`:970`), a decision that
+  landed while a run unwound (`:1296`), the hand-off ask after a restart (`:1651`), `resumeParked`
+  (`:1948`) and `sendMessage` (`:1993`) — each end in a `.catch` that logs
+  `[supervisor] <id> launch threw` or `resume threw`, so what still throws after the slot is freed
+  (`#settle`, `pump`) is a line in the log, not a crash.
+
+*Not done / not decided:* if `#settle` itself throws (the database failing), the slot is freed and
+the error logged, but the row can stay `working`; that is a database fault, not this item. A launch
+that throws before its run is counted as a run in Metrics (`recordRunEnd`), as one that throws
+inside it already was.
+
+*Verified:* `session/verify.ts` §13, beside the launch-failure checks (`:1753`): the `copilot`
+engine is replaced through `registerBackend` with one whose `create` throws, one slot is left
+free, and each agent has its own job. "a launch that throws before its run begins fails as
+launch_failed, saying what", "and gives its slot back", "so the next queued agent starts in it";
+then through `POST /api/agents/:id/message` to a finished agent: "a resume that throws before its
+run begins fails as resume_failed" and "and the queued one starts, with no slot kept by the one
+that failed" (exactly one more slot in use than before). The real engine and the slot setting are
+put back after. Without the change to `supervisor.ts` the same run ends the process on Node 22 with
+the unhandled `Error: no copilot backend`. `make test`: 27 PASS.
+
 ### Amendment 147 — post-merge, applied. **What you click on Spawn is what runs: a persona's tool rules no longer go over the pills.**
 
 Found (14 Oct), the TODO.md item "A Custom launch loses the interaction, guardrails and effort

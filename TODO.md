@@ -86,6 +86,8 @@ the last of it on 12 Oct).
   either run the install or stop with one sentence saying to. Add a row to the troubleshooting table
   in `docs/MANUAL.md` too.
 
+- [x] **A throw before a run begins keeps its slot (wave 11, A1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 148.*
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
