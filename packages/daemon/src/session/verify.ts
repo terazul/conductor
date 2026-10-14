@@ -1750,6 +1750,62 @@ async function main(): Promise<void> {
     `${othersQueued} others queued · ${JSON.stringify(noLaunch)}`,
   );
 
+  /*
+   * Amendment 148. A throw after the slot is taken but before the run begins — here the
+   * engine itself can't be made — used to keep the slot for good, leave the agent `working`
+   * and reject a promise nobody awaited. Each agent has its own job, so one failing doesn't
+   * settle the job the next one is in. One slot is free, so the next starts only if the
+   * failed one gave its slot back.
+   */
+  const realCopilot = backendFor('copilot')!;
+  registerBackend({ ...realCopilot, create: () => { throw new Error('no copilot backend'); } });
+  const slotsBefore = sup.slots.used;
+  await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: String(slotsBefore + 1) } });
+  for (const id of ['job_a148', 'job_a148_next', 'job_a148_msg', 'job_a148_after']) job(id, null);
+  fixture('agt_a148', 'job_a148', { role: 'starter', status: 'queued', autonomy: DEFAULT_AUTONOMY, provider: 'copilot' } as Partial<Agent>);
+  sup.pump();
+  await until(() => getAgent(db, 'agt_a148')?.status === 'failed');
+  const noEngine = failedStatuses('agt_a148');
+  check(
+    'a launch that throws before its run begins fails as launch_failed, saying what',
+    noEngine.length === 1 && noEngine[0]?.error === 'launch_failed' && detailOf('agt_a148') === 'no copilot backend',
+    JSON.stringify(noEngine),
+  );
+  check('and gives its slot back', sup.slots.used === slotsBefore, `${sup.slots.used} of ${slotsBefore}`);
+  const runsBeforeNext = runs.length;
+  fixture('agt_a148_next', 'job_a148_next', { role: 'next', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+  sup.pump();
+  check(
+    'so the next queued agent starts in it',
+    (await until(() => runs.length === runsBeforeNext + 1)) && getAgent(db, 'agt_a148_next')?.status === 'working',
+    `${getAgent(db, 'agt_a148_next')?.status} · ${sup.slots.used} used`,
+  );
+  runs[runsBeforeNext]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === slotsBefore);
+  // The same through a message to a finished agent (#launchWithPrompt), with one queued
+  // that only the slot it gives back can start: kept, there would be one too many in use.
+  fixture('agt_a148_msg', 'job_a148_msg', { role: 'resumer', sdkSessionId: 'sess_a148', autonomy: DEFAULT_AUTONOMY, provider: 'copilot' } as Partial<Agent>);
+  fixture('agt_a148_after', 'job_a148_after', { role: 'after', status: 'queued', autonomy: DEFAULT_AUTONOMY });
+  const runsBeforeAfter = runs.length;
+  const messaged = await send('POST', '/api/agents/agt_a148_msg/message', { text: 'carry on' });
+  await until(() => getAgent(db, 'agt_a148_msg')?.status === 'failed');
+  const noResume = failedStatuses('agt_a148_msg');
+  check(
+    'a resume that throws before its run begins fails as resume_failed',
+    messaged.status === 200 && noResume.length === 1 && noResume[0]?.error === 'resume_failed' && detailOf('agt_a148_msg') === 'no copilot backend',
+    `${messaged.status} · ${JSON.stringify(noResume)}`,
+  );
+  check(
+    'and the queued one starts, with no slot kept by the one that failed',
+    (await until(() => runs.length === runsBeforeAfter + 1)) && getAgent(db, 'agt_a148_after')?.status === 'working' && sup.slots.used === slotsBefore + 1,
+    `${getAgent(db, 'agt_a148_after')?.status} · ${sup.slots.used} used`,
+  );
+  runs[runsBeforeAfter]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === slotsBefore);
+  registerBackend(realCopilot);
+  await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: null } });
+  for (const id of ['agt_a148', 'agt_a148_msg']) setAgentStatus(db, id, 'done');
+
   const paused = await send('POST', '/api/agents/agt_net2/pause');
   await until(() => net2?.finished === true);
   await settle(150);
