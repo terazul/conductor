@@ -36,7 +36,7 @@ import {
 } from './autonomy.js';
 import { scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.js';
-import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, pillsWith, resetPersona, withPersona, withoutPersona } from './personas.js';
+import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, resetPersona, withPersona, withoutPersona } from './personas.js';
 import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, orchestratorRow, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, setupOf, toPreset, withOrchestrator, withSetup, withoutSetup, type CustomRole, type SavedSetup } from './custom.js';
 import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { DEFAULT_METHOD, METHODS, branchOptions, branchProblem, isolationOf, launchBody, methodFrom, methodReady, pickedNote, presetLabel } from './launch.js';
@@ -52,9 +52,12 @@ import {
   startsWhen,
   commonPick,
   modelFor,
+  personaOf,
   pickAll,
   pickFor,
   readsOnly,
+  rowAutonomy,
+  rowOverrides,
   toAgentSpecs,
   unresolvedRoles,
   orchestratedFor,
@@ -624,8 +627,6 @@ console.log('\n12 · personas: what a role is, editable (Amendment 68, the share
   check('a broken setting is the built-ins', personasFrom('{nope').length === BUILT_IN_PERSONAS.length);
   check('a stored field of the wrong type is dropped', personaFor(personasFrom(JSON.stringify({ edits: { developer: { brief: 3, skills: ['a', 4] } } })), 'developer')?.skills.join() === 'a');
   check('one of yours cannot take a built-in id', personasFrom(JSON.stringify({ own: [{ id: 'developer', name: 'x' }] })).filter((p) => p.id === 'developer').length === 1);
-  const pills = { acceptEdits: true, allowBash: false, allowPush: false, network: false, mcp: false };
-  check('tool rules: what the persona says wins, the rest stay the launch\'s', JSON.stringify(pillsWith(pills, { bash: true, mcp: true })) === JSON.stringify({ ...pills, allowBash: true, mcp: true }));
 }
 
 console.log('\n13 · presets and Custom rows take their personas (Amendment 68)');
@@ -643,7 +644,7 @@ console.log('\n13 · presets and Custom rows take their personas (Amendment 68)'
   const specs = toAgentSpecs(full, defaultPills(), 5, undefined, {}, tiersNow, {}, undefined, personas);
   const developer = specs.find((x) => x.role === 'developer')!;
   check('a preset role carries its persona: id, system prompt, skills', developer.persona === 'developer' && developer.systemPrompt === 'Prefer pure functions.' && developer.skills?.join() === 'tdd', JSON.stringify(developer));
-  check("the persona's tool rules go over the pills: MCP on", developer.autonomy.allowedTools.includes('mcp__*') && !defaultPills()['mcp']);
+  check("the persona's tool rules don't go over the pills: MCP stays off, as clicked (Amendment 147)", !developer.autonomy.allowedTools.includes('mcp__*') && !defaultPills()['mcp']);
   check("and the preset keeps its own brief and tier, not the persona's", developer.brief === full.roles.find((r) => r.role === 'developer')!.brief && developer.model === tiersNow.sonnet);
   // Every built-in has a system prompt since Amendment 126, so "nothing to append" is a validator edited down to none.
   const quietSpecs = toAgentSpecs(full, defaultPills(), 5, undefined, {}, tiersNow, {}, undefined, personasFrom(withPersona(raw, { ...personaFor(personas, 'validator')!, systemPrompt: '' })));
@@ -704,7 +705,7 @@ console.log('\n14 · an architect among the built-ins (Amendment 70)');
   check('it may read, run shell and write its ADR, and never pushes', JSON.stringify(arch?.tools) === JSON.stringify({ bash: true, write: true, network: true, push: false }));
   const specs = toAgentSpecs(toPreset('custom', 'x', [{ role: 'architect', brief: '', dependsOnRoles: [] }, { role: 'developer', brief: '', dependsOnRoles: ['architect'] }], personasFrom(null)), defaultPills(), 5, undefined, {}, {}, {}, undefined, personasFrom(null));
   const a = specs[0]!;
-  check('a Custom architect row launches with its system prompt and its tool rules', a.persona === 'architect' && /software architect/.test(a.systemPrompt ?? '') && a.autonomy.allowedTools.includes('Bash') && a.autonomy.disallowedTools.includes('Bash(git push:*)') && !a.autonomy.disallowedTools.includes('WebFetch'), JSON.stringify(a.autonomy));
+  check("a Custom architect row launches with its system prompt and the launch's pills (Amendment 147)", a.persona === 'architect' && /software architect/.test(a.systemPrompt ?? '') && JSON.stringify(a.autonomy) === JSON.stringify(toAutonomy(defaultPills(), 5)), JSON.stringify(a.autonomy));
   check('and is offered as a role, after the ones new rows have always taken', KNOWN_ROLES.includes('architect') && nextRole([FIRST_ROLE]) === 'validator');
 }
 
@@ -1460,6 +1461,88 @@ console.log('\n24 · "merge into main and clean up when done", a launch option (
   check("Spawn draws it with the other pills (PILLS.map)", /\{PILLS\.map\(\(p\) => \{/.test(route));
   const settings = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
   check('and Settings does too', /\{PILLS\.map\(\(p\) => \(/.test(settings));
+}
+
+console.log('\n25 · what you click is what runs: a persona does not change the guardrails, and a pinned row says so (Amendment 147)');
+{
+  const every = personasFrom(null);
+  const arch = toPreset('custom', 'c', [{ role: 'architect', brief: '', dependsOnRoles: [] }], every);
+  const archRow = arch.roles[0]!;
+  check('a Custom row called architect takes the architect persona, as before', archRow.persona === 'architect');
+  const push = toAgentSpecs(arch, { ...defaultPills(), allowPush: true }, 5, 'high', {}, {}, {}, 'auto', every)[0]!;
+  check('allow git push clicked on: no deny on git push, whatever the persona says', !push.autonomy.disallowedTools.includes('Bash(git push:*)'), JSON.stringify(push.autonomy));
+  const quiet = toAgentSpecs(arch, defaultPills(), 5, 'high', {}, {}, {}, 'auto', every)[0]!;
+  check('allow network off: no WebFetch or WebSearch allowed, and both denied', !quiet.autonomy.allowedTools.includes('WebFetch') && !quiet.autonomy.allowedTools.includes('WebSearch') && quiet.autonomy.disallowedTools.includes('WebFetch'), JSON.stringify(quiet.autonomy));
+  check('run shell unattended off: no Bash allowed', !quiet.autonomy.allowedTools.includes('Bash'), JSON.stringify(quiet.autonomy));
+  check("so the row's autonomy is the launch's, exactly", JSON.stringify(quiet.autonomy) === JSON.stringify(toAutonomy(defaultPills(), 5, 'high', 'auto')));
+  const full = toAgentSpecs(presetById('full'), defaultPills(), 5, 'high', {}, {}, {}, 'auto', every);
+  check("a preset's architect takes the pills too", JSON.stringify(full.find((x) => x.role === 'architect')!.autonomy) === JSON.stringify(toAutonomy(defaultPills(), 5, 'high', 'auto')));
+
+  const reviewer = full.find((x) => x.role === 'reviewer')!;
+  check('a reviewer is still read-only under auto: write tools denied, mode "ask me"', WRITE_TOOLS.every((t) => reviewer.autonomy.disallowedTools.includes(t)) && reviewer.autonomy.mode === 'default', JSON.stringify(reviewer.autonomy));
+  const loose = toAgentSpecs(presetById('full'), { ...PERMISSIVE, mcp: true }, 5, 'high', {}, {}, {}, 'auto', every).find((x) => x.role === 'reviewer')!;
+  check('and with every pill on, no unattended shell or MCP', !loose.autonomy.allowedTools.includes('Bash') && !loose.autonomy.allowedTools.includes('mcp__*'), JSON.stringify(loose.autonomy));
+  check('rowAutonomy is what toAgentSpecs sends', presetById('full').roles.every((r, i) => JSON.stringify(rowAutonomy(r, defaultPills(), 5, 'high', 'auto', every)) === JSON.stringify(full[i]!.autonomy)));
+
+  const listed: ListedRole[] = [{ id: 'developer', tier: 'sonnet' }, { id: 'reviewer', tier: 'opus' }, { id: 'architect', tier: 'opus' }];
+  const orch: Preset = { id: 'custom', label: 'c', roles: [{ ...archRow, orchestrates: true }] };
+  const pills = { ...defaultPills(), allowPush: true, allowBash: true, mcp: true };
+  const [o] = toAgentSpecs(orch, pills, 5, 'max', {}, { opus: 'o', sonnet: 's' }, {}, 'auto', every, listed);
+  const roles = o!.helperRoles ?? [];
+  const role = (id: string) => roles.find((r) => r.id === id)!;
+  check('the roles it may start follow the same rules: the architect and developer run as clicked', ['developer', 'architect'].every((id) => JSON.stringify(role(id).autonomy) === JSON.stringify(toAutonomy(pills, 5, 'max', 'auto'))), JSON.stringify(roles.map((r) => r.autonomy)));
+  check('and the orchestrator itself', JSON.stringify(o!.autonomy) === JSON.stringify(toAutonomy(pills, 5, 'max', 'auto')));
+  check('a listed reviewer is pinned read-only', WRITE_TOOLS.every((t) => role('reviewer').autonomy.disallowedTools.includes(t)) && role('reviewer').autonomy.mode === 'default' && !role('reviewer').autonomy.allowedTools.includes('Bash'));
+  check('effort reaches every spec and every listed role', o!.autonomy.effort === 'max' && roles.every((r) => r.autonomy.effort === 'max'));
+  check('the mode reaches every writing spec and role; a reading one under plan stays plan', roles.filter((r) => r.id !== 'reviewer').every((r) => r.autonomy.mode === 'auto') &&
+    toAgentSpecs(presetById('full'), defaultPills(), 5, 'low', {}, {}, {}, 'plan', every).every((x) => x.autonomy.mode === 'plan' && x.autonomy.effort === 'low'));
+
+  const devRow = presetById('full').roles.find((r) => r.role === 'developer')!;
+  const revRow = presetById('full').roles.find((r) => r.role === 'reviewer')!;
+  check('rowOverrides: nothing for a writing row, whatever is clicked', rowOverrides(devRow, PERMISSIVE, 'bypassPermissions', every) === null && rowOverrides(archRow, defaultPills(), 'auto', every) === null && rowOverrides(devRow, defaultPills(), undefined) === null);
+  const said = rowOverrides(revRow, { ...PERMISSIVE, mcp: true }, 'auto', every);
+  check('and for a reading one, why and each thing that changed', said === 'reads only (reviewer): no file edits, asks before shell, no MCP, mode ask me', said ?? 'null');
+  check('only what changed: shell already asks and plan stays plan', rowOverrides(revRow, defaultPills(), 'plan', every) === 'reads only (reviewer): no file edits');
+  const reading = personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, tools: { write: false } }));
+  const scribeRow = presetById('full').roles.find((r) => r.role === 'scribe')!;
+  check('a reading persona is named as the reason', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) === 'reads only (scribe persona): no file edits, mode ask me', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) ?? 'null');
+
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const pipe = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
+  check('the plan rows and the listed roles show it', /rowOverrides\(r, pills, mode, personas\)/.test(route) && /className="sp-rownote"/.test(route) && /rowOverrides\(\{ role: l\.id/.test(pipe) && /pills=\{pills\}/.test(route));
+
+  // A job's "+ agent" too: a persona's shell, push, network and MCP don't change the sibling's autonomy.
+  const ag: Agent = {
+    id: 'd', jobId: 'j', projectId: 'p', role: 'developer', model: 'm', sdkSessionId: null, status: 'queued', blockMode: null,
+    costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], startedAt: null, endedAt: null,
+    autonomy: { mode: 'auto', allowedTools: ['Read', 'Glob', 'Grep'], disallowedTools: ['WebFetch', 'WebSearch'], budgetUsd: 25, effort: 'high' },
+  };
+  const added = addedAutonomy([ag], 'architect-2', personaFor(every, 'architect'), { usd: 3 });
+  check("+ agent with the architect persona keeps the job's rules: no Bash, no push deny, network still denied", JSON.stringify({ ...added, budgetUsd: 25 }) === JSON.stringify(ag.autonomy), JSON.stringify(added));
+
+  // The Full preset's architect, resolved by role name rather than a Custom row, also follows
+  // the push pill despite the architect persona's own push: false (Amendment 147).
+  const fullArch = toAgentSpecs(presetById('full'), { ...defaultPills(), allowPush: true }, 5, 'high', {}, {}, {}, 'auto', every).find((x) => x.role === 'architect')!;
+  check("the Full preset's architect, taken by role name, also follows the push pill, not the persona's push:false", !fullArch.autonomy.disallowedTools.includes('Bash(git push:*)'), JSON.stringify(fullArch.autonomy));
+
+  // MCP on and off, for a writing persona that stores a conflicting mcp field: the pill decides, the persona's own value is never read (Amendment 147).
+  const mcpStored = personasFrom(withPersona(null, { ...personaFor(every, 'developer')!, tools: { mcp: false } }));
+  const mcpBase = toPreset('custom', 'c', [{ role: 'developer', brief: '', dependsOnRoles: [] }], mcpStored);
+  const mcpOn = toAgentSpecs(mcpBase, { ...defaultPills(), mcp: true }, 5, undefined, {}, {}, {}, undefined, mcpStored)[0]!;
+  const mcpOff = toAgentSpecs(mcpBase, defaultPills(), 5, undefined, {}, {}, {}, undefined, mcpStored)[0]!;
+  check('a writing persona that stores mcp:false still follows the mcp pill both ways', mcpOn.autonomy.allowedTools.includes('mcp__*') && !mcpOff.autonomy.allowedTools.includes('mcp__*'), JSON.stringify({ on: mcpOn.autonomy.allowedTools, off: mcpOff.autonomy.allowedTools }));
+
+  // A reviewer alone, under mode plan, keeps plan — isolated from the bundled check above.
+  const planReviewer = toAgentSpecs(presetById('full'), defaultPills(), 5, 'high', {}, {}, {}, 'plan', every).find((x) => x.role === 'reviewer')!;
+  check('a reviewer alone, under mode plan, keeps plan rather than being forced to default', planReviewer.autonomy.mode === 'plan', planReviewer.autonomy.mode);
+
+  // A Custom row with persona: '' (none) on a reading role is pinned by the role name alone.
+  const noPersonaRow = toPreset('custom', 'c', [{ role: 'reviewer', brief: '', dependsOnRoles: [], persona: '' }], every).roles[0]!;
+  check("a Custom row named reviewer with persona: '' (none) is still pinned, by its role name", personaOf(noPersonaRow, every) === undefined && readsOnly(noPersonaRow, every) && WRITE_TOOLS.every((t) => rowAutonomy(noPersonaRow, PERMISSIVE, 5, undefined, 'auto', every).disallowedTools.includes(t)));
+  // A writing role (developer) given a write:false persona is pinned too, same as a reading role.
+  const devReading = personasFrom(withPersona(null, { ...personaFor(every, 'developer')!, tools: { write: false } }));
+  const pinnedDev = rowAutonomy(devRow, PERMISSIVE, 5, undefined, 'auto', devReading);
+  check('a writing role (developer) given a write:false persona is pinned too: write tools denied, mode ask me, no unattended shell', WRITE_TOOLS.every((t) => pinnedDev.disallowedTools.includes(t)) && pinnedDev.mode === 'default' && !pinnedDev.allowedTools.includes('Bash'), JSON.stringify(pinnedDev));
 }
 
 console.log(

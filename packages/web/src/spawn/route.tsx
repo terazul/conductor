@@ -63,6 +63,7 @@ import {
   pickFor,
   presetById,
   readsOnly,
+  rowOverrides,
   startsWhen,
   toAgentSpecs,
   unresolvedRoles,
@@ -903,6 +904,7 @@ function Spawn() {
           <div className="sp-plan-body" ref={reorder.rootRef} {...reorder.rootProps}>
             {preset.roles.map((r, i) => {
               const persona = personaOf(r, personas);
+              const note = rowOverrides(r, pills, mode, personas);
               return (
               <div
                 className={`sp-areorder${movable ? ` sp-reorder${reorder.markOf(i)}` : ''}${r.orchestrates ? ' is-orch' : ''}`}
@@ -981,6 +983,8 @@ function Spawn() {
                   )}
                   <span className="sp-when">{startsWhen(r)}</span>
                 </div>
+                {/* What this row runs with that you didn't click, and why (Amendment 147). */}
+                {note && <div className="sp-rownote">{note}</div>}
                 {/*
                  * The roles an orchestrated stack's orchestrator may start (Amendment 128), under
                  * its row: editable here, sent with the launch. With none listed the row above is
@@ -990,6 +994,8 @@ function Spawn() {
                   <Pipeline
                     listed={listed}
                     personas={personas}
+                    pills={pills}
+                    mode={mode}
                     tiers={tiers}
                     claude={claude}
                     model={launchOn.model}

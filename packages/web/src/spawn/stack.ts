@@ -14,7 +14,7 @@ import { WRITE_TOOLS, createsCycle, isReadOnlyRole, rewireOnRemoval } from '@con
 import { CLAUDE, parseTokens, providerOf } from '../lib/providers.js';
 import { DEFAULT_BUDGET_USD, DEFAULT_MODE, defaultPills, toAutonomy } from './autonomy.js';
 import { DEFAULT_BUDGET_TOKENS } from './engine.js';
-import type { PersonaTools, Persona } from './personas.js';
+import type { Persona } from './personas.js';
 
 const ROLE = /^[a-z][a-z0-9-]{0,30}$/;
 
@@ -108,34 +108,11 @@ export function budgetDefault(agents: readonly Agent[], role: AgentRole, usd: bo
   return String(t?.budgetTokens ?? DEFAULT_BUDGET_TOKENS);
 }
 
-/** A persona's tool rules over an autonomy, as `pillsWith` puts them over Spawn's pills. */
-function withTools(a: Autonomy, t: PersonaTools): Autonomy {
-  let allowed = [...a.allowedTools];
-  let denied = [...a.disallowedTools];
-  const allow = (tool: string, on: boolean): void => {
-    allowed = allowed.filter((x) => x !== tool);
-    if (on) allowed.push(tool);
-  };
-  const deny = (tool: string, on: boolean): void => {
-    denied = denied.filter((x) => x !== tool);
-    if (on) denied.push(tool);
-  };
-  if (t.bash !== undefined) allow('Bash', t.bash);
-  if (t.mcp !== undefined) allow('mcp__*', t.mcp);
-  if (t.push !== undefined) deny('Bash(git push:*)', !t.push);
-  if (t.network !== undefined) {
-    for (const tool of ['WebFetch', 'WebSearch']) {
-      allow(tool, t.network);
-      deny(tool, !t.network);
-    }
-  }
-  return { ...a, allowedTools: allowed, disallowedTools: denied };
-}
-
 /**
  * The added agent's autonomy: a sibling's that reads alike (the job's pills, as launched),
- * its persona's tool rules over it, then pinned read-only for a reading role or persona the
- * way `toAgentSpecs` pins one, and its own cap. Spawn's defaults when the job has nobody.
+ * pinned read-only for a reading role or persona the way `toAgentSpecs` pins one, and its own
+ * cap. Spawn's defaults when the job has nobody. A persona's other tool rules don't change it,
+ * as they don't on Spawn (Amendment 147).
  */
 export function addedAutonomy(
   agents: readonly Agent[],
@@ -146,7 +123,7 @@ export function addedAutonomy(
   const t = templateFor(agents, role, persona);
   // A writer in a job of readers can't take a reader's pin: Spawn's defaults, then.
   const base = t && (readsOnly(role, persona) || !reads(t)) ? t.autonomy : toAutonomy(defaultPills(), null, undefined, DEFAULT_MODE);
-  let a: Autonomy = persona ? withTools(base, persona.tools) : { ...base };
+  let a: Autonomy = { ...base };
   if (readsOnly(role, persona)) {
     a = {
       ...a,

@@ -641,6 +641,21 @@
   white-space: nowrap;
 }
 
+/*
+ * What a row runs with that you didn't click, and why (Amendment 147): the read-only pin, said
+ * in a line under the row. Muted like the plan's other notes: nothing is wrong, and nothing to do.
+ */
+.sp-rownote {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.5;
+  padding: 2px 0 0 15px;
+}
+
+.sp-pipe-rownote {
+  padding-left: 14px;
+}
+
 /* ── resulting-options disclosure ───────────────────────────────────────── */
 
 .sp-resolved {

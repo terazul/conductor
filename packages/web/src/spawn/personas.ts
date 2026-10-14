@@ -7,17 +7,22 @@
  * live in one setting, `conductor.personas`, holding only what differs from the built-ins
  * plus your own — so a later build's better built-in reaches you unless you changed it.
  *
- * Presets take the persona of the same role for its system prompt, skills and tool rules,
- * keeping their own brief and model tier. A Custom row picks a persona by id and may
- * override its brief and model for one launch. A running agent keeps what it launched
- * with: the persona's fields are copied into its spec at launch.
+ * Presets take the persona of the same role for its system prompt and skills, keeping their
+ * own brief and model tier. Its tool rules no longer go over the pills, apart from
+ * `write: false` (Amendment 147). A Custom row picks a persona by id and may override its
+ * brief and model for one launch. A running agent keeps what it launched with: the persona's
+ * fields are copied into its spec at launch.
  */
 
 import type { ModelTier } from '@conductor/shared';
 
 export const PERSONAS_KEY = 'conductor.personas';
 
-/** What a persona says about the tools; absent means the launch's pills decide. */
+/**
+ * What a persona says about the tools. Only `write: false` is acted on: it makes a reading
+ * persona. Shell, push, network and MCP are the launch's pills, whatever is stored here
+ * (Amendment 147); they are kept so a stored persona still reads back whole.
+ */
 export interface PersonaTools {
   bash?: boolean;
   push?: boolean;
@@ -353,19 +358,4 @@ export function newPersonaId(list: readonly Persona[]): string {
 /** The persona for a role: the one with that id, or none. */
 export function personaFor(list: readonly Persona[], role: string): Persona | undefined {
   return list.find((p) => p.id === role);
-}
-
-/**
- * A persona's tool rules over the launch's pills: what it says wins, what it leaves out
- * stays the launch's. `write: false` is a reading persona, applied by the caller, since
- * write isn't a pill.
- */
-export function pillsWith(pills: Record<string, boolean>, t: PersonaTools): Record<string, boolean> {
-  return {
-    ...pills,
-    ...(t.bash !== undefined ? { allowBash: t.bash } : {}),
-    ...(t.push !== undefined ? { allowPush: t.push } : {}),
-    ...(t.network !== undefined ? { network: t.network } : {}),
-    ...(t.mcp !== undefined ? { mcp: t.mcp } : {}),
-  };
 }

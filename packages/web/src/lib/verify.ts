@@ -1181,8 +1181,8 @@ console.log('\n29 · personas are listed, edited, reset and deleted on Settings 
   );
   check("the model is the launch's, a tier, or an exact id", /the launch's choice/.test(editor) && /TIERS\.map/.test(editor) && /an exact model…/.test(editor));
   check(
-    'five tool rules, each on, off or the launch’s',
-    /TOOL_RULES\.map/.test(editor) && /RULE_CHOICES\.map/.test(editor) && ['bash', 'push', 'network', 'mcp', 'write'].every((k) => new RegExp(`id: '${k}'`).test(route)) && /value: undefined, label: "the launch's"/.test(route),
+    'one tool rule, write, on, off or the launch’s; the rest are the pills (Amendment 147)',
+    /TOOL_RULES\.map/.test(editor) && /RULE_CHOICES\.map/.test(editor) && /id: 'write'/.test(route) && ['bash', 'push', 'network', 'mcp'].every((k) => !new RegExp(`id: '${k}'`).test(route)) && /value: undefined, label: "the launch's"/.test(route),
   );
   check('the system prompt says it is appended, and keeps to the daemon’s limit', /Appended to Claude Code's own system prompt/.test(editor) && /maxLength=\{20_000\}/.test(editor));
   const daemon = readFileSync(new URL('../../../daemon/src/routes/session.ts', import.meta.url), 'utf8');

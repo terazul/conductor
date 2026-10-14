@@ -12,8 +12,8 @@
 
 import type { AgentSpec, AgentRole, Autonomy, EffortLevel, HelperRole, ModelCatalog, ModelTier } from '@conductor/shared';
 import { WRITE_TOOLS, isReadOnlyRole } from '@conductor/shared';
-import { toAutonomy, type PillState } from './autonomy.js';
-import { personaFor, pillsWith, type Persona } from './personas.js';
+import { MODES, toAutonomy, type PillState } from './autonomy.js';
+import { personaFor, type Persona } from './personas.js';
 import { ORCHESTRATED_ID, helperCapFor, orchestrates, type ListedRole } from './orchestrated.js';
 
 /**
@@ -370,10 +370,11 @@ export function helperRolesFor(
  * into a writer.
  *
  * With personas (Amendment 68), each role takes its persona — the one it picked, else the
- * one of its role's name. The spec carries the persona's id, system prompt and skills; its
- * tool rules go over the pills before the read-only pin, so a persona can't undo that; and a
- * reading persona (`write: false`) is pinned as a reading role is. The brief and the model
- * tier stay the preset's. Without personas, the specs are what they always were.
+ * one of its role's name. The spec carries the persona's id, system prompt and skills, and a
+ * reading persona (`write: false`) is pinned as a reading role is. Its other tool rules (shell,
+ * push, network, MCP) are not used: what you clicked is what every row runs with, a Custom
+ * row's, a preset's and a listed role's alike (Amendment 147). The brief and the model tier
+ * stay the preset's. Without personas, the specs are what they always were.
  */
 export function toAgentSpecs(
   preset: Preset,
@@ -400,17 +401,6 @@ export function toAgentSpecs(
   return preset.roles.map((r) => {
     const runs = r.orchestrates === true && orchestrates(listed);
     const p = personaOf(r, personas);
-    const readOnly = readsOnly(r, personas);
-    const own: PillState = p ? pillsWith(pills, p.tools) : pills;
-    const effective: PillState = readOnly
-      ? // MCP tools can change things outside the folder, so a reading role has none (Amendment 67).
-        { ...own, acceptEdits: false, allowBash: false, mcp: false }
-      : own;
-
-    // A reading role stays read-only whatever was chosen: planning is reading, the rest asks.
-    const roleMode = mode === undefined ? undefined : readOnly ? (mode === 'plan' ? 'plan' : 'default') : mode;
-    const autonomy = toAutonomy(effective, budgetPerAgent, effort, roleMode);
-
     return {
       role: r.role,
       // An unresolved tier is sent as is and the daemon refuses it by name; Spawn
@@ -426,13 +416,57 @@ export function toAgentSpecs(
         : (helpers[r.role] ?? 0) > 0
           ? { helpers: helpers[r.role] }
           : {}),
-      autonomy: readOnly
-        ? { ...autonomy, disallowedTools: [...autonomy.disallowedTools, ...WRITE_TOOLS] }
-        : autonomy,
+      autonomy: rowAutonomy(r, pills, budgetPerAgent, effort, mode, personas),
       // At the end of the spec, as the wire type has it: the roles it may start (Amendment 128).
       ...(runs ? { helperRoles: helperRolesFor(listed, pills, budgetPerAgent, effort, tiers, mode, personas) } : {}),
     };
   });
+}
+
+/**
+ * The autonomy one row runs with: the launch's pills, effort and mode, as clicked. A persona's
+ * tool rules don't change them (Amendment 147); only the read-only pin does, for a reading role
+ * or a reading persona: nothing auto-accepted, no unattended shell, no MCP, the write tools
+ * denied outright, and the mode `plan` if that was chosen, else "ask me".
+ */
+export function rowAutonomy(
+  r: PresetRole,
+  pills: PillState,
+  budgetPerAgent: number | null,
+  effort: EffortLevel | undefined,
+  mode: Autonomy['mode'] | undefined,
+  personas: readonly Persona[] | undefined,
+): Autonomy {
+  if (!readsOnly(r, personas)) return toAutonomy(pills, budgetPerAgent, effort, mode);
+  // MCP tools can change things outside the folder, so a reading role has none (Amendment 67).
+  const pinned: PillState = { ...pills, acceptEdits: false, allowBash: false, mcp: false };
+  // A reading role stays read-only whatever was chosen: planning is reading, the rest asks.
+  const roleMode = mode === undefined ? undefined : mode === 'plan' ? 'plan' : 'default';
+  const a = toAutonomy(pinned, budgetPerAgent, effort, roleMode);
+  return { ...a, disallowedTools: [...a.disallowedTools, ...WRITE_TOOLS] };
+}
+
+/**
+ * What the plan row says when the row won't run with what was clicked (Amendment 147): why,
+ * and each thing that changed. Null when it runs as clicked. Only the read-only pin changes a
+ * row, so a writing row always says nothing.
+ */
+export function rowOverrides(
+  r: PresetRole,
+  pills: PillState,
+  mode: Autonomy['mode'] | undefined,
+  personas?: readonly Persona[],
+): string | null {
+  const clicked = toAutonomy(pills, null, undefined, mode);
+  const runs = rowAutonomy(r, pills, null, undefined, mode, personas);
+  const changed: string[] = [];
+  if (WRITE_TOOLS.some((t) => runs.disallowedTools.includes(t) && !clicked.disallowedTools.includes(t))) changed.push('no file edits');
+  if (clicked.allowedTools.includes('Bash') && !runs.allowedTools.includes('Bash')) changed.push('asks before shell');
+  if (clicked.allowedTools.includes('mcp__*') && !runs.allowedTools.includes('mcp__*')) changed.push('no MCP');
+  if (runs.mode !== clicked.mode) changed.push(`mode ${MODES.find((m) => m.id === runs.mode)?.label ?? runs.mode}`);
+  if (changed.length === 0) return null;
+  const why = isReadOnlyRole(r.role) ? r.role : `${personaOf(r, personas)?.name ?? r.role} persona`;
+  return `reads only (${why}): ${changed.join(', ')}`;
 }
 
 /** The exact id picked for each role that has one — Spawn's per-row model. */
