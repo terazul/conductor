@@ -19,6 +19,15 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [ ] **Never give up on the model: back off to every hour.** Asked for (14 Oct). When an agent gets no
+  answer from the model, for whatever reason (no connection, the API down, a rate or spend limit on
+  the provider's side), keep trying: first the usual waits (`conductor.retryDelays`, 5 s, 15 s, 30 s,
+  60 s, 5 min by default, Amendment 140), then 30 minutes, then every hour, and stay at every hour until
+  you say otherwise. Today it stops after the last wait (`daemon/src/session/retry.ts`). Settle: the
+  Needs You card's wording while it keeps trying, a **stop retrying** button on it (and on the agent),
+  whether Conductor's own budget pause (Amendment 125, 140) counts as "no response" (it shouldn't: that
+  is a decision, not an outage), and whether the hourly tries survive a daemon restart.
+
 - [ ] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
   time, a **queue** choice: the message waits until the agent's turn ends (it is `done`, or stops to
   wait on you after finishing what it was doing), then goes as if you had pressed send. Several
