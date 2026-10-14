@@ -967,7 +967,7 @@ export class Supervisor implements AgentControl {
        * fresh — which this used to — started a new session from the job prompt and
        * lost the whole conversation.
        */
-      void this.#launch(agent.id, agent.sdkSessionId);
+      void this.#launch(agent.id, agent.sdkSessionId).catch((err) => console.error(`[supervisor] ${agent.id} launch threw`, err));
     }
   }
 
@@ -1224,38 +1224,41 @@ export class Supervisor implements AgentControl {
     retryBook().cancel(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
-    this.#openRun(agent);
-    setAgentStatus(this.#db, agentId, 'working');
-    // Queued, or settled while this one waited for you (Amendment 88): it is working now.
-    if (job.status !== 'working') setJobStatus(this.#db, job.id, 'working');
-    eventLog().emit(
-      { projectId: agent.projectId, jobId: agent.jobId, agentId },
-      { kind: 'status', status: 'working' },
-    );
-    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!], jobs: [getJob(this.#db, job.id)!] });
-
-    // On the engine it was spawned on, which never changes: its session id is that
-    // engine's, and no other's (Amendment 74).
-    const runner = createBackend(getAgentProvider(this.#db, agentId), this.#db, {
-      agentId,
-      jobId: agent.jobId,
-      projectId: agent.projectId,
-      worktreePath: job.worktreePath,
-      extraDirs: this.#reachable(agent.projectId, job.worktreePath),
-      helperCap: agent.helperCap ?? 0,
-      handOff: this.#hasWaiters(agent),
-      ...this.#rolesScope(agent),
-      model: agent.model,
-      autonomy: this.#autonomyFor(agentId),
-      spentUsd: agent.costUsd,
-      // What its persona gave it at launch, on this run and every resume (Amendment 68).
-      ...personaScope(getAgentPersona(this.#db, agentId)),
-    });
-    this.#runners.set(agentId, runner);
 
     let outcome;
     const began = Date.now();
+    // From the slot being taken, not from the run: whatever throws before the run begins
+    // ends it as a failed launch and gives the slot back (Amendment 148).
     try {
+      this.#openRun(agent);
+      setAgentStatus(this.#db, agentId, 'working');
+      // Queued, or settled while this one waited for you (Amendment 88): it is working now.
+      if (job.status !== 'working') setJobStatus(this.#db, job.id, 'working');
+      eventLog().emit(
+        { projectId: agent.projectId, jobId: agent.jobId, agentId },
+        { kind: 'status', status: 'working' },
+      );
+      this.#pushEntities({ agents: [getAgent(this.#db, agentId)!], jobs: [getJob(this.#db, job.id)!] });
+
+      // On the engine it was spawned on, which never changes: its session id is that
+      // engine's, and no other's (Amendment 74).
+      const runner = createBackend(getAgentProvider(this.#db, agentId), this.#db, {
+        agentId,
+        jobId: agent.jobId,
+        projectId: agent.projectId,
+        worktreePath: job.worktreePath,
+        extraDirs: this.#reachable(agent.projectId, job.worktreePath),
+        helperCap: agent.helperCap ?? 0,
+        handOff: this.#hasWaiters(agent),
+        ...this.#rolesScope(agent),
+        model: agent.model,
+        autonomy: this.#autonomyFor(agentId),
+        spentUsd: agent.costUsd,
+        // What its persona gave it at launch, on this run and every resume (Amendment 68).
+        ...personaScope(getAgentPersona(this.#db, agentId)),
+      });
+      this.#runners.set(agentId, runner);
+
       const resuming = resumeFrom !== undefined && resumeFrom !== null;
       // A resume prompt is ours, not the human's: shown as `auto`, and not sent again
       // if the run has to be moved past a call it can't make.
@@ -1290,7 +1293,7 @@ export class Supervisor implements AgentControl {
     if (this.#resumeWanted.delete(agentId)) {
       const fresh = getAgent(this.#db, agentId);
       if (fresh?.sdkSessionId) {
-        void this.#launch(agentId, fresh.sdkSessionId);
+        void this.#launch(agentId, fresh.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
         return;
       }
     }
@@ -1645,7 +1648,7 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!job || job.status === 'paused' || job.status === 'failed' || !existsSync(job.worktreePath)) return false;
     if (budgetRefusal(agent)) return false;
-    void this.#launchWithPrompt(agent.id, agent.sdkSessionId, HANDOFF_ASK, true);
+    void this.#launchWithPrompt(agent.id, agent.sdkSessionId, HANDOFF_ASK, true).catch((err) => console.error(`[supervisor] ${agent.id} resume threw`, err));
     return true;
   }
 
@@ -1942,7 +1945,7 @@ export class Supervisor implements AgentControl {
       this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
       return;
     }
-    void this.#launch(agentId, agent.sdkSessionId);
+    void this.#launch(agentId, agent.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
   }
 
   /**
@@ -1987,7 +1990,7 @@ export class Supervisor implements AgentControl {
      * has to know what anybody else already logged. `synthetic` travels with the text
      * so a resume nudge still renders as `auto` rather than as something you said.
      */
-    void this.#launchWithPrompt(agentId, agent.sdkSessionId, text, synthetic);
+    void this.#launchWithPrompt(agentId, agent.sdkSessionId, text, synthetic).catch((err) => console.error(`[supervisor] ${agentId} resume threw`, err));
     return 'resumed';
   }
 
@@ -2140,39 +2143,41 @@ export class Supervisor implements AgentControl {
     retryBook().cancel(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
-    // Continuing a failed agent makes its job live again (Amendment 88): a job settled
-    // `failed` behind it would otherwise keep its queued agents from ever starting.
-    this.#reopenJob(agent.jobId);
-    // Told something after it finished: that is a new run, and its last summary was the last run's.
-    this.#openRun(agent);
-    setAgentStatus(this.#db, agentId, 'working');
-    eventLog().emit(
-      { projectId: agent.projectId, jobId: agent.jobId, agentId },
-      { kind: 'status', status: 'working' },
-    );
-
-    // On the engine it was spawned on, which never changes: its session id is that
-    // engine's, and no other's (Amendment 74).
-    const runner = createBackend(getAgentProvider(this.#db, agentId), this.#db, {
-      agentId,
-      jobId: agent.jobId,
-      projectId: agent.projectId,
-      worktreePath: job.worktreePath,
-      extraDirs: this.#reachable(agent.projectId, job.worktreePath),
-      helperCap: agent.helperCap ?? 0,
-      handOff: this.#hasWaiters(agent),
-      ...this.#rolesScope(agent),
-      model: agent.model,
-      autonomy: this.#autonomyFor(agentId),
-      spentUsd: agent.costUsd,
-      // What its persona gave it at launch, on this run and every resume (Amendment 68).
-      ...personaScope(getAgentPersona(this.#db, agentId)),
-    });
-    this.#runners.set(agentId, runner);
 
     let outcome;
     const began = Date.now();
+    // As in #launch: a throw before the run begins is a failed resume, and frees the slot (Amendment 148).
     try {
+      // Continuing a failed agent makes its job live again (Amendment 88): a job settled
+      // `failed` behind it would otherwise keep its queued agents from ever starting.
+      this.#reopenJob(agent.jobId);
+      // Told something after it finished: that is a new run, and its last summary was the last run's.
+      this.#openRun(agent);
+      setAgentStatus(this.#db, agentId, 'working');
+      eventLog().emit(
+        { projectId: agent.projectId, jobId: agent.jobId, agentId },
+        { kind: 'status', status: 'working' },
+      );
+
+      // On the engine it was spawned on, which never changes: its session id is that
+      // engine's, and no other's (Amendment 74).
+      const runner = createBackend(getAgentProvider(this.#db, agentId), this.#db, {
+        agentId,
+        jobId: agent.jobId,
+        projectId: agent.projectId,
+        worktreePath: job.worktreePath,
+        extraDirs: this.#reachable(agent.projectId, job.worktreePath),
+        helperCap: agent.helperCap ?? 0,
+        handOff: this.#hasWaiters(agent),
+        ...this.#rolesScope(agent),
+        model: agent.model,
+        autonomy: this.#autonomyFor(agentId),
+        spentUsd: agent.costUsd,
+        // What its persona gave it at launch, on this run and every resume (Amendment 68).
+        ...personaScope(getAgentPersona(this.#db, agentId)),
+      });
+      this.#runners.set(agentId, runner);
+
       outcome = await runner.run({ prompt, resume, synthetic });
     } catch (err) {
       outcome = {
