@@ -196,6 +196,59 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 149 — post-merge, applied. **With two calls of one tool waiting for you, each call parks on its own request and each answer reaches only its own call.**
+
+Daemon only (`arbiter/index.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of
+docs/plans/wave-11.md … following §0"; this is the plan's item A3 (lane B, §2 "the arbiter matches
+the wrong request"). Amends Amendment 30, whose "two things were left alone" kept case 1 applying a
+staged decision "to the next call of the same tool name, not the same `toolUseId`", and the
+by-name match in case 2 it described. Nothing a person sees changed: Needs You's cards and words
+are the same, so `docs/MANUAL.md` is unchanged.
+
+- **What was wrong.** PreToolUse's case 2 took the first open request matching `toolUseId ||
+  toolName`, and `openRequestsForAgent` lists them oldest first, so with two Bash calls waiting a
+  call for the second parked on the first. Staged decisions were one per agent (`#decided:
+  Map<agentId, …>`): answering the second request overwrote the first's answer, and case 1 gave
+  whichever was staged to the next call of that tool, so an allow for `git push` could run as the
+  allow for `rm -rf build`.
+- **Requests already store their input** (the plan's §8 question). `requestPermission` writes
+  `input: ask.input` (`arbiter/index.ts:398`) into `requests.input`, read back as
+  `RequestRecord.input` (`store.ts:946`). Nothing new is stored, and no migration.
+- **Case 2 matches the call's own request** (`arbiter/index.ts:310`). By `toolUseId` first; then by
+  name only when that can't be another call's: exactly one open request of the tool, or one with
+  the same input. Copilot asks again under a fresh id (`backends/copilot.ts:442`), which is why the
+  name fallback stays. A call of the tool that is neither of the waiting ones is no longer parked
+  on one of them: it goes on to `canUseTool` and asks for itself.
+- **Staged decisions are one per request** (`#decided: Map<agentId, PendingDecision[]>`,
+  `arbiter/index.ts:182`), appended by `decide` (`:540`) and taken by `#takeStaged` (`:732`): the
+  request's `toolUseId`, or the same tool with the same input when the call comes back under a
+  fresh id. `PendingDecision` carries the request's input for that (`:169`). Inputs compare after a
+  JSON round trip, as the stored one had (`sameInput`, `:761`).
+- **Unchanged.** The single-request park and the MCP decline (`:323`, Amendment 30), `clearStaged`
+  and `cancelForAgent` dropping all of an agent's staged decisions, and `hasStagedDecision`.
+  `stagedFor` (`:723`), read for the resume nudge and the fork's note, returns the latest decision
+  answered, which is what one-per-agent held before.
+
+*Not done / not decided:* a staged decision no longer reaches a call of the same tool whose input
+differs. That covers the interrupt path (`#escalate`), where the model is nudged to "make that exact
+call again" under a new id: if it changes the command, it asks again rather than being allowed. It
+also covers Amendment 131's "an agent that asks again anyway still gets your answer": that now holds
+only when it asks the same questions. The plan asks for exactly this ("consumed by id, or by name
+plus equal input"); recorded here because 131 states the old behaviour. With several decisions
+staged, the resume nudge still names one call, the latest, as before.
+
+*Verified:* `session/verify.ts` §14, after the MCP-decline checks (`:2054`), with two parked Bash
+requests on their own agent and job: "with two Bash calls waiting, a call for the second parks on
+the second", "and under a fresh id, on the one with its input", "a third Bash call, neither of
+them, is not parked on either"; then, with only the second answered (allow), "the second's allow
+never runs the first's command" (the first's call parks on the first); then with the first denied
+too, "both answers, given before the calls come back, survive: each to its own call". At `:2102`:
+"a call under a fresh id, with one of its tool waiting, still parks". Amendment 30's "an MCP call
+behind a waiting one is declined" and "a built-in one is still parked with it" pass unchanged. With
+`arbiter/index.ts` put back as it was on `main`, five of the six new checks fail (the third Bash
+call parked on the first; the allow ran the first's call; the second's answer was gone). `pnpm -r
+typecheck` clean; `make test`: 27 PASS.
+
 ### Amendment 148 — post-merge, applied. **A run that throws before it begins gives its slot back and fails as a launch, rather than holding the slot for good and crashing the daemon.**
 
 Daemon only (`session/supervisor.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of
