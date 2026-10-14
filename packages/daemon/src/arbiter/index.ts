@@ -64,6 +64,7 @@ import type {
   PendingRequest,
   PermissionSuggestion,
 } from '@conductor/shared';
+import { isDeepStrictEqual } from 'node:util';
 import type { PermissionDecision } from '../session/backend.js';
 import { backendFor } from '../session/backends/index.js';
 import type { Db } from '../db/index.js';
@@ -164,6 +165,8 @@ interface PendingDecision {
   requestId: string;
   toolName: string;
   toolUseId: string | null;
+  /** The call's input as the request stored it, to know the call again under a fresh id. */
+  input: unknown;
   decision: Decision;
 }
 
@@ -172,8 +175,11 @@ export class Arbiter {
   #control: AgentControl | null = null;
   /** requestId → the live canUseTool promise it is holding. */
   #held = new Map<string, Held>();
-  /** agentId → decision to apply from PreToolUse on the next run. */
-  #decided = new Map<string, PendingDecision>();
+  /**
+   * agentId → decisions to apply from PreToolUse on the next run, one per request answered,
+   * oldest first. One per agent let a second answer overwrite the first (Amendment 149).
+   */
+  #decided = new Map<string, PendingDecision[]>();
 
   constructor(db: Db) {
     this.#db = db;
@@ -271,9 +277,8 @@ export class Arbiter {
   }): PreToolVerdict {
     // 1. Answered while parked: apply it here rather than waiting for canUseTool.
     //    This is the path the spike measured at 678 ms with no extra model turn.
-    const decided = this.#decided.get(ctx.agentId);
-    if (decided && decided.toolName === ctx.toolName) {
-      this.#decided.delete(ctx.agentId);
+    const decided = this.#takeStaged(ctx);
+    if (decided) {
       const d = decided.decision;
       if (d.type === 'deny') {
         return { kind: 'deny', reason: d.message || 'denied by the human' };
@@ -298,9 +303,15 @@ export class Arbiter {
 
     // 2. The same call re-offered while its request is still open: re-park it.
     //    Cheap, and it keeps a parked agent parked instead of burning a slot.
-    const stillOpen = openRequestsForAgent(this.#db, ctx.agentId).find(
-      (r) => r.toolUseId === ctx.toolUseId || r.toolName === ctx.toolName,
-    );
+    //    Its own request, by id. Copilot gives a re-offered call a fresh id, so by name too,
+    //    but only when that can't be another call's: one open request of the tool, or the
+    //    same input. Matching any of the name found the oldest of two Bash calls for the
+    //    second (Amendment 149).
+    const open = openRequestsForAgent(this.#db, ctx.agentId);
+    const named = open.filter((r) => r.toolName === ctx.toolName);
+    const stillOpen =
+      open.find((r) => r.toolUseId === ctx.toolUseId) ??
+      (named.length === 1 ? named[0] : named.find((r) => sameInput(r.input, ctx.input)));
     if (stillOpen) {
       /*
        * Never an MCP call. On resume the SDK checks that a deferred call's tool exists
@@ -526,12 +537,10 @@ export class Arbiter {
     }
 
     // Parked: stage the decision for PreToolUse and bring the session back.
-    this.#decided.set(request.agentId, {
-      requestId,
-      toolName: request.toolName,
-      toolUseId: request.toolUseId,
-      decision,
-    });
+    this.#decided.set(request.agentId, [
+      ...(this.#decided.get(request.agentId) ?? []),
+      { requestId, toolName: request.toolName, toolUseId: request.toolUseId, input: request.input, decision },
+    ]);
     this.#broadcastPending();
     this.#control?.resumeParked(request.agentId);
   }
@@ -710,9 +719,25 @@ export class Arbiter {
     return openRequestsForAgent(this.#db, agentId);
   }
 
-  /** Staged decision for an agent about to resume, if any. */
+  /** Staged decision for an agent about to resume, if any: the latest answered. */
   stagedFor(agentId: string): PendingDecision | undefined {
-    return this.#decided.get(agentId);
+    return this.#decided.get(agentId)?.at(-1);
+  }
+
+  /**
+   * The staged decision for this call, taken off the list: its request's id, or the same
+   * tool with the same input when the call came back under a fresh id. By name alone, the
+   * answer to one Bash call ran another's command (Amendment 149).
+   */
+  #takeStaged(ctx: { agentId: string; toolName: string; toolUseId: string; input: unknown }): PendingDecision | undefined {
+    const staged = this.#decided.get(ctx.agentId) ?? [];
+    const i = staged.findIndex(
+      (d) => d.toolUseId === ctx.toolUseId || (d.toolName === ctx.toolName && sameInput(d.input, ctx.input)),
+    );
+    if (i < 0) return undefined;
+    const [taken] = staged.splice(i, 1);
+    if (staged.length === 0) this.#decided.delete(ctx.agentId);
+    return taken;
   }
 
   /**
@@ -730,6 +755,11 @@ export class Arbiter {
       return open ? open.blockMode : null;
     };
   }
+}
+
+/** Whether a live call's input is the one a request stored, which went through JSON. */
+function sameInput(stored: unknown, live: unknown): boolean {
+  return isDeepStrictEqual(stored, JSON.parse(JSON.stringify(live ?? {})));
 }
 
 /**

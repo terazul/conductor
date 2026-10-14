@@ -2051,6 +2051,73 @@ async function main(): Promise<void> {
   check('a built-in one is still parked with it', bash.kind === 'park', JSON.stringify(bash));
   resolveRequest(db, 'req_bash', { type: 'deny', by: 'human' });
 
+  // Two Bash calls wait for you: each is its own request, and so is each answer (Amendment 149).
+  job('job_two_bash', null);
+  fixture('agt_two_bash', 'job_two_bash', { sdkSessionId: 'sess_two_bash', status: 'blocked', blockMode: 'parked', autonomy: DEFAULT_AUTONOMY });
+  const R1 = { id: 'req_bash_1', toolUseId: 'toolu_r1', input: { command: 'rm -rf build' } };
+  const R2 = { id: 'req_bash_2', toolUseId: 'toolu_r2', input: { command: 'git push' } };
+  for (const r of [R1, R2]) {
+    insertRequest(db, {
+      id: r.id,
+      agentId: 'agt_two_bash',
+      jobId: 'job_two_bash',
+      projectId: pid,
+      kind: 'permission',
+      blockMode: 'parked',
+      toolName: 'Bash',
+      toolUseId: r.toolUseId,
+      input: r.input,
+      label: r.input.command,
+      createdAt: nowIso(),
+    });
+  }
+  const callFor = (r: typeof R1, toolUseId = r.toolUseId) =>
+    arbiter().preToolUse({ agentId: 'agt_two_bash', toolName: 'Bash', toolUseId, input: r.input });
+  const second = callFor(R2);
+  check('with two Bash calls waiting, a call for the second parks on the second', second.kind === 'park' && second.reason.includes(R2.id), JSON.stringify(second));
+  const freshSecond = callFor(R2, 'call_fresh');
+  check('and under a fresh id, on the one with its input', freshSecond.kind === 'park' && freshSecond.reason.includes(R2.id), JSON.stringify(freshSecond));
+  const other = arbiter().preToolUse({ agentId: 'agt_two_bash', toolName: 'Bash', toolUseId: 'call_other', input: { command: 'ls' } });
+  check('a third Bash call, neither of them, is not parked on either', other.kind === 'observe', JSON.stringify(other));
+
+  base = runs.length;
+  arbiter().decide(R2.id, { type: 'allow_once' });
+  await until(() => runs.length === base + 1);
+  const early = callFor(R1);
+  check("the second's allow never runs the first's command", early.kind === 'park' && early.reason.includes(R1.id), JSON.stringify(early));
+  arbiter().decide(R1.id, { type: 'deny', message: 'not that one' });
+  const forFirst = callFor(R1);
+  const forSecond = callFor(R2);
+  check(
+    'both answers, given before the calls come back, survive: each to its own call',
+    forFirst.kind === 'deny' && forFirst.reason === 'not that one' && forSecond.kind === 'allow' && !arbiter().hasStagedDecision('agt_two_bash'),
+    JSON.stringify([forFirst, forSecond]),
+  );
+  for (let i = base; i < runs.length || getAgent(db, 'agt_two_bash')?.status !== 'done'; i++) {
+    await until(() => runs.length > i);
+    runs[i]?.finish({ cost: 0, reason: 'completed' });
+    await settle(50);
+  }
+
+  // Copilot asks again under a fresh id (copilot.ts): with one Bash call waiting, it still parks.
+  fixture('agt_fresh_id', 'job_wedged', { autonomy: DEFAULT_AUTONOMY });
+  insertRequest(db, {
+    id: 'req_fresh_id',
+    agentId: 'agt_fresh_id',
+    jobId: 'job_wedged',
+    projectId: pid,
+    kind: 'permission',
+    blockMode: 'held',
+    toolName: 'Bash',
+    toolUseId: 'call_asked',
+    input: { command: 'npm test' },
+    label: 'npm test',
+    createdAt: nowIso(),
+  });
+  const reoffered = arbiter().preToolUse({ agentId: 'agt_fresh_id', toolName: 'Bash', toolUseId: 'call_again', input: { command: 'npm test -- --watch' } });
+  check('a call under a fresh id, with one of its tool waiting, still parks', reoffered.kind === 'park' && reoffered.reason.includes('req_fresh_id'), JSON.stringify(reoffered));
+  resolveRequest(db, 'req_fresh_id', { type: 'deny', by: 'human' });
+
   fixture('agt_parked_once', 'job_wedged', { autonomy: DEFAULT_AUTONOMY });
   finishRun(db, startRun(db, 'agt_parked_once', 'sess_once'), { terminalReason: 'tool_deferred', deferredTool: CALL });
   finishRun(db, startRun(db, 'agt_parked_once', 'sess_once'), { terminalReason: 'aborted_tools' });
