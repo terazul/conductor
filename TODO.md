@@ -19,14 +19,53 @@ the last of it on 12 Oct).
 
 ## Right now
 
-- [ ] **Never give up on the model: back off to every hour.** Asked for (14 Oct). When an agent gets no
-  answer from the model, for whatever reason (no connection, the API down, a rate or spend limit on
-  the provider's side), keep trying: first the usual waits (`conductor.retryDelays`, 5 s, 15 s, 30 s,
-  60 s, 5 min by default, Amendment 140), then 30 minutes, then every hour, and stay at every hour until
-  you say otherwise. Today it stops after the last wait (`daemon/src/session/retry.ts`). Settle: the
-  Needs You card's wording while it keeps trying, a **stop retrying** button on it (and on the agent),
-  whether Conductor's own budget pause (Amendment 125, 140) counts as "no response" (it shouldn't: that
-  is a decision, not an outage), and whether the hourly tries survive a daemon restart.
+- [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
+  this replaces "back off to every hour". Today an agent that can't reach the model retries on its
+  own (`daemon/src/session/retry.ts`: 5 s, 15 s, 30 s, 60 s, 5 min by default, Amendments 123 and
+  140), each try a fresh Claude Code process resuming its session. After roughly 7 minutes it is
+  `failed`, and it fails its job. The count is in memory (`RetryBook`, retry.ts:258), so a restart
+  forgets it. An outage is one thing that hits every agent on the provider (Alerts already shows it as
+  one card, `alerts.ts:256`), but each agent retries it separately. Making those separate retries go
+  on hourly would leave N processes launching every hour, none of them knowing about the others.
+  - **The first tries stay as they are.** These are the agent's own short waits
+    (`conductor.retryDelays`), because most blips are over in seconds.
+  - **After the last wait, the agent waits for the model, not for a clock.** It isn't `failed`:
+    it stays resumable, its session kept, its job not failed. The wait is stored on the agent row
+    (a column such as `waiting_model`: cause, provider, since), not only in memory, so it survives
+    a restart.
+  - **One probe per provider, not one retry per agent.** The daemon asks the provider whether it
+    answers, at 30 s, 1, 2, 5 and 15 min, then every 15 min. Claude's probe is the call
+    `session/models.ts:80-112` already makes: `GET /v1/models` on `ANTHROPIC_BASE_URL`, with
+    the credential it already reads. It's free and starts no process. Copilot and OpenRouter use
+    their backend's `listModels()`. A probe also runs at once when the clock jumps (the laptop
+    woke from sleep), and when you press **retry now**.
+  - **When the probe answers, resume the agents one at a time.** Start one, and once the model
+    replies to it (`answered`, retry.ts:330), start the rest a few seconds apart. All at once
+    would hit the same rate limit again.
+  - **A throttle says when.** If the provider says when it will answer again (`Retry-After`, or a
+    usage limit's reset time), wait until then instead of probing, and say so on the card ("the
+    model's limit resets at 15:00").
+  - **What doesn't wait:**
+    - a login or billing problem (`ACCOUNT_ERRORS`, retry.ts:50): it needs a person, and goes
+      straight to Needs You, as now;
+    - a bad request or a retired model (`NEVER_BETTER`): it would fail the same way every time;
+    - Conductor's own budget pause (Amendments 125, 140): that's a decision, not an outage.
+  - **Needs You:** one card per provider for the whole outage: "can't reach the model since 14:02 —
+    6 agents waiting, next check 14:47". Its buttons: **retry now** (probe now), **stop waiting**
+    (on the card for all of them, and on each agent for one; it ends them `failed` as today), and
+    a link to the agents. The fleet status bar shows that the provider is down.
+  Starts at: `retry.ts` (`decideRetry` returns a third answer, "wait for the model", once the tries
+  are spent), a new `session/outage.ts` (the per-provider probe and its schedule, on retry.ts's
+  `Clock` so session/verify.ts can drive it), a migration for the column, the supervisor's
+  `#settle` and its boot-time resume (a row that is `waiting_model` rejoins its provider's outage),
+  and `alerts.ts` for the card.
+  **Decide:**
+  - Is "waiting for the model" a new agent status, or `paused` with a reason? Hard to undo: it's in
+    `shared/src/events.ts:26` and every client reads it.
+  - Should the probe cap at 15 min or at an hour?
+  - Is there a limit at all: give up after a day, or never?
+  - While its agents wait, does a job show as running or as waiting?
+  - Are new launches on a provider that's down held, or allowed to try?
 
 - [ ] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
   time, a **queue** choice: the message waits until the agent's turn ends (it is `done`, or stops to
