@@ -284,8 +284,8 @@ That supersedes the 14 Oct "hourly, forever" answer. The entry has five open que
 - whether a job shows as running or as waiting;
 - whether new launches on a provider that's down are held.
 
-**Before S4 starts:** the person answers those five questions, and the analyst writes the lane
-from the TODO entry.
+**Before S4 starts:** ~~the person answers those five questions~~ answered 14 Oct, see §6 R2. The
+lane is built from the TODO entry (`TODO.md:22`) plus those answers; no separate analyst pass.
 
 **What still holds from the earlier analysis:**
 - `RetryBook` is memory only (`retry.ts:265-362`).
@@ -747,7 +747,7 @@ Same project only. It launches straight away.*
 |---|---|
 | R1 | Done in Amendment 147: the pills win; only `write: false` and reading roles pin a row |
 | A2 | The message waits for a slot and survives a restart (the S2 table, `trigger='slot'`) |
-| R2 | Superseded by `06ab549`: wait for the model, one probe per provider; five questions open |
+| R2 | Superseded by `06ab549`: wait for the model, one probe per provider. *Decided (14 Oct), the five questions:* the agent is `paused` with a reason ("waiting for the model"), not a new status; the probe backs off to every 15 min; it never gives up (Pause or Cancel stops it); the job shows as waiting; new launches on a provider that's down are queued until the probe answers |
 | R3 | Sent when the turn ends as `done`; a question doesn't count; it waits through `failed`/`paused`; one per turn |
 | O2 | Accepted as is: no enforcement, no lane |
 | U1 | More chroma, floor 1.06, hues ≥ 60° apart |
