@@ -19,6 +19,16 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [ ] **A Custom launch loses the interaction, guardrails and effort you chose.** Found (14 Oct): on
+  Spawn with **custom…**, the **interaction**, **guardrails** and **effort** clicked there are not what the
+  launched agents run with. Not yet diagnosed. Leads, in `web/src/spawn/presets.ts` `toAgentSpecs`
+  (~:378): each row's autonomy is built from the pills, effort and mode (`toAutonomy`), but a row with a
+  persona takes `pillsWith(pills, p.tools)`, so the persona's tools replace the guardrails you clicked,
+  and Custom rows get personas by default (`personaPicks`, `spawn/route.tsx:336`); a reading role is
+  forced to read-only and `default` mode. Also check that the daemon keeps a spec's `autonomy` and
+  `effort` as sent (`supervisor.createJob`, `agentRow`), and that the composer then shows them. Fix so
+  what you click is what runs, and say on the row when a persona or a reading role changes it.
+
 - [ ] **Never give up on the model: back off to every hour.** Asked for (14 Oct). When an agent gets no
   answer from the model, for whatever reason (no connection, the API down, a rate or spend limit on
   the provider's side), keep trying: first the usual waits (`conductor.retryDelays`, 5 s, 15 s, 30 s,
