@@ -457,6 +457,11 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
       if (r < 4.5) low.push(`--bg on --${f} ${r.toFixed(2)}`);
     }
     check(`${name}: every text token ≥ 4.5:1 on every surface, and --bg on every fill`, low.length === 0, low.join('; '));
+    // What needs you sits on --need-wash (14 Oct): its text reads on it, and it stands off the page.
+    const onWash = ['need', 'ink', 'ink2'].filter((t) => ratio(theme.get(t)!, theme.get('need-wash')!) < 4.5);
+    check(`${name}: --need, --ink and --ink2 are ≥ 4.5:1 on --need-wash, the rail's backdrop`, theme.has('need-wash') && onWash.length === 0, onWash.map((t) => `--${t} ${ratio(theme.get(t)!, theme.get('need-wash')!).toFixed(2)}`).join(', '));
+    const off = Math.min(...['bg', 'bg2'].map((b) => ratio(theme.get('need-wash')!, theme.get(b)!)));
+    check(`${name}: --need-wash stands off the page by 1.15:1 or more, so the rail is seen`, off >= 1.15, off.toFixed(3));
     // The project / agent label's backdrop (Amendment 97): its text, and the "/" between.
     const onHere = ['ink', 'ink2', 'ink3'].filter((t) => ratio(theme.get(t)!, theme.get('here')!) < 4.5);
     check(`${name}: the project / agent label is ≥ 4.5:1 on its backdrop`, theme.has('here') && onHere.length === 0, onHere.join(', '));

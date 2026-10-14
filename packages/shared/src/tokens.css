@@ -46,6 +46,9 @@
   /* status — semantic, never decorative */
   --live: #3ddbb8;
   --need: #ffb03a;
+  /* The backdrop of what needs you (the attention rail, the navigator's Needs you heading).
+     Not a text colour: --need and --ink sit on it at 4.5:1 or more (lib/verify.ts). */
+  --need-wash: #3a2b17;
   --fail: #ff5f48;
   --done: #93c470;
   --queue: #8fa3b8;
@@ -144,6 +147,8 @@
 
   --live: #066b56;
   --need: #8a4d00;
+  /* A clear pale amber: the dark --need mixed into --bg at 13% was a beige the page hid. */
+  --need-wash: #ffcf6b;
   --fail: #b02a16;
   --done: #3f6a1c;
   --queue: #4a5f76;

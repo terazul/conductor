@@ -148,25 +148,22 @@
   opacity: 0.55;
 }
 
-/* Lit. Someone is blocked on you. */
+/* Lit. Someone is blocked on you. The --need-wash backdrop and an amber bar at the left,
+   in both themes: in light the --need mix alone was too faint to see (14 Oct). */
 .sh-alert.is-live {
   cursor: pointer;
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--need) 13%, transparent),
-    color-mix(in srgb, var(--need) 3%, transparent) 62%,
-    transparent
+    var(--need-wash),
+    var(--need-wash) 55%,
+    color-mix(in srgb, var(--need-wash) 35%, transparent)
   );
-  transition: background 0.15s;
+  box-shadow: inset 4px 0 0 var(--need);
+  transition: filter 0.15s;
 }
 
 .sh-alert.is-live:hover {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--need) 20%, transparent),
-    color-mix(in srgb, var(--need) 5%, transparent) 62%,
-    transparent
-  );
+  filter: saturate(1.25) brightness(1.03);
 }
 
 .sh-alert.is-live:focus-visible {
@@ -177,7 +174,7 @@
 .sh-alert.is-live > span {
   font-size: var(--fs-base);
   color: var(--need);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -195,7 +192,7 @@
 }
 
 .sh-alert.is-live em {
-  color: var(--ink3);
+  color: var(--ink2);
   font-style: normal;
   margin-left: auto;
   font-family: var(--mono);
@@ -541,11 +538,19 @@
   flex: none;
 }
 
-/* Something in this project waits on you: the heading says so, and how many. */
+/* Something in this project waits on you: the heading says so, and how many, on the same
+   --need-wash backdrop as the rail, so it is seen in light as well as dark. */
 .sh-nav-head.is-need,
 .sh-nav-head.is-need .sh-nav-n,
 .sh-nav-need {
   color: var(--need);
+}
+
+.sh-nav-head.is-need {
+  background: var(--need-wash);
+  box-shadow: inset 3px 0 0 var(--need);
+  border-radius: 3px;
+  font-weight: 600;
 }
 
 .sh-nav-need {
