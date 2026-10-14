@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Project } from '@conductor/shared';
-import { useAgents, useFeedStatus, usePending, useProjects } from '../lib/store.js';
+import { useAgents, useFeedStatus, usePending, useProjectSpend, useProjects } from '../lib/store.js';
 import { useNavParams } from '../lib/nav.js';
 import { SCREEN, highlight, openSpawn } from '../shell/nav.js';
 import { NewProject } from './NewProject.js';
@@ -65,7 +65,8 @@ export function Fleet() {
    * called per row of a variable list. `sortFacts` is pure and lives in order.ts, so the
    * navigator orders its projects from the very same facts (Amendment 69).
    */
-  const facts = useMemo(() => sortFacts(projects, agents, pending), [projects, agents, pending]);
+  const spent = useProjectSpend();
+  const facts = useMemo(() => sortFacts(projects, agents, pending, spent), [projects, agents, pending, spent]);
 
   // The Sort by menu (Amendment 57); your order is one of its choices (Amendment 54).
   const order = parseOrder(useSetting(ORDER_KEY));

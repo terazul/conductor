@@ -49,13 +49,11 @@ import type { ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
 import { classifyRetry } from '../retry.js';
 import { lifetimeCost, runLimit } from '../budget.js';
-import { costChanged } from '../../daily.js';
-import { hub } from '../../hub.js';
+import { broadcastSpend, costChanged } from '../../daily.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
 import {
   addCostToday,
   addSpendToday,
-  costToday,
   finishRun,
   openRequestsForAgent,
   setAgentSession,
@@ -655,11 +653,8 @@ export class ClaudeBackend implements AgentBackend {
         // Every status bar shows today's spend as it grows, and the daily budget's alert
         // is checked against it (Amendment 59).
         if (costUsd > previous) {
-          try {
-            hub().broadcast({ type: 'cost', costToday: costToday(this.#db) });
-          } catch {
-            // No hub outside the daemon (the spike). Not fatal.
-          }
+          // With the fleet's and the project's totals beside it (Amendment 146).
+          broadcastSpend(this.#db);
           costChanged();
         }
 

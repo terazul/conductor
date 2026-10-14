@@ -40,7 +40,7 @@ import { openAttention } from './nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { Navigator, useRoute } from './Navigator.js';
 import { DETAILS_KEY, NAV_OPEN_KEY, detailsShown, navShown, rightPanelFor } from './navtree.js';
-import { DAILY_KEY, dailyMeter, parseBudget } from './spend.js';
+import { DAILY_KEY, TOTAL_TITLE, dailyMeter, parseBudget, totalWords } from './spend.js';
 import { useNow } from './clock.js';
 import { PauseAll } from './pauseall.js';
 import { fmtAge, fmtMoney } from './ui.js';
@@ -196,16 +196,33 @@ function useBuild(): Build | null {
 }
 
 /** Today's spend, and against the daily budget when there is one (Amendment 59). */
-function DailySpend({ costToday }: { costToday: number }) {
+function DailySpend({ costToday, costTotal }: { costToday: number; costTotal: number | null }) {
   const budget = parseBudget(useSetting(DAILY_KEY));
-  if (budget === null) return <span>{fmtMoney(costToday)} today</span>;
+  // The fleet's all-time total after today's (Amendment 146); absent from a daemon before it.
+  const total =
+    costTotal === null ? null : (
+      <span className="sh-spend-total" title={TOTAL_TITLE}>
+        {totalWords(costTotal)}
+      </span>
+    );
+  if (budget === null) {
+    return (
+      <span className="sh-spend-pair">
+        <span>{fmtMoney(costToday)} today</span>
+        {total}
+      </span>
+    );
+  }
   const m = dailyMeter(costToday, budget);
   return (
-    <span className="sh-spend" data-tone={m.tone} title={m.title}>
-      <span className="sh-spend-bar" aria-hidden="true">
-        <i style={{ width: `${Math.round(m.fraction * 100)}%` }} />
+    <span className="sh-spend-pair">
+      <span className="sh-spend" data-tone={m.tone} title={m.title}>
+        <span className="sh-spend-bar" aria-hidden="true">
+          <i style={{ width: `${Math.round(m.fraction * 100)}%` }} />
+        </span>
+        {m.label}
       </span>
-      {m.label}
+      {total}
     </span>
   );
 }
@@ -213,7 +230,7 @@ function DailySpend({ costToday }: { costToday: number }) {
 function StatusBar() {
   const build = useBuild();
   const status = useFeedStatus();
-  const { slots, costToday, seq } = useStatusBar();
+  const { slots, costToday, costTotal, seq } = useStatusBar();
   return (
     <footer className="sh-statusbar">
       <span>
@@ -235,7 +252,7 @@ function StatusBar() {
         <span>
           {slots.used}/{slots.total} agent slots
         </span>
-        <DailySpend costToday={costToday} />
+        <DailySpend costToday={costToday} costTotal={costTotal} />
         {build && (
           <span className="sh-build" data-behind={build.behind} title={buildTitle(build)}>
             {build.behind ? '⚠ ' : ''}

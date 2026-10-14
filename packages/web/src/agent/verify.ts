@@ -641,7 +641,9 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   check('its budget is tokens where the engine has no dollars, and the patch is { budgetTokens }', /has\.budget === 'tokens' \?/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetTokens: cap \} \}\)/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetUsd: cap \} \}\)/.test(comp));
   check("its model comes from the engine's list, and Claude keeps the catalog picker", /\{claude \? \(\s*<ModelSelect\s*catalog=\{models\.catalog\}/.test(comp) && /useProviderModels\(claude \? null : providerOf\(agent\)\)/.test(comp) && /providerModelProblem\(theirs\.list, model\)/.test(comp));
   const insp = readFileSync(new URL('./inspector.tsx', import.meta.url), 'utf8');
-  check('the details panel shows no dollars an engine never reported, and a token bar in tokens', /dollars \? \(\s*<span>\{fmtMoney\(agent\.costUsd\)\}<\/span>\s*\) : \(/.test(insp) && /not reported/.test(insp) && /budget\.unit === 'tokens'/.test(insp));
+  // Since Amendment 146 the panel's spend is today and the lifetime side by side, in tokens where
+  // the engine reports no dollars (`agentPairWords(agent, dollars)`), not "not reported".
+  check('the details panel shows no dollars an engine never reported, and a token bar in tokens', /agentPairWords\(agent, dollars\)/.test(insp) && /reports tokens, not dollars/.test(insp) && /budget\.unit === 'tokens'/.test(insp));
   const ui = readFileSync(new URL('../shell/ui.tsx', import.meta.url), 'utf8');
   const head = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   const card = readFileSync(new URL('../fleet/card.tsx', import.meta.url), 'utf8');

@@ -11,7 +11,7 @@
  * the grid can't disagree, and a new Sort by moves both at once.
  */
 
-import type { Agent, AgentStatus, PendingRequest } from '@conductor/shared';
+import type { Agent, AgentStatus, PendingRequest, ProjectSpend } from '@conductor/shared';
 
 export const ORDER_KEY = 'conductor.fleetOrder';
 export const SORT_KEY = 'conductor.fleetSort';
@@ -64,6 +64,8 @@ export function sortFacts(
   projects: readonly { id: string }[],
   agents: readonly Pick<Agent, 'projectId' | 'status' | 'costUsd' | 'startedAt' | 'endedAt'>[],
   pending: readonly Pick<PendingRequest, 'projectId'>[],
+  /** Each project's total as the daemon keeps it (Amendment 146); absent, the current agents' sum. */
+  spent?: readonly Pick<ProjectSpend, 'projectId' | 'total'>[] | null,
 ): Map<string, SortFacts> {
   const out = new Map<string, SortFacts>();
   for (const p of projects) {
@@ -83,6 +85,9 @@ export function sortFacts(
     }
     // A live request outranks everything, even a failure.
     if (pending.some((q) => q.projectId === p.id)) best = -1;
+    // Most spent is the project's whole total, kept when its agents are removed (Amendment 146).
+    const kept = spent?.find((s) => s.projectId === p.id);
+    if (kept) spend = kept.total;
     out.set(p.id, { rank: best, working, lastActive, spend });
   }
   return out;

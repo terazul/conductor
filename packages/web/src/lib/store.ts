@@ -28,6 +28,7 @@ import {
   type Job,
   type PendingRequest,
   type Project,
+  type ProjectSpend,
   type ScheduledMessage,
   type ServerFrame,
   type Snapshot,
@@ -56,6 +57,10 @@ interface State {
   alerts: Alert[];
   slots: { used: number; total: number };
   costToday: number;
+  /** The fleet's all-time spend (Amendment 146); null when the daemon has not said (one from before it). */
+  costTotal: number | null;
+  /** Each project's spend today and in total (Amendment 146); null when the daemon has not said. */
+  projectSpend: ProjectSpend[] | null;
   /** Messages waiting for their time (Amendment 111), soonest first. */
   scheduled: ScheduledMessage[];
   eventsByAgent: Map<string, Event[]>;
@@ -75,6 +80,8 @@ function initialState(): State {
     alerts: [],
     slots: { used: 0, total: 7 },
     costToday: 0,
+    costTotal: null,
+    projectSpend: null,
     scheduled: [],
     eventsByAgent: new Map(),
     eventsByJob: new Map(),
@@ -177,6 +184,10 @@ class Store {
       case 'cost':
         // So did today's spend, before Amendment 59.
         s.costToday = frame.costToday;
+        // The totals beside it (Amendment 146), when the daemon sends them; a frame without
+        // them leaves what the tab had.
+        if (frame.costTotal !== undefined) s.costTotal = frame.costTotal;
+        if (frame.projectSpend !== undefined) s.projectSpend = frame.projectSpend;
         break;
 
       case 'settings':
@@ -219,6 +230,10 @@ class Store {
     s.alerts = snap.alerts ?? [];
     s.slots = snap.slots;
     s.costToday = snap.costToday;
+    // A daemon from before Amendment 146 sends neither: the status bar shows today alone, and
+    // a project its current agents' sum (`projectSpendOf`, shell/spend.ts).
+    s.costTotal = snap.costTotal ?? null;
+    s.projectSpend = snap.projectSpend ?? null;
     // A daemon from before Amendment 111 sends none.
     s.scheduled = snap.scheduled ?? [];
     s.seq = snap.seq;
@@ -504,10 +519,19 @@ export function useJobDiffstat(jobId: string | null): DiffStat {
   );
 }
 
-export function useStatusBar(): { slots: State['slots']; costToday: number; seq: number } {
+export function useStatusBar(): { slots: State['slots']; costToday: number; costTotal: number | null; seq: number } {
   return useSelect('statusbar', (s) => ({
     slots: s.slots,
     costToday: s.costToday,
+    costTotal: s.costTotal,
     seq: s.seq,
   }));
+}
+
+/**
+ * Every project's spend today and in total, as the daemon last said (Amendment 146), or null
+ * from a daemon before it. `projectSpendOf` (shell/spend.ts) reads one project's from it.
+ */
+export function useProjectSpend(): ProjectSpend[] | null {
+  return useSelect('projectSpend', (s) => s.projectSpend);
 }

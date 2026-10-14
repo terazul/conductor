@@ -32,6 +32,7 @@ import {
   fmtMoney,
   fmtTokens,
 } from '../shell/ui.js';
+import { agentPairWords } from '../shell/spend.js';
 
 export function Lane({
   agent,
@@ -47,6 +48,7 @@ export function Lane({
   const budget = budgetOf(agent);
   // An engine that reports no dollars shows none, rather than a $0.00 it never spent (Amendment 80).
   const dollars = capabilitiesOf(agent, useProviders()).costUsd;
+  const pair = agentPairWords(agent, dollars);
   const shown = shownStatus(agent, pending);
   const key = STATUS_KEY[shown];
   const elapsedMs = useElapsedMs(startedMs(agent, events), agent.endedAt, events);
@@ -182,10 +184,19 @@ export function Lane({
         ) : (
           <span className="pj-meter-none">uncapped</span>
         )}
-        <span title={`${agent.inputTokens} in / ${agent.outputTokens} out`}>
-          {fmtTokens(agent.inputTokens + agent.outputTokens)} tok
+        {/* Today (what the budget counts) and its whole life, side by side (Amendment 146). An
+            engine that reports no dollars has both in tokens, and its lifetime tokens are the pair's. */}
+        {dollars && (
+          <span title={`${agent.inputTokens} in / ${agent.outputTokens} out`}>
+            {fmtTokens(agent.inputTokens + agent.outputTokens)} tok
+          </span>
+        )}
+        <span
+          className="pj-spendpair"
+          title={`Spent today, which its budget counts and which starts again at midnight; and over its whole life${dollars ? '' : ` (${agent.inputTokens} in / ${agent.outputTokens} out)`}`}
+        >
+          {pair.today} · {pair.total}
         </span>
-        {dollars && <span title="Spent over its whole life">{fmtMoney(agent.costUsd)}</span>}
       </div>
     </div>
   );

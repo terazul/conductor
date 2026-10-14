@@ -68,9 +68,9 @@ import { SEEN_KEY, isFinished, markSeen, parseSeen, seenOnAgent, serializeSeen, 
 import { SEEN_AGENTS_KEY, markAgentsSeen, parseSeenAgents, serializeSeenAgents, unseenDoneAgents } from './seen.js';
 import { REVOKE_NOTE, copyLine, ruleOrigin, ruleTitle } from '../settings/rules.js';
 import { nestHelpers } from '../fleet/nest.js';
-import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortProjects, type SortFacts } from '../fleet/order.js';
+import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortFacts, sortProjects, type SortFacts } from '../fleet/order.js';
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
-import { OVER_AT, WARN_AT, budgetProblem, dailyMeter, parseBudget, toneOf } from '../shell/spend.js';
+import { OVER_AT, TOTAL_TITLE, WARN_AT, agentPairWords, budgetProblem, dailyMeter, parseBudget, projectPairWords, projectSpendOf, toneOf, totalWords } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
   BUDGET_CEILING_KEY,
@@ -1672,9 +1672,10 @@ console.log("\n· a budget counts what was spent today, and goes back to zero at
   const insp = src('../agent/inspector.tsx');
   const card = src('../attention/AlertCard.tsx');
   const spawn = src('../spawn/route.tsx');
-  check('the composer counts today: its spent figure and its folded line are today\'s, and the lifetime one is the tooltip', /spentOn\(agent\)/.test(comp) && /\{fmtMoney\(todayUsd\)\} spent today/.test(comp) && /Over its whole life: \$\{fmtMoney\(agent\.costUsd\)\}/.test(comp) && !/agent\.costUsd >= /.test(comp));
+  // Amendment 146: today's figure and the lifetime one side by side, from `agentPairWords`.
+  check('the composer counts today: its spent figure and its folded line are today\'s, and the lifetime one is beside it', /spentOn\(agent\)/.test(comp) && /agentPairWords\(agent, caps\.costUsd\)/.test(comp) && /\{pair\.today\}/.test(comp) && /· \{pair\.total\}/.test(comp) && !/agent\.costUsd >= /.test(comp));
   check('the composer\'s budget fields say per day', /Budget in dollars per day/.test(comp) && /Budget in tokens per day/.test(comp));
-  check('the details panel shows today against the budget, and the lifetime spend as a plain line', /`today \$\{fmtMoney\(budget\.spent\)\} of \$\{fmtMoney\(budget\.cap\)\}`/.test(insp) && />lifetime</.test(insp));
+  check('the details panel shows today against the budget, and today and the lifetime spend as a plain line', /`today \$\{fmtMoney\(budget\.spent\)\} of \$\{fmtMoney\(budget\.cap\)\}`/.test(insp) && />spent</.test(insp) && /\{pair\.today\} · \{pair\.total\}/.test(insp));
   check('Needs You says daily on both cards and says nothing resumes by itself on a renewed one', /label: 'Budget reached for today'/.test(card) && /label: 'Over its daily budget'/.test(card) && /Nothing resumes by itself/.test(card));
   check('Spawn\'s pill says per agent per day, with a tooltip that says it starts again at midnight', /⏱ budget per agent per day \$/.test(spawn) && /starts again at midnight/.test(spawn));
   check('nothing on a screen decides from the lifetime figure: the budget is read through budgetOf', !/costUsd\s*>=\s*\w*(cap|budget)/i.test(comp + insp + src('./../fleet/lane.tsx') + src('./../fleet/card.tsx')));
@@ -1758,9 +1759,103 @@ console.log('\n38 · the retry delays, the budget ceiling and midnight are setti
   );
 }
 
+console.log('\n· today and all-time totals for each agent, project and the fleet (Amendment 146)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const today = localDayOf();
+  const yesterday = localDayOf(new Date(Date.now() - 86_400_000));
+  const mk = (id: string, over: Partial<Agent> = {}): Agent => ({
+    id,
+    jobId: J,
+    projectId: P,
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 's',
+    status: 'done',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 25 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+  const totals = () => store.select(`tot${seq++}`, (s) => ({ today: s.costToday, total: s.costTotal, projects: s.projectSpend }));
+
+  // ── the store: an old snapshot, a new one, the frame ──
+  send({ type: 'hello', seq: 0, snapshot: { ...snapshot, costToday: 1.5 } });
+  check('a snapshot from before 146 still applies: today as it was, no total and no projects', totals().today === 1.5 && totals().total === null && totals().projects === null, JSON.stringify(totals()));
+  const ps = [{ projectId: P, today: 1.5, total: 9.25, tokensToday: 0, tokensTotal: 0 }];
+  send({ type: 'hello', seq: 0, snapshot: { ...snapshot, costToday: 1.5, costTotal: 40, projectSpend: ps } });
+  check("a snapshot with them carries the fleet's total and each project's pair", totals().total === 40 && totals().projects?.[0]?.total === 9.25);
+  send({ type: 'cost', costToday: 2, costTotal: 40.5, projectSpend: [{ ...ps[0]!, today: 2, total: 9.75 }] });
+  check('a cost frame moves today, the total and the projects together', totals().today === 2 && totals().total === 40.5 && totals().projects?.[0]?.total === 9.75);
+  send({ type: 'cost', costToday: 0 });
+  check('a cost frame from before 146 moves today alone and leaves the totals the tab had', totals().today === 0 && totals().total === 40.5 && totals().projects?.[0]?.total === 9.75, JSON.stringify(totals()));
+  send({ type: 'hello', seq: 0, snapshot });
+
+  // ── the status bar ──
+  check('the status bar says the total after today: "· $40.50 total"', totalWords(40.5) === '· $40.50 total' && totalWords(0) === '· $0.00 total');
+  check('and its hover says what it counts', TOTAL_TITLE === 'spent by every agent since Conductor started counting, kept when agents are removed');
+  const shell = src('../shell/shell.tsx');
+  check(
+    "the bar draws today's spend (with its meter) and then the total, which is absent from a daemon before it",
+    /const \{ slots, costToday, costTotal, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costTotal=\{costTotal\} \/>/.test(shell) &&
+      /costTotal === null \? null/.test(shell) && /title=\{TOTAL_TITLE\}/.test(shell) && /\{totalWords\(costTotal\)\}/.test(shell) && /\{m\.label\}\s*<\/span>\s*\{total\}/.test(shell),
+  );
+
+  // ── a project's pair ──
+  check('a project reads "today $a · total $b"', JSON.stringify(projectPairWords({ today: 1.2, total: 8.4, tokensToday: 0, tokensTotal: 0 })) === JSON.stringify({ today: 'today $1.20', total: 'total $8.40' }));
+  check('in tokens where nothing reported dollars', JSON.stringify(projectPairWords({ today: 0, total: 0, tokensToday: 3_400, tokensTotal: 41_000 })) === JSON.stringify({ today: 'today 3.4k tok', total: 'total 41k tok' }));
+  check('and both, where it ran on both kinds of engine', projectPairWords({ today: 1, total: 2, tokensToday: 950, tokensTotal: 12_500 }).total === 'total $2.00 + 12.5k tok');
+  check('a project that spent nothing reads $0.00, not tokens', projectPairWords({ today: 0, total: 0, tokensToday: 0, tokensTotal: 0 }).total === 'total $0.00');
+  const here = [mk('a1', { costUsd: 3, spentToday: { day: today, usd: 1, tokens: 0 } }), mk('a2', { costUsd: 2, spentToday: { day: yesterday, usd: 2, tokens: 0 } })];
+  check("what the daemon keeps wins over the current agents' sum: a removed agent's spend stays", projectSpendOf(ps, P, here).total === 9.25);
+  const fallback = projectSpendOf(null, P, [...here, mk('cp', { provider: 'copilot', inputTokens: 600, outputTokens: 400, spentToday: { day: today, usd: 0, tokens: 300 } }), mk('other', { projectId: 'prj_other', costUsd: 99 })]);
+  check(
+    "from a daemon before it, the project's current agents: lifetime dollars, today's, and a token engine's tokens",
+    fallback.total === 5 && fallback.today === 1 && fallback.tokensToday === 300 && fallback.tokensTotal === 1000,
+    JSON.stringify(fallback),
+  );
+  const proj = src('../fleet/project.tsx');
+  check(
+    "the Project screen's header and its column read the project's pair, not the current agents' costUsd",
+    /projectPairWords\(projectSpendOf\(spendList, active \?\? '', agents\)\)/.test(proj) && /<span\s+className="pj-headspend"[\s\S]*?<b>\{spend\.today\}<\/b> · \{spend\.total\}/.test(proj) &&
+      /<span>spend<\/span>\s*<span[^>]*>\s*\{spend\.today\} · \{spend\.total\}/.test(proj) && !/a\.costUsd, 0\)/.test(proj),
+  );
+  check("and so does each Fleet card's footer", /projectPairWords\(projectSpendOf\(spendList, project\.id, agents\)\)/.test(src('../fleet/card.tsx')) && /className="fl-card-spend"/.test(src('../fleet/card.tsx')));
+  const facts = sortFacts([{ id: P }], here, [], ps);
+  check("most spent sorts by the project's kept total, and by its agents' sum without one", facts.get(P)?.spend === 9.25 && sortFacts([{ id: P }], here, []).get(P)?.spend === 5);
+
+  // ── an agent's pair ──
+  const claude = mk('c1', { costUsd: 31.4, spentToday: { day: today, usd: 4.1, tokens: 0 } });
+  check("an agent reads today's spend and its whole life's side by side", JSON.stringify(agentPairWords(claude, true)) === JSON.stringify({ today: 'today $4.10', total: 'total $31.40' }));
+  check('yesterday\'s stamp is nothing today, and the total stands', JSON.stringify(agentPairWords(mk('c2', { costUsd: 31.4, spentToday: { day: yesterday, usd: 4.1, tokens: 0 } }), true)) === JSON.stringify({ today: 'today $0.00', total: 'total $31.40' }));
+  check('an engine that reports no dollars says tokens: today\'s, and its input plus output in all', JSON.stringify(agentPairWords(mk('t1', { provider: 'copilot', inputTokens: 160_000, outputTokens: 70_000, spentToday: { day: today, usd: 0, tokens: 110 } }), false)) === JSON.stringify({ today: 'today 110 tok', total: 'total 230k tok' }));
+  check('an agent from before 129, with no stamp, has spent nothing today', agentPairWords(mk('old', { costUsd: 7 }), true).today === 'today $0.00');
+  const lane = src('../fleet/lane.tsx');
+  check(
+    'the lane, the details panel and the composer show the pair where each showed one figure, in the unit capabilitiesOf says',
+    /agentPairWords\(agent, dollars\)/.test(lane) && /\{pair\.today\} · \{pair\.total\}/.test(lane) && !/Spent over its whole life">/.test(lane) &&
+      /agentPairWords\(agent, dollars\)/.test(src('../agent/inspector.tsx')) && /agentPairWords\(agent, caps\.costUsd\)/.test(src('../agent/composer.tsx')),
+  );
+  check('the budget meter still reads today', /budgetOf\(agent\)/.test(lane) && /budgetOf\(\{ \.\.\.agent, autonomy \}\)/.test(src('../agent/composer.tsx')));
+  check(
+    'the new classes are drawn with tokens only',
+    ['../fleet/fleet.css', '../shell/shell.css', '../agent/agent.css'].every((f) => {
+      const css = src(f);
+      return ['.fl-card-spend', '.pj-headspend', '.pj-spendpair', '.sh-spend-pair', '.sh-spend-total', '.ag-budget-total']
+        .map((c) => css.split(`${c} {`)[1]?.split('}')[0] ?? '')
+        .every((body) => !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(body));
+    }),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings; spend reads today and in total for each agent, project and the fleet.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

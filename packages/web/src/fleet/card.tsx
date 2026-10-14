@@ -30,9 +30,11 @@ import {
   useJobDiffstat,
   useJobs,
   usePending,
+  useProjectSpend,
   useProjectStatus,
   useServers,
 } from '../lib/store.js';
+import { projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { restOf, restWord } from './rest.js';
@@ -601,6 +603,9 @@ export function ProjectCard({
 
   const blocked = pending.length > 0;
   const working = agents.filter((a) => a.status === 'working').length;
+  // What the project spent today and in total (Amendment 146), kept when agents are removed.
+  const spendList = useProjectSpend();
+  const spend = projectPairWords(projectSpendOf(spendList, project.id, agents));
 
   /*
    * Every card opens its Project screen, blocked or not (Amendment 66). A blocked card
@@ -698,6 +703,12 @@ export function ProjectCard({
         ) : (
           <span>{activity.moving ? 'working' : 'no recent tool calls'}</span>
         )}
+        <span
+          className="fl-card-spend"
+          title="Spent by this project's agents today, and since Conductor started counting. Removing an agent or a job keeps it."
+        >
+          {spend.today} · {spend.total}
+        </span>
 
         <span className="fl-card-actions">
           {job && (

@@ -786,10 +786,32 @@ export interface Snapshot {
   /** Daemon-wide facts for the status bar. */
   slots: { used: number; total: number };
   costToday: number;
+  /**
+   * Amendment 146: everything the fleet has spent, every day `cost_daily` has counted, summed.
+   * It keeps what removed agents and projects spent. Optional, so a daemon or a recording from
+   * before it still renders (as today's figure alone).
+   */
+  costTotal?: number;
+  /** Amendment 146: each project's spend today and over its whole life. Optional for the same reason. */
+  projectSpend?: ProjectSpend[];
   /** Amendment 46. Optional so a recording made before it still replays. */
   settings?: Record<string, string>;
   /** Amendment 111: messages waiting for their time. Optional for the same reason. */
   scheduled?: ScheduledMessage[];
+}
+
+/**
+ * Amendment 146. What one project's agents spent, today and since Conductor started counting:
+ * read from `project_spend_daily`, which nothing removes when an agent or a job is removed, so a
+ * total does not fall when one goes. Dollars for engines that report them; tokens (input plus
+ * output) for engines that don't, as `DaySpend` counts them. Today is the daemon's local day.
+ */
+export interface ProjectSpend {
+  projectId: string;
+  today: number;
+  total: number;
+  tokensToday: number;
+  tokensTotal: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -994,8 +1016,12 @@ export type ServerFrame =
   | { type: 'alerts'; alerts: Alert[] }
   /** The whole settings map, each time it changes (Amendment 46). */
   | { type: 'settings'; settings: Record<string, string> }
-  /** Today's spend, each time it grows (Amendment 59). It used to arrive only with a snapshot. */
-  | { type: 'cost'; costToday: number }
+  /**
+   * Today's spend, each time it grows (Amendment 59). It used to arrive only with a snapshot.
+   * Amendment 146 adds the fleet's all-time total and each project's today and total, optional
+   * so a page from before reads the frame as it did.
+   */
+  | { type: 'cost'; costToday: number; costTotal?: number; projectSpend?: ProjectSpend[] }
   /** Slots in use and the limit, each time either changes (Amendment 47). */
   | { type: 'slots'; slots: { used: number; total: number } }
   /** A terminal command started, or ended (Amendment 58). */

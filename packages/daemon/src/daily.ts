@@ -6,7 +6,7 @@
 
 import type { Db } from './db/index.js';
 import { hub } from './hub.js';
-import { costToday, localDay } from './session/store.js';
+import { localDay, spendFigures } from './session/store.js';
 import { readSettings, settingRule } from './settings.js';
 
 export const DAILY_KEY = 'conductor.dailyBudget';
@@ -33,6 +33,19 @@ export function onCostChanged(fn: () => void): () => void {
 
 export function costChanged(): void {
   for (const l of listeners) l();
+}
+
+/**
+ * Every open page is told what has been spent: today's figure (Amendment 59), the fleet's
+ * all-time total and each project's today and total (Amendment 146). Called whenever spend is
+ * credited, in either unit, and at the day change. No hub outside the daemon is not fatal.
+ */
+export function broadcastSpend(db: Db): void {
+  try {
+    hub().broadcast({ type: 'cost', ...spendFigures(db) });
+  } catch {
+    // No hub outside the daemon (the spike). Not fatal.
+  }
 }
 
 /** How often the day is looked at. Short, because a machine that sleeps through midnight wakes late. */
@@ -109,11 +122,8 @@ export function onDayTurn(fn: (day: string, was: string) => void): () => void {
 export function startDayWatch(db: Db): () => void {
   watch?.stop();
   const mine = new DayWatch((day, was) => {
-    try {
-      hub().broadcast({ type: 'cost', costToday: costToday(db) });
-    } catch {
-      // No hub outside the daemon. Not fatal.
-    }
+    // Today's figures go back to zero; the totals do not (Amendment 146).
+    broadcastSpend(db);
     costChanged();
     for (const l of [...turnListeners]) {
       try {

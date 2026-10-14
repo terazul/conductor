@@ -23,6 +23,7 @@ import type {
   PermissionSuggestion,
   Project,
   ProjectNote,
+  ProjectSpend,
   Question,
 } from '@conductor/shared';
 import { row, rows, type Db } from '../db/index.js';
@@ -259,7 +260,8 @@ export function setDefaultBranch(db: Db, id: string, branch: string): Project | 
  *  • anything on disk. Not this file's business, and not any caller's either.
  *
  * The agents' `agent_spend_daily` rows go with them (Amendment 129): they are the agents'
- * budgets, and a removed agent has none left to read.
+ * budgets, and a removed agent has none left to read. The project's `project_spend_daily`
+ * rows stay, unread while the project is gone (Amendment 146): no foreign key, as `cost_daily`.
  */
 export function deleteProject(db: Db, id: string): void {
   db.prepare('DELETE FROM projects WHERE id = ?').run(id);
@@ -272,7 +274,8 @@ export function deleteProject(db: Db, id: string): void {
  * NOT deleted, deliberately, and for the same reasons as `deleteProject`: the `events`
  * rows, because the log is append-only (§5.2) and an orphaned transcript is a truer
  * record than a hole; `cost_daily`, because the money was spent and a removal is not a
- * refund; and nothing whatsoever on disk.
+ * refund; `project_spend_daily`, for the same reason, so its project's total keeps what it
+ * spent (Amendment 146); and nothing whatsoever on disk.
  */
 export function deleteAgent(db: Db, id: string): void {
   db.prepare('DELETE FROM agents WHERE id = ?').run(id);
@@ -833,15 +836,74 @@ export function addSpendToday(db: Db, agentId: string, delta: { usd?: number; to
   const usd = delta.usd && delta.usd > 0 ? delta.usd : 0;
   const tokens = delta.tokens && delta.tokens > 0 ? Math.round(delta.tokens) : 0;
   if (usd > 0 || tokens > 0) {
-    db.prepare(
-      `INSERT INTO agent_spend_daily (agent_id, day, cost_usd, tokens)
-       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agents WHERE id = ?)
-       ON CONFLICT(agent_id, day) DO UPDATE SET
-         cost_usd = cost_usd + excluded.cost_usd,
-         tokens = tokens + excluded.tokens`,
-    ).run(agentId, localDay(), usd, tokens, agentId);
+    const day = localDay();
+    // The agent's day and its project's day are one write (Amendment 146): a SAVEPOINT, so it
+    // nests inside a caller's transaction as well as standing alone, and neither is ever
+    // credited without the other.
+    db.exec('SAVEPOINT spend');
+    try {
+      db.prepare(
+        `INSERT INTO agent_spend_daily (agent_id, day, cost_usd, tokens)
+         SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agents WHERE id = ?)
+         ON CONFLICT(agent_id, day) DO UPDATE SET
+           cost_usd = cost_usd + excluded.cost_usd,
+           tokens = tokens + excluded.tokens`,
+      ).run(agentId, day, usd, tokens, agentId);
+      // The project's own record, which outlives the agent (240_spend_totals.sql).
+      db.prepare(
+        `INSERT INTO project_spend_daily (project_id, day, cost_usd, tokens)
+         SELECT project_id, ?, ?, ? FROM agents WHERE id = ?
+         ON CONFLICT(project_id, day) DO UPDATE SET
+           cost_usd = cost_usd + excluded.cost_usd,
+           tokens = tokens + excluded.tokens`,
+      ).run(day, usd, tokens, agentId);
+      db.exec('RELEASE spend');
+    } catch (err) {
+      db.exec('ROLLBACK TO spend');
+      db.exec('RELEASE spend');
+      throw err;
+    }
   }
   return spentToday(db, agentId);
+}
+
+// ── totals that outlive what spent them (Amendment 146) ─────────────────────
+
+/**
+ * Everything the fleet has spent, in dollars: every day `cost_daily` holds, summed. Nothing
+ * removes those rows (`deleteAgent`, `deleteJob` and `deleteProject` leave them), so a removed
+ * agent's money stays in it.
+ */
+export function costTotal(db: Db): number {
+  const r = row<{ total: number }>(db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_daily').get());
+  return r?.total ?? 0;
+}
+
+/**
+ * Each project's spend today and over its whole life, from `project_spend_daily`, which no
+ * removal touches. Only the projects there are: a forgotten project's rows are kept, unread.
+ * Every project is listed, with zeros when it has spent nothing.
+ */
+export function projectSpend(db: Db): ProjectSpend[] {
+  return rows<{ id: string; today: number; total: number; tokens_today: number; tokens_total: number }>(
+    db
+      .prepare(
+        `SELECT p.id,
+                COALESCE(SUM(CASE WHEN s.day = ? THEN s.cost_usd END), 0) AS today,
+                COALESCE(SUM(s.cost_usd), 0)                              AS total,
+                COALESCE(SUM(CASE WHEN s.day = ? THEN s.tokens END), 0)   AS tokens_today,
+                COALESCE(SUM(s.tokens), 0)                                AS tokens_total
+           FROM projects p LEFT JOIN project_spend_daily s ON s.project_id = p.id
+          GROUP BY p.id
+          ORDER BY p.id`,
+      )
+      .all(localDay(), localDay()),
+  ).map((r) => ({ projectId: r.id, today: r.today, total: r.total, tokensToday: r.tokens_today, tokensTotal: r.tokens_total }));
+}
+
+/** The `cost` frame's figures, and the snapshot's: today, the fleet's all-time total, each project's pair. */
+export function spendFigures(db: Db): { costToday: number; costTotal: number; projectSpend: ProjectSpend[] } {
+  return { costToday: costToday(db), costTotal: costTotal(db), projectSpend: projectSpend(db) };
 }
 
 /**

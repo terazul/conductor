@@ -803,6 +803,18 @@
   color: var(--fail);
 }
 
+/* Today's spend, then the fleet's all-time total, quieter (Amendment 146). */
+.sh-spend-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sh-spend-total {
+  color: var(--ink3);
+  cursor: help;
+}
+
 /* Pause everything until a time (Amendment 111): the bar's control, its panel, and the on state. */
 .sh-pause-btn {
   font: inherit;

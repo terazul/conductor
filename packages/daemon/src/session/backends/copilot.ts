@@ -53,6 +53,7 @@ import type { Autonomy, EventPayload } from '@conductor/shared';
 import type { AgentBackend, PermissionDecision, ProviderModel, RunOpts, RunOutcome, RunnerScope } from '../backend.js';
 import { arbiter, toolRuleFor } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
+import { broadcastSpend } from '../../daily.js';
 import { eventLog } from '../../eventlog.js';
 import { callTool, toolsFor, type ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
@@ -555,6 +556,8 @@ export class CopilotBackend implements AgentBackend {
     // The token budget is per day (Amendment 129): this call's input plus output tokens are
     // the agent's spend today, the day the call arrives, whatever the lifetime totals say.
     const today = addSpendToday(this.#db, this.#scope.agentId, { tokens: u.inputTokens + u.outputTokens });
+    // Its project's tokens today and in total grow with it, and every page is told (Amendment 146).
+    if (u.inputTokens + u.outputTokens > 0) broadcastSpend(this.#db);
     this.#emit({
       kind: 'usage',
       costUsd,

@@ -20,10 +20,12 @@ import {
   useJobDiffstat,
   useJobs,
   usePending,
+  useProjectSpend,
   useProjectStatus,
   useProjects,
   useServers,
 } from '../lib/store.js';
+import { projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { isFinished, markJobsSeen, useTabVisible, useUnseenJobs } from '../lib/seen.js';
 import {
@@ -40,7 +42,6 @@ import {
   STATUS_KEY,
   STATUS_WORD,
   Tag,
-  fmtMoney,
   tildePath,
 } from '../shell/ui.js';
 import { removeJob, terminateJob, useCommand } from '../agent/endpoints.js';
@@ -320,7 +321,10 @@ export function ProjectScreen() {
     [allPending, active],
   );
   const server = servers.find((s) => s.jobId === job?.id && s.alive);
-  const spend = agents.reduce((n, a) => n + a.costUsd, 0);
+  // Today and in total, from the project's own record (Amendment 146), which keeps what removed
+  // agents and jobs spent. It was the sum of the current agents' `costUsd`, which lost it.
+  const spendList = useProjectSpend();
+  const spend = projectPairWords(projectSpendOf(spendList, active ?? '', agents));
   // The header says finished only while a job here is unseen; at rest it is quiet (Amendment 130).
   const headRest = restOf(status, agents.length, jobs.some(finishedHere));
   const working = agents.filter((a) => a.status === 'working').length;
@@ -390,7 +394,9 @@ export function ProjectScreen() {
             </div>
             <div className="pj-kv">
               <span>spend</span>
-              <span>{fmtMoney(spend)}</span>
+              <span title="What this project's agents spent today, and since Conductor started counting: removing an agent or a job keeps it">
+                {spend.today} · {spend.total}
+              </span>
             </div>
           </div>
 
@@ -445,6 +451,12 @@ export function ProjectScreen() {
               {restWord(headRest) ?? STATUS_WORD[status]}
             </Tag>
           )}
+          <span
+            className="pj-headspend"
+            title="Spent by this project's agents today, and since Conductor started counting. Removing an agent or a job keeps it."
+          >
+            <b>{spend.today}</b> · {spend.total}
+          </span>
 
           <div className="fl-panehead-r">
             <button

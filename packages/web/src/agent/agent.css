@@ -603,6 +603,15 @@
   color: var(--fail);
 }
 
+/* Its whole life, after today's figure, never in the budget's colours (Amendment 146). */
+.ag-budget-total {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+  cursor: help;
+}
+
 /* The same bar the status bar draws for today's spend, small, beside a figure. */
 .ag-meter {
   display: inline-block;
