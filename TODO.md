@@ -112,6 +112,10 @@ the last of it on 12 Oct).
 
 - [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 153 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
 
+- [x] **Pull and rebase on Branches (wave 11, N3).** Asked for (14 Oct) for docs/plans/wave-11.md. Starts at
+  `daemon/src/workspace/branches.ts` (`act`, beside push), `web/src/branches/rules.ts` and `route.tsx` (beside Push).
+  *Decided (14 Oct): rebasing a pushed branch is allowed, with a warning; Conductor never forces.* *Done 15 Oct: Amendment 156.*
+
 - [x] **Docs: D1, D2, D3, the test plan and ADR 0001 (wave 11, F).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): D2 drops the links.* *Done 15 Oct: Amendment 154 (no links to the missing architecture guide; `scripts/verify-docs-links.mjs` in `make test`).*
 
 - [x] **A listed role whose persona names an exact model runs on sonnet (wave 11, O1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 155 (`ListedRole.model`, kept from the persona and sent as the role's `HelperRole.model`; the role select shows it).*

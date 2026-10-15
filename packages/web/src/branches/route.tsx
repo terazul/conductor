@@ -1,7 +1,9 @@
 /**
  * Screen 7 — Branches (Amendment 109, ADR 0008). A project's local branches drawn against
  * its default branch, and the four things you do to land an agent's work: merge one into
- * main, merge them all, commit what's uncommitted, push to origin. Plus Fetch.
+ * main, merge them all, commit what's uncommitted, push to origin. Plus Fetch, and Pull and
+ * Rebase onto main (N3), each confirmed; a pushed branch's rebase warns that its next push
+ * needs a force, which Conductor never does.
  *
  *   order 65 · hotkey 7. Registered by main.tsx's `./＊/route.tsx` glob, like every screen.
  *
@@ -33,6 +35,7 @@ import { branchAction, getBranches, previewMerge } from './endpoints.js';
 import { BranchGraph } from './graph.js';
 import { onBranchesChanged } from './live.js';
 import {
+  FORCE_SENTENCE,
   FORGET_LABEL,
   checkoutConfirm,
   checkoutReason,
@@ -51,21 +54,27 @@ import {
   mergeConfirm,
   mergeable,
   ownersOf,
+  pullConfirm,
+  pullReason,
   pushConfirm,
   previewLine,
   pushReason,
+  rebaseConfirm,
+  rebaseReason,
   removedText,
   rootLine,
   showCommit,
+  showPull,
   showPush,
+  showRebase,
 } from './rules.js';
 import './branches.css';
 
 type Outcome =
-  | { kind: 'done'; action: BranchAction['action']; res: BranchActionResult }
+  | { kind: 'done'; action: BranchAction['action']; branch: string | null; res: BranchActionResult }
   | { kind: 'error'; label: string; text: string; tone: 'warn' | 'fail' };
 
-type Confirming = 'merge' | 'merge_all' | 'push' | 'checkout' | 'delete' | 'clean' | null;
+type Confirming = 'merge' | 'merge_all' | 'push' | 'pull' | 'rebase' | 'checkout' | 'delete' | 'clean' | null;
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -220,7 +229,7 @@ function Branches() {
       try {
         const res = await branchAction(project.id, action);
         accept(res.branches);
-        setOutcome({ kind: 'done', action: action.action, res });
+        setOutcome({ kind: 'done', action: action.action, branch: 'branch' in action ? action.branch : null, res });
       } catch (err) {
         const tone = err instanceof ApiError && err.status === 409 ? 'warn' : 'fail';
         setOutcome({ kind: 'error', label, text: errorText(err), tone });
@@ -519,6 +528,9 @@ function ActionBar({
   const mergeAction: BranchAction = intoBranch?.isTarget ? { action: 'merge', branch: b.name } : { action: 'merge', branch: b.name, into };
   const commit = showCommit(b) ? commitReason(b) : null;
   const push = pushReason(resp, b);
+  const pull = pullReason(b);
+  const rebase = rebaseReason(resp, b);
+  const confirmRebase = rebaseConfirm(resp, b);
   const confirmMerge = mergeConfirm(resp, b, into || resp.target, ahead);
   const commitBlocked = commit ?? (message.trim().length === 0 ? 'write a message first' : null);
   const makeDefault = makeDefaultReason(defaultBranch, b);
@@ -620,6 +632,10 @@ function ActionBar({
         {showPush(resp, b) && (
           <Act label={busy === 'push' ? 'Pushing…' : `Push to ${resp.remote ?? 'origin'}`} reason={push} busy={working} onClick={() => setConfirming('push')} />
         )}
+        {showPull(b) && <Act label={busy === 'pull' ? 'Pulling…' : 'Pull'} reason={pull} busy={working} onClick={() => setConfirming('pull')} />}
+        {showRebase(b) && (
+          <Act label={busy === 'rebase' ? 'Rebasing…' : `Rebase onto ${resp.target}`} reason={rebase} busy={working} onClick={() => setConfirming('rebase')} />
+        )}
 
         <Act
           label={busy === 'set_default' ? 'Making default…' : 'Make default'}
@@ -666,6 +682,33 @@ function ActionBar({
           <span>{pushConfirm(resp, b)}</span>
           <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'push', branch: b.name }, 'Push')}>
             Push
+          </button>
+          <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {confirming === 'pull' && pull === null && (
+        <div className="br-confirm" role="alertdialog" aria-label={`confirm pulling ${b.name}`}>
+          <span>{pullConfirm(resp, b)}</span>
+          <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'pull', branch: b.name }, 'Pull')}>
+            Pull
+          </button>
+          <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {confirming === 'rebase' && rebase === null && (
+        <div className="br-confirm" role="alertdialog" aria-label={`confirm rebasing ${b.name}`}>
+          <span>
+            {confirmRebase.ask}
+            {confirmRebase.warn && <span className="br-warn"> {confirmRebase.warn}</span>}
+          </span>
+          <button type="button" className="br-btn br-btn-go" disabled={working} onClick={() => run({ action: 'rebase', branch: b.name }, 'Rebase')}>
+            Rebase
           </button>
           <button type="button" className="br-btn" onClick={() => setConfirming(null)}>
             Cancel
@@ -722,7 +765,7 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
       </div>
     );
   }
-  const { action, res } = outcome;
+  const { action, branch, res } = outcome;
   // Where a merge went: the answer says, since it can be any branch now (Amendment 110).
   const target = res.into ?? fallback;
   const sha = res.sha ? ` (${res.sha.slice(0, 7)})` : '';
@@ -736,6 +779,12 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
           : `Nothing was merged.`;
   } else if (action === 'commit') text = `Committed${sha}.`;
   else if (action === 'push') text = res.ok ? 'Pushed.' : 'The push did not go through.';
+  else if (action === 'pull') text = `Pulled${sha}.`;
+  else if (action === 'rebase') {
+    // A pushed branch, rebased, is marked in the answer's listing: say what its next push needs.
+    const rebased = res.branches.branches.find((x) => x.name === branch)?.rebased === true;
+    text = res.conflict ? '' : `Rebased onto ${target}${sha}.${rebased ? ` Careful: ${FORCE_SENTENCE}.` : ''}`;
+  }
   else if (action === 'set_default') text = res.ok ? 'Made the default.' : 'That did not go through.';
   else if (action === 'delete' || action === 'clean_merged') text = removedText(res.removed ?? [], res.forgotJobs ?? []);
   else text = res.ok ? 'Fetched.' : 'The fetch did not go through.';
@@ -746,10 +795,17 @@ function Result({ outcome, target: fallback, onClose }: { outcome: Outcome; targ
         {text && <span>{text}</span>}
         {res.conflict && (
           <div className="br-conflict">
-            <span>
-              {res.conflict.branch} conflicts with {target} in {plural(res.conflict.files.length, 'file')} — the merge was undone,
-              and {target} is as it was{res.merged.length > 0 ? ' after the merges above' : ''}.
-            </span>
+            {action === 'rebase' ? (
+              <span>
+                {res.conflict.branch} conflicts with {target} in {plural(res.conflict.files.length, 'file')} — the rebase was undone,
+                and {res.conflict.branch} is as it was.
+              </span>
+            ) : (
+              <span>
+                {res.conflict.branch} conflicts with {target} in {plural(res.conflict.files.length, 'file')} — the merge was undone,
+                and {target} is as it was{res.merged.length > 0 ? ' after the merges above' : ''}.
+              </span>
+            )}
             <ul>
               {res.conflict.files.map((f) => (
                 <li key={f}>

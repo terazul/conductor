@@ -1,7 +1,7 @@
 /**
  * A project's branches: list them against the default branch, merge them into it, commit
- * a branch's uncommitted work, push, fetch (Amendment 109, ADR 0008), and remove the ones
- * that are merged (Amendment 143).
+ * a branch's uncommitted work, push, fetch (Amendment 109, ADR 0008), remove the ones
+ * that are merged (Amendment 143), and pull or rebase one (N3).
  *
  * The first code in the daemon that writes history and talks to a remote, so it is
  * deliberately narrow:
@@ -12,6 +12,7 @@
  *   - nothing is ever forced: push names an explicit `src:dst` refspec without '+', so a
  *     configured `remote.origin.push = +…` is never used, and there is no `--force` anywhere;
  *     a branch is deleted with `branch -d`, never `-D`, and only local branches ever are;
+ *     pull only fast-forwards, and a pushed branch that was rebased is refused at push;
  *   - fetch never prunes;
  *   - every mutating action holds `branches:<repoRoot>` so two never interleave.
  *
@@ -111,6 +112,19 @@ const NO_JOBS: BranchJobs = {
 const locks = new KeyedLock();
 
 /**
+ * Branches rebased here while they had an upstream, by `<root>\0<name>` (N3). Until one is
+ * pushed, a listing marks it `rebased` while it has diverged from that upstream, and Push
+ * refuses it: the push would need a force. In memory: after a restart the remote's own
+ * rejection is what a push gets.
+ */
+const rebasedSincePush = new Set<string>();
+const rebasedKey = (root: string, name: string): string => `${root}\0${name}`;
+
+/** What a pushed branch's rebase means for its next push (N3), in the confirm and in Push's refusal. */
+export const FORCE_SENTENCE =
+  "this branch is pushed; after rebasing, the next push needs a force, which Conductor never does — you'd do it yourself";
+
+/**
  * The repo a project's path is in, or a 400, with the branch to draw against resolved.
  * `recorded` is the project's `defaultBranch`; `chosen` is the one you picked on the screen;
  * `defaultBranchSet`, `rootLive` and `setDefault` are Amendment 117's, from the store and
@@ -198,7 +212,16 @@ export function parseBranchAction(raw: unknown): BranchAction {
       return { action, branch, into };
     }
     case 'push':
+    case 'pull':
       return { action, branch: branchOf() };
+    case 'rebase': {
+      const branch = branchOf();
+      const onto = body['onto'];
+      if (onto === undefined || onto === null) return { action, branch };
+      if (typeof onto !== 'string' || onto.length === 0) throw new BranchError(400, 'onto must be a branch name');
+      if (onto.startsWith('-')) throw new BranchError(400, 'not a branch name', onto);
+      return { action, branch, onto };
+    }
     case 'commit': {
       const branch = branchOf();
       const message = body['message'];
@@ -233,7 +256,7 @@ export function parseBranchAction(raw: unknown): BranchAction {
       throw new BranchError(
         400,
         'unknown action',
-        'one of merge, merge_all, commit, push, fetch, set_default, delete, clean_merged',
+        'one of merge, merge_all, commit, push, fetch, pull, rebase, set_default, delete, clean_merged',
       );
   }
 }
@@ -417,6 +440,7 @@ export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> 
     const path = where.get(r.name);
     const count = path ? await uncommitted(path) : null;
     const { jobId, live } = repo.lookup(r.name);
+    const rebased = upstream !== null && upstream.behind > 0 && rebasedSincePush.has(rebasedKey(root, r.name));
     return {
       name: r.name,
       head: r.head,
@@ -431,6 +455,7 @@ export async function listBranches(repo: BranchRepo): Promise<BranchesResponse> 
       jobId,
       live,
       upstream,
+      ...(rebased ? { rebased: true as const } : {}),
     };
   });
 
@@ -676,6 +701,93 @@ function said(out: { stdout: string; stderr: string }): string {
   return [out.stdout.trim(), out.stderr.trim()].filter(Boolean).join('\n');
 }
 
+const commits = (n: number): string => `${n} commit${n === 1 ? '' : 's'}`;
+
+/**
+ * Where a pull or a rebase runs (N3): the branch's own checkout, with nothing working on it
+ * and no tracked changes. A branch checked out nowhere is refused, as a merge into it is.
+ */
+async function ownCheckout(b: BranchInfo, what: 'pull' | 'rebase'): Promise<string> {
+  refuseLive(b);
+  if (!b.worktree) {
+    throw new BranchError(409, `${b.name} isn't checked out`, `a ${what} runs in its checkout: check ${b.name} out somewhere first`);
+  }
+  if (!(await trackedClean(b.worktree.path))) {
+    throw new BranchError(409, `${b.name}'s checkout has changes`, `commit or discard the tracked changes in ${b.worktree.path} first`);
+  }
+  return b.worktree.path;
+}
+
+/**
+ * Pull (N3): fetch the branch's remote (never pruning), then fast-forward it to its upstream
+ * in its own checkout. Never a merge commit, never a rebase: a branch that has diverged is
+ * refused, and you choose.
+ */
+async function pullOne(root: string, b: BranchInfo): Promise<Omit<BranchActionResult, 'branches'>> {
+  const cwd = await ownCheckout(b, 'pull');
+  if (!b.upstream) throw new BranchError(409, `${b.name} has no upstream`, 'there is nothing to pull from: push it first');
+  const remote = (await git(root, ['config', '--get', `branch.${b.name}.remote`]).catch(() => '')).trim();
+  let fetched = '';
+  // '.' is a local upstream: nothing to fetch.
+  if (remote && remote !== '.') {
+    try {
+      fetched = said(await gitBoth(root, ['fetch', '--no-prune', '--', remote], { env: sshEnv(), timeoutMs: REMOTE_TIMEOUT_MS }));
+    } catch (err) {
+      remoteFailure(err, 'fetch');
+    }
+  }
+  // `refs/heads/x@{upstream}` doesn't resolve, and `x@{upstream}` could name a tag; the
+  // upstream's own full refname is unambiguous.
+  const up = (await git(root, ['for-each-ref', '--format=%(upstream)', '--', heads(b.name)])).trim();
+  if (!up || !(await gitOk(root, ['rev-parse', '--verify', '--quiet', up]))) {
+    throw new BranchError(409, `${b.name} has no upstream`, `${b.upstream.ref} is gone from its remote`);
+  }
+  const [ahead, behind] = await leftRight(root, heads(b.name), up);
+  if (behind === 0) throw new BranchError(409, 'nothing to pull', `${b.name} already has every commit on ${b.upstream.ref}`);
+  if (ahead > 0) {
+    throw new BranchError(
+      409,
+      'diverged — merge or rebase',
+      `${b.name} has ${commits(ahead)} ${b.upstream.ref} doesn't, and ${b.upstream.ref} has ${commits(behind)} it doesn't`,
+    );
+  }
+  const out = await gitBoth(cwd, ['merge', '--ff-only', '--', up]);
+  const sha = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+  return { ok: true, merged: [], sha, output: [fetched, said(out)].filter(Boolean).join('\n') };
+}
+
+/**
+ * Rebase (N3): replay `b`'s commits onto `onto` in `b`'s own checkout. On a conflict the
+ * rebase is aborted, so the checkout is as it was, and the files are reported as a merge's
+ * are. A branch with an upstream is rebased too; it is then remembered, so its next push is
+ * refused with `FORCE_SENTENCE` rather than sent to be rejected.
+ */
+async function rebaseOne(root: string, b: BranchInfo, onto: BranchInfo): Promise<Omit<BranchActionResult, 'branches'>> {
+  if (onto.name === b.name) throw new BranchError(400, `can't rebase ${b.name} onto itself`);
+  const cwd = await ownCheckout(b, 'rebase');
+  const [[behind], base] = await Promise.all([
+    leftRight(root, heads(onto.name), heads(b.name)),
+    mergeBase(root, heads(onto.name), heads(b.name)),
+  ]);
+  if (base === null) throw new BranchError(409, 'unrelated histories', `${b.name} shares no history with ${onto.name}`);
+  if (behind === 0) throw new BranchError(409, 'nothing to rebase', `${b.name} already has every commit on ${onto.name}`);
+  let output: string;
+  try {
+    output = said(await gitBoth(cwd, ['rebase', '--no-autostash', '--', heads(onto.name)]));
+  } catch (err) {
+    const files = (await git(cwd, ['diff', '--name-only', '--diff-filter=U']).catch(() => ''))
+      .split('\n')
+      .filter(Boolean);
+    // Undo whatever the rebase left, conflict or not, so the checkout is as it was.
+    await gitOk(cwd, ['rebase', '--abort']);
+    if (files.length > 0) return { ok: false, merged: [], into: onto.name, conflict: { branch: b.name, files } };
+    throw err;
+  }
+  if (b.upstream) rebasedSincePush.add(rebasedKey(root, b.name));
+  const sha = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+  return { ok: true, merged: [], into: onto.name, sha, ...(output ? { output } : {}) };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Deleting a merged branch (Amendment 143)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -856,14 +968,28 @@ async function act(
       const b = known(state, action.branch);
       refuseLive(b);
       const remote = remoteOf(state);
+      // Rebased here after it was pushed (N3): only a force would land it, and that is yours.
+      const key = rebasedKey(root, b.name);
+      const needsForce = (): BranchError => new BranchError(409, `${b.name} was rebased after it was pushed`, FORCE_SENTENCE);
+      if (b.rebased) throw needsForce();
       const ref = heads(b.name);
       const args = ['push', ...(b.upstream ? [] : ['-u']), '--', remote, `${ref}:${ref}`];
       try {
         const out = await gitBoth(root, args, { env: sshEnv(), timeoutMs: REMOTE_TIMEOUT_MS });
+        rebasedSincePush.delete(key);
         return { ok: true, merged: [], output: said(out) };
       } catch (err) {
+        if (rebasedSincePush.has(key) && err instanceof GitError && REJECTED.test(err.stderr)) throw needsForce();
         remoteFailure(err, 'push');
       }
+    }
+
+    case 'pull':
+      return pullOne(root, known(state, action.branch));
+
+    case 'rebase': {
+      const b = known(state, action.branch);
+      return rebaseOne(root, b, intoOf(state, action.onto));
     }
 
     case 'fetch': {

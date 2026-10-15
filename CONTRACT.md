@@ -200,6 +200,69 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 156 — post-merge, applied. **Branches can pull and rebase a branch; a pushed branch rebased is refused at push, since it needs a force Conductor never does.**
+
+Daemon (`workspace/branches.ts`, `routes/branches.ts`, `workspace/verify-branches.ts`), shared
+(`src/wire.ts`), web (`branches/rules.ts`, `branches/route.tsx`, `branches/verify.ts`) and docs
+(`docs/MANUAL.md`, `TODO.md`). The user, 14 Oct 2026: "Execute … docs/plans/wave-11.md … following
+§0"; this is the plan's lane I1, item N3 (`docs/plans/wave-11.md:391`), with the decision of 14 Oct
+(`:761`): "Rebasing a pushed branch is allowed, with a force-needed warning; Conductor never forces".
+*Amends Amendment 109*, whose Branches screen landed work only by merging and pushing: it can now
+also bring a branch up to its upstream and rebase it onto the target. Nothing it did before changes;
+push gains one refusal.
+
+- **Two actions** (`shared/src/wire.ts:954`, `:960`): `pull{branch}` and `rebase{branch, onto?}`,
+  parsed at `branches.ts:215-217` (`onto` must be a string not starting with '-'; it defaults to the
+  target, `intoOf`). `BranchInfo.rebased?` (`wire.ts:891`) marks a branch Conductor rebased while it
+  had an upstream and that has diverged from it since (`branches.ts:443`).
+- **Pull** (`pullOne`, `branches.ts:726`). `ownCheckout` (`:710`) refuses, with 409, a live agent, a
+  branch that isn't checked out, and tracked changes. Then 409 for no upstream; a fetch of the branch's
+  own remote with `--no-prune`, `sshEnv()` and `REMOTE_TIMEOUT_MS` (`:734`; skipped for a local `.`
+  upstream); the upstream's full refname from `for-each-ref` (`:741`), since `refs/heads/x@{upstream}`
+  doesn't resolve; 409 "nothing to pull" when it isn't behind; 409 "diverged — merge or rebase", with
+  both counts, when it is also ahead; and `merge --ff-only` in the checkout (`:754`).
+- **Rebase** (`rebaseOne`, `branches.ts:765`). It is refused with 400 onto itself, then by
+  `ownCheckout`, then with 409 for unrelated histories or nothing to rebase. It runs
+  `rebase --no-autostash -- refs/heads/<onto>` in the branch's checkout. On any failure it runs
+  `rebase --abort` (`:782`), then returns `{ok: false, conflict: {branch, files}}` as `mergeOne` does,
+  or rethrows when there were no conflicted files.
+- **Never forced.** A branch rebased with an upstream goes into `rebasedSincePush` (`branches.ts:120`).
+  Its next push is refused before it reaches the remote: 409 "<branch> was rebased after it was
+  pushed", with `FORCE_SENTENCE` (`:124`) as the detail (`:973-974`). A remote rejection of a branch
+  in the set gets the same refusal (`:982`), and a push that goes through clears it. The rules header
+  says so. No `--force`, `--force-with-lease`, `-f` or `+` refspec was added; the verify reads the
+  source to check.
+- **Web.** `rules.ts:159-205` adds `FORCE_SENTENCE` (the daemon's words), `showPull`/`pullReason`
+  (no upstream, live, not checked out, "diverged — merge or rebase"; a level branch isn't refused,
+  since pull fetches first), `pullConfirm`, `showRebase`/`rebaseReason` (the target, live, not checked
+  out, unrelated, nothing to rebase) and `rebaseConfirm`, which warns "Careful: <FORCE_SENTENCE>." when
+  the branch has an upstream. `pushReason` returns the sentence for a `rebased` branch (`:126`).
+  `route.tsx:635` puts **Pull** and **Rebase onto main** beside Push; their confirms are at
+  `:692` and `:704`, like Push's. The result says "Pulled (sha)." or "Rebased onto main (sha).", adding
+  the warning when the answer's listing marks the branch `rebased` (`:782-786`). A rebase's conflict
+  says "the rebase was undone, and <branch> is as it was" (`:800`).
+- **Docs.** `docs/MANUAL.md` gains "Pull and rebase a branch" after "Delete merged branches", and a
+  sentence in the Branches row of the screens table.
+
+*Not done / not decided:* `rebasedSincePush` is in memory, so after a restart Push is offered again and
+the remote's own "the push was rejected" is what you see. The web always rebases onto the target; the
+daemon's `onto` has no picker. Pull's `merge --ff-only` is local and runs without `sshEnv` or the
+timeout; only its fetch talks to the remote. Tracked changes aren't in the listing (its count includes
+untracked files), so the web leaves that refusal to the daemon's 409.
+
+*Verified:* daemon `verify-branches.ts` section 14 (`:921`), with an origin and a second clone that
+moves it: a fast-forward pull lands origin's commit with no merge commit, and a second pull is
+"nothing to pull"; a diverged pull is refused and moves neither side; no upstream, not checked out,
+tracked changes (pull and rebase) and a live agent (pull and rebase) are 409s; a rebase onto main
+rewrites the branch onto main with a clean checkout; a second rebase, onto a branch it already has,
+onto itself (400) and onto `--onto` (400) are refused; a conflicting rebase reports `c.txt`, leaves no
+rebase in progress, a clean tree and the branch where it was; a pushed branch rebases, is listed
+`rebased` (↑2 ↓1), and its push is a 409 with `FORCE_SENTENCE`, leaving origin untouched; and the
+source has no force. The old "unknown action" check used `rebase`, now a real action; it uses `squash`
+(`:475`). Daemon: 214 checks PASS. Web `branches/verify.ts` section 11 (`:393`): the reasons, the
+confirms with and without the warning, Push's refusal after a rebase, and the route's buttons, confirms
+and result text. `pnpm -r typecheck` clean; `make test`: 28 PASS.
+
 ### Amendment 155 — post-merge, applied. **A role an orchestrated stack lists runs on its persona's model when that is an exact id, not on sonnet.**
 
 Web only (`spawn/orchestrated.ts`, `spawn/presets.ts`, `spawn/custom.ts`, `spawn/Pipeline.tsx`,
