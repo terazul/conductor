@@ -984,7 +984,14 @@ project's name opens its Project screen, and its **▸** opens it to three subme
   the ◆ when it is an orchestrator (as on its Agent tab), plus a count when one needs you. A
   click opens the agent, and the navigator stays
   where it is. Groups start open; click a group's heading to close it. A project with
-  one job still shows its group. Helpers are listed in their job like any agent.
+  one job still shows its group. Helpers are listed in their job like any agent. Once an
+  orchestrator has ended (done, failed or stopped), its helpers that have ended too fold
+  into one row right after it, such as **↳ 12 helpers · all done**, or **↳ 5 helpers · 4
+  done, 1 failed** when they ended differently; its dot is the worst inside. It starts
+  closed; its **▸** opens it to their rows. A helper still running, or one that needs you,
+  keeps its own row, so nothing waiting on you is folded away, and a fold needs two helpers
+  or more. Opening a folded helper from elsewhere, such as its Agent tab, opens its fold.
+  Folding only hides rows: each helper's transcript, last reply and cost stay.
 - **Needs you**: this project's waiting requests and alerts, one row each. The heading
   turns amber, with a count, when anything waits. A click opens that item in Needs you.
 - **Files**: the project's folders, its main one first. A folder opens and closes like any
@@ -998,8 +1005,8 @@ project's name opens its Project screen, and its **▸** opens it to three subme
   Nothing here marks a changed file; for that, open the folder
   on Files itself.
 
-Every project, submenu and job group opens and closes on its own, and what's open is
-remembered.
+Every project, submenu, job group and fold of helpers opens and closes on its own, and
+what's open is remembered.
 Projects are listed in the Fleet's **Sort by** order and follow it when it changes.
 Dragging a project onto another in the navigator moves it there and switches the sort
 to **my order**, as dragging a Fleet card does; dropping below the last project puts it

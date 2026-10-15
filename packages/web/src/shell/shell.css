@@ -596,6 +596,23 @@
   padding: 1px 0 3px 12px;
 }
 
+/*
+ * An ended orchestrator's helpers, folded into one row (Amendment 168): quiet as a job's
+ * heading, since it is a summary of rows, not an agent. Never amber: a helper that waits
+ * on you is never in it.
+ */
+.sh-nav-fhead {
+  color: var(--ink3);
+}
+
+.sh-nav-fhead:hover {
+  color: var(--ink2);
+}
+
+.sh-nav-fold > .sh-nav-items {
+  padding: 1px 0 2px 12px;
+}
+
 .sh-nav-tag {
   font-family: var(--mono);
   font-size: var(--fs-2xs);

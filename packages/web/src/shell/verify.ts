@@ -18,6 +18,10 @@
  * §9 (Amendment 92): a project's folders open into their directories as a tree, sharing
  * the Files screen's own `useFileTree`; `navDirId` names each directory's node, and
  * `navFileLink` is the link a file row hands `navigate('files', …)`.
+ *
+ * §14 (Amendment 168): once an orchestrator has ended, its ended helpers fold into one row
+ * after it; one still going or waiting on you stays out; the fold starts closed under its own
+ * node, and every helper is still there.
  */
 
 import type { Agent, Alert, FileNode, PendingRequest } from '@conductor/shared';
@@ -34,6 +38,9 @@ import {
   NAV_TREE_KEY,
   currentProject,
   detailsShown,
+  foldHelpers,
+  foldLabel,
+  foldOf,
   folderName,
   groupByJob,
   isOpen,
@@ -43,6 +50,7 @@ import {
   navDirId,
   navDrop,
   navFileLink,
+  navFoldId,
   navId,
   navJobId,
   navProjects,
@@ -566,9 +574,74 @@ console.log('\n13 · a file or folder in the navigator can be renamed and delete
   check("and a project's drag, text/plain only, is never a move in the Files tree", !canDrop(['text/plain'], 'README.md', 'docs'));
 }
 
+console.log('\n14 · an ended orchestrator\'s ended helpers fold into one row (Amendment 168)');
+{
+  const helper = (id: string, status: Agent['status'], parentId = 'o'): Agent => ({ ...agent(id, 'p', 'jS', `builder-${id}` as Agent['role'], status), parentId });
+  const stack = (orch: Agent['status'], ...hs: Agent[]): Agent[] => [{ ...agent('o', 'p', 'jS', 'architect', orch), pipelineRoles: ['developer'] } as Agent, ...hs];
+  const proj = [{ id: 'p', name: 'p', path: '/p' }];
+  const job = [{ id: 'jS', createdAt: '2026-10-15T09:00:00Z', prompt: 'Build it' }];
+  const rowsOf = (as: Agent[], pend: PendingRequest[] = [], al: Alert[] = []) => navTree(proj, as, pend, al, job)[0]!.jobs[0]!;
+  const shape = (j: ReturnType<typeof rowsOf>): string => j.rows.map((r) => (r.kind === 'agent' ? r.agent.id : `[${r.fold.helpers.map((h) => h.id).join(' ')}]`)).join(',');
+
+  const done3 = [helper('h1', 'done'), helper('h2', 'done'), helper('h3', 'done')];
+  const running = rowsOf(stack('working', ...done3));
+  check('an orchestrator still working folds nothing', shape(running) === 'o,h1,h2,h3', shape(running));
+  check('nor does one waiting on its turn', shape(rowsOf(stack('queued', ...done3))) === 'o,h1,h2,h3');
+
+  const twelve = Array.from({ length: 12 }, (_, i) => helper(`h${i + 1}`, 'done'));
+  const ended = rowsOf(stack('done', ...twelve));
+  const fold = ended.rows[1]?.kind === 'fold' ? ended.rows[1].fold : null;
+  check('once it has ended, its ended helpers are one row, right after it', ended.rows.length === 2 && ended.rows[0]?.kind === 'agent' && fold?.helpers.length === 12, shape(ended));
+  check('which says how many, all done', fold?.label === '↳ 12 helpers · all done', fold?.label);
+  check('failed and stopped orchestrators end too', ['failed', 'stopped'].every((s) => rowsOf(stack(s as Agent['status'], ...done3)).rows.length === 2));
+
+  const mixed = rowsOf(stack('done', helper('h1', 'done'), helper('h2', 'working'), helper('h3', 'failed'), helper('h4', 'done'), helper('h5', 'done'), helper('h6', 'stopped')), [request('rq', 'p', 'h5', 'npm test')]);
+  check('a helper still working, and one waiting on you, keep their rows and their places', shape(mixed) === 'o,[h1 h3 h4 h6],h2,h5', shape(mixed));
+  const mf = mixed.rows.find((r) => r.kind === 'fold');
+  const mfold = mf?.kind === 'fold' ? mf.fold : null;
+  check("a mixed fold counts each ending, done first", mfold?.label === '↳ 4 helpers · 2 done, 1 failed, 1 stopped', mfold?.label);
+  check("its dot is the worst inside, by the Fleet's SORT_RANK", mfold?.status === 'failed' && SORT_RANK.failed < SORT_RANK.stopped);
+  check('and never blocked: nothing that waits on you is in it', mixed.rows.every((r) => r.kind === 'agent' || r.fold.helpers.every((h) => h.needs === 0)));
+  const alerted = rowsOf(stack('done', helper('h1', 'failed'), helper('h2', 'done'), helper('h3', 'done')), [], [alert('al', 'p', ['h1'])]);
+  check("a failed helper whose alert waits on you stays out", shape(alerted) === 'o,[h2 h3],h1', shape(alerted));
+  check('one ended helper is not folded: a row for a row', shape(rowsOf(stack('done', helper('h1', 'done'), helper('h2', 'working')))) === 'o,h1,h2');
+  check('foldLabel reads all failed, and one helper', foldLabel(['failed', 'failed']) === '↳ 2 helpers · all failed' && foldLabel(['done']) === '↳ 1 helper · all done');
+
+  // A helper's helper is the orchestrator's too, as nestHelpers nests it.
+  const deep = rowsOf(stack('done', helper('h1', 'done'), helper('g1', 'done', 'h1'), helper('h2', 'done')));
+  check("a helper's own helpers fold with the rest", shape(deep) === 'o,[h1 g1 h2]', shape(deep));
+  const two = rowsOf([...stack('done', helper('h1', 'done'), helper('h2', 'done')), agent('v', 'p', 'jS', 'validator', 'done')]);
+  check('an agent of the job that is no one\'s helper keeps its row', shape(two) === 'o,[h1 h2],v', shape(two));
+  check('groupByJob alone folds nothing: rows are the agents', groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, finished: false, orchestrator: false, budget: null }], [])[0]!.rows.map((r) => r.kind).join() === 'agent');
+  check('foldHelpers without the agents behind the rows folds nothing', foldHelpers(ended.agents, []).length === ended.agents.length);
+
+  // Display only.
+  const all = stack('done', ...twelve);
+  const before = JSON.stringify(all);
+  const t = navTree(proj, all, [], [], job)[0]!;
+  check("every helper is still in its job's agents and the project's", t.jobs[0]!.agents.length === 13 && t.agents.length === 13);
+  check('and the agents handed in are untouched, cost and all', JSON.stringify(all) === before);
+  check('a finished helper you have not opened marks its fold', navTree(proj, all, [], [], job, new Set(), new Set(['h3']))[0]!.jobs[0]!.rows.some((r) => r.kind === 'fold' && r.fold.finished) && !fold?.finished);
+
+  // Open and closed.
+  const id = navFoldId('p', 'o');
+  check('a fold is p:<id>:fold:<orchestratorId>, apart from every other node', id === 'p:p:fold:o' && ![navId('p'), navId('p', 'agents'), navJobId('p', 'jS'), navDirId('p', 'r', '')].includes(id));
+  check('a fold starts closed: nothing stored opens it', !isOpen(parseOpen(null), id));
+  const opened = toggleOpen(parseOpen(null), id);
+  check('one toggle opens it, and touches nothing else', isOpen(opened, id) && opened.size === 1 && jobShown(opened, navJobId('p', 'jS')));
+  check('an open fold survives the setting', isOpen(parseOpen(serializeOpen(opened)), id) && !isOpen(parseOpen(serializeOpen(toggleOpen(opened, id))), id));
+  const tree14 = navTree(proj, all, [], [], job);
+  check('foldOf finds the fold a helper is in, and none for the orchestrator or nothing', foldOf(tree14, 'h7') === id && foldOf(tree14, 'o') === null && foldOf(tree14, undefined) === null);
+
+  const nav = src('./Navigator.tsx');
+  check('the group draws its rows, an agent or a fold', /job\.rows\.map\(\(r\) =>/.test(nav) && /<FoldRow key=\{`fold:\$\{r\.fold\.orchestratorId\}`\}/.test(nav));
+  check('a fold opens by isOpen on navFoldId, through the same toggle', /const id = navFoldId\(project\.id, fold\.orchestratorId\);\s*const shown = isOpen\(open, id\);/.test(nav));
+  check('arriving on a helper in a closed fold opens it, once', /const holder = foldOf\(tree, agentId\);/.test(nav) && /\}, \[holder, agentId\]\);/.test(nav));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
