@@ -62,15 +62,17 @@
   /* Where you are: the backdrop of the project / agent label at the top of the Project and
      Agent screens (Amendment 97). Not a status colour, so it never reads as one. --ink3 on
      it is 4.9:1. */
-  --here: #1f3047;
+  --here: #1c2e55;
 
   /* The same label on the Project screen and on the Agent screen, each on its own backdrop
      (Amendment 127) so you can tell them apart at a glance; Fleet and the other screens keep
      --here. Hues no status colour has (a petrol blue, a wine), and each a different lightness
      from --here and from the other, so they tell apart without colour vision. --ink3 on them
-     is 5.6:1 and 4.6:1. That floor is why the spread in lightness is small. */
-  --here-project: #002a35;
-  --here-agent: #4d283e;
+     is 5.4:1 and 4.6:1. That floor is why the spread in lightness is small, so the three carry
+     more chroma, and their hues are at least 60° apart in OKLCH (slate 264°, petrol 199°, wine
+     345°; Amendment 155). The petrol is as saturated as sRGB has it this dark. */
+  --here-project: #002e30;
+  --here-agent: #591e43;
 
   /* What you typed: your own turns in an agent's transcript, their label, bar and text
      (Amendment 106). Not a status colour — violet, which none of them is — so your words
@@ -157,9 +159,9 @@
   --shadow: rgb(60 45 30 / 16%);
   --paper: #ffffff;
 
-  --here: #d6e0f0;
-  --here-project: #c4ecf9;
-  --here-agent: #f5cfe3;
+  --here: #d4e1fb;
+  --here-project: #acf4f7;
+  --here-agent: #fccde6;
 
   --you: #6236b0;
 

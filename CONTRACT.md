@@ -200,6 +200,76 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 155 — post-merge, applied. **The three label backdrops carry more chroma, sit 1.06:1 apart in lightness and 60° apart in hue, in both themes.**
+
+Shared (`tokens.css`) and web (`lib/verify.ts`), and `docs/MANUAL.md`, `TODO.md`. No behaviour, wire
+or daemon change, no migration, no new token. The user, 14 Oct 2026, on wave 11's item U1 (lane H,
+"make the three backdrops easier to tell apart"): *"more chroma and a hue check. Violet `--you` stays,
+and no new backdrops are added"*; §6: "More chroma, floor 1.06, hues ≥ 60° apart". *Amends Amendment
+127*, which chose `--here-project` and `--here-agent` and set the floor at 1.04:1 with no check on
+hue, and answers the question it and Amendment 135 left ("say if … too alike once seen") with
+numbers; the person still looks.
+
+- **New values** (`tokens.css:65`, `:74-75` dark; `:162-164` light). Old → new, with OKLCH
+  lightness L, chroma C and hue H:
+
+  | token | dark | light |
+  |---|---|---|
+  | `--here` (slate) | `#1f3047` L .306 C .048 H 256° → `#1c2e55` L .308 C .074 H 264° | `#d6e0f0` L .904 C .024 H 260° → `#d4e1fb` L .908 C .038 H 264° |
+  | `--here-project` (petrol) | `#002a35` L .264 C .048 H 220° → `#002e30` L .274 C .047 H 199° | `#c4ecf9` L .919 C .045 H 220° → `#acf4f7` L .921 C .071 H 199° |
+  | `--here-agent` (wine) | `#4d283e` L .334 C .064 H 345° → `#591e43` L .339 C .098 H 345° | `#f5cfe3` L .892 C .050 H 345° → `#fccde6` L .896 C .062 H 345° |
+
+  Lightness stays where it was (L within .01 in each); chroma goes up by about half, except the
+  dark petrol.
+- **The dark petrol is as saturated as sRGB has it.** `#002a35` already had red at 0, the edge of the
+  gamut; at that darkness a blue-green can't reach more than about C .046-.050 between 199° and
+  220°. So it gains distance by hue instead: it moves from 220° to 199°, 36° → 64° from the slate,
+  which is what the slate and petrol lacked (they were the closest pair). Its light twin gains
+  chroma (.045 → .071).
+- **Hues, pairwise, dark / light**: slate-petrol 36° / 40° → 65° / 65°; slate-wine 88° / 85° → 81° /
+  81°; petrol-wine 124° / 126° → 146° / 146°. The status hues are `--fail` 31°, `--need` 72°, `--done`
+  133°, `--live` 174°, `--queue` 250°, `--you` 298°; the petrol at 199° sits between `--live` and
+  `--queue`, 25° from `--live` but at a third of its OKLCH lightness, and the slate moves 8° further from
+  `--queue`'s blue-grey, not toward `--you`.
+- **Lightness ratios, dark / light** (WCAG luminance): `--here`-`--here-project` 1.137 / 1.059 →
+  1.096 / 1.067; `--here`-`--here-agent` 1.074 / 1.058 → 1.076 / 1.063; `--here-project`-`--here-agent`
+  1.221 / 1.120 → 1.180 / 1.135. The order is kept: in dark petrol is darkest and wine lightest, in
+  light the other way round. The two light pairs that were under 1.06 are over it now.
+- **Ink on the three, dark** (`--ink` / `--ink2` / `--ink3`): `--here` 10.85 / 6.58 / 4.91;
+  `--here-project` 11.90 / 7.22 / 5.38 (was 12.33 / 7.48 / 5.58); `--here-agent` 10.08 / 6.12 / 4.56
+  (was 10.10 / 6.13 / 4.57). **Light**: `--here` 13.30 / 7.40 / 4.91 (was 13.15 / 7.31 / 4.85);
+  `--here-project` 14.20 / 7.90 / 5.24 (was 13.93 / 7.75 / 5.14); `--here-agent` 12.51 / 6.96 / 4.62
+  (was 12.43 / 6.91 / 4.59). `--ink3` on the dark wine is the tightest, at 4.56, 0.01 under where it
+  was; the 4.5 floor on it is what caps the dark wine's lightness, and so the whole spread.
+- **The checks** (`lib/verify.ts` section 9, "both themes are readable"): the pairwise floor is
+  1.06:1 (`:508`, was 1.04). New: each backdrop has an OKLCH chroma of at least 0.03, so its hue is a
+  hue and not a grey's noise (`:512`; the old light `--here`, C .024, fails it), and any two are at
+  least 60° apart in OKLCH hue, the short way round the wheel (`:518`). `oklch` (`:437`) is Ottosson's
+  OKLab from linear sRGB. The "not a status colour (or `--you`)" and the 4.5:1 ink checks are as they
+  were.
+- **The crumb border, revisited and kept** (`shell/ui.css:33`, `color-mix(in srgb, var(--crumb) 60%,
+  var(--ink3))`). Measured against its backdrop it is 1.94 / 1.93 / 1.84 in dark (was 1.95 / 1.98 /
+  1.89) and 1.73 / 1.75 / 1.70 in light (was 1.71 / 1.75 / 1.69), and the mix now carries a little of
+  each backdrop's hue. So it still draws the same line, and `ui.css` and `verify-crumb.ts` are
+  unchanged. A new check in section 9 (`:554`, beside the top-bar tab's) recomputes the mix as
+  `color-mix` does in sRGB and fails under 1.6:1 on any backdrop in either theme.
+- **The MANUAL** (`docs/MANUAL.md:941`, §4 after the top-bar tabs) says what the three backdrops
+  are, where each shows, that they are apart in hue and a little in lightness, and that `make test`
+  fails if two come too close.
+
+*Not done / not decided:* not looked at in a browser, in either theme; the person confirms they are
+distinct at a glance (wave-11.md §5, "U1 in both themes"). The colours were chosen by computing
+OKLCH, not by eye. No backdrop was added and `--you` is unchanged, as decided. The chroma floor of
+0.03 is this lane's own, to make the hue check mean something; the spec asked only for the 60°.
+
+*Verified:* with the old six values put back in `tokens.css`, section 9 failed 4 checks: dark hues
+"--here 256° and --here-project 220°"; light floor "--here and --here-project 1.059; --here and
+--here-agent 1.058"; light chroma "--here C 0.024"; light hues "--here 260° and --here-project 219°".
+With the new ones every check in section 9 passes in both themes, `lib/verify-crumb.ts` passes
+unchanged, `pnpm -r typecheck` is clean and `make test` is green: 28 PASS. Earlier runs stopped on
+the daemon's fixed test ports (`EADDRINUSE` on 7799, 7801; 3143 held on IPv4) and two fs-watcher
+checks under a load of 15, while other tracks ran their own tests; none of it touches this lane.
+
 ### Amendment 158 — post-merge, applied. **A nested repo's changes show as its own: badges, roll-up and diffs inside `inner/`.**
 
 Daemon (`workspace/changes.ts`, `workspace/git.ts`, `workspace/service.ts`, `workspace/tree.ts`,
