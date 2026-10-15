@@ -99,6 +99,21 @@ the last of it on 12 Oct).
   waiting one keeps its row; arriving on a folded helper opens its fold; the Project screen is not
   folded).*
 
+- [ ] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct).
+  Today the agent screen's **›_ terminal** tab (`web/src/agent/agent.tsx:824-834`) starts its shell in
+  the job's folder (`routes/term.ts:84-88`, and `routes/terminal.ts:30-34` for the old command
+  runner): `jobs.worktree_path`. For a job in its own worktree, that is
+  `<project>/.conductor/wt/<jobId>`, so the shell opens there. An example is
+  `conductor/.conductor/wt/job_86f7263f-898`. Only the Terminal dock opens at the project root
+  (`project.path`, `routes/term.ts:89-92`).
+  Starts at: `agentAt` in `routes/term.ts:84`, and the Terminal tab's title and links
+  (`web/src/agent/TermPanel.tsx`), which should say which folder the shell is in.
+  **Decide:**
+  - The root folder (the main checkout) has a different branch checked out from the agent's
+    worktree. A shell there shows `main`, not the agent's changes. Should every terminal open at the
+    root, or only a project's? Or should the agent's tab open at the root of its checkout (the worktree
+    top, never a folder inside it) with a one-click "go to the project root"?
+
 - [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
   and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
