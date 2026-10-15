@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 157 — post-merge, applied. **Branches shows every repo Files shows: the project's own folder, its extra directories that are repos, and the repos nested in either, picked in the header.**
+### Amendment 162 — post-merge, applied. **Branches shows every repo Files shows: the project's own folder, its extra directories that are repos, and the repos nested in either, picked in the header.**
 
 Daemon (`workspace/project-repo.ts`, `routes/branches.ts`, `workspace/verify-branches.ts`), shared
 (`src/wire.ts`), web (`branches/endpoints.ts`, `branches/rules.ts`, `branches/route.tsx`,
@@ -209,14 +209,14 @@ docs/plans/wave-11.md … following §0"; this is the plan's lane I2, item N4
 (`docs/plans/wave-11.md:516`), run as track 3 of `docs/plans/wave-11-tracks.md` on 15 Oct.
 *Amends Amendment 109*, whose Branches screen opened only `project.path`; *Amendment 144*, whose
 `projectRepo` is unchanged and still what `session/finish.ts` merges in; and *Amendment 156*, whose
-`rebasedSincePush` was already keyed by the repo's root (`branches.ts:120`, `:443`), so a rebase in
+`rebasedSincePush` was already keyed by the repo's root (`branches.ts:121`, `:444`), so a rebase in
 one repo never marks a same-named branch in another.
 
 - **The choices** (`projectRepos`, `project-repo.ts:165`): `project.path` first, then each extra
   directory that is a repo, then the repos nested in either, from Files' own `buildTree`
   (`tree.ts`, unedited; nested up to four deep), named `<dir>/<rel>`. A repo is listed once, by
   the real path of its top level, so an extra directory inside the project's repo is that repo.
-  `BranchesResponse` gains `repo?` and `repos?: BranchRepoChoice[]` (`wire.ts:944`, `:950`, `:954`).
+  `BranchesResponse` gains `repo?` and `repos?: BranchRepoChoice[]` (`wire.ts:955`, `:961`, `:965`).
 - **`?repo=`** on GET, POST and the preview (`routes/branches.ts:75`, `:85`, `:98`), resolved by
   `projectRepoOf` (`project-repo.ts:198`). Absent, empty or the project's own folder opens it as
   before (`openOwn`). Anything else must match a choice by real path, so a symlink, `..`, a plain
@@ -228,9 +228,9 @@ one repo never marks a same-named branch in another.
   master (`resolveTarget` with the checked-out branch as the recorded one), and `set_default` is a
   400 (`:137`). Its checked-out branch is live while an agent that can reach the repo is live, so
   pull, rebase, merge into it, delete and the rest refuse it with the same 409 as a job's branch
-  (`refuseLive`, `branches.ts:503`). Which agents reach it (`reachedByAll`, `project-repo.ts:82`):
+  (`refuseLive`, `branches.ts:504`). Which agents reach it (`reachedByAll`, `project-repo.ts:82`):
   every agent is given the project's extra directories whatever its job's isolation
-  (`Supervisor.#reachable`, `supervisor.ts:690`), so for a repo that is, is in, or holds an extra
+  (`Supervisor.#reachable`, `supervisor.ts:692`), so for a repo that is, is in, or holds an extra
   directory, any live agent of the project counts; for a repo nested only in `project.path`, a live
   agent of an `in_place` or `branch` job, which works in that folder. A `worktree` job's agent is
   given its worktree and the extra directories, not `project.path`, and its checkout holds no nested
@@ -241,7 +241,7 @@ one repo never marks a same-named branch in another.
   outside the own folder). `route.tsx:283` puts a **repo** picker (`RepoPicker`, `:453`) first in
   the header; the repo picked is kept while you stay on the project, and another project starts from
   its own folder on its first read: the repo and the choices are kept with the project they were
-  picked in (`:197-202`), so a switch never asks for the old project's repo. The choices are the last listing's, so the picker stays when a repo can't
+  picked in (`:196-204`), so a switch never asks for the old project's repo. The choices are the last listing's, so the picker stays when a repo can't
   be read. In another repo, **compared with** is a plain line, the root line is hidden, and **Make
   default** and its check-out are gone (`:285`, `:703`).
 - **Docs.** `docs/MANUAL.md` gains "Branches in another repo" after "Pull and rebase a branch", and a
