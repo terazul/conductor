@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 155 — post-merge, applied. **Each stage of a pipeline hears every earlier stage's summary, not only the one before it.**
+### Amendment 161 — post-merge, applied. **Each stage of a pipeline hears every earlier stage's summary, not only the one before it.**
 
 Shared (`stack.ts`), daemon (`session/handoff.ts`, `session/supervisor.ts`, `session/verify.ts`) and
 `docs/MANUAL.md`. The user, 15 Oct 2026: "Run track 2 of `docs/plans/wave-11-tracks.md`"; this is the
@@ -231,11 +231,11 @@ prompt and its re-run note; nothing on a screen changes.
   the agent that waited for them, are given only by their summaries.* (`:429`), in the singular with one
   ("The agent further up … is given only by its summary."); "the agent" / "the agents" before it counts only the
   direct ones.
-- **The supervisor.** `#furtherUp(agent)` (`supervisor.ts:1619`) turns `ancestorsOf` into those upstreams, each
+- **The supervisor.** `#furtherUp(agent)` (`supervisor.ts:1656`) turns `ancestorsOf` into those upstreams, each
   with its role, its summary from `getHandoff` and `via` the role it came through, leaving out the direct ones,
   any that never handed off, and any it was started without (`getWentWithout`, Amendment 88). `#promptFor` puts
   them first, oldest first, then the direct ones as before, then the ones it was started without, marked
-  stopped (`:1185`). `#takeRerunNote` puts them before its direct ones the same way (`:2166`), so a re-run note
+  stopped (`:1186`). `#takeRerunNote` puts them before its direct ones the same way (`:2203`), so a re-run note
   says what a first prompt would.
 
 *Not done / not decided:* an ancestor that never handed off (a person released it, or it predates

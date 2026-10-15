@@ -115,7 +115,7 @@ export interface Ancestor {
 
 /**
  * Everything `agentId` waits on, directly or however far up, each once, in topological order:
- * an agent comes after every one it waits on (Amendment 155). So in A→B→C, C's are A then B, and
+ * an agent comes after every one it waits on (Amendment 161). So in A→B→C, C's are A then B, and
  * in a diamond the shared one is there once. An agent's own helpers are not walked (they report
  * to it, not to the stage after it), and an id no agent has is left out.
  */

@@ -2764,7 +2764,7 @@ async function main(): Promise<void> {
     return out[0] === plain[0] && out[1] === plain[1];
   })());
 
-  // ── Amendment 155: each stage hears every earlier stage's summary, not only the one before it ──
+  // ── Amendment 161: each stage hears every earlier stage's summary, not only the one before it ──
   {
     const SUM_A = 'Architect summary: the plan is in docs/plan.md, three steps, and nothing else moves.';
     const SUM_B = 'Developer summary: built the three steps; the tests are in tests/plan.test.ts.';
@@ -4202,7 +4202,7 @@ async function main(): Promise<void> {
     runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
     check('every job here settled', await until(() => ['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].every((j) => ['done', 'failed'].includes(getJob(db, j)?.status ?? ''))), JSON.stringify(['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].map((j) => getJob(db, j)?.status)));
 
-    // Further up and gone without (Amendment 155): X went without S, which T, already run, still
+    // Further up and gone without (Amendment 161): X went without S, which T, already run, still
     // waits on. S is reached through T, but neither X's first prompt nor its re-run note gives it "via".
     {
       const SUM_A155 = 'Analyst summary: the requirements are in REQS.md.';

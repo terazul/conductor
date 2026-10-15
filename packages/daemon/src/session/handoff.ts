@@ -240,7 +240,7 @@ export interface Upstream {
   summary?: string;
   /**
    * The role of the agent it was reached through, for one further up than those the reader
-   * waited for (Amendment 155): only its summary is passed on, headed `[role, via <this>]`, and
+   * waited for (Amendment 161): only its summary is passed on, headed `[role, via <this>]`, and
    * it is counted against the cap like a conversation.
    */
   via?: string;

@@ -247,7 +247,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
     crossed the budget; the ceiling still stops it mid-turn through the SDK.
 
 - [x] **Each stage sees every earlier stage's summary (N9).** In a chain A → B → C, C heard A only inside
-  B's launch prompt, the first text the cap drops. *Done 15 Oct: Amendment 155, `ancestorsOf`
+  B's launch prompt, the first text the cap drops. *Done 15 Oct: Amendment 161, `ancestorsOf`
   (`shared/src/stack.ts`); a first prompt and a re-run note give each agent further up by its summary,
   once, under `[role, via <role>]`.* *Decided (14 Oct): ancestors appear as their summaries, "via <role>",
   within the cap.*
