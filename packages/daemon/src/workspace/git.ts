@@ -311,10 +311,18 @@ export async function numstat(cwd: string, paths: string[] = []): Promise<NumSta
   return stats;
 }
 
-/** Unified diff against HEAD. Empty string when nothing is dirty. */
-export async function diff(cwd: string, paths: string[] = []): Promise<string> {
+/**
+ * Unified diff against HEAD. Empty string when nothing is dirty. `prefix` is a
+ * nested repo's folder (`inner/`, Amendment 155): its patch then names
+ * `a/inner/app.js`, the path the outer worktree knows the file by.
+ * `--ignore-submodules=all` leaves out a nested repo's gitlink, the opaque
+ * "Subproject commit" entry: its own files are diffed by its own repo instead.
+ */
+export async function diff(cwd: string, paths: string[] = [], prefix = ''): Promise<string> {
   if (!(await hasHead(cwd))) return '';
-  const args = ['diff', '--no-color', '--no-ext-diff', '--relative', 'HEAD'];
+  const args = ['diff', '--no-color', '--no-ext-diff', '--relative', '--ignore-submodules=all'];
+  if (prefix) args.push(`--src-prefix=a/${prefix}`, `--dst-prefix=b/${prefix}`);
+  args.push('HEAD');
   if (paths.length > 0) args.push('--', ...paths);
   return git(cwd, args);
 }

@@ -31,8 +31,8 @@ import { basename, join, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { FileEditPayload } from '@conductor/shared';
 import { eventLog } from '../eventlog.js';
-import { isRepo, numstat, status, toPosix } from './git.js';
-import { countNewFile, withoutIgnored } from './changes.js';
+import { isRepo, numstat, status, toPosix, type NumStat, type StatusEntry } from './git.js';
+import { countNewFile, ownerOf, withoutIgnored } from './changes.js';
 import type { KeyedLock } from './lock.js';
 import type { WorkspaceRecord, WorkspaceStore } from './store.js';
 import { relativePosix } from './paths.js';
@@ -212,19 +212,36 @@ export class Watcher {
 
   async #emitBatch(batch: Pending[]): Promise<FileEditPayload[]> {
     const root = this.#ws.path;
-    // Filter 3 — one process for the whole batch. Deleted paths can't be
-    // check-ignore'd usefully, so they skip it.
-    const live = batch.filter((b) => !b.deleted).map((b) => b.path);
-    const allowed = new Set(await withoutIgnored(root, live));
-    const candidates = batch.filter((b) => b.deleted || allowed.has(b.path));
-    if (candidates.length === 0) return [];
-
-    const paths = candidates.map((c) => c.path);
     // One probe per flush, not per path, and the flush is already debounced.
     const gitless = !(await isRepo(root));
-    const [stats, entries] = await Promise.all([numstat(root, paths), status(root)]);
-    const statByPath = new Map(stats.map((s) => [s.path, s]));
-    const entryByPath = new Map(entries.map((e) => [e.path, e]));
+
+    // Each path is asked of the repo that owns it (Amendment 155): the outer repo
+    // knows a nested clone or submodule only as one opaque folder, and refuses a
+    // `check-ignore` for a path inside it. With no git there is one group.
+    const groups = new Map<string, Pending[]>();
+    for (const b of batch) {
+      const owner = gitless ? '' : ownerOf(root, b.path);
+      groups.set(owner, [...(groups.get(owner) ?? []), b]);
+    }
+
+    // Filter 3 — one process per repo in the batch. Deleted paths can't be
+    // check-ignore'd usefully, so they skip it.
+    const candidates: Pending[] = [];
+    const statByPath = new Map<string, NumStat>();
+    const entryByPath = new Map<string, StatusEntry>();
+    for (const [owner, items] of groups) {
+      const repo = join(root, owner);
+      const rel = (b: Pending): string => b.path.slice(owner.length);
+      const live = items.filter((b) => !b.deleted).map(rel);
+      const allowed = new Set(await withoutIgnored(repo, live));
+      const kept = items.filter((b) => b.deleted || allowed.has(rel(b)));
+      if (kept.length === 0) continue;
+      candidates.push(...kept);
+      const [stats, entries] = await Promise.all([numstat(repo, kept.map(rel)), status(repo)]);
+      for (const s of stats) statByPath.set(owner + s.path, s);
+      for (const e of entries) entryByPath.set(owner + e.path, e);
+    }
+    if (candidates.length === 0) return [];
 
     const emitted: FileEditPayload[] = [];
 

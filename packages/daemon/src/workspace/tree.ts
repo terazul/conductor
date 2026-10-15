@@ -24,7 +24,9 @@
  * below is the one place that notices the boundary (by `lstat`, not `isRepo` —
  * `isRepo` answers true for every folder inside the outer repo, nested or
  * not), and `expandNestedRepo` re-lists it with its own `listFiles`, grafting
- * the result in and marking the folder with its branch.
+ * the result in and marking the folder with its branch. Its changes are its
+ * own too (Amendment 155): `scanChanges` scans it as a repo, so its badges and
+ * the folder's roll-up are what its own `git status` says.
  */
 
 import { lstatSync, readdirSync } from 'node:fs';
@@ -375,16 +377,23 @@ export async function buildTree(
   }
 
   // A deleted file is gone from ls-files but is exactly what a human wants to
-  // see flagged, so changed paths are unioned in — into the outer repo's own
-  // paths, never the nested ones. A nested repo's own changes are a deliberate
-  // gap (ADR 0003): the outer `git status` only ever reports the whole nested
-  // directory as one opaque entry, never a path inside it.
+  // see flagged, so changed paths are unioned in. `scanChanges` scans each
+  // nested repo as its own (Amendment 155), so a path inside one goes into the
+  // nested pool, under the same budget as that repo's listed files; never the
+  // nested folder itself, which is a folder, not a file.
   const ownPaths = new Set(top.files);
   const nestedDirs = new Set(repos.keys());
+  const insideNested = (path: string): boolean => {
+    for (let i = path.indexOf('/'); i > 0; i = path.indexOf('/', i + 1)) {
+      if (nestedDirs.has(path.slice(0, i))) return true;
+    }
+    return false;
+  };
   for (const raw of changes.byPath.keys()) {
     const path = raw.endsWith('/') ? raw.slice(0, -1) : raw;
     if (path.length === 0 || !listed(path) || nestedDirs.has(path)) continue;
-    ownPaths.add(path);
+    if (insideNested(path)) nestedFiles.push(path);
+    else ownPaths.add(path);
   }
 
   // Budget (ADR 0003): the outer repo's own paths go first, so one large

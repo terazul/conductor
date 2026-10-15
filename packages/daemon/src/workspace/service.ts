@@ -49,7 +49,7 @@ import { WorkspaceStore, type WorkspaceRecord } from './store.js';
 import { NO_GIT_BRANCH, WorktreeMgr, type EnsureRequest } from './worktree.js';
 import { Watcher } from './watcher.js';
 import { canonicalRoot, relativePosix, resolveEntry, resolveForRead, resolveForWrite } from './paths.js';
-import { MAX_TEXT_BYTES, looksBinary, scanChanges } from './changes.js';
+import { MAX_TEXT_BYTES, looksBinary, ownerOf, scanChanges } from './changes.js';
 import { buildTree } from './tree.js';
 import { isMarkdown, renderMarkdown } from './markdown.js';
 import { diff as gitDiff, diffUntracked, isRepo, readBlob, status, storedCopy, trackedCount } from './git.js';
@@ -441,8 +441,13 @@ export class WorkspaceService {
       throw new WorkspaceError(404, `${relPath} is a link to ${target}, which isn't there`);
     }
 
-    const entry = (await status(ws.path)).find((e) => e.path === path);
-    const copy = entry?.deleted ? await storedCopy(ws.path, path) : null;
+    // Asked of the repo that owns the path, so a nested repo's file opens as its copy
+    // (Amendment 155).
+    const owner = ownerOf(ws.path, path);
+    const repo = join(ws.path, owner);
+    const rel = path.slice(owner.length);
+    const entry = (await status(repo).catch(() => [])).find((e) => e.path === rel);
+    const copy = entry?.deleted ? await storedCopy(repo, rel) : null;
     if (!copy) {
       if (entry?.deleted || this.#store.change(ws.jobId, path)?.deleted) {
         throw new WorkspaceError(404, `${relPath} was deleted, and git has no copy of it to show`);
@@ -455,7 +460,7 @@ export class WorkspaceService {
         `${relPath} was deleted, and its last copy is ${(copy.size / 1024 / 1024).toFixed(1)} MB — too large to open in the pane`,
       );
     }
-    const raw = await readBlob(ws.path, copy.spec);
+    const raw = await readBlob(repo, copy.spec);
     if (looksBinary(Buffer.from(raw, 'utf8'))) {
       throw new WorkspaceError(415, `${relPath} was deleted, and it was binary — nothing useful to render`);
     }
@@ -506,7 +511,17 @@ export class WorkspaceService {
       };
     }
 
-    const tracked = await gitDiff(ws.path);
+    // The worktree's own diff, then each nested repo's that has a change in it, its
+    // paths prefixed with its folder (Amendment 155). `git diff` leaves the nested
+    // repos' opaque gitlinks out, as `scanChanges` leaves out their entries.
+    const owners = new Set([...changes.byPath.keys()].map((p) => ownerOf(ws.path, p)));
+    owners.delete('');
+    const tracked = [
+      await gitDiff(ws.path),
+      ...(await Promise.all(
+        [...owners].sort().map((o) => gitDiff(join(ws.path, o), [], o).catch(() => '')),
+      )),
+    ];
     const untracked: string[] = [];
     for (const change of changes.byPath.values()) {
       if (!change.created || change.binary) continue;
@@ -518,7 +533,7 @@ export class WorkspaceService {
     }
 
     return {
-      diff: [tracked, ...untracked].filter((s) => s.length > 0).join(''),
+      diff: [...tracked, ...untracked].filter((s) => s.length > 0).join(''),
       added: changes.added,
       removed: changes.removed,
       files: changes.files,
@@ -816,7 +831,21 @@ export class WorkspaceService {
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
+  /**
+   * One path's diff, from the repo that owns it (Amendment 155): a file inside a nested
+   * clone or a submodule is diffed by that repo's git, its patch naming the path as the
+   * worktree does. The outer repo would only say the whole folder is dirty.
+   */
   async #diffForPath(ws: WorkspaceRecord, path: string): Promise<string> {
+    const owner = ownerOf(ws.path, path);
+    if (owner) {
+      const repo = join(ws.path, owner);
+      const rel = path.slice(owner.length);
+      const entry = (await status(repo).catch(() => [])).find((e) => e.path === rel);
+      if (!entry) return '';
+      if (entry.untracked) return (await this.#untrackedPatch(ws, path)) ?? '';
+      return gitDiff(repo, [rel], owner).catch(() => '');
+    }
     const entries = await status(ws.path);
     const entry = entries.find((e) => e.path === path);
     if (!entry) {
