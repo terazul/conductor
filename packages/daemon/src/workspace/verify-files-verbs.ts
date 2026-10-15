@@ -223,6 +223,18 @@ async function verbsOn(r: Root, opts: { git: boolean }): Promise<void> {
   check('a folder → 200, moved with what is in it, folders above made', moved.status === 200 && moved.body.type === 'dir' && !existsSync(at('r')) && readFileSync(at('q/r2/three.md'), 'utf8') === 'three\n', show(moved));
   const into = await rename('q', 'q/r2/inner');
   check('a folder into itself → 400, nothing moved', into.status === 400 && /into itself/.test(into.body.error) && isDir('q/r2'), show(into));
+  // A move is a rename into another folder: what the Files tree's drag and its Move to… send.
+  put(r.dir, 'mv/a.md', 'a\n');
+  put(r.dir, 'mv/sub/keep.md', 'keep\n');
+  const down = await rename('mv/a.md', 'mv/sub/a.md');
+  check('a move into a subfolder → 200, the file under it, what was there kept', down.status === 200 && down.body.to === 'mv/sub/a.md' && !existsSync(at('mv/a.md')) && readFileSync(at('mv/sub/a.md'), 'utf8') === 'a\n' && readFileSync(at('mv/sub/keep.md'), 'utf8') === 'keep\n', show(down));
+  put(r.dir, 'mv/f/b.md', 'b\n');
+  const dirDown = await rename('mv/f', 'mv/sub/f');
+  check('a folder into a folder beside it → 200, with what is in it', dirDown.status === 200 && dirDown.body.type === 'dir' && !existsSync(at('mv/f')) && readFileSync(at('mv/sub/f/b.md'), 'utf8') === 'b\n', show(dirDown));
+  put(r.dir, 'mv/sub/keep2.md', 'there\n');
+  put(r.dir, 'mv/keep2.md', 'here\n');
+  const taken = await rename('mv/keep2.md', 'mv/sub/keep2.md');
+  check('a move onto a name taken in the subfolder → 409, both as they were', taken.status === 409 && /mv\/sub\/keep2\.md already exists/.test(taken.body.error) && readFileSync(at('mv/keep2.md'), 'utf8') === 'here\n' && readFileSync(at('mv/sub/keep2.md'), 'utf8') === 'there\n', show(taken));
   const same = await rename('q', 'q');
   check('to the same name → 400', same.status === 400, show(same));
   const noTo = await send<Err>('POST', r.url('rename'), { from: 'q' });
@@ -384,7 +396,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 153).\n`
+      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, a move into a subfolder (Amendment 159), recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 153).\n`
       : `\nAmendment 138 files: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

@@ -1223,3 +1223,25 @@
   margin-left: 0;
   padding: 2px 0 0;
 }
+
+/* ── moving by drag and Move to… (Amendment 159) ─────────────────────────── */
+
+/* The row being dragged fades, as a project's does in the navigator. */
+.c5-dirrow.is-dragging,
+.c5-filerow.is-dragging {
+  opacity: 0.45;
+}
+
+/* The folder (or the root's heading, for the top) that would take the drop. */
+.c5-dirrow.is-drop,
+.c5-roothead.is-drop {
+  background: var(--surf);
+  box-shadow: inset 0 0 0 1px var(--ink3);
+  border-radius: 4px;
+}
+
+/* A refused drop's reason, under the folder it was dropped on. */
+.c5-moveerr {
+  margin: 0 0 3px;
+  padding-right: 8px;
+}

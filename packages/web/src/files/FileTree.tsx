@@ -20,13 +20,19 @@
  * **⌫** (delete). They are siblings of the row's button, as the + is, shown on hover and
  * focus. On a focused row F2 renames, and Delete (or ⌘⌫) deletes. A rename opens the name box in
  * the row's place; a delete's confirm (the screen's, `confirm`) sits under its row.
+ *
+ * Moving (Amendment 159): a row on disk can be dragged onto a folder row, and has
+ * **→/** (Move to…), which asks for the folder in the row's place. The rules are
+ * moving.ts's; `dropProps` is shared with the section's heading, which takes a drop for
+ * the top. A move the daemon refuses says why under the folder it was dropped on.
  */
 
-import { useMemo } from 'react';
+import { useMemo, type DragEvent } from 'react';
 import type { FileNode } from '@conductor/shared';
 import type { Folders } from './tabs.js';
 import { NewFileForm } from './NewFileForm.js';
 import { since, type Touch } from './useWorkspace.js';
+import { MOVE_MIME, canDrop } from './moving.js';
 
 /** New folder, rename and delete (Amendment 138). Held by the screen, as `adding` is. */
 export interface TreeVerbs {
@@ -44,8 +50,67 @@ export interface TreeVerbs {
   /** The entry a delete is asking about, or null; `confirm` is drawn under its row. */
   deleting: string | null;
   confirm: React.ReactNode;
-  /** Put away the folder or rename box. */
+  /** Put away the folder, rename or move box. */
   onCancel: () => void;
+  /** Moving: the path being dragged in this section, or null. */
+  dragging: string | null;
+  onDragStart: (path: string) => void;
+  onDragEnd: () => void;
+  /** The folder a drag is over ('' is the top), for its mark, or null. */
+  over: string | null;
+  onOver: (folder: string | null) => void;
+  /** The dragged entry was dropped on `folder`. */
+  onDrop: (folder: string) => void;
+  /** The entry whose Move to… box is open, or null. */
+  moving: string | null;
+  onMove: (path: string) => void;
+  /** Move `from` into `folder`. Rejects with the reason it could not. */
+  onMoved: (from: string, folder: string) => Promise<void>;
+  /** A dropped move that was refused, and why: shown under the folder it was dropped on. */
+  moveError: { at: string; text: string } | null;
+}
+
+/** What makes a row draggable: its path, as a tree drag, and as text for Firefox. */
+export function dragProps(verbs: TreeVerbs, path: string) {
+  return {
+    draggable: true,
+    onDragStart: (e: DragEvent<HTMLElement>): void => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData(MOVE_MIME, path);
+      // Firefox starts no drag without data, and text/plain is what it looks for.
+      e.dataTransfer.setData('text/plain', path);
+      // After the browser has taken the image, so the faded row isn't what follows the pointer.
+      setTimeout(() => verbs.onDragStart(path), 0);
+    },
+    onDragEnd: (): void => verbs.onDragEnd(),
+  };
+}
+
+/** What makes `folder` ('' is the top) a place to drop a dragged row. */
+export function dropProps(verbs: TreeVerbs, folder: string) {
+  return {
+    onDragOver: (e: DragEvent<HTMLElement>): void => {
+      if (!canDrop(e.dataTransfer.types, verbs.dragging, folder)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (verbs.over !== folder) verbs.onOver(folder);
+    },
+    onDragLeave: (e: DragEvent<HTMLElement>): void => {
+      if (verbs.over === folder && !e.currentTarget.contains(e.relatedTarget as Node | null)) verbs.onOver(null);
+    },
+    onDrop: (e: DragEvent<HTMLElement>): void => {
+      if (!canDrop(e.dataTransfer.types, verbs.dragging, folder)) return;
+      e.preventDefault();
+      verbs.onDrop(folder);
+    },
+  };
+}
+
+/** The marks a row wears while a row is dragged: itself, or the folder it would land in. */
+export function dragMark(verbs: TreeVerbs | undefined, path: string): string {
+  if (!verbs || verbs.dragging === null) return '';
+  if (verbs.dragging === path) return ' is-dragging';
+  return verbs.over === path ? ' is-drop' : '';
 }
 
 interface Props {
@@ -153,7 +218,20 @@ export function FileTree({
       />
     ) : null;
 
-  /** Rename and delete, and for a folder new folder, beside a row. */
+  /** The Move to… box, in the row's own place, as the rename box is. */
+  const moveForm = (node: FileNode, depth: number): React.ReactNode =>
+    verbs ? (
+      <NewFileForm
+        key={`m:${node.path}`}
+        kind="move"
+        dir={node.path}
+        indent={8 + depth * 13}
+        onCreate={(folder) => verbs.onMoved(node.path, folder)}
+        onCancel={verbs.onCancel}
+      />
+    ) : null;
+
+  /** Rename, move and delete, and for a folder new folder, beside a row. */
   const actions = (node: FileNode): React.ReactNode =>
     verbs ? (
       <>
@@ -179,6 +257,15 @@ export function FileTree({
         </button>
         <button
           type="button"
+          className="c5-iconbtn c5-act"
+          onClick={() => verbs.onMove(node.path)}
+          title={`Move ${node.path} to… (or drag it onto a folder)`}
+          aria-label={`Move ${node.path} to…`}
+        >
+          →/
+        </button>
+        <button
+          type="button"
           className="c5-iconbtn c5-act c5-del"
           onClick={() => verbs.onDelete(node)}
           title={`Delete ${node.path} (Delete)`}
@@ -200,11 +287,23 @@ export function FileTree({
     }
   };
 
+  /** Why a move dropped on `folder` was refused, under it. */
+  const moveErrorFor = (folder: string, depth: number): void => {
+    if (verbs?.moveError?.at === folder) {
+      rows.push(
+        <div key={`me:${folder}`} className="c5-newerr c5-moveerr" role="alert" style={{ paddingLeft: 8 + depth * 13 }}>
+          {verbs.moveError.text}
+        </div>,
+      );
+    }
+  };
+
   // The root's boxes are the first thing in the tree.
   const rootForm = adding === '' ? form('', 0) : null;
   if (rootForm) rows.push(rootForm);
   const rootFolder = verbs?.folderIn === '' ? folderForm('', 0) : null;
   if (rootFolder) rows.push(rootFolder);
+  moveErrorFor('', 0);
 
   const walk = (node: FileNode, depth: number): void => {
     for (const kid of node.children ?? []) {
@@ -215,11 +314,17 @@ export function FileTree({
         const open = isOpen(kid.path);
         if (verbs?.renaming === kid.path) {
           rows.push(renameForm(kid, depth));
+        } else if (verbs?.moving === kid.path) {
+          rows.push(moveForm(kid, depth));
         } else {
           // The + is a sibling of the row's button, not inside it: a button in a button is
           // not valid, and the row's click is the folder opening.
           rows.push(
-            <div key={`d:${kid.path}`} className="c5-dirrow">
+            <div
+              key={`d:${kid.path}`}
+              className={`c5-dirrow${dragMark(verbs, kid.path)}`}
+              {...(verbs ? { ...dragProps(verbs, kid.path), ...dropProps(verbs, kid.path) } : {})}
+            >
               <button
                 type="button"
                 className="c5-row dir"
@@ -255,6 +360,7 @@ export function FileTree({
           );
         }
         confirmFor(kid.path);
+        moveErrorFor(kid.path, depth + 1);
         // Under its own row, open or not: asking for a name on a folded folder still
         // has to show the box. Opening the file then opens the folder.
         const own = adding === kid.path ? form(kid.path, depth + 1) : null;
@@ -274,6 +380,10 @@ export function FileTree({
 
       if (verbs?.renaming === kid.path && !gone) {
         rows.push(renameForm(kid, depth));
+        continue;
+      }
+      if (verbs?.moving === kid.path && !gone) {
+        rows.push(moveForm(kid, depth));
         continue;
       }
 
@@ -311,10 +421,11 @@ export function FileTree({
           ) : null}
         </button>
       );
-      // A deleted file is not on disk to rename or delete, so it keeps the bare row.
+      // A deleted file is not on disk to rename, move or delete, so it keeps the bare row.
+      // A file row can be dragged but is not a place to drop.
       rows.push(
         verbs && !gone ? (
-          <div key={`f:${kid.path}`} className="c5-filerow">
+          <div key={`f:${kid.path}`} className={`c5-filerow${dragMark(verbs, kid.path)}`} {...dragProps(verbs, kid.path)}>
             {row}
             {actions(kid)}
           </div>

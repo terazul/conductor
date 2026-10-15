@@ -17,6 +17,8 @@
  *    tree (Amendment 92): a folder row opens and closes, fetching its tree with the
  *    Files screen's own `useFileTree` the first time it's opened; a file row opens that
  *    file on the Files screen. No change marks here, unlike the Files tree itself.
+ *    A file or folder in it can be renamed (✎, F2) and deleted (⌫, Delete or ⌘⌫), with
+ *    the Files tree's own box and confirm.
  *
  * An agent's row has its budget meter, the Fleet lane's thin bar in the Fleet's tones
  * (`pj-meter` with `data-tone`, fleet/fleet.css:1035), and a job's heading the sum of its
@@ -42,9 +44,11 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects } from '../lib/store.js';
 import { useUnseenAgents, useUnseenJobs } from '../lib/seen.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
-import { createFile, isImagePath, useFileTree } from '../files/useWorkspace.js';
+import { createFile, isImagePath, renameEntry, useFileTree } from '../files/useWorkspace.js';
 import { NewFileForm } from '../files/NewFileForm.js';
-import { openNew } from '../files/useTabs.js';
+import { DeleteConfirm } from '../files/DeleteConfirm.js';
+import { onDisk } from '../files/deleting.js';
+import { followRename, openNew } from '../files/useTabs.js';
 import { SCREEN, openAgent, openProject, recall } from './nav.js';
 import {
   NAV_TREE_KEY,
@@ -259,11 +263,85 @@ function AddForm({ dir, add }: { dir: string; add: NavAdd }) {
 }
 
 /**
+ * Rename and delete from the navigator (Amendment 159), as the Files tree has them: the
+ * rename is its name box in the row's place, and the open tabs follow the rename
+ * (`renameEntry`, then `followRename`); the delete is its confirm under the row
+ * (`DeleteConfirm`, which closes the tabs the delete took). One box at a time, with the +.
+ */
+interface NavEdit {
+  /** The entry whose rename box is open, or null. */
+  renaming: string | null;
+  rename: (path: string) => void;
+  renamed: (from: string, to: string) => Promise<void>;
+  /** The entry a delete is asking about, or null. */
+  deleting: FileNode | null;
+  remove: (node: FileNode) => void;
+  /** Put the rename box or the confirm away. */
+  done: () => void;
+}
+
+/** ✎ and ⌫ beside a row, after a folder's +. */
+function EditButtons({ node, edit }: { node: FileNode; edit: NavEdit }) {
+  return (
+    <>
+      <button
+        type="button"
+        className="sh-nav-add"
+        onClick={() => edit.rename(node.path)}
+        title={`Rename ${node.path} (F2)`}
+        aria-label={`Rename ${node.path}`}
+      >
+        ✎
+      </button>
+      <button
+        type="button"
+        className="sh-nav-add sh-nav-del"
+        onClick={() => edit.remove(node)}
+        title={`Delete ${node.path} (Delete)`}
+        aria-label={`Delete ${node.path}`}
+        aria-pressed={edit.deleting?.path === node.path}
+      >
+        ⌫
+      </button>
+    </>
+  );
+}
+
+/** F2 renames the row's entry, and Delete (or ⌘⌫) deletes it, as in the Files tree. */
+function editKeys(e: React.KeyboardEvent<HTMLElement>, node: FileNode, edit: NavEdit): void {
+  if (e.key === 'F2') edit.rename(node.path);
+  else if (e.key === 'Delete' || (e.key === 'Backspace' && e.metaKey)) edit.remove(node);
+  else return;
+  e.preventDefault();
+}
+
+/** The rename box, in the row's place. */
+function RenameForm({ node, edit }: { node: FileNode; edit: NavEdit }) {
+  return (
+    <NewFileForm
+      key={`r:${node.path}`}
+      kind={node.type === 'dir' ? 'rename-dir' : 'rename-file'}
+      dir={node.path}
+      indent={0}
+      onCreate={(to) => edit.renamed(node.path, to)}
+      onCancel={edit.done}
+    />
+  );
+}
+
+/** The delete's confirm, under its row. */
+function DeleteForm({ node, root, edit }: { node: FileNode; root: string; edit: NavEdit }) {
+  return edit.deleting?.path === node.path ? (
+    <DeleteConfirm key={node.path} root={root} node={edit.deleting} onDone={edit.done} onCancel={edit.done} />
+  ) : null;
+}
+
+/**
  * One directory's children, inside a Files folder's tree (Amendment 92). Dirs first,
  * then files: the order the daemon already builds the tree in (`workspace/tree.ts`'s
  * `finish`), so this walks `node.children` as given rather than sorting again. A dir
  * row opens and closes a nested copy of this same list; a file row opens the file. A
- * dir row has a + (Amendment 138).
+ * dir row has a + (Amendment 138); a row on disk has ✎ and ⌫.
  */
 function FileRows({
   node,
@@ -271,52 +349,76 @@ function FileRows({
   root,
   open,
   add,
+  edit,
 }: {
   node: FileNode;
   projectId: string;
   root: string;
   open: ReadonlySet<string>;
   add: NavAdd;
+  edit: NavEdit;
 }) {
   return (
     <>
       {(node.children ?? []).map((kid) => {
+        const here = onDisk(kid);
         if (kid.type === 'file') {
-          return (
+          if (here && edit.renaming === kid.path) return <RenameForm key={`r:${kid.path}`} node={kid} edit={edit} />;
+          const row = (
             <button
               key={`f:${kid.path}`}
               type="button"
               className="sh-nav-row"
               onClick={() => navigate(SCREEN.files, navFileLink(root, kid.path))}
+              onKeyDown={here ? (e) => editKeys(e, kid, edit) : undefined}
               title={kid.path}
             >
               <span className="sh-nav-label">{kid.name}</span>
             </button>
+          );
+          // A file git lists only because it went has nothing on disk to rename or delete.
+          return here ? (
+            <div className="sh-nav-file" key={`f:${kid.path}`}>
+              <div className="sh-nav-dirrow">
+                {row}
+                <EditButtons node={kid} edit={edit} />
+              </div>
+              <DeleteForm node={kid} root={root} edit={edit} />
+            </div>
+          ) : (
+            row
           );
         }
         const id = navDirId(projectId, root, kid.path);
         const shown = isOpen(open, id);
         return (
           <div className="sh-nav-dir" key={`d:${kid.path}`}>
-            <div className="sh-nav-dirrow">
-              <button
-                type="button"
-                className="sh-nav-row"
-                aria-expanded={shown}
-                onClick={() => toggle(id)}
-                title={`${shown ? 'Close' : 'Open'} ${kid.name}`}
-              >
-                <Chevron open={shown} />
-                <span className="sh-nav-label">{kid.name}</span>
-                {/* A nested repo's branch, as a quiet mark beside its folder (Amendment 94). */}
-                {kid.repo && <span className="sh-nav-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
-              </button>
-              <AddButton dir={kid.path} label={kid.path} add={add} />
-            </div>
+            {edit.renaming === kid.path ? (
+              <RenameForm node={kid} edit={edit} />
+            ) : (
+              <div className="sh-nav-dirrow">
+                <button
+                  type="button"
+                  className="sh-nav-row"
+                  aria-expanded={shown}
+                  onClick={() => toggle(id)}
+                  onKeyDown={(e) => editKeys(e, kid, edit)}
+                  title={`${shown ? 'Close' : 'Open'} ${kid.name}`}
+                >
+                  <Chevron open={shown} />
+                  <span className="sh-nav-label">{kid.name}</span>
+                  {/* A nested repo's branch, as a quiet mark beside its folder (Amendment 94). */}
+                  {kid.repo && <span className="sh-nav-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
+                </button>
+                <AddButton dir={kid.path} label={kid.path} add={add} />
+                <EditButtons node={kid} edit={edit} />
+              </div>
+            )}
+            <DeleteForm node={kid} root={root} edit={edit} />
             <AddForm dir={kid.path} add={add} />
             {shown && (
               <div className="sh-nav-items">
-                <FileRows node={kid} projectId={projectId} root={root} open={open} add={add} />
+                <FileRows node={kid} projectId={projectId} root={root} open={open} add={add} edit={edit} />
               </div>
             )}
           </div>
@@ -337,16 +439,18 @@ function FolderTree({
   root,
   open,
   add,
+  edit,
 }: {
   projectId: string;
   root: string;
   open: ReadonlySet<string>;
   add: NavAdd;
+  edit: NavEdit;
 }) {
   const tree = useFileTree(root);
   if (tree.error) return <span className="sh-nav-none">{tree.error}</span>;
   if (!tree.data) return <span className="sh-nav-none">{tree.loading ? 'loading…' : 'no files'}</span>;
-  return <FileRows node={tree.data.root} projectId={projectId} root={root} open={open} add={add} />;
+  return <FileRows node={tree.data.root} projectId={projectId} root={root} open={open} add={add} edit={edit} />;
 }
 
 /**
@@ -357,6 +461,9 @@ function FolderTree({
  * It and each folder in it have a + on hover or focus (Amendment 138), which opens the
  * Files tree's name box in place. The file is made where you were looking and opened in
  * Files ready to type; the panel stays as it was.
+ *
+ * What is in it can be renamed and deleted; the folder itself cannot,
+ * as the Files tree's root cannot.
  */
 function FolderNode({
   project,
@@ -370,9 +477,37 @@ function FolderNode({
   const id = navDirId(project.id, folder.root, '');
   const shown = isOpen(open, id);
   const [at, setAt] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<FileNode | null>(null);
+  const edit: NavEdit = {
+    renaming,
+    rename: (path) => {
+      setAt(null);
+      setDeleting(null);
+      setRenaming(path);
+    },
+    renamed: async (from, to) => {
+      const done = await renameEntry(folder.root, from, to);
+      followRename(folder.root, done.from, done.to);
+      setRenaming(null);
+    },
+    deleting,
+    remove: (node) => {
+      setAt(null);
+      setRenaming(null);
+      setDeleting(deleting?.path === node.path ? null : node);
+    },
+    done: () => {
+      setRenaming(null);
+      setDeleting(null);
+    },
+  };
   const add: NavAdd = {
     at,
-    open: (dir) => setAt(at === dir ? null : dir),
+    open: (dir) => {
+      edit.done();
+      setAt(at === dir ? null : dir);
+    },
     create: async (path) => {
       const made = await createFile(folder.root, path);
       openNew(folder.root, made.path, made.raw, !isImagePath(made.path));
@@ -400,7 +535,7 @@ function FolderNode({
       <AddForm dir="" add={add} />
       {shown && (
         <div className="sh-nav-items">
-          <FolderTree projectId={project.id} root={folder.root} open={open} add={add} />
+          <FolderTree projectId={project.id} root={folder.root} open={open} add={add} edit={edit} />
         </div>
       )}
     </div>

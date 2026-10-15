@@ -772,8 +772,8 @@ console.log('\nnew folder, rename and delete (Amendment 138)');
   check('a folder row has new folder, rename and delete', ['New folder in docs', 'Rename docs', 'Delete docs'].every((l) => labels.includes(l)), labels.join(', '));
   check('a file row has rename and delete, and no new folder', labels.includes('Rename README.md') && labels.includes('Delete README.md') && !labels.some((l) => l === 'New folder in README.md'));
   check('a deleted file (not on disk) has neither', !labels.some((l) => l?.endsWith('old.md')));
-  check('the + stays first after the folder\'s button, the new ones after it', /<div class="c5-dirrow"><button[^>]*class="c5-row dir"[^>]*>(?:(?!<\/button>).)*<\/button><button[^>]*c5-add[^>]*>\+<\/button><button[^>]*c5-act[^>]*aria-label="New folder in docs"/.test(drawn));
-  check('each is a sibling of the row button, never inside it', /<div class="c5-filerow"><button[^>]*class="c5-row"[^>]*>(?:(?!<\/button>).)*README\.md(?:(?!<\/button>).)*<\/button><button[^>]*c5-act/.test(drawn));
+  check('the + stays first after the folder\'s button, the new ones after it', /<div class="c5-dirrow"[^>]*><button[^>]*class="c5-row dir"[^>]*>(?:(?!<\/button>).)*<\/button><button[^>]*c5-add[^>]*>\+<\/button><button[^>]*c5-act[^>]*aria-label="New folder in docs"/.test(drawn));
+  check('each is a sibling of the row button, never inside it', /<div class="c5-filerow"[^>]*><button[^>]*class="c5-row"[^>]*>(?:(?!<\/button>).)*README\.md(?:(?!<\/button>).)*<\/button><button[^>]*c5-act/.test(drawn));
   const renaming = draw(verbs({ renaming: 'README.md' }));
   check('rename puts the name box in the row\'s place, the name selected for typing', renaming.includes('value="README.md"') && renaming.includes('aria-label="new name for the file README.md"') && !/class="c5-row"[^>]*data-path="README\.md"/.test(renaming));
   const renamingDir = draw(verbs({ renaming: 'docs' }));
@@ -850,9 +850,140 @@ console.log('\nnew folder, rename and delete (Amendment 138)');
   check('its + shows on hover and focus, and always where there is no hover', /\.sh-nav-dirrow:hover \.sh-nav-add,\s*\.sh-nav-dirrow:focus-within \.sh-nav-add/.test(shellCss) && /@media \(hover: none\)\s*\{\s*\.sh-nav-add\s*\{\s*opacity: 1;/.test(shellCss));
 }
 
+console.log('\nmove by drag or Move to… (Amendment 159)');
+{
+  // ── where a move lands, as pure functions ──
+  const { MOVE_MIME, canDrop, moveEntry, moveInto, parentOf } = await import('./moving.js');
+  const plan = (from: string, folder: string): string => JSON.stringify(moveInto(from, folder));
+  check('a move keeps the name and changes the folder', plan('a.md', 'docs/sub') === '{"to":"docs/sub/a.md"}' && plan('docs/a.md', '') === '{"to":"a.md"}' && plan('docs', 'notes') === '{"to":"notes/docs"}');
+  check('into the folder it is already in is nothing to do, not an error', plan('docs/a.md', 'docs') === '{"stay":true}' && plan('a.md', '') === '{"stay":true}' && parentOf('docs/sub/a.md') === 'docs/sub' && parentOf('a.md') === '');
+  check('a folder cannot go into itself or anything under it, said in the daemon\'s words', plan('docs', 'docs') === '{"refused":"docs cannot be moved into itself"}' && plan('docs', 'docs/sub/deep') === '{"refused":"docs cannot be moved into itself"}');
+  check('a folder beside it that only starts with its name is not under it', plan('docs', 'docs2') === '{"to":"docs2/docs"}');
+  const tree = [MOVE_MIME, 'text/plain'];
+  check('a folder takes a tree drag that would move something', canDrop(tree, 'README.md', 'docs') && canDrop(tree, 'docs/a.md', ''));
+  check('and refuses it into itself, under itself, or where it already is', !canDrop(tree, 'docs', 'docs') && !canDrop(tree, 'docs', 'docs/sub') && !canDrop(tree, 'docs/a.md', 'docs'));
+  check("a project's drag (text/plain only), or one from another section, is no drop here", !canDrop(['text/plain'], 'README.md', 'docs') && !canDrop(tree, null, 'docs'));
+
+  // ── naming the folder in Move to… ──
+  const { checkMoveFolder, prefillMove } = await import('./naming.js');
+  const into = (raw: string): string => {
+    const c = checkMoveFolder(raw);
+    return c.ok ? `[${c.path}]` : `refused: ${c.reason}`;
+  };
+  const pm = prefillMove('docs/sub/a.md');
+  check('Move to… starts at the folder it is in, all of it selected', pm.value === 'docs/sub' && pm.from === 0 && pm.to === 8 && prefillMove('a.md').value === '');
+  check('an empty box, . or / is the top, and a leading / reads from the top', into('') === '[]' && into(' . ') === '[]' && into('/') === '[]' && into('/docs/') === '[docs]' && into('docs/sub/') === '[docs/sub]');
+  check("a folder name is refused for what a folder's name is", into('../x').startsWith('refused') && into('.git').startsWith('refused') && into('a\\b').startsWith('refused'));
+  const form = readFileSync(new URL('./NewFileForm.tsx', import.meta.url), 'utf8');
+  check('Enter on the folder it is already in just puts the box away', /if \(moving && named\.path === parentOf\(dir\)\) \{\s*onCancel\(\);\s*return;/.test(form) && /move: \{ start: prefillMove, check: checkMoveFolder/.test(form));
+
+  // ── the tree, drawn with a move under way ──
+  const { FileTree, dragProps, dropProps } = await import('./FileTree.js');
+  const leaf = (path: string, extra: Partial<FileNode> = {}): FileNode => ({ path, name: path.split('/').pop()!, type: 'file', ...extra });
+  const top: FileNode = { path: '', name: '', type: 'dir', children: [
+    { path: 'docs', name: 'docs', type: 'dir', children: [leaf('docs/a.md')] },
+    leaf('old.md', { change: { added: 0, removed: 2, created: false, at: '', deleted: true } }),
+    leaf('README.md'),
+  ] };
+  const noop = async (): Promise<void> => {};
+  const dropped: string[] = [];
+  const verbs = (o: Record<string, unknown> = {}) => ({
+    folderIn: null, onFolder: () => {}, onMakeFolder: noop, renaming: null, onRename: () => {}, onRenamed: noop,
+    onDelete: () => {}, deleting: null, confirm: null, onCancel: () => {},
+    dragging: null, onDragStart: () => {}, onDragEnd: () => {}, over: null, onOver: () => {},
+    onDrop: (f: string) => dropped.push(f), moving: null, onMove: () => {}, onMoved: noop, moveError: null,
+    ...o,
+  });
+  const draw = (v: Record<string, unknown>): string =>
+    renderToStaticMarkup(createElement(FileTree, {
+      root: top, selected: null, onSelect: () => {}, folders: undefined, onToggle: () => {},
+      touches: new Map(), roles: new Map(), now: 0, adding: null, onAdd: () => {}, onCreate: noop, onCancelAdd: () => {},
+      verbs: v as never,
+    }));
+  const drawn = draw(verbs());
+  const labels = [...drawn.matchAll(/aria-label="(Move [^"]*)"/g)].map((m) => m[1]);
+  check('every row on disk has Move to…, a deleted file has not', labels.includes('Move docs to…') && labels.includes('Move docs/a.md to…') && labels.includes('Move README.md to…') && !labels.some((l) => l?.includes('old.md')), labels.join(', '));
+  check('a row on disk can be dragged; a deleted file cannot', /<div class="c5-dirrow" draggable="true">/.test(drawn) && /<div class="c5-filerow" draggable="true">/.test(drawn) && !/draggable="true"><button[^>]*data-path="old\.md"/.test(drawn));
+  const moving = draw(verbs({ moving: 'docs/a.md' }));
+  check("Move to… puts its box in the row's place, at the folder it is in", moving.includes('value="docs"') && moving.includes('aria-label="folder to move docs/a.md into (empty for the top)"') && !/data-path="docs\/a\.md"/.test(moving));
+  const movingTop = draw(verbs({ moving: 'README.md' }));
+  check('at the top the box starts empty and says so', movingTop.includes('value=""') && movingTop.includes('placeholder="the top"'));
+  const marked = draw(verbs({ dragging: 'README.md', over: 'docs' }));
+  check('while a row is dragged it fades, and the folder it would land in is marked', /class="c5-filerow is-dragging"/.test(marked) && /class="c5-dirrow is-drop"/.test(marked) && !/is-drop/.test(draw(verbs({ dragging: null, over: 'docs' }))));
+  const refused = draw(verbs({ moveError: { at: 'docs', text: 'docs/README.md already exists' } }));
+  check("a refused drop says why, as an alert, under the folder it was dropped on", /class="c5-newerr c5-moveerr" role="alert"[^>]*>docs\/README\.md already exists</.test(refused) && refused.indexOf('c5-moveerr') > refused.indexOf('>docs/<') && refused.indexOf('c5-moveerr') < refused.indexOf('a.md'));
+  const atTop = draw(verbs({ moveError: { at: '', text: 'x' } }));
+  check('and first in the tree for a drop on the heading', atTop.indexOf('c5-moveerr') > -1 && atTop.indexOf('c5-moveerr') < atTop.indexOf('c5-dirrow'));
+
+  // ── the drag itself: what it carries, and what a folder takes ──
+  const set: string[] = [];
+  const started: string[] = [];
+  dragProps(verbs({ onDragStart: (p: string) => started.push(p) }) as never, 'docs/a.md').onDragStart({
+    dataTransfer: { effectAllowed: '', setData: (k: string, v: string) => set.push(`${k}=${v}`), setDragImage: () => {} },
+  } as never);
+  await new Promise((done) => setTimeout(done, 5));
+  check('a drag carries the path as application/x-conductor-path, and as text/plain for Firefox', set.join(' ') === `${MOVE_MIME}=docs/a.md text/plain=docs/a.md` && started.join() === 'docs/a.md', set.join(' '));
+  const over = (v: Record<string, unknown>, folder: string, types: string[]): boolean => {
+    let took = false;
+    const e = { dataTransfer: { types, dropEffect: 'none' }, preventDefault: () => { took = true; } };
+    dropProps(v as never, folder).onDragOver(e as never);
+    return took && e.dataTransfer.dropEffect === 'move';
+  };
+  const holding = verbs({ dragging: 'docs' });
+  check('a folder row takes the drag over it only when it may', over(verbs({ dragging: 'README.md' }), 'docs', tree) && !over(holding, 'docs', tree) && !over(holding, 'docs/sub', tree) && !over(verbs({ dragging: 'README.md' }), 'docs', ['text/plain']));
+  dropProps(verbs({ dragging: 'README.md' }) as never, 'docs').onDrop({ dataTransfer: { types: tree }, preventDefault: () => {} } as never);
+  dropProps(holding as never, 'docs').onDrop({ dataTransfer: { types: tree }, preventDefault: () => {} } as never);
+  check('a drop moves only what may go there', dropped.join() === 'docs');
+  const treeSrc = readFileSync(new URL('./FileTree.tsx', import.meta.url), 'utf8');
+  check('a file row is dragged but never dropped on', /className=\{`c5-filerow\$\{dragMark\(verbs, kid\.path\)\}`\} \{\.\.\.dragProps\(verbs, kid\.path\)\}>/.test(treeSrc) && (treeSrc.match(/dropProps\(verbs, kid\.path\)/g) ?? []).length === 1);
+
+  // ── the move: a rename, and the tabs follow it ──
+  const { openTab: open, tabKey: key } = await import('./tabs.js');
+  const { update, putEdit, editOf, getFiles } = await import('./useTabs.js');
+  const { errorText } = await import('../lib/errors.js');
+  update((st) => open(open(st, 'jm', 'notes/a.md', 1), 'jm', 'notes/b.md', 2));
+  putEdit(key('jm', 'notes/a.md'), { draft: 'typed', base: 'saved' });
+  const real = globalThis.fetch;
+  const sent: { url: string; body: Record<string, unknown> }[] = [];
+  let reply: { status: number; body: unknown } = { status: 200, body: {} };
+  globalThis.fetch = (async (url: string, init?: { body?: string }) => {
+    sent.push({ url, body: init?.body ? JSON.parse(init.body) : {} });
+    return { ok: reply.status < 400, status: reply.status, json: async () => reply.body };
+  }) as unknown as typeof fetch;
+  try {
+    reply = { status: 200, body: { from: 'notes/a.md', to: 'docs/sub/a.md', type: 'file' } };
+    const done = await moveEntry('jm', 'notes/a.md', 'docs/sub');
+    check('a move is a rename to the same name in the new folder', sent[0]?.url === '/api/jobs/jm/rename' && JSON.stringify(sent[0].body) === '{"from":"notes/a.md","to":"docs/sub/a.md"}' && done?.to === 'docs/sub/a.md');
+    const tabs = getFiles().tabs.filter((t) => t.jobId === 'jm').map((t) => t.path).join(' ');
+    check('its tab follows it, and its unsaved edit too', tabs === 'docs/sub/a.md notes/b.md' && editOf(key('jm', 'docs/sub/a.md'))?.draft === 'typed' && editOf(key('jm', 'notes/a.md')) === null, tabs);
+    reply = { status: 409, body: { error: 'docs/sub/b.md already exists' } };
+    let why: unknown = null;
+    await moveEntry('jm', 'notes/b.md', 'docs/sub').catch((e: unknown) => { why = e; });
+    check("a taken name refuses with the daemon's sentence, and the tab stays", errorText(why) === 'docs/sub/b.md already exists' && getFiles().tabs.some((t) => t.jobId === 'jm' && t.path === 'notes/b.md'));
+    const before = sent.length;
+    let self: unknown = null;
+    await moveEntry('jm', 'docs', 'docs/sub').catch((e: unknown) => { self = e; });
+    const stay = await moveEntry('jm', 'notes/b.md', 'notes');
+    check('into itself is refused, and where it already is does nothing, without asking the daemon', errorText(self) === 'docs cannot be moved into itself' && stay === null && sent.length === before);
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  // ── the screen's wiring, read from source ──
+  const mv = readFileSync(new URL('./moving.ts', import.meta.url), 'utf8');
+  check('a move is the rename flow: renameEntry, then followRename', /const done = await renameEntry\(root, from, plan\.to\);\s*followRename\(root, done\.from, done\.to\);/.test(mv) && /MOVE_MIME = 'application\/x-conductor-path'/.test(mv));
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  check('the screen moves with moveEntry and opens the folder it landed in', /if \(await moveEntry\(r\.root, from, folder\)\) openDown\(folder\);/.test(route));
+  check("a refused drop shows the daemon's sentence under the folder", /move\(from, folder\)\.catch\(\(err: unknown\) => setMoveError\(\{ at: folder, text: errorText\(err\) \}\)\)/.test(route));
+  check("the root's heading takes a drop for the top", /className=\{`c5-roothead\$\{dragMark\(verbs, ''\)\}`\} title=\{r\.where\} \{\.\.\.dropProps\(verbs, ''\)\}/.test(route));
+  const css = readFileSync(new URL('./files.css', import.meta.url), 'utf8');
+  const ours = css.slice(css.indexOf('moving by drag and Move to… (Amendment 159)'));
+  check('the marks are drawn in existing tokens only', ours.length > 0 && /\.c5-dirrow\.is-drop/.test(ours) && /var\(--ink3\)/.test(ours) && !/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(ours));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94); new folder, rename and delete, with tabs that follow a rename and close on a delete, a double confirm for a folder with files in it, and a + on the navigator\'s folders (Amendment 138).\n'
+    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94); new folder, rename and delete, with tabs that follow a rename and close on a delete, a double confirm for a folder with files in it, and a + on the navigator\'s folders (Amendment 138); a drag onto a folder, or Move to…, moves an entry, refusing it into itself and saying why a taken name was refused, and its tabs follow (Amendment 159).\n'
     : `\nTrack C files verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

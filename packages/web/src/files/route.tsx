@@ -29,7 +29,8 @@ import { errorText } from '../lib/errors.js';
 import { Splitter } from '../shell/Splitter.js';
 import { highlight, recall } from '../shell/nav.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { FileTree, type TreeVerbs } from './FileTree.js';
+import { FileTree, dragMark, dropProps, type TreeVerbs } from './FileTree.js';
+import { moveEntry } from './moving.js';
 import { DeleteConfirm } from './DeleteConfirm.js';
 import { FilePane } from './FilePane.js';
 import { DiffView } from './DiffView.js';
@@ -589,11 +590,37 @@ function RootSection({
   const [folderIn, setFolderIn] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<FileNode | null>(null);
-  const only = (which: 'file' | 'folder' | 'rename' | 'delete'): void => {
+  /*
+   * Moving (Amendment 159): the drag is held here, per section, so a drag from another
+   * section (another root) or a project's drag in the navigator is no drop here. A move
+   * is moving.ts's `moveEntry`, a rename and then `followRename`; the folder it lands in
+   * is opened, as a new folder is.
+   */
+  const [moving, setMoving] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<{ at: string; text: string } | null>(null);
+  const only = (which: 'file' | 'folder' | 'rename' | 'delete' | 'move'): void => {
     if (which !== 'file') setAdding(null);
     if (which !== 'folder') setFolderIn(null);
     if (which !== 'rename') setRenaming(null);
     if (which !== 'delete') setDeleting(null);
+    if (which !== 'move') setMoving(null);
+    setMoveError(null);
+  };
+  /** Open `path` and every folder above it, so what was made or moved there shows. */
+  const openDown = (path: string): void => {
+    if (path === '') return;
+    update((st) => {
+      const parts = path.split('/');
+      return parts.reduce(
+        (acc, _, i) => toggleFolder(acc, r.root, parts.slice(0, i + 1).join('/'), false),
+        st,
+      );
+    });
+  };
+  const move = async (from: string, folder: string): Promise<void> => {
+    if (await moveEntry(r.root, from, folder)) openDown(folder);
   };
   // The + is Amendment 121's and hands `setAdding` straight to the tree; opening its box
   // puts the others away from here.
@@ -602,6 +629,8 @@ function RootSection({
     setFolderIn(null);
     setRenaming(null);
     setDeleting(null);
+    setMoving(null);
+    setMoveError(null);
   }, [adding]);
   const verbs: TreeVerbs = {
     folderIn,
@@ -611,14 +640,7 @@ function RootSection({
     },
     onMakeFolder: async (path) => {
       const made = await createFolder(r.root, path);
-      update((st) => {
-        const parts = made.path.split('/');
-        // Open it and every folder above it, so it shows where it was made.
-        return parts.reduce(
-          (acc, _, i) => toggleFolder(acc, r.root, parts.slice(0, i + 1).join('/'), false),
-          st,
-        );
-      });
+      openDown(made.path);
       setFolderIn(null);
     },
     renaming,
@@ -648,7 +670,36 @@ function RootSection({
     onCancel: () => {
       setFolderIn(null);
       setRenaming(null);
+      setMoving(null);
     },
+    dragging,
+    onDragStart: (path) => {
+      only('move');
+      setDragging(path);
+    },
+    onDragEnd: () => {
+      setDragging(null);
+      setOver(null);
+    },
+    over,
+    onOver: setOver,
+    onDrop: (folder) => {
+      const from = dragging;
+      setDragging(null);
+      setOver(null);
+      if (from === null) return;
+      move(from, folder).catch((err: unknown) => setMoveError({ at: folder, text: errorText(err) }));
+    },
+    moving,
+    onMove: (path) => {
+      only('move');
+      setMoving(moving === path ? null : path);
+    },
+    onMoved: async (from, folder) => {
+      await move(from, folder);
+      setMoving(null);
+    },
+    moveError,
   };
 
   // Chosen with nothing open: its default pick, once its tree lands.
@@ -664,7 +715,8 @@ function RootSection({
   const changed = tree.data?.changedFiles ?? 0;
   return (
     <section className="c5-rootsec" aria-label={r.where}>
-      <div className="c5-roothead" title={r.where}>
+      {/* The heading takes a drop too: it is the top of this root. */}
+      <div className={`c5-roothead${dragMark(verbs, '')}`} title={r.where} {...dropProps(verbs, '')}>
         <span className="c5-rootname">{r.name}</span>
         {changed > 0 && (
           <span className="c5-rootstat">
