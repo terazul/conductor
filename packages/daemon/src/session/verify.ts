@@ -5331,7 +5331,12 @@ async function main(): Promise<void> {
     const noneHd = await handOffOver('hd_val', 'All green.');
     check('no headings configured: no check, a plain OK', !noneHd.isError && /^Handed off\. scribe will start/.test(noneHd.text), noneHd.text);
 
-    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    // Finishing the validator starts the scribe, so finish until nothing is left running: a run left
+    // going here is a stranger in the next section's slot count.
+    for (let i = 0; i < 10 && (sup.slots.used > 0 || runs.some((r) => !r.finished)); i++) {
+      for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+      await settle(100);
+    }
     await until(() => sup.slots.used === 0);
 
     /*
