@@ -15,7 +15,7 @@
  *     from its role label, but starts open (Amendment 18) — mechanics hide
  *     themselves, output waits for you to fold it (Amendment 33). A turn Conductor
  *     sent ("auto") folds too, and in an orchestrator's transcript starts folded: its
- *     helpers' report is theirs, and its own reply is what you read (Amendment 160).
+ *     helpers' report is theirs, and its own reply is what you read (Amendment 164).
  *
  *  3. A BLOCKED ASK STAYS IN THE TRANSCRIPT after it is answered. The pending
  *     queue clears, but "it asked, I chose this" is the most valuable line in
@@ -285,7 +285,7 @@ function diffFromInput(input: unknown): DiffLine[] | null {
 
 /** A readable one-liner for whatever a tool was handed. */
 function inputSummary(input: unknown): string | null {
-  // `task` is what `start_helper` was asked to do (Amendment 160), rather than its JSON.
+  // `task` is what `start_helper` was asked to do (Amendment 164), rather than its JSON.
   const s = pickString(input, 'command', 'file_path', 'path', 'pattern', 'url', 'prompt', 'task');
   if (s) return s;
   if (input === undefined || input === null) return null;
@@ -527,7 +527,7 @@ function AgentTurn({
 
 /**
  * A turn Conductor sent ("auto"): a helpers' report, a resume nudge, a merge note. It folds
- * from its label as a reply does (Amendment 160). `startFolded` is whether it starts folded:
+ * from its label as a reply does (Amendment 164). `startFolded` is whether it starts folded:
  * in an orchestrator's transcript, where the helpers' report is long and its own reply to it
  * is what you came for. Elsewhere it starts open, as every reply does (Amendment 18).
  */
@@ -572,7 +572,7 @@ export function replyKeys(turns: readonly Turn[]): string[] {
 }
 
 /**
- * The turns that start folded (Amendment 160): in an orchestrator's transcript, the ones
+ * The turns that start folded (Amendment 164): in an orchestrator's transcript, the ones
  * Conductor sent it. None anywhere else. `orchestrator` is whether the agent may start
  * helpers (`helperCap` above 0), which is what a helpers' report is sent to.
  */

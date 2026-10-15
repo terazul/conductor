@@ -130,7 +130,7 @@ the last of it on 12 Oct).
 - [x] **Do non-Claude engines drop effort or plan mode? (wave 11, X1).** Found (14 Oct) for docs/plans/wave-11.md §8. *Done 15 Oct: Amendment 160 (traced on Spawn, "+ agent" and `start_helper`; nothing is lost: the effort is sent as `reasoningEffort`, and plan first is sent as "ask me" and shown so before launch; no code changed).*
 - [ ] **An effort the model doesn't take.** Spawn (`route.tsx:1127`) and the composer offer all five efforts for any model, on every engine. Copilot's model list says which each model takes (`efforts`, `copilot.ts:231`); OpenRouter's says nothing. The SDK looks likely to refuse an unsupported one at the run (not tried live). Found (15 Oct) by Amendment 156.
 
-- [x] **An orchestrator's page opens to its helpers' reports, not its own replies (wave 11, O3).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): O2 accepted as is; the orchestrator's auto turns start folded.* *Done 15 Oct: Amendment 160 (auto turns fold under `u${seq}`; in an agent that can start helpers they start folded, and one you open stays open in `conductor.agentUnfolds`; fold all reaches them; a `start_helper` line shows its task).*
+- [x] **An orchestrator's page opens to its helpers' reports, not its own replies (wave 11, O3).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): O2 accepted as is; the orchestrator's auto turns start folded.* *Done 15 Oct: Amendment 164 (auto turns fold under `u${seq}`; in an agent that can start helpers they start folded, and one you open stays open in `conductor.agentUnfolds`; fold all reaches them; a `start_helper` line shows its task).*
 
 ## Housekeeping
 

@@ -947,7 +947,7 @@ function LookSection() {
           type="button"
           className="st-btn"
           onClick={() => {
-            // The opened default folds too (Amendment 160), so an orchestrator's auto turns fold again.
+            // The opened default folds too (Amendment 164), so an orchestrator's auto turns fold again.
             writeSetting('conductor.agentFolds', null);
             writeSetting('conductor.agentUnfolds', null);
             setDone('Every turn is back to how it starts.');

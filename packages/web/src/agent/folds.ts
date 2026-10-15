@@ -8,7 +8,7 @@
  * now; one that arrives afterwards is output you haven't read, and arrives open.
  *
  * One kind of turn starts folded: a turn Conductor sent an orchestrator ("auto"), such as
- * its helpers' report (Amendment 160). It is long, it is its helpers' words, and the
+ * its helpers' report (Amendment 164). It is long, it is its helpers' words, and the
  * orchestrator's reply to it is what you read. For those the default is the fold, so what's
  * kept is the other set: the ones you opened (`Unfolds`), and one you open stays open.
  *
@@ -77,7 +77,7 @@ export function unfoldAll(f: Folds, agentId: string): Folds {
 }
 
 /**
- * The turns that start folded which you opened, per agent (Amendment 160). The same shape
+ * The turns that start folded which you opened, per agent (Amendment 164). The same shape
  * and bounds as `Folds`, kept beside it, so a stored set of folds from before reads as it did.
  */
 export type Unfolds = Folds;
@@ -179,7 +179,7 @@ function kept(key: string) {
 }
 
 const folded = kept('conductor.agentFolds');
-/** The turns that start folded which you opened (Amendment 160). */
+/** The turns that start folded which you opened (Amendment 164). */
 const unfolded = kept('conductor.agentUnfolds');
 
 /** You folded, opened, folded all or unfolded all: both sets, as `fn` leaves them. */

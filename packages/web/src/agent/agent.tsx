@@ -510,7 +510,7 @@ export function AgentScreen() {
   const replies = useMemo(() => replyKeys(turns), [turns]);
   /*
    * An agent that may start helpers is sent their report as an auto turn, and in its
-   * transcript those start folded (Amendment 160). `helperCap` is what the daemon checks
+   * transcript those start folded (Amendment 164). `helperCap` is what the daemon checks
    * before it sends one (`#takeHelperReport`), so it is every agent that can get one.
    */
   const orchestrator = (agent?.helperCap ?? 0) > 0;

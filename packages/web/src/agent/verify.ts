@@ -534,7 +534,7 @@ console.log('\nYour turns · what you typed reads in its own colour (Amendment 1
       /color: var\(--you\)/.test(rule('.ag-lastask-t')));
   const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
   check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
-  // Amendment 160: a turn Conductor sent is its own component now, so it can fold; your own turns are not marked auto.
+  // Amendment 164: a turn Conductor sent is its own component now, so it can fold; your own turns are not marked auto.
   check('a turn Conductor sent for you is marked auto and keeps the plain look', /className=\{`ag-msg is-you is-auto\$\{folded \? ' is-folded' : ''\}`\}/.test(tsx) && /className="ag-msg is-you" id=/.test(tsx));
   check('no status colour on your turn', !/var\(--(need|live|done|fail|queue|idle)\)/.test(body + rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
 }
@@ -1093,7 +1093,7 @@ console.log('\n· "merge into main and clean up when done" in the agent\'s setti
   check('it sits with the guardrails, so it folds with them', comp.indexOf("id: 'merge_when_done'") > comp.indexOf('const PILLS: PillDef[] = [') && comp.indexOf("id: 'merge_when_done'") < comp.indexOf('interface ModeDef'));
 }
 
-console.log("\n· an orchestrator's auto turns start folded, and one you open stays open (Amendment 160)");
+console.log("\n· an orchestrator's auto turns start folded, and one you open stays open (Amendment 164)");
 {
   const at = (seq: number, payload: unknown): Event =>
     ({ seq, ts: '2026-10-15T00:00:00Z', projectId: 'p', jobId: 'j', agentId: 'o', payload }) as Event;
