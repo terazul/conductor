@@ -1183,7 +1183,7 @@ export class Supervisor implements AgentControl {
     const wentWithout = getWentWithout(this.#db, agentId);
     const upstream: Upstream[] = [
       // Those further up, by their summaries, oldest first.
-      ...this.#furtherUp(agent).filter((u) => !wentWithout.some((w) => w.id === u.id)),
+      ...this.#furtherUp(agent),
       ...agent.dependsOn.flatMap((id) => {
         const dep = getAgent(this.#db, id);
         return dep ? [heard(id, dep.role)] : [];
@@ -1649,14 +1649,17 @@ export class Supervisor implements AgentControl {
   /**
    * The agents further up than the ones this one waits for, as `Upstream`s that carry only their
    * summary, each "via" the role of the one it waits for that leads to it, in the order they ran
-   * (`ancestorsOf`). One that never handed off has nothing to pass on and is left out.
+   * (`ancestorsOf`). One that never handed off has nothing to pass on and is left out, and so is
+   * one it was started without (Amendment 88): it is still reached through another that waited
+   * for it, but a first prompt gives it as stopped, and a re-run note does not give it at all.
    */
   #furtherUp(agent: Agent): (Upstream & { id: string })[] {
     const jobAgents = agentsForJob(this.#db, agent.jobId);
     const roleOf = new Map(jobAgents.map((a) => [a.id, a.role]));
+    const without = new Set(getWentWithout(this.#db, agent.id).map((w) => w.id));
     return ancestorsOf(jobAgents, agent.id).flatMap(({ id, via }) => {
       const { summary } = this.#summaryOf(id);
-      return id !== via && summary ? [{ id, role: roleOf.get(id) ?? id, reply: null, summary, via: roleOf.get(via) ?? via }] : [];
+      return id !== via && summary && !without.has(id) ? [{ id, role: roleOf.get(id) ?? id, reply: null, summary, via: roleOf.get(via) ?? via }] : [];
     });
   }
 

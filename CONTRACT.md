@@ -221,37 +221,45 @@ prompt and its re-run note; nothing on a screen changes.
   reader waited for. It has no turns (`turnsOf`), its heading is `[role, via <role>]` (`head`, `:374`), and its
   body is its summary only (`viaBody`, `:385`), never "(It finished without a written reply.)".
 - **Within the cap.** Its need is its summary as set down (`viaCost`, `:382`), shared out with the
-  conversations by `shareCap` (`:426`). Over its share it keeps the beginning and says `… (the last N
+  conversations by `shareCap` (`:424`). Over its share it keeps the beginning and says `… (the last N
   characters of its summary are left out to fit)`, or `(Its summary, N characters, is left out to fit.)` with
   no room at all. The summaries of the agents waited on directly are still whole and outside the cap
   (Amendment 104).
 - **Said once.** In its own voice the ancestor says its summary, so `dropRepeats` (Amendment 120) takes the
   copy quoted in the next stage's launch prompt out and leaves the marker; in a diamond both quotes go and
   the one part stays. When any upstream is further up, the opening adds: *The agents further up, marked "via"
-  the agent that waited for them, are given only by their summaries.* (`:430`); "the agent" / "the agents" counts
-  only the direct ones.
-- **The supervisor.** `#furtherUp(agent)` (`supervisor.ts:1617`) turns `ancestorsOf` into those upstreams, each
-  with its role, its summary from `getHandoff` and `via` the role it came through, leaving out the direct ones
-  and any that never handed off. `#promptFor` puts them first, oldest first, then the direct ones as before,
-  then the ones it was started without (Amendment 88), not twice (`:1182-1185`). `#takeRerunNote` puts them
-  before its direct ones the same way (`:2163`), so a re-run note says what a first prompt would.
+  the agent that waited for them, are given only by their summaries.* (`:429`), in the singular with one
+  ("The agent further up … is given only by its summary."); "the agent" / "the agents" before it counts only the
+  direct ones.
+- **The supervisor.** `#furtherUp(agent)` (`supervisor.ts:1619`) turns `ancestorsOf` into those upstreams, each
+  with its role, its summary from `getHandoff` and `via` the role it came through, leaving out the direct ones,
+  any that never handed off, and any it was started without (`getWentWithout`, Amendment 88). `#promptFor` puts
+  them first, oldest first, then the direct ones as before, then the ones it was started without, marked
+  stopped (`:1185`). `#takeRerunNote` puts them before its direct ones the same way (`:2166`), so a re-run note
+  says what a first prompt would.
 
 *Not done / not decided:* an ancestor that never handed off (a person released it, or it predates
 Amendment 104) is left out rather than given by its last reply. An agent it was started without is not walked
-further up: removing one rewires its waiters to what it waited on (Amendment 88), so those are direct. An
+further up: removing one rewires its waiters to what it waited on (Amendment 88), so those are direct. One
+stopped but not removed (`#goWithout`) leaves the resumed agent's `dependsOn`, yet can still be reached through
+another live dependency (X went without S; T, which X waits on and which had already started, still waits on S);
+`#furtherUp` leaves it out by id, so neither the first prompt nor the re-run note gives it "via". An
 orchestrator's helper report is unchanged. `docs/adr/0001-preset-stacks.md` still says what it says about
 transitive handoff; track 6's lane D4 corrects that ADR.
 
-*Verified:* `session/verify.ts` §17 (`:2765`, the block "each stage hears every earlier stage's summary"),
+*Verified:* `session/verify.ts` §17 (`:2767`, the block "each stage hears every earlier stage's summary"),
 against the real supervisor and the fake SDK: in architect → developer → scribe, the developer hears the
 architect as before and nothing "via"; the scribe holds the architect's summary once, under `[architect, via
 developer]`, before the developer's part, with the developer's quote of it left out; re-run from the
 developer, the scribe's re-run note holds it once the same way. Pure: a diamond gives the shared ancestor's
 summary once and both quotes go; four sharing 3,000 characters take 750 each and three ancestors' summaries
 are cut with the line, the direct summary whole; with room every one is whole; with none it says so; `rerunNote`
-carries the same section. `ancestorsOf` in §17p (`:4217`): a chain, a diamond (`a<b b<b c<c`), a direct one
-also further up another, helpers and a missing id, a loop. With `#furtherUp` returning nothing the chain and
-re-run checks fail. `pnpm -r typecheck` clean; `make test` green.
+carries the same section; with two further up the opening says "agents", with one "agent". In §17o (`:4205`,
+"Further up and gone without"): X went without S, still reached through T; X's first prompt gives S once, marked
+stopped, and only the analyst further up "via" T, and its re-run note has the same "via" parts and no S.
+`ancestorsOf` in §17p (`:4267`): a chain, a diamond (`a<b b<b c<c`), a direct one also further up another,
+helpers and a missing id, a loop. With `#furtherUp` returning nothing the chain and re-run checks fail; with it
+not leaving out the ones gone without, both §17o checks fail. `pnpm -r typecheck` clean; `make test` green.
 
 ### Amendment 160 — post-merge, applied. **Copilot and OpenRouter keep the effort chosen, and Spawn shows plan mode as "ask me" before launch: nothing is lost, so the open question is closed.**
 

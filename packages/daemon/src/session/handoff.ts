@@ -426,9 +426,13 @@ export function handoffSection(upstream: readonly Upstream[], cap: number, openi
     parts.map((u) => (u.via ? viaCost(u) : turnsOf(u).reduce((n, t) => n + costOf(t), 0))),
   );
   // Ones further up are there by their summary alone.
-  const further = upstream.some((u) => u.via)
-    ? ' The agents further up, marked "via" the agent that waited for them, are given only by their summaries.'
-    : '';
+  const via = upstream.filter((u) => u.via).length;
+  const further =
+    via === 0
+      ? ''
+      : via === 1
+        ? ' The agent further up, marked "via" the agent that waited for it, is given only by its summary.'
+        : ' The agents further up, marked "via" the agent that waited for them, are given only by their summaries.';
   return [
     (opening ??
       (all

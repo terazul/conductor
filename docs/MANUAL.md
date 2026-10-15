@@ -547,7 +547,7 @@ The agents further up are passed on too, by their summaries. In a chain architec
 scribe, the scribe hears the developer whole and the architect's summary under **[architect, via
 developer]**, though it waits only for the developer. Each one further up is there once, however
 many paths lead to it, and the furthest comes first. Only what it said when it handed off goes
-on: one that never handed off is left out. These summaries share the amount below with the
+on: one that never handed off, or that you ran it without, is left out. These summaries share the amount below with the
 conversations, so when there isn't room one is cut, and a line says how much of it was left out.
 **↻ re-run after this** (below) tells an agent the same. The files come the other way: every agent in a job works in the
 same folder, so what an earlier agent changed is already there.

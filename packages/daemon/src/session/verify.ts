@@ -102,6 +102,8 @@ import {
   getAgentPersona,
   getHandoff,
   getRerunPending,
+  getWentWithout,
+  setHandoff,
   setRerunPending,
   setAgentAutonomy,
   setAgentStatus,
@@ -2789,7 +2791,7 @@ async function main(): Promise<void> {
         toldC.indexOf('[architect, via developer]') < toldC.indexOf('[developer]\n') && toldC.includes(`[developer]\nIts summary of its work:\n${SUM_B}`),
       toldC,
     );
-    check('B’s quote of it is the one left out, and C is told what "via" means', toldC.includes(REPEAT_MARKER) && toldC.includes('given only by their summaries') && toldC.includes('You started after the agent before you finished.'), toldC);
+    check('B’s quote of it is the one left out, and C is told what "via" means', toldC.includes(REPEAT_MARKER) && toldC.includes('The agent further up, marked "via" the agent that waited for it, is given only by its summary.') && toldC.includes('You started after the agent before you finished.'), toldC);
     said17('agt_ch_c', 'Written up.');
     runs[at + 2]?.finish({ cost: 0, reason: 'completed' });
     await until(() => getAgent(db, 'agt_ch_c')?.status === 'done');
@@ -2817,6 +2819,7 @@ async function main(): Promise<void> {
     const viaA: Upstream = { role: 'architect', reply: null, summary: arch.summary, via: 'developer' };
     const diamond = handoffSection([viaA, quoted('developer'), quoted('validator')], 1_000_000);
     check('in a diamond, the shared ancestor’s summary appears once, in its own part, and neither quote of it does', occurrences(diamond, arch.summary!) === 1 && diamond.includes(`[architect, via developer]\nIts summary of its work:\n${arch.summary}`) && occurrences(diamond, REPEAT_MARKER) === 2, diamond);
+    check('with more than one further up, the sentence says "agents"', handoffSection([viaA, { ...viaA, role: 'analyst' }, quoted('developer')], 1_000_000).includes('The agents further up, marked "via" the agent that waited for them, are given only by their summaries.'));
     check('only its summary: its conversation is not passed on by it', !diamond.slice(0, diamond.indexOf('[developer]')).includes('Agent: '), diamond);
     check('one with no summary to give writes no "finished without a reply"', !handoffSection([{ role: 'a', reply: null, summary: 'x'.repeat(80), via: 'b' }], 1_000).includes('without a written reply'));
 
@@ -4198,6 +4201,53 @@ async function main(): Promise<void> {
     check('and once it is done the one waiting starts', await until(() => getAgent(db, 'agt_f_rev')?.status === 'working'));
     runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
     check('every job here settled', await until(() => ['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].every((j) => ['done', 'failed'].includes(getJob(db, j)?.status ?? ''))), JSON.stringify(['job_strand', 'job_legacy', 'job_rw', 'job_rw2', 'job_fail88'].map((j) => getJob(db, j)?.status)));
+
+    // Further up and gone without (Amendment 155): X went without S, which T, already run, still
+    // waits on. S is reached through T, but neither X's first prompt nor its re-run note gives it "via".
+    {
+      const SUM_A155 = 'Analyst summary: the requirements are in REQS.md.';
+      const SUM_S155 = 'Architect summary: the plan, half done, is in PLAN.md.';
+      job('job_ww155', null);
+      setJobStatus(db, 'job_ww155', 'working');
+      fixture('agt_ww_a', 'job_ww155', { role: 'analyst', status: 'done', autonomy: DEFAULT_AUTONOMY });
+      fixture('agt_ww_s', 'job_ww155', { role: 'architect', status: 'stopped', dependsOn: ['agt_ww_a'], autonomy: DEFAULT_AUTONOMY });
+      fixture('agt_ww_t', 'job_ww155', { role: 'developer', status: 'done', sdkSessionId: 'sess_ww_t', dependsOn: ['agt_ww_s'], autonomy: DEFAULT_AUTONOMY });
+      fixture('agt_ww_x', 'job_ww155', { role: 'scribe', status: 'paused', dependsOn: ['agt_ww_t', 'agt_ww_s'], autonomy: DEFAULT_AUTONOMY });
+      setHandoff(db, 'agt_ww_a', { summary: SUM_A155, held: false });
+      setHandoff(db, 'agt_ww_s', { summary: SUM_S155, held: false });
+      setHandoff(db, 'agt_ww_t', { summary: 'Developer summary: built.', held: false });
+      said88('job_ww155', 'agt_ww_s', 'Plan: half of it.');
+      said88('job_ww155', 'agt_ww_t', 'Built.');
+      const atWw = runs.length;
+      await send('POST', '/api/agents/agt_ww_x/resume', {});
+      await until(() => (runs[atWw]?.prompts.length ?? 0) > 0);
+      check(
+        'resumed, X went without the architect but still reaches it through the developer',
+        JSON.stringify(getAgent(db, 'agt_ww_x')?.dependsOn) === '["agt_ww_t"]' && getWentWithout(db, 'agt_ww_x')[0]?.id === 'agt_ww_s' &&
+          ancestorsOf(agentsForJob(db, 'job_ww155'), 'agt_ww_x').some((u) => u.id === 'agt_ww_s'),
+      );
+      const viaOf = (text: string) => JSON.stringify(text.match(/\[[^\]\n]+, via [^\]\n]+\]/g) ?? []);
+      const toldX = runs[atWw]?.prompts[0] ?? '';
+      check(
+        'its first prompt gives the architect once, as stopped, not "via" the developer; the analyst is "via" it',
+        viaOf(toldX) === '["[analyst, via developer]"]' && occurrences(toldX, SUM_S155) === 1 && toldX.includes('[architect — stopped') &&
+          toldX.includes(`[analyst, via developer]\nIts summary of its work:\n${SUM_A155}`) && toldX.includes('The agent further up, marked "via" the agent that waited for it, is given only by its summary.'),
+        toldX,
+      );
+      runs[atWw]?.finish({ cost: 0, reason: 'completed' });
+      await until(() => getAgent(db, 'agt_ww_x')?.status === 'done');
+      said88('job_ww155', 'agt_ww_t', 'Built again.');
+      const againWw = await send<RerunResponse>('POST', '/api/agents/agt_ww_t/rerun', {});
+      check('re-running from the developer puts X back', againWw.status === 200 && (await until(() => (runs[atWw + 1]?.prompts.length ?? 0) > 0)), JSON.stringify(againWw.body));
+      const noteX = runs[atWw + 1]?.prompts[0] ?? '';
+      check(
+        'and its re-run note leaves the architect out too: the same "via" parts as its first prompt',
+        noteX.startsWith('Your input changed.') && viaOf(noteX) === viaOf(toldX) && !noteX.includes(SUM_S155) && noteX.includes(SUM_A155),
+        noteX,
+      );
+      runs[atWw + 1]?.finish({ cost: 0, reason: 'completed' });
+      await until(() => getAgent(db, 'agt_ww_x')?.status === 'done');
+    }
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     sdk.query = realQuery;
