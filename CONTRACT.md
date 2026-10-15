@@ -200,6 +200,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 171 — post-merge, applied. **A folder too big to watch is left unwatched, and a spawn that throws can't crash the daemon.**
+
+Daemon only (`workspace/watcher.ts`, `preview/probe.ts`, `workspace/verify.ts`). Found 15 Oct: the
+daemon crashed on every start. At start it attaches a file watcher to every live job's folder, and
+chokidar opens one file handle per entry on macOS. The `dmp` project's job folder holds about 42,000
+files, so the daemon ran out of handles (12,000 EMFILE errors in one start), stopped answering, and
+the next `lsof` it spawned from the preview sweep threw EBADF before starting, uncaught, which took
+the process down.
+- **The limit.** `countWatchable(root, limit)` counts what the watcher would open (the same
+  `NEVER_WATCH` folders skipped, no symlinks, depth 12), stopping just past the limit. A folder over
+  `WATCH_MAX_ENTRIES`, 10,000, is not watched: it logs one line, and `Watcher.tooBig` is true. Its file
+  edits aren't reported live; its tree, diffs and changes still read from git as they do. Counted on
+  this machine's live folders: `dmp`'s job is past it after 148 ms, the next largest has 2,830 entries.
+- **The spawn.** `pidForPort` catches a throw from `execFile` and answers null, as it already did for
+  a failed `lsof`.
+- Checked in `workspace/verify.ts` §17: the count skips `node_modules` and stops one past the limit; a
+  folder past a small limit isn't watched and says so; one under it is; `pidForPort`'s catch.
+- **Not done.** Other spawns that could throw the same way when handles run out are not wrapped; with
+  the watcher capped the daemon should not run short. A big folder's live edits could come from
+  polling git instead; nothing does that yet.
+
 ### Amendment 170 — post-merge, applied. **Metrics draws each day's cost as a bar above the day table, empty days included, and says why time per turn runs high.**
 
 Web only (`metrics/rules.ts`, `metrics/chart.tsx` new, `metrics/route.tsx`, `metrics/metrics.css`,

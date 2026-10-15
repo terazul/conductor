@@ -28,7 +28,7 @@
 
 import { watch, type FSWatcher } from 'chokidar';
 import { basename, join, sep } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import type { FileEditPayload } from '@conductor/shared';
 import { eventLog } from '../eventlog.js';
 import { isRepo, numstat, status, toPosix, type NumStat, type StatusEntry } from './git.js';
@@ -83,6 +83,47 @@ function isStructurallyIgnored(root: string, abs: string): boolean {
   return false;
 }
 
+/**
+ * The most entries a folder may hold and still be watched (Amendment 171). chokidar opens one
+ * file handle per entry on macOS, so a folder of 42,000 files ran the daemon out of handles,
+ * and the next process it spawned crashed it. A folder past this is not watched: its file
+ * edits are not reported live, and everything else about it works.
+ */
+export const WATCH_MAX_ENTRIES = 10_000;
+let watchLimit = WATCH_MAX_ENTRIES;
+
+/** For checks: a smaller limit, and back to the real one with no argument. */
+export function setWatchLimit(n: number = WATCH_MAX_ENTRIES): void {
+  watchLimit = n;
+}
+
+/**
+ * How many entries the watcher would open under `root`, counting no further than `limit + 1`:
+ * the same folders it never watches are skipped, symlinks are not followed, and it goes no
+ * deeper than the watcher does. Stops as soon as it is past the limit, so it is cheap on a huge tree.
+ */
+export function countWatchable(root: string, limit: number, depth = 12): number {
+  let n = 0;
+  const walk = (dir: string, level: number): void => {
+    if (n > limit || level > depth) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (n > limit) return;
+      if (NEVER_WATCH.has(e.name)) continue;
+      n += 1;
+      if (n > limit) return;
+      if (e.isDirectory() && !e.isSymbolicLink()) walk(join(dir, e.name), level + 1);
+    }
+  };
+  walk(root, 0);
+  return n;
+}
+
 interface Pending {
   path: string;
   deleted: boolean;
@@ -96,6 +137,7 @@ export class Watcher {
   #pending = new Map<string, Pending>();
   #timer: NodeJS.Timeout | null = null;
   #ready = false;
+  #tooBig = false;
   /** Last emitted counts per path — filter 4. */
   #lastEmitted = new Map<string, string>();
   #flushing: Promise<void> = Promise.resolve();
@@ -119,10 +161,22 @@ export class Watcher {
     return this.#fsw !== null;
   }
 
+  /** True when the folder was too big to watch (Amendment 171). */
+  get tooBig(): boolean {
+    return this.#tooBig;
+  }
+
   start(): void {
     if (this.#fsw) return;
     const root = this.#ws.path;
     if (!existsSync(root)) return;
+    // Too big to watch with a handle per entry (Amendment 171): say so once and leave it unwatched.
+    const limit = watchLimit;
+    if (countWatchable(root, limit) > limit) {
+      this.#tooBig = true;
+      console.warn(`[workspace] ${root} has more than ${limit.toLocaleString('en')} entries — not watching it for file edits`);
+      return;
+    }
 
     this.#fsw = watch(root, {
       ignoreInitial: true,

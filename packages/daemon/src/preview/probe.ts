@@ -168,27 +168,33 @@ export async function probeHttp(port: number): Promise<HttpProbe> {
 export function pidForPort(port: number): Promise<number | null> {
   if (!isAllowedPort(port)) return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFile(
-      'lsof',
-      // No -4/-6 filter: the server may be bound to either family, and we want
-      // the pid regardless of which one answered the probe.
-      ['-ti', `tcp:${port}`, '-sTCP:LISTEN'],
-      { timeout: 2_000 },
-      (err, stdout) => {
-        if (err) {
-          resolve(null);
-          return;
-        }
-        // Several pids can share a listening socket (a forked master). The
-        // lowest is the parent, which is the one worth signalling.
-        const pids = stdout
-          .split('\n')
-          .map((l) => Number(l.trim()))
-          .filter((n) => Number.isInteger(n) && n > 0)
-          .sort((a, b) => a - b);
-        resolve(pids[0] ?? null);
-      },
-    );
+    // A spawn can throw before it starts (EBADF, EMFILE when the daemon is short of file
+    // handles). It is best-effort, so that is a null pid, never a crash (Amendment 171).
+    try {
+      execFile(
+        'lsof',
+        // No -4/-6 filter: the server may be bound to either family, and we want
+        // the pid regardless of which one answered the probe.
+        ['-ti', `tcp:${port}`, '-sTCP:LISTEN'],
+        { timeout: 2_000 },
+        (err, stdout) => {
+          if (err) {
+            resolve(null);
+            return;
+          }
+          // Several pids can share a listening socket (a forked master). The
+          // lowest is the parent, which is the one worth signalling.
+          const pids = stdout
+            .split('\n')
+            .map((l) => Number(l.trim()))
+            .filter((n) => Number.isInteger(n) && n > 0)
+            .sort((a, b) => a - b);
+          resolve(pids[0] ?? null);
+        },
+      );
+    } catch {
+      resolve(null);
+    }
   });
 }
 

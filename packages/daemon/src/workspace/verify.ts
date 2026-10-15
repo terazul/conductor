@@ -59,6 +59,7 @@ import { registerSnapshotContributor } from '../hub.js';
 import { DEFAULT_AUTONOMY, addProjectDir, insertAgent, insertJob } from '../session/store.js';
 import { supervisor } from '../session/supervisor.js';
 import { WorkspaceError, publishNew, workspace } from './service.js';
+import { Watcher, WATCH_MAX_ENTRIES, countWatchable, setWatchLimit } from './watcher.js';
 import { type CompleteResult } from './browse.js';
 import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
 import { KeyedLock } from './lock.js';
@@ -1902,6 +1903,40 @@ async function main(): Promise<void> {
   rmSync(NEW_ROOT, { recursive: true, force: true });
   rmSync(PROJ, { recursive: true, force: true });
   check('the fixture is back as it was', !existsSync(NEW_ROOT));
+
+  console.log('\n17 · a folder too big to watch is left unwatched, not a crash (Amendment 171)');
+  {
+    const BIG = join(tmpdir(), `conductor-watchcap-${process.pid}`);
+    rmSync(BIG, { recursive: true, force: true });
+    mkdirSync(join(BIG, 'src', 'deep'), { recursive: true });
+    mkdirSync(join(BIG, 'node_modules', 'pkg'), { recursive: true });
+    for (let i = 0; i < 30; i++) writeFileSync(join(BIG, 'src', `f${i}.ts`), '');
+    for (let i = 0; i < 10; i++) writeFileSync(join(BIG, 'src', 'deep', `g${i}.ts`), '');
+    for (let i = 0; i < 500; i++) writeFileSync(join(BIG, 'node_modules', 'pkg', `n${i}.js`), '');
+    check('the limit is ten thousand entries, well above any project watched here today', WATCH_MAX_ENTRIES === 10_000);
+    check('it counts what the watcher would open: files and folders, not node_modules', countWatchable(BIG, 1_000) === 42, String(countWatchable(BIG, 1_000)));
+    check('and stops just past the limit, so a huge tree costs little', countWatchable(BIG, 5) === 6);
+    const rec = (path: string) => ({ jobId: `job_watchcap_${basename(path)}`, projectId: 'p', repoPath: path, path, branch: 'main', isolation: 'in_place', baseRef: null, createdAt: new Date().toISOString(), removedAt: null }) as unknown as WorkspaceRecord;
+    const store = { changes: () => new Map() } as unknown as ConstructorParameters<typeof Watcher>[1];
+    setWatchLimit(20);
+    const big = new Watcher(rec(BIG), store, new KeyedLock());
+    big.start();
+    check('a folder past the limit is not watched, and says why', !big.watching && big.tooBig);
+    setWatchLimit(100);
+    const fits = new Watcher(rec(BIG), store, new KeyedLock());
+    fits.start();
+    check('one under it is watched as before', fits.watching && !fits.tooBig);
+    await fits.stop();
+    setWatchLimit();
+    rmSync(BIG, { recursive: true, force: true });
+  }
+
+  // A spawn that throws before it starts (EBADF when the daemon is out of handles) is caught.
+  {
+    const probe = readFileSync(new URL('../preview/probe.ts', import.meta.url), 'utf8');
+    const fn = probe.slice(probe.indexOf('export function pidForPort'), probe.indexOf('/**', probe.indexOf('export function pidForPort')));
+    check('pidForPort catches a spawn that throws, and answers null (Amendment 171)', /try \{\s*execFile\(/.test(fn) && /\} catch \{\s*resolve\(null\);/.test(fn));
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   rmSync(join(SCRATCH, '.conductor'), { recursive: true, force: true });
