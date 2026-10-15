@@ -541,7 +541,15 @@ replied, and a line for each tool it called, though not what the tools returned)
 brief. So the developer in **bug fix** starts with the cause the debugger reported, and the
 reviewer in the full pipeline starts with what the architect, developer and validator
 concluded. It is sent once, at launch. You can read exactly what the agent was told as the
-first turn of its transcript. The files come the other way: every agent in a job works in the
+first turn of its transcript.
+
+The agents further up are passed on too, by their summaries. In a chain architect → developer →
+scribe, the scribe hears the developer whole and the architect's summary under **[architect, via
+developer]**, though it waits only for the developer. Each one further up is there once, however
+many paths lead to it, and the furthest comes first. Only what it said when it handed off goes
+on: one that never handed off, or that you ran it without, is left out. These summaries share the amount below with the
+conversations, so when there isn't room one is cut, and a line says how much of it was left out.
+**↻ re-run after this** (below) tells an agent the same. The files come the other way: every agent in a job works in the
 same folder, so what an earlier agent changed is already there.
 
 How much of it is passed on is about a quarter of the next agent's model's context window,

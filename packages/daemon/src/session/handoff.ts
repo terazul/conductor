@@ -15,7 +15,10 @@
  *
  * On top of that comes what the agent said about its own work when it handed off, with its
  * `hand_off` tool (Amendment 104), or what a person sent for it from Needs You: the summary,
- * printed first, whole, outside the cap.
+ * printed first, whole, outside the cap. An agent further up than the ones it waited for is
+ * passed on by that summary alone, "via" the one it came through, and counted against the cap
+ * (`Upstream.via`): a chain's first stage would otherwise reach its last only quoted in the
+ * second's launch prompt, which is the first thing the cap drops.
  *
  * It is capped at about a quarter of the next model's context window (`handoffCap`),
  * shared between the agents it waited for. Over the cap the OLDEST goes first and the last
@@ -235,10 +238,17 @@ export interface Upstream {
    * Needs You (Amendment 104).
    */
   summary?: string;
+  /**
+   * The role of the agent it was reached through, for one further up than those the reader
+   * waited for (Amendment 161): only its summary is passed on, headed `[role, via <this>]`, and
+   * it is counted against the cap like a conversation.
+   */
+  via?: string;
 }
 
-/** What `handoffSection` has of one upstream: its turns, or its last reply as the one turn. */
+/** What `handoffSection` has of one upstream: its turns, or its last reply as the one turn. None for one further up. */
 function turnsOf(u: Upstream): readonly Turn[] {
+  if (u.via) return [];
   if (u.turns && u.turns.length > 0) return u.turns;
   const reply = u.reply?.trim();
   return reply ? [{ kind: 'agent', text: reply }] : [];
@@ -359,16 +369,32 @@ function noReply(u: Upstream): string {
   return u.status === 'stopped' ? '(It was stopped before it wrote a reply.)' : '(It finished without a written reply.)';
 }
 
-/** `[role]`, or `[role — stopped, so it may not have finished its part]`, as a helper's report says it. */
+/** `[role]`, `[role, via role]`, or `[role — stopped, so it may not have finished its part]`, as a helper's report says it. */
 function head(u: Upstream): string {
+  if (u.via) return `[${u.role}, via ${u.via}]`;
   return !u.status || u.status === 'done' ? `[${u.role}]` : `[${u.role} — ${u.status}, so it may not have finished its part]`;
 }
 
 /** What an upstream's summary (Amendment 104) is printed under. */
 const SUMMARY_HEAD = 'Its summary of its work:\n';
 
+/** What one further up needs of the cap: its summary as the section sets it down. */
+const viaCost = (u: Upstream): number => (u.summary?.trim() ? SUMMARY_HEAD.length + u.summary.trim().length + 2 : 0);
+
+/** The summary of one further up, in `allowance` characters: its beginning, and how much of it is left out. */
+function viaBody(u: Upstream, allowance: number): string {
+  const summary = u.summary?.trim() ?? '';
+  if (viaCost(u) <= allowance) return `${SUMMARY_HEAD}${summary}`;
+  const kept = summary.slice(0, Math.max(0, allowance - SUMMARY_HEAD.length - 2));
+  const left = (summary.length - kept.length).toLocaleString('en');
+  return kept
+    ? `${SUMMARY_HEAD}${kept}\n… (the last ${left} characters of its summary are left out to fit)`
+    : `(Its summary, ${left} characters, is left out to fit.)`;
+}
+
 /** One upstream under its heading: its summary, what was left out, its conversation, and a note if it wrote no reply. */
 function upstreamBody(u: Upstream, allowance: number): string {
+  if (u.via) return viaBody(u, allowance);
   const all = turnsOf(u);
   const { kept, dropped } = fitTurns(all, allowance);
   const parts: string[] = [];
@@ -391,21 +417,30 @@ function upstreamBody(u: Upstream, allowance: number): string {
  */
 export function handoffSection(upstream: readonly Upstream[], cap: number, opening?: string): string {
   if (upstream.length === 0) return '';
-  const who = upstream.length === 1 ? 'the agent' : 'the agents';
+  const who = upstream.filter((u) => !u.via).length === 1 ? 'the agent' : 'the agents';
   const all = upstream.every((u) => !u.status || u.status === 'done');
   // What one upstream quotes of another is said once, before any of it is counted against the cap (Amendment 120).
   const parts = dropRepeats(upstream);
   const allowance = shareCap(
     cap,
-    parts.map((u) => turnsOf(u).reduce((n, t) => n + costOf(t), 0)),
+    parts.map((u) => (u.via ? viaCost(u) : turnsOf(u).reduce((n, t) => n + costOf(t), 0))),
   );
+  // Ones further up are there by their summary alone.
+  const via = upstream.filter((u) => u.via).length;
+  const further =
+    via === 0
+      ? ''
+      : via === 1
+        ? ' The agent further up, marked "via" the agent that waited for it, is given only by its summary.'
+        : ' The agents further up, marked "via" the agent that waited for them, are given only by their summaries.';
   return [
     (opening ??
       (all
         ? `You started after ${who} before you finished.`
         : `You were started without waiting for every agent before you to finish.`)) +
       ` They worked in this same folder, so what they changed is already here. What each was told and said, in ` +
-      `order, with a line for each tool it called (what the tools returned is left out):`,
+      `order, with a line for each tool it called (what the tools returned is left out):` +
+      further,
     ...parts.map((u, i) => `\n${head(u)}\n${upstreamBody(u, allowance[i]!)}`),
   ].join('\n');
 }
