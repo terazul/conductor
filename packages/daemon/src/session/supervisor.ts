@@ -149,7 +149,7 @@ import {
 } from './store.js';
 import { reportedWindow } from './windows.js';
 import { finishJob, type Finish } from './finish.js';
-import { broadcastScheduled, deleteScheduled, failScheduled, nextWhenDone } from './schedule.js';
+import { broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, nextForSlot, nextWhenDone } from './schedule.js';
 
 const exec = promisify(execFile);
 
@@ -223,6 +223,20 @@ export function strandNote(role: string | null): string {
  * event log, as `isStrandNote`'s is. One you paused yourself stays paused.
  */
 export const HOLD_NOTE = 'paused with everything until the scheduled time — it carries on by itself then';
+
+/**
+ * Why an agent is queued after you wrote to it (Amendment 167): every slot was taken, so the
+ * message waits as a `'slot'` row and goes when one frees. Its own sentence, so cancelling the
+ * message knows the queued status is this one's to undo.
+ */
+export const SLOT_WAIT_NOTE = 'waiting for a slot — your message goes when one frees';
+
+/**
+ * Why an agent is queued when the decision that landed while its run unwound found every slot
+ * taken (Amendment 167). Not SLOT_WAIT_NOTE: there is no message of yours to cancel, and
+ * cancelling one sent after it must not undo this.
+ */
+export const SLOT_RESUME_NOTE = 'waiting for a slot — it carries on when one frees';
 
 /**
  * Why an agent can't run: the folder its job works in is gone (Amendment 114). Removed by
@@ -946,10 +960,24 @@ export class Supervisor implements AgentControl {
    * state change; cheap enough to be unconditional.
    */
   pump(): void {
-    // Everything is paused until a time (Amendment 111): nothing starts by itself.
-    if (this.#hold) return;
     for (const agent of listAgents(this.#db)) {
       if (agent.status !== 'queued') continue;
+      /*
+       * A message sent while every slot was taken (Amendment 167): it goes in the first slot
+       * that frees, as `sendMessage` would have sent it then — past its job's pause, its
+       * wait for the model and its dependencies, none of which stop a message you send. Past
+       * a hold too, which never applied to your own message; the ask to hand off is ours, and
+       * waits for the hold to end like anything else that starts by itself.
+       */
+      const message = nextForSlot(this.#db, agent.id);
+      if (message && !(this.#hold && message.text === HANDOFF_ASK)) {
+        if (this.#slotsUsed() >= slotLimit()) return;
+        if (this.#active.has(agent.id) || this.#halting.has(agent.jobId)) continue;
+        this.#sendForSlot(agent, message);
+        continue;
+      }
+      // Everything is paused until a time (Amendment 111): nothing starts by itself.
+      if (this.#hold) continue;
       // Waiting for the model to come back (Amendment 123): it frees its slot while it waits
       // and starts when its time comes, like any queued agent.
       if (retryBook().waiting(agent.id)) continue;
@@ -1299,7 +1327,17 @@ export class Supervisor implements AgentControl {
     // A decision that landed while this run was still unwinding.
     if (this.#resumeWanted.delete(agentId)) {
       const fresh = getAgent(this.#db, agentId);
-      if (fresh?.sdkSessionId) {
+      if (fresh?.sdkSessionId && this.#slotsUsed() >= slotLimit()) {
+        // Its slot was taken while it unwound (Amendment 167): queued, as `resumeParked` queues
+        // one with no slot, and pump() resumes it — with the same prompt — when one frees.
+        this.#reopenJob(fresh.jobId);
+        setAgentStatus(this.#db, agentId, 'queued');
+        eventLog().emit(
+          { projectId: fresh.projectId, jobId: fresh.jobId, agentId },
+          { kind: 'status', status: 'queued', error: SLOT_RESUME_NOTE },
+        );
+        this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+      } else if (fresh?.sdkSessionId) {
         void this.#launch(agentId, fresh.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
         return;
       }
@@ -1471,6 +1509,18 @@ export class Supervisor implements AgentControl {
       // Before the roll-up, so a job whose agent is about to go again isn't finished (Amendment 157).
       this.#sendWhenDone(agent);
     }
+    // Another message of yours waits for a slot (Amendment 167): queued again, before the
+    // roll-up, so the job isn't finished, and pump() sends it — ahead of any `done` one.
+    const ended = getAgent(this.#db, agentId);
+    if (
+      ended &&
+      (ended.status === 'done' || ended.status === 'failed') &&
+      !this.#resumeWanted.has(agentId) &&
+      !this.#halting.has(agent.jobId) &&
+      nextForSlot(this.#db, agentId)
+    ) {
+      this.#waitForSlot(ended);
+    }
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.#rollUpJob(agent.jobId);
   }
@@ -1492,6 +1542,8 @@ export class Supervisor implements AgentControl {
    */
   #sendWhenDone(agent: Agent): void {
     if (this.#resumeWanted.has(agent.id) || this.#halting.has(agent.jobId)) return;
+    // One you sent earlier still waits for a slot (Amendment 167): it goes first, this at the next `done`.
+    if (nextForSlot(this.#db, agent.id)) return;
     const m = nextWhenDone(this.#db, agent.id);
     if (!m) return;
     if (this.#hold) {
@@ -1708,6 +1760,13 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!job || job.status === 'paused' || job.status === 'failed' || !existsSync(job.worktreePath)) return false;
     if (budgetRefusal(agent)) return false;
+    // Every slot taken (Amendment 167): it waits for one as your message would, and goes then.
+    if (this.#slotsUsed() >= slotLimit()) {
+      insertScheduled(this.#db, agent.id, null, HANDOFF_ASK, 'slot', true);
+      broadcastScheduled(this.#db);
+      this.#waitForSlot(agent);
+      return true;
+    }
     void this.#launchWithPrompt(agent.id, agent.sdkSessionId, HANDOFF_ASK, true).catch((err) => console.error(`[supervisor] ${agent.id} resume threw`, err));
     return true;
   }
@@ -2048,8 +2107,11 @@ export class Supervisor implements AgentControl {
 
   // ── user controls ─────────────────────────────────────────────────────────
 
-  /** Mid-task message. Resumes a finished or parked agent if it is not live. */
-  sendMessage(agentId: string, text: string, synthetic = false): 'sent' | 'resumed' {
+  /**
+   * Mid-task message. Resumes a finished or parked agent if it is not live — in a free slot.
+   * With every slot taken it waits for one (Amendment 167): `'queued'`.
+   */
+  sendMessage(agentId: string, text: string, synthetic = false): 'sent' | 'resumed' | 'queued' {
     const runner = this.#runners.get(agentId);
     if (runner?.send(text, synthetic)) return 'sent';
 
@@ -2062,6 +2124,19 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (job && !existsSync(job.worktreePath)) {
       throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
+    }
+
+    /*
+     * Every slot taken, or one of yours already waiting, which goes first (Amendment 167): it
+     * waits as a `'slot'` row, which a restart keeps, and pump() sends it when a slot frees.
+     * So does one sent while its last run is still unwinding, which used to start a second run
+     * beside it: it goes once that run has settled. Over the limit only as Amendment 132 is.
+     */
+    if (this.#active.has(agentId) || this.#slotsUsed() >= slotLimit() || nextForSlot(this.#db, agentId)) {
+      insertScheduled(this.#db, agentId, null, text, 'slot', synthetic);
+      broadcastScheduled(this.#db);
+      if (!this.#active.has(agentId) && agent.status !== 'queued') this.#waitForSlot(agent);
+      return 'queued';
     }
 
     /*
@@ -2078,6 +2153,73 @@ export class Supervisor implements AgentControl {
      */
     void this.#launchWithPrompt(agentId, agent.sdkSessionId, text, synthetic).catch((err) => console.error(`[supervisor] ${agentId} resume threw`, err));
     return 'resumed';
+  }
+
+  // ── a message waiting for a slot (Amendment 167) ──────────────────────────
+
+  /** Queued with the reason, so you see why it hasn't started and cancelling can undo it. */
+  #waitForSlot(agent: Agent): void {
+    setAgentStatus(this.#db, agent.id, 'queued');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
+      { kind: 'status', status: 'queued', error: SLOT_WAIT_NOTE },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agent.id)!] });
+  }
+
+  /**
+   * pump() gave this agent a slot: its oldest waiting message goes, in its session, as it would
+   * have when you sent it. Refused as `sendMessage` refuses — a cap reached or the folder gone
+   * while it waited — the row keeps the reason, as a timed one does, and the agent says why.
+   */
+  #sendForSlot(agent: Agent, m: { id: string; text: string; synthetic: boolean }): void {
+    const job = getJob(this.#db, agent.jobId);
+    const refusal = budgetRefusal(agent);
+    if (!agent.sdkSessionId || !job || refusal || !existsSync(job.worktreePath)) {
+      failScheduled(
+        this.#db,
+        m.id,
+        refusal ?? (job ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : `agent ${agent.id} cannot receive messages yet`),
+      );
+      broadcastScheduled(this.#db);
+      if (refusal) this.#pause(agent.id, budgetNote(agent));
+      else if (job) this.#refuseGone(agent.id, job);
+      return;
+    }
+    deleteScheduled(this.#db, m.id);
+    broadcastScheduled(this.#db);
+    // The message is its resume: not the restart nudge a restart left it owed.
+    this.#restarted.delete(agent.id);
+    void this.#launchWithPrompt(agent.id, agent.sdkSessionId, m.text, m.synthetic).catch((err) => console.error(`[supervisor] ${agent.id} resume threw`, err));
+  }
+
+  /**
+   * You cancelled a message waiting for a slot (routes/schedule.ts). With none left, an agent
+   * that was queued only for it goes back to what it was — done, failed, paused, stopped or
+   * waiting on your answer — so pump() doesn't start it unasked. The ask to hand off,
+   * cancelled, leaves it held for you, as it would have been without the ask.
+   */
+  slotMessageCancelled(agentId: string): void {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent || agent.status !== 'queued' || this.#active.has(agentId) || nextForSlot(this.#db, agentId)) return;
+    const statuses = eventLog()
+      .forAgent(agentId)
+      .flatMap((e) => (e.payload.kind === 'status' ? [e.payload] : []));
+    const last = statuses.at(-1);
+    const before = statuses.at(-2);
+    if (last?.status !== 'queued' || last.error !== SLOT_WAIT_NOTE || !before || before.status === 'queued') return;
+    const at = { projectId: agent.projectId, jobId: agent.jobId, agentId };
+    if (before.status === 'working') {
+      const held = this.#holdsHandoff(agent);
+      setAgentStatus(this.#db, agentId, 'done');
+      setHandoff(this.#db, agentId, { summary: getHandoff(this.#db, agentId).summary, held });
+      eventLog().emit(at, { kind: 'status', status: 'done', ...(held ? { error: HANDOFF_HELD_NOTE } : {}) });
+    } else {
+      setAgentStatus(this.#db, agentId, before.status, before.blockMode ?? null);
+      eventLog().emit(at, { ...before });
+    }
+    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    this.#rollUpJob(agent.jobId);
   }
 
   // ── re-run from here (Amendment 102) ──────────────────────────────────────

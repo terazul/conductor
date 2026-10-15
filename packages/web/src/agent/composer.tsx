@@ -39,7 +39,7 @@ import {
   useProviders,
 } from '../lib/providers.js';
 import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } from '../spawn/autonomy.js';
-import { queueWhenDone, scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { queueWhenDone, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
@@ -274,9 +274,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const submit = async () => {
     const body = text.trim();
     if (body.length === 0) return;
-    const ok = await send.run('Sending a message', () =>
-      sendMessage(agent.id, { text: body }),
-    );
+    // Every slot taken (Amendment 167): it waits for one, and the notice says so.
+    const ok = await send.run('Sending a message', () => sendMessage(agent.id, { text: body }), (r) => sentText(r));
     // Only clear the box on success — a 404 must not eat what you wrote.
     if (ok) setText('');
   };

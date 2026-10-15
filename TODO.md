@@ -108,6 +108,10 @@ the last of it on 12 Oct).
 
 - [x] **A throw before a run begins keeps its slot (wave 11, A1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 149.*
 
+- [x] **A sent message ignores the slot limit (wave 11, A2).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): the message waits for a slot and survives a restart.* *Done 15 Oct: Amendment 167 (a `'slot'` row in `scheduled_messages`, the agent `queued`; pump sends it in the first free slot, held or not; the ask to hand off and a relaunch wait the same way).*
+
+- [ ] **A decision that lands while a messaged run is finishing is lost.** Found (15 Oct) in wave 11's A2 (Amendment 167). The relaunch a decision asks for (`#resumeWanted`, `supervisor.ts`) only follows runs started by `#launch`; a run started by `#launchWithPrompt` (your message, a waiting `'slot'` message, the ask to hand off) ends `done` and nothing runs again. It was so before Amendment 167. Starts at: `#launchWithPrompt`'s settle in `supervisor.ts`, beside `#launch`'s `#resumeWanted` check; a check in `session/verify.ts` §15 next to the unwinding-relaunch one.
+
 - [x] **The arbiter matches the wrong request (wave 11, A3).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 150.*
 
 - [x] **A 4th developer is refused as a send-back, even on new work.** Found (14 Oct) by the user: send-backs were counted per role, not per piece of work. *Done 14 Oct: Amendment 151 (counted per lane, a role and a name; helpers in all a launch choice, up to 48).*
