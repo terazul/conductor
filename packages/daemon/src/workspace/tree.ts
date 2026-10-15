@@ -30,7 +30,7 @@
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FileNode, FileTreeResponse } from '@conductor/shared';
-import { isRepo, listFiles, nestedBranch, toPosix, untrackedDirs } from './git.js';
+import { checkIgnore, isRepo, listFiles, nestedBranch, toPosix, untrackedDirs } from './git.js';
 import type { ChangeSet } from './changes.js';
 
 /**
@@ -155,21 +155,33 @@ const MAX_EMPTY_PROBES = 2_000;
  * from the Files screen was there on disk and nowhere on screen. `untrackedDirs` names
  * the untracked folders; this opens them, `budget` folders at most per tree read, and
  * returns the ones with nothing listable in them. A nested repo is left to Amendment 90.
+ *
+ * Level by level, so .gitignore is asked once per depth (Amendment 152): an ignored
+ * subfolder is dropped before it is opened, so neither it nor anything under it is
+ * listed — what `git status --ignored` calls ignored stays out of Files.
  */
-function emptyUnder(abs: string, rel: string, budget: { left: number }, depth = 0): string[] {
-  if (budget.left <= 0 || depth > 12 || hasDotGit(abs)) return [];
-  budget.left -= 1;
-  let entries;
-  try {
-    entries = readdirSync(abs, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const kids = entries.filter((e) => !NEVER_LISTED.has(e.name));
-  if (kids.length === 0) return [rel];
+async function emptyUnder(worktree: string, roots: string[], budget: { left: number }): Promise<string[]> {
   const out: string[] = [];
-  for (const e of kids) {
-    if (e.isDirectory()) out.push(...emptyUnder(join(abs, e.name), `${rel}/${e.name}`, budget, depth + 1));
+  let level = roots;
+  for (let depth = 0; level.length > 0 && budget.left > 0 && depth <= 12; depth += 1) {
+    const next: string[] = [];
+    for (const rel of level) {
+      if (budget.left <= 0) break;
+      const abs = join(worktree, rel);
+      if (hasDotGit(abs)) continue;
+      budget.left -= 1;
+      let entries;
+      try {
+        entries = readdirSync(abs, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      const kids = entries.filter((e) => !NEVER_LISTED.has(e.name));
+      if (kids.length === 0) out.push(rel);
+      for (const e of kids) if (e.isDirectory()) next.push(`${rel}/${e.name}`);
+    }
+    const ignored = await checkIgnore(worktree, next);
+    level = next.filter((rel) => !ignored.has(rel));
   }
   return out;
 }
@@ -346,12 +358,8 @@ export async function buildTree(
     : [walkFiles(worktree, cap * 5), [] as string[]];
 
   const top = classifyLevel(worktree, rawEntries, '');
-  const budget = { left: MAX_EMPTY_PROBES };
-  for (const raw of untracked) {
-    const rel = raw.slice(0, -1);
-    if (rel.length === 0 || !listed(rel)) continue;
-    top.emptyDirs.push(...emptyUnder(join(worktree, rel), rel, budget));
-  }
+  const roots = untracked.map((raw) => raw.slice(0, -1)).filter((rel) => rel.length > 0 && listed(rel));
+  top.emptyDirs.push(...(await emptyUnder(worktree, roots, { left: MAX_EMPTY_PROBES })));
 
   // Amendment 90: expand every nested-repo boundary found at the root, in
   // parallel, each recursing into whatever it contains of its own.

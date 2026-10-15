@@ -169,6 +169,31 @@ async function verbsOn(r: Root, opts: { git: boolean }): Promise<void> {
     rmSync(at('scratch'), { recursive: true });
     rmSync(at('src/empty'), { recursive: true });
     rmSync(at('node_modules'), { recursive: true });
+
+    // Amendment 152: inside an untracked folder, an empty folder .gitignore excludes is not listed.
+    put(r.dir, 'scratch/.gitignore', 'ign/\n*.tmp\n');
+    for (const d of ['plain', 'ign/kid', 'x.tmp', 'deep/ign', 'deep/ok', 'nested/e']) mkdirSync(at(`scratch/${d}`), { recursive: true });
+    sh(at('scratch/nested'), 'init', '-q');
+    const reply = await send<FileTreeResponse>('GET', r.url('tree'));
+    const shown = flatten(reply.body.root).filter((n) => n.type === 'dir').map((n) => n.path);
+    // What git itself calls ignored here, the listing `git status --ignored` is built on.
+    const gitIgnored = sh(r.dir, 'ls-files', '-o', '-i', '--directory', '--exclude-standard').split('\n').filter(Boolean);
+    const underIgnored = shown.filter((d) => gitIgnored.some((g) => `${d}/`.startsWith(g)));
+    check('git calls these ignored', ['scratch/ign/', 'scratch/x.tmp/', 'scratch/deep/ign/'].every((g) => gitIgnored.includes(g)), gitIgnored.join(','));
+    check('an ignored empty folder under an untracked one is hidden, by name and by glob', !shown.includes('scratch/ign') && !shown.includes('scratch/x.tmp') && !shown.includes('scratch/deep/ign'), shown.join(','));
+    check("and so are an ignored folder's own empty folders", !shown.includes('scratch/ign/kid'), shown.join(','));
+    check('a plain empty folder under an untracked one is shown, at any depth', shown.includes('scratch/plain') && shown.includes('scratch/deep/ok'), shown.join(','));
+    check('Files lists nothing git calls ignored', underIgnored.length === 0, underIgnored.join(','));
+    check('a nested repo in the untracked folder still reads: 200, and its folder is there', reply.status === 200 && shown.includes('scratch/nested'), `${reply.status} ${shown.join(',')}`);
+    rmSync(at('scratch'), { recursive: true });
+  } else {
+    // No git, so no .gitignore applies: every empty folder is listed (Amendment 152).
+    put(r.dir, 'scratch/.gitignore', 'ign/\n');
+    mkdirSync(at('scratch/ign/kid'), { recursive: true });
+    mkdirSync(at('scratch/plain'));
+    const shown = flatten((await send<FileTreeResponse>('GET', r.url('tree'))).body.root).map((n) => n.path);
+    check('a folder with no git lists every empty folder, .gitignore or not', shown.includes('scratch/ign/kid') && shown.includes('scratch/plain'), shown.join(','));
+    rmSync(at('scratch'), { recursive: true });
   }
   const again = await folder('notes/2026/oct');
   check('again → 409 "already exists"', again.status === 409 && /already exists$/.test(again.body.error), show(again));
@@ -359,7 +384,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, recursive delete, and the log.\n`
+      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 152).\n`
       : `\nAmendment 138 files: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
