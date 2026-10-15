@@ -1,5 +1,5 @@
 /**
- * The context windows the engines have reported.  TRACK A.  (Amendments 120, 161)
+ * The context windows the engines have reported.  TRACK A.  (Amendments 120, 163)
  *
  * `handoffCap` (handoff.ts) is a quarter of the next model's window. It used to know only a
  * small table of floors, because nothing read a window from anywhere. The model lists do
@@ -9,7 +9,7 @@
  *   Copilot      `capabilities.limits.max_context_window_tokens` on each model of its list
  *   Claude       `max_input_tokens` on each model of the gateway's `GET /v1/models`, when the
  *                gateway says (Claude Code's own list has no window); and
- *                `modelUsage[model].contextWindow` on every `result` (Amendment 161), which is
+ *                `modelUsage[model].contextWindow` on every `result` (Amendment 163), which is
  *                the window that run had
  *
  * It is written by whoever lists the models (`copilotModels`, `openRouterModels`, `catalog`)
@@ -21,7 +21,7 @@
  * runs the base one unless asked for `[1m]`). So a list never overwrites a window a run
  * reported, and a run always overwrites a list's.
  *
- * KEPT ACROSS A RESTART (Amendment 161, migration 270). `initWindows(db)` at startup loads
+ * KEPT ACROSS A RESTART (Amendment 163, migration 270). `initWindows(db)` at startup loads
  * `model_windows` and keeps the handle; from then on each window that changes is written there
  * too, and one that is the same as before is not written again. Without it (a test that never
  * calls it) the windows are kept in memory only, as before. A write that fails is logged and
@@ -88,7 +88,7 @@ export function recordWindows(provider: string, models: Iterable<{ id: string; t
 }
 
 /**
- * The windows one Claude result reports, as `{ id, tokens }` (Amendment 161). Pure.
+ * The windows one Claude result reports, as `{ id, tokens }` (Amendment 163). Pure.
  *
  *  - Each `modelUsage` entry's `contextWindow`, under its canonical id (`canonicalModel`, else its
  *    key) and under the key when that differs.

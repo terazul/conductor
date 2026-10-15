@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- 270_model_windows — Track A. The context windows the engines reported outlive a restart (Amendment 161).
+-- 270_model_windows — Track A. The context windows the engines reported outlive a restart (Amendment 163).
 --
 -- APPEND-ONLY. Once applied, never edited (db/index.ts records it by name).
 --

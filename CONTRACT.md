@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 161 — post-merge, applied. **A Claude run's own context window is kept, under the model's alias and its full id, and every window outlives a restart, so the hand-off cap uses the real one from the first run on.**
+### Amendment 163 — post-merge, applied. **A Claude run's own context window is kept, under the model's alias and its full id, and every window outlives a restart, so the hand-off cap uses the real one from the first run on.**
 
 Daemon (`session/windows.ts`, `session/backends/claude.ts`, `index.ts`, `session/verify.ts`, migration
 `270_model_windows.sql` new) and `docs/MANUAL.md` (§ the hand-off, one paragraph). No wire, shared or web
@@ -221,7 +221,7 @@ the database. `handoffCap`, `contextWindow`, the floor table and the `[1m]` rule
   `contextWindow` is kept under its `canonicalModel` (else its key) and under the key when that differs, and
   under the agent's own model when that is an alias that names the entry as `matchModel` does
   (`metrics.ts:165`: `opus` names `claude-opus-4-7`). The supervisor looks the window up by the agent's model
-  (`#handoffCapOf`, `supervisor.ts:1157-1159`, unchanged), so an agent launched on `opus` finds the window
+  (`#handoffCapOf`, `supervisor.ts:1158-1160`, unchanged), so an agent launched on `opus` finds the window
   its own run reported. `default`, or an alias that names none of the entries, adds no name. Other models a
   run used (a subagent's) are kept under their own ids.
 - **`[1m]` is still not looked up** (`reportedWindow`, `windows.ts:150-152`, as before), and now not
@@ -242,7 +242,7 @@ the database. `handoffCap`, `contextWindow`, the floor table and the `[1m]` rule
   (`copilot.ts:227`, `:250`; `models.ts:290`), and they now persist too. `reportedWindow` is unchanged for
   the supervisor, and for H2 (track 2) when it reads the registry. `forgetWindows` (verify only) clears the
   table as well.
-- **The MANUAL** (`docs/MANUAL.md:547-556`) says a Claude run's window counts and wins over a list's, and
+- **The MANUAL** (`docs/MANUAL.md:555-564`) says a Claude run's window counts and wins over a list's, and
   that the windows are kept across a restart. Its line saying the daemon forgets them until Spawn is opened
   is gone.
 
@@ -254,10 +254,10 @@ row, which costs one row. An alias whose model changes (a new `opus`) takes the 
 result on it. Tokens are still not counted (Amendment 120; H2 measures the ratio). Not looked at on a real
 model: wave-11.md §5 lists "the H1 windows" among the person's checks after wave 3.
 
-*Verified:* `daemon/src/session/verify.ts`. Pure, beside 120's checks (`:2713-2752`): the canonical id, the
+*Verified:* `daemon/src/session/verify.ts`. Pure, beside 120's checks (`:2715-2754`): the canonical id, the
 key and the alias are kept; an exact id is not kept twice, and `default` or a non-matching alias adds no
 name; `[1m]` is not kept, under a `[1m]` key or for a `[1m]` agent's base id; junk is skipped; a run beats a
-list, and a later run beats an earlier one. Live, in §21 (`:5185-5262`): an agent launched on the alias
+list, and a later run beats an earlier one. Live, in §21 (`:5328-5405`): an agent launched on the alias
 `tinyrun-h1` ends with a `modelUsage` keyed `claude-tinyrun-h1-20261015` (canonical `claude-tinyrun-h1`,
 `contextWindow` 2,000), a helper model and a `[1m]` entry. The window is then kept under all three names,
 the helper's under its own, and the `[1m]` one not at all. A model list after it doesn't overwrite it. The

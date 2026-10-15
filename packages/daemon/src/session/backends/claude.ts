@@ -666,7 +666,7 @@ export class ClaudeBackend implements AgentBackend {
         // result, for the same reason `previous` is above.
         const metrics = this.#record(m, usage, outcome.costUsd - previous);
         // The window this run had, by model, for the hand-off cap: the real one from the first
-        // run on, and kept across a restart (Amendment 161). Never worth ending a run over.
+        // run on, and kept across a restart (Amendment 163). Never worth ending a run over.
         try {
           recordRunWindows('claude', m['modelUsage'], this.#scope.model);
         } catch (err) {

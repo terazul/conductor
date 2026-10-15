@@ -98,7 +98,7 @@ export async function build(): Promise<FastifyInstance> {
   const db = openDb();
   initEventLog(db);
   initHub();
-  // The models' windows kept before a restart, for the hand-off cap (Amendment 161).
+  // The models' windows kept before a restart, for the hand-off cap (Amendment 163).
   initWindows(db);
 
   // Before the token check, and unconditional: a token is opt-in, this is not.
