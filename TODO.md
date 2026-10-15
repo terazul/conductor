@@ -97,6 +97,7 @@ the last of it on 12 Oct).
 
 - [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 152 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
 
+- [x] **Docs: D1, D2, D3, the test plan and ADR 0001 (wave 11, F).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): D2 drops the links.* *Done 15 Oct: Amendment 153 (no links to the missing architecture guide; `scripts/verify-docs-links.mjs` in `make test`).*
 
 ## Housekeeping
 

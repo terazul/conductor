@@ -196,6 +196,62 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 153 — post-merge, applied. **The docs link only to files in git, and `make test` checks that they do.**
+
+Docs (`README.md`, `TODO.md`, `docs/MANUAL.md`, `docs/adr/0001-preset-stacks.md`,
+`docs/adr/0002-edit-running-stack.md`, `docs/plans/multi-provider-lanes.md`,
+`docs/plans/multi-provider-backends.md`, `docs/checks/ui-test-plan.md` new) and the build
+(`scripts/verify-docs-links.mjs` new, `Makefile`). The user, 14 Oct 2026: "Execute wave 1 of
+docs/plans/wave-11.md … following §0"; this is the plan's lane F (§2, "Docs: D1, D2, D3, the test plan
+and ADR 0001"), with *Decided (14 Oct): D2 drops the links.* *Amends Amendment 81*, which said
+`docs/ARCHITECTURE.md` lives outside git and left README's link to it: the links are gone. Nothing in the
+app changes; `docs/MANUAL.md` changes only where it linked that file and in its two lists of reading roles.
+
+- **D1, the next number.** `TODO.md:14` said "The next amendment is 148", which was stale by the next
+  merge. It now says the next number is the top one in CONTRACT.md plus one.
+- **D2, no `docs/ARCHITECTURE.md`.** README's line under the title (`README.md:7`) points to the decision
+  records in `docs/adr/` instead; its links under the suites (`:160`) and after Layout (`:185`) are taken
+  out, and the Layout line for `docs/` (`:180`) says "decision records (adr/)" where it said "the
+  architecture guide". `docs/MANUAL.md:5-6` points to `adr/`. `docs/adr/0002-edit-running-stack.md:116`
+  says there is no architecture guide, so the ADRs and the amendments carry it. The two plans
+  (`multi-provider-lanes.md:14`, `multi-provider-backends.md:199`) no longer name the file. CONTRACT's
+  own mentions (Amendments 81 and 89) are history and are left as written.
+- **D3, auditor.** The reading-role lists at `docs/MANUAL.md:372-373` and `:443-444` read "reviewer,
+  debugger, analyst, auditor", as `READ_ONLY_ROLES` (`shared/src/stack.ts:119`) and MANUAL `:552` do.
+- **The UI test plan.** `docs/checks/ui-test-plan.md` holds a heading and one line: the person pastes the
+  plan in there. The browser check in TODO ("Look at what was built in Amendments 99-129 in a browser",
+  `TODO.md:116`) links it.
+- **ADR 0001's handoff line** (`docs/adr/0001-preset-stacks.md:14-15`) cited `supervisor.ts:685-689`,
+  `handoff.ts:37-45` and an 8,000-character cap on the final reply, all gone since Amendments 101, 104
+  and 120. It now describes the whole conversation as text with the `hand_off` summary on top
+  (`#promptFor`, `supervisor.ts:1168-1190`; `handoffSection`, `handoff.ts:392`), a chain carrying the
+  earlier parts inside each upstream's own launch prompt, the cap of a quarter of the window shared out
+  (`handoffCap` `:79`, `shareCap` `:209`) and `dropRepeats` (`:313`), with a dated note saying it was
+  corrected. The ADR's decision (E and F) is unchanged; the note says the reviewer now sees the plan
+  inside the developer's conversation unless the cap leaves it out.
+- **The link check** (`scripts/verify-docs-links.mjs`, in `make test` after the install check,
+  `Makefile:175`). It reads README.md, TODO.md, docs/MANUAL.md and every tracked `.md` under `docs/`,
+  takes `[text](target)` links (`:31`) and reference definitions (`:32`), skips http(s), mailto, pure
+  `#anchor` links, fenced code blocks (`:48`) and inline code spans, strips the `#fragment`, resolves
+  the rest against the linking file's folder (a leading `/` from the repo root) and needs it in
+  `git ls-files` (`:71`). Only `.md` targets are checked. It prints `docs links: PASS — N links in M
+  files`, or each bad link as `file:line → target` and exits 1.
+
+*Not done / not decided:* links to anything but a `.md` file (README's `mockups/conductor.html`, folder
+links such as `docs/adr/`) are not checked, as the plan asks only for `.md`. CONTRACT.md
+and PLAN.md are not read by the check, since the plan names README, MANUAL, TODO and `docs/`. ADR 0001's
+risk "Plan-aware review" (`:97`) and "Handoff growth, if G is ever taken" (`:98`) still read as of
+Amendment 82; only the stale factual line was to change. The UI test plan itself is the person's to paste.
+
+*Verified:* before the D2 edits the check failed with 4 of 34 links (`README.md:7`, `:160`, `:186` →
+`docs/ARCHITECTURE.md`; `docs/MANUAL.md:6` → `ARCHITECTURE.md`), and the two plans' and ADR 0002's
+mentions were not links, so were found by `git grep`. After: `docs links: PASS — 31 links in 46 files`;
+no other link was broken. Breaking TODO's new link on purpose gave `TODO.md:116 →
+docs/checks/ui-test-plann.md` and exit 1, then was put back. A throwaway probe file showed a good
+`#fragment`, a title, `<…>`, `/README.md` and `../TODO.md` pass, a bad `#fragment`, a bad `../` and a bad
+reference definition fail, and http, mailto, `#anchor`, a code span, a ``` fence and a `~~~~` fence
+holding a ``` line are skipped. `pnpm -r typecheck` clean; `make test`: 28 PASS.
+
 ### Amendment 152 — post-merge, applied. **An empty folder .gitignore excludes is not listed in Files, inside an untracked folder or under an ignored one.**
 
 Daemon only (`workspace/tree.ts`, `workspace/verify-files-verbs.ts`). The user, 14 Oct 2026: "Execute
