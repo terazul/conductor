@@ -28,8 +28,8 @@ import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
 import { useFileTree } from '../files/useWorkspace.js';
-import { foldAll, unfoldAll, updateFolds, useFolds } from './folds.js';
-import { Transcript, buildTranscript, replyKeys } from './transcript.js';
+import { foldEvery, shownFolded, unfoldEvery, updateFoldState, useFolds, useUnfolds } from './folds.js';
+import { Transcript, buildTranscript, replyKeys, startFoldedKeys } from './transcript.js';
 import { Composer } from './composer.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
@@ -508,9 +508,17 @@ export function AgentScreen() {
   const worktreePath = links?.worktreePath ?? '';
   const turns = useMemo(() => buildTranscript(events, worktreePath), [events, worktreePath]);
   const replies = useMemo(() => replyKeys(turns), [turns]);
+  /*
+   * An agent that may start helpers is sent their report as an auto turn, and in its
+   * transcript those start folded (Amendment 164). `helperCap` is what the daemon checks
+   * before it sends one (`#takeHelperReport`), so it is every agent that can get one.
+   */
+  const orchestrator = (agent?.helperCap ?? 0) > 0;
+  const startFolded = useMemo(() => startFoldedKeys(turns, orchestrator), [turns, orchestrator]);
   const folds = useFolds();
-  const foldedHere = active !== null ? (folds[active] ?? []) : [];
-  const anyOpen = replies.some((k) => !foldedHere.includes(k));
+  const unfolds = useUnfolds();
+  const anyOpen =
+    active !== null && replies.some((k) => !shownFolded({ folds, unfolds }, active, k, startFolded.includes(k)));
 
   /*
    * Where to scroll (F15; the decision is `scrollIntent` in scroll.ts). Arriving lands on
@@ -731,8 +739,8 @@ export function AgentScreen() {
                 className="fl-btn is-ghost"
                 title={anyOpen ? 'Fold every reply to one line' : 'Unfold every reply'}
                 onClick={() =>
-                  updateFolds((f) =>
-                    anyOpen ? foldAll(f, agent.id, replies) : unfoldAll(f, agent.id),
+                  updateFoldState((s) =>
+                    anyOpen ? foldEvery(s, agent.id, replies, startFolded) : unfoldEvery(s, agent.id, startFolded),
                   )
                 }
               >
@@ -791,6 +799,7 @@ export function AgentScreen() {
             role={agent.role}
             streaming={agent.status === 'working'}
             links={links}
+            startFolded={startFolded}
           />
           {/*
             * Without it, the follow rule's restraint reads as "nothing is happening":

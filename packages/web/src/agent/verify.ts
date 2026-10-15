@@ -30,16 +30,22 @@ import {
   MAX_FOLD_AGENTS,
   MAX_FOLDS,
   foldAll,
+  foldEvery,
   foldLine,
   isFolded,
   parseFolds,
   setFold,
+  shownFolded,
+  toggleFold,
   unfoldAll,
+  unfoldEvery,
+  updateFoldState,
+  type FoldState,
   type Folds,
 } from './folds.js';
 import { lineCount, renderMarkdown, tableCells } from './markdown.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
-import { buildTranscript, replyKeys } from './transcript.js';
+import { Transcript, buildTranscript, replyKeys, startFoldedKeys } from './transcript.js';
 import { isMermaid, mermaidReason } from '../lib/mermaid.js';
 import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
@@ -528,7 +534,8 @@ console.log('\nYour turns · what you typed reads in its own colour (Amendment 1
       /color: var\(--you\)/.test(rule('.ag-lastask-t')));
   const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
   check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
-  check('a turn Conductor sent for you is marked auto and keeps the plain look', /is-you\$\{t\.synthetic \? ' is-auto' : ''\}/.test(tsx));
+  // Amendment 164: a turn Conductor sent is its own component now, so it can fold; your own turns are not marked auto.
+  check('a turn Conductor sent for you is marked auto and keeps the plain look', /className=\{`ag-msg is-you is-auto\$\{folded \? ' is-folded' : ''\}`\}/.test(tsx) && /className="ag-msg is-you" id=/.test(tsx));
   check('no status colour on your turn', !/var\(--(need|live|done|fail|queue|idle)\)/.test(body + rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
 }
 
@@ -1086,9 +1093,84 @@ console.log('\n· "merge into main and clean up when done" in the agent\'s setti
   check('it sits with the guardrails, so it folds with them', comp.indexOf("id: 'merge_when_done'") > comp.indexOf('const PILLS: PillDef[] = [') && comp.indexOf("id: 'merge_when_done'") < comp.indexOf('interface ModeDef'));
 }
 
+console.log("\n· an orchestrator's auto turns start folded, and one you open stays open (Amendment 164)");
+{
+  const at = (seq: number, payload: unknown): Event =>
+    ({ seq, ts: '2026-10-15T00:00:00Z', projectId: 'p', jobId: 'j', agentId: 'o', payload }) as Event;
+  const REPORT = 'Your helper has finished. What each was told and said, in order:\n\n[developer]\nHELPER_BODY: built the lane';
+  const run = buildTranscript([
+    at(1, { kind: 'user_text', text: 'run track 6' }),
+    at(2, {
+      kind: 'tool_start',
+      toolUseId: 'tu1',
+      tool: 'mcp__conductor__start_helper',
+      label: 'start_helper',
+      input: { role: 'developer', task: 'Build lane O3: fold the auto turns', name: 'o3' },
+    }),
+    at(3, { kind: 'user_text', text: REPORT, synthetic: true }),
+    at(4, { kind: 'text', text: 'ORCH_REPLY: the developer built it; next the reviewer.' }),
+  ]);
+  const draw = (agentId: string, orchestrator: boolean): string =>
+    renderToStaticMarkup(
+      createElement(Transcript, {
+        turns: run,
+        agentId,
+        role: 'orchestrator',
+        streaming: false,
+        links: null,
+        startFolded: startFoldedKeys(run, orchestrator),
+      }),
+    );
+  // The auto turn's own element, from its id to the next turn.
+  const autoOf = (html: string): string => html.slice(html.indexOf('id="t-u3"') - 80, html.indexOf('id="t-a4"'));
+
+  const orch = draw('agt_orch', true);
+  check('the helpers\' report is an auto turn, keyed u3, that starts folded in an orchestrator\'s transcript', startFoldedKeys(run, true).join(' ') === 'u3', startFoldedKeys(run, true).join(' '));
+  check('an orchestrator\'s auto turn renders folded: its first line and a count, not the report', /class="ag-msg is-you is-auto is-folded"/.test(orch) && autoOf(orch).includes('aria-expanded="false"') && autoOf(orch).includes('Your helper has finished.') && /4 lines/.test(autoOf(orch)) && !orch.includes('HELPER_BODY'), autoOf(orch));
+  check('and the orchestrator\'s own reply is open: the page opens to it', orch.includes('ORCH_REPLY') && !/id="t-a4"[^>]*is-folded|is-folded[^>]*id="t-a4"/.test(orch));
+
+  const plain = draw('agt_plain', false);
+  check('a non-orchestrator\'s auto turn renders open (Amendment 18)', startFoldedKeys(run, false).length === 0 && plain.includes('HELPER_BODY') && /class="ag-msg is-you is-auto"/.test(plain) && autoOf(plain).includes('aria-expanded="true"'));
+  check('and still folds, from its label', autoOf(plain).includes('class="ag-who ag-who-fold"') && autoOf(plain).includes('title="Fold this turn to one line"'));
+
+  // Opening a default fold is kept in the unfolded set, and nothing is written to the folds.
+  const none: FoldState = { folds: {}, unfolds: {} };
+  const opened = toggleFold(none, 'agt_orch', 'u3', true);
+  check('a default fold you open is kept as opened', !shownFolded(opened, 'agt_orch', 'u3', true) && isFolded(opened.unfolds, 'agt_orch', 'u3') && Object.keys(opened.folds).length === 0);
+  check('and survives a reload', !shownFolded({ folds: {}, unfolds: parseFolds(JSON.stringify(opened.unfolds)) }, 'agt_orch', 'u3', true));
+  check('folding it again forgets it, back to the default', shownFolded(toggleFold(opened, 'agt_orch', 'u3', true), 'agt_orch', 'u3', true) && !('agt_orch' in toggleFold(opened, 'agt_orch', 'u3', true).unfolds));
+  check('a reply still starts open, and only your fold folds it (Amendment 18)', !shownFolded(none, 'agt_orch', 'a4', false) && shownFolded(toggleFold(none, 'agt_orch', 'a4', false), 'agt_orch', 'a4', false) && Object.keys(toggleFold(none, 'agt_orch', 'a4', false).unfolds).length === 0);
+  check('a stored set of folds from before reads as it did', shownFolded({ folds: parseFolds('{"agt_x":["a2"]}'), unfolds: {} }, 'agt_x', 'a2', false));
+  updateFoldState((s) => toggleFold(s, 'agt_orch', 'u3', true));
+  const reopened = draw('agt_orch', true);
+  check('a default fold you open stays open, rendered', reopened.includes('HELPER_BODY') && autoOf(reopened).includes('aria-expanded="true"') && !/is-auto is-folded/.test(reopened));
+  check('on another agent it is still folded', !draw('agt_orch2', true).includes('HELPER_BODY'));
+
+  // Fold all: the replies and the auto turns.
+  check('fold all covers the auto turns', replyKeys(run).join(' ') === 'a2 u3 a4', replyKeys(run).join(' '));
+  const keys = replyKeys(run);
+  const byDefault = startFoldedKeys(run, true);
+  const all = foldEvery(opened, 'agt_orch', keys, byDefault);
+  check('fold all folds every turn, the one you opened included', keys.every((k) => shownFolded(all, 'agt_orch', k, byDefault.includes(k))) && !isFolded(all.folds, 'agt_orch', 'u3'));
+  const loose = unfoldEvery(all, 'agt_orch', byDefault);
+  check('unfold all opens every turn, the auto turn included', keys.every((k) => !shownFolded(loose, 'agt_orch', k, byDefault.includes(k))));
+  const plainAll = foldEvery(none, 'agt_plain', keys, []);
+  check('and on a non-orchestrator, fold all folds its auto turns too', keys.every((k) => shownFolded(plainAll, 'agt_plain', k, false)));
+  updateFoldState((s) => foldEvery(s, 'agt_orch', keys, byDefault));
+  const folded = draw('agt_orch', true);
+  check('rendered after fold all, nothing is open', (folded.match(/aria-expanded="false"/g) ?? []).length === 3 && !folded.includes('HELPER_BODY') && !folded.includes('class="ag-md"'), folded);
+
+  // The start_helper row says what it was asked to do, not its JSON.
+  check('a start_helper line shows its task', /<span class="ag-tool-subj">Build lane O3: fold the auto turns<\/span>/.test(plain) && !plain.includes('&quot;task&quot;'));
+
+  const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('the Agent screen calls an agent with helpers an orchestrator, and passes what starts folded', /const orchestrator = \(agent\?\.helperCap \?\? 0\) > 0;/.test(screen) && /startFoldedKeys\(turns, orchestrator\)/.test(screen) && /startFolded=\{startFolded\}/.test(screen));
+  check('and its fold all uses both sets', /foldEvery\(s, agent\.id, replies, startFolded\)/.test(screen) && /unfoldEvery\(s, agent\.id, startFolded\)/.test(screen));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line.\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them.\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

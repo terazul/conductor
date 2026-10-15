@@ -7,7 +7,12 @@
  * kept is the set you folded, never a default. "Fold all" folds the replies there are
  * now; one that arrives afterwards is output you haven't read, and arrives open.
  *
- * Turn keys (`a${seq}`) come from the event log, so they are the same after a reload
+ * One kind of turn starts folded: a turn Conductor sent an orchestrator ("auto"), such as
+ * its helpers' report (Amendment 164). It is long, it is its helpers' words, and the
+ * orchestrator's reply to it is what you read. For those the default is the fold, so what's
+ * kept is the other set: the ones you opened (`Unfolds`), and one you open stays open.
+ *
+ * Turn keys (`a${seq}`, `u${seq}`) come from the event log, so they are the same after a reload
  * and on another screen. Bounded, like the Files tabs: a long run can't grow
  * localStorage without limit, and the agent looked at least recently goes first.
  *
@@ -61,7 +66,7 @@ export function setFold(f: Folds, agentId: string, key: string, folded: boolean)
   return put(f, agentId, folded ? [...now, key] : now);
 }
 
-/** Folds every reply in `keys` — the ones there are now. */
+/** Folds every turn in `keys` — the ones there are now. */
 export function foldAll(f: Folds, agentId: string, keys: readonly string[]): Folds {
   const now = f[agentId] ?? [];
   return put(f, agentId, [...now, ...keys.filter((k) => !now.includes(k))]);
@@ -69,6 +74,52 @@ export function foldAll(f: Folds, agentId: string, keys: readonly string[]): Fol
 
 export function unfoldAll(f: Folds, agentId: string): Folds {
   return put(f, agentId, []);
+}
+
+/**
+ * The turns that start folded which you opened, per agent (Amendment 164). The same shape
+ * and bounds as `Folds`, kept beside it, so a stored set of folds from before reads as it did.
+ */
+export type Unfolds = Folds;
+
+/** What's kept for one agent's transcript: what you folded, and what you opened of the rest. */
+export interface FoldState {
+  folds: Folds;
+  unfolds: Unfolds;
+}
+
+/**
+ * Whether a turn shows folded. One that starts open (`byDefault` false, every reply) is
+ * folded once you fold it; one that starts folded is open once you open it.
+ */
+export function shownFolded(s: FoldState, agentId: string, key: string, byDefault: boolean): boolean {
+  return byDefault ? !isFolded(s.unfolds, agentId, key) : isFolded(s.folds, agentId, key);
+}
+
+/** You folded or opened one turn. It's kept in the set that holds what isn't the default. */
+export function toggleFold(s: FoldState, agentId: string, key: string, byDefault: boolean): FoldState {
+  const folded = shownFolded(s, agentId, key, byDefault);
+  return byDefault
+    ? { ...s, unfolds: setFold(s.unfolds, agentId, key, folded) }
+    : { ...s, folds: setFold(s.folds, agentId, key, !folded) };
+}
+
+/** "Fold all": every turn in `keys` folded, the ones in `byDefault` back to their fold. */
+export function foldEvery(
+  s: FoldState,
+  agentId: string,
+  keys: readonly string[],
+  byDefault: readonly string[],
+): FoldState {
+  return {
+    folds: foldAll(s.folds, agentId, keys.filter((k) => !byDefault.includes(k))),
+    unfolds: put(s.unfolds, agentId, (s.unfolds[agentId] ?? []).filter((k) => !byDefault.includes(k))),
+  };
+}
+
+/** "Unfold all": nothing folded, and every turn in `byDefault` (those there are now) opened. */
+export function unfoldEvery(s: FoldState, agentId: string, byDefault: readonly string[]): FoldState {
+  return { folds: unfoldAll(s.folds, agentId), unfolds: foldAll(s.unfolds, agentId, byDefault) };
 }
 
 /**
@@ -90,37 +141,59 @@ export function foldLine(prose: string): string {
 
 // ── the storage side ────────────────────────────────────────────────────────
 
-const KEY = 'conductor.agentFolds';
-const listeners = new Set<() => void>();
-let cache: Folds | null = null;
-/** The stored text `cache` was parsed from, so another tab's change is noticed. */
-let parsedFrom: string | null | undefined;
+/** One set of turn keys per agent, kept in the settings file under `key`. */
+function kept(key: string) {
+  const listeners = new Set<() => void>();
+  let cache: Folds | null = null;
+  /** The stored text `cache` was parsed from, so another tab's change is noticed. */
+  let parsedFrom: string | null | undefined;
 
-// Kept in the settings file (Amendment 46), so every browser has the same folds.
-function read(): Folds {
-  const raw = readSetting(KEY);
-  if (cache && raw === parsedFrom) return cache;
-  parsedFrom = raw;
-  cache = parseFolds(raw);
-  return cache;
+  // Kept in the settings file (Amendment 46), so every browser has the same folds.
+  function read(): Folds {
+    const raw = readSetting(key);
+    if (cache && raw === parsedFrom) return cache;
+    parsedFrom = raw;
+    cache = parseFolds(raw);
+    return cache;
+  }
+
+  onSettings(() => {
+    if (readSetting(key) !== parsedFrom) for (const l of listeners) l();
+  });
+
+  function write(f: Folds): void {
+    cache = f;
+    parsedFrom = JSON.stringify(cache);
+    writeSetting(key, parsedFrom);
+    for (const l of listeners) l();
+  }
+
+  function subscribe(l: () => void): () => void {
+    listeners.add(l);
+    return () => listeners.delete(l);
+  }
+
+  // `read` is the server snapshot too, so agent/verify.ts can render a transcript under Node.
+  const use = (): Folds => useSyncExternalStore(subscribe, read, read);
+  return { read, write, use };
 }
 
-onSettings(() => {
-  if (readSetting(KEY) !== parsedFrom) for (const l of listeners) l();
-});
+const folded = kept('conductor.agentFolds');
+/** The turns that start folded which you opened (Amendment 164). */
+const unfolded = kept('conductor.agentUnfolds');
 
-export function updateFolds(fn: (f: Folds) => Folds): void {
-  cache = fn(read());
-  parsedFrom = JSON.stringify(cache);
-  writeSetting(KEY, parsedFrom);
-  for (const l of listeners) l();
-}
-
-function subscribe(l: () => void): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
+/** You folded, opened, folded all or unfolded all: both sets, as `fn` leaves them. */
+export function updateFoldState(fn: (s: FoldState) => FoldState): void {
+  const was = { folds: folded.read(), unfolds: unfolded.read() };
+  const now = fn(was);
+  if (now.folds !== was.folds) folded.write(now.folds);
+  if (now.unfolds !== was.unfolds) unfolded.write(now.unfolds);
 }
 
 export function useFolds(): Folds {
-  return useSyncExternalStore(subscribe, read);
+  return folded.use();
+}
+
+export function useUnfolds(): Unfolds {
+  return unfolded.use();
 }
