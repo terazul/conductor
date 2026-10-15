@@ -371,8 +371,8 @@ it (waiting for it), and the developer starts from its plan. Presets use the per
 the same role for its system prompt and skills, and keep their own brief and model. A
 persona with **write: off** reads only, and a reading role (reviewer, debugger, analyst,
 auditor) never writes, whatever its persona says. When a persona or a reading role pins a row read-
-only, the plan says so underneath: "reads only (reviewer): no file edits, asks before
-shell, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
+only, the plan says so underneath: "reads only (reviewer): no file edits, read-only shell
+only, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
 get. A running or sleeping agent keeps what it launched with.
 
 **What the built-in roles are told** (since 10 Oct, each has a system prompt; the text is in
@@ -394,8 +394,9 @@ Those headings are the **summary** an agent gives `hand_off` when others wait fo
 commit, push or rewrite history unless the job says to: its changes stay in the working
 tree, where **Files** shows them and the agents after it read them, and you commit them from
 **Branches** (**Commit…**). The reviewer's verdict is words in a reply; nothing waits for it or
-stops on it. The tools and models of the built-ins are as they were, and only the architect
-says anything about pushing (it never does). A stack's preset keeps its own brief, so the
+stops on it. The tools of the built-ins are as they were, and only the architect says
+anything about pushing (it never does). Their models changed on 14 Oct (Amendment 148): the
+architect and the developer are on opus, the other five on sonnet. A stack's preset keeps its own brief, so the
 system prompt is what reaches every stack. If you had edited a built-in, you keep your edit;
 **reset** puts back the new text.
 
@@ -425,7 +426,7 @@ whose steps you already know.
 
 - **The roles it may start are listed under its row before you launch.** Unless you change
   them: developer, validator, reviewer and scribe, each on the tier its persona asks for
-  (sonnet, sonnet, opus and sonnet). Change a role's **tier** with its picker, remove one
+  (opus, sonnet, sonnet and sonnet). Change a role's **tier** with its picker, remove one
   with **×**, or add another (architect, debugger, analyst or a persona of your own) with
   **+ add a role…**. It can start those roles and no others. The list is for this launch only;
   choosing the preset again puts the default back. A Custom setup's row can orchestrate too
@@ -497,11 +498,12 @@ no tool that can edit `README.md` but not `index.ts`. Check its diff like any ot
 change. With worktree isolation, the docs land in the job's worktree, not in your
 checkout, until you take them.
 
-**The model** is chosen per role by the preset — opus where something is judged, sonnet
-where a decided plan is executed — and that's the default. Each row of the plan preview
+**The model** is chosen per role by the preset — opus for the roles that design and build
+(the architect, the orchestrator and the developer), sonnet for every other role (validator,
+reviewer, scribe, debugger, analyst; Amendment 148) — and that's the default. Each row of the plan preview
 has its own model picker showing the **exact model id** that role will get, such as
 `us.anthropic.claude-opus-5-5`. Change a row to give that role a different model: opus
-for the developer and a cheaper model for the scribe, say. Hover a row to see the tier its
+for the reviewer of a risky change and a cheaper model for the scribe, say. Hover a row to see the tier its
 preset gave it.
 
 The **model** picker above the plan sets every row at once. It shows that model while
@@ -554,8 +556,17 @@ jobs) — are marked
 **read-only** in that plan, and it's enforced rather than advertised: the file-writing
 tools are denied outright for them, so they stay read-only even if you've set the
 autonomy pills wide open, and even if you approve a prompt. They can still run shell
-commands, but each one stops and asks — an analyst that can't run `git log` can't
-tell you how the code got this way.
+commands — an analyst that can't run `git log` can't tell you how the code got this
+way. Since 14 Oct (Amendment 148) the read-only ones run without asking, whatever the shell
+pill says: `git status`, `git diff`, `git log`, `git show`, `git blame`, `grep`, `cat`,
+`head`, `tail`, `ls`, `wc`, `diff`, `stat` and `pwd`, alone or piped into each other.
+`--output` on `git diff`, `log` or `show` is refused, since it writes a file. Every other
+command still stops and asks, and so does one of those that writes into a file with `>`.
+`sed`, `find`, `rg`, `sort` and the rest are left off on purpose: each has an option that
+writes or runs something else (`sed -n '1w f'`, `find -delete`, `rg --pre`, `sort -o`), and
+running the tests can write build output. Claude Code itself still lets their plain forms
+through. What Claude Code double-checks (a `for` loop, `$VARIABLES`, `cd` into another folder
+before `git`) still asks.
 
 ### Choose the engine
 
@@ -617,7 +628,8 @@ unattended.** A ⚠ appears on a switch that is *off* and will therefore stop an
 whatever you've allowed: a `cd` before a `git` command (another folder's git hooks could
 run), commands with `$VARIABLES` or `$(…)`, cloning. With the pill on, Conductor answers
 those for you, so they never reach Needs you. The deny rules still hold (no push unless
-allowed), and a reading role never gets unattended shell. **Allow MCP tools** does the
+allowed), and a reading role never gets unattended shell: only its read-only commands run
+without asking (above), and Conductor doesn't answer the double-checked ones for it. **Allow MCP tools** does the
 same for your MCP servers' tools (Jira, Lucid, Obsidian…), which no other pill covers;
 it's off by default, and a reading role never gets it, since some of those tools change
 things outside the folder. Both are in a running agent's guardrails too.

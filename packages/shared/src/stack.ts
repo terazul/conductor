@@ -130,6 +130,51 @@ export function isReadOnlyRole(role: AgentRole): boolean {
 export const WRITE_TOOLS: readonly string[] = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 
 /**
+ * The shell commands a reading role runs without asking (Amendment 148), in Claude Code's rule
+ * syntax, for `allowedTools`. Any other command it runs still asks, and the write tools stay
+ * denied.
+ *
+ * Only commands that cannot change a file, whatever their options. A prefix rule lets every
+ * option through, and Claude Code then skips its own check of that command's options (seen on
+ * 14 Oct with 2.1.284: under `Bash(sed -n:*)`, `sed -n '1w out' f` wrote `out`). So these are
+ * left out: `sed`, even `sed -n` (its `w` writes and `e` runs a command), `find` (`-delete`,
+ * `-exec`, `-fprint`), `rg` (`--pre` runs a program), `sort` (`-o`), `uniq` (a second file is
+ * its output), `file` (`-C` writes `magic.mgc`), `xargs` and `tee`, every git command that
+ * changes the tree or the refs (`checkout`, `reset`, `stash`, …), and `make` and the test
+ * runners (they write build output). Claude Code's own read-only check still runs the plain
+ * forms of most of those unasked. A redirect (`cat a > b`) is not covered by these rules:
+ * Claude Code asks about it, and on an engine without that check Conductor does
+ * (`toolRuleFor`, daemon).
+ */
+export const READ_ONLY_BASH: readonly string[] = [
+  'Bash(git status:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git show:*)',
+  'Bash(git blame:*)',
+  'Bash(grep:*)',
+  'Bash(cat:*)',
+  'Bash(head:*)',
+  'Bash(tail:*)',
+  'Bash(ls:*)',
+  'Bash(wc:*)',
+  'Bash(diff:*)',
+  'Bash(stat:*)',
+  'Bash(pwd)',
+];
+
+/**
+ * The one way the commands above can write a file, `--output=<file>` on `git diff`, `git log`
+ * and `git show`, denied for a reading role (Amendment 148). A deny rule holds in every mode and
+ * goes before an allow; git refuses an abbreviated `--output`, so the whole word is enough.
+ */
+export const READ_ONLY_BASH_DENIED: readonly string[] = [
+  'Bash(git diff *--output*)',
+  'Bash(git log *--output*)',
+  'Bash(git show *--output*)',
+];
+
+/**
  * Why `autonomy` doesn't keep a reading role read-only, or null when it does: the write
  * tools denied, and a mode that changes nothing unasked (plan, or ask me).
  */

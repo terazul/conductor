@@ -155,7 +155,7 @@ import { HANDOFF_ASK, NEW_DAY_NUDGE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supe
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
-import { HELPERS_MAX, PIPELINE_HELPERS_MAX, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
+import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
@@ -3354,6 +3354,36 @@ async function main(): Promise<void> {
         gate('default', 'Bash', { command: 'npm test' }, { allowedTools: ['Bash(npm test:*)'] }) === 'allow' &&
         gate('default', 'Bash', { command: 'ls' }) === 'ask',
     );
+    {
+      // A reading role's shell on an engine that applies no rules itself (Amendment 148).
+      const reader = { allowedTools: ['Read', 'Glob', 'Grep', ...READ_ONLY_BASH], disallowedTools: ['WebFetch', 'WebSearch', 'Bash(git push:*)', ...WRITE_TOOLS, ...READ_ONLY_BASH_DENIED] };
+      const runs = (command: string) => gate('default', 'Bash', { command }, reader);
+      check(
+        "a reading role's read-only commands run unasked, alone or piped together",
+        ['git status --short', 'git diff --stat main...HEAD', 'git log --oneline -5 | head -3', 'git show HEAD:src/a.ts', 'git blame -L 1,20 src/a.ts',
+          'grep -rn "x" src | wc -l', 'cat a.ts', 'tail -n 20 log.txt', 'ls -la', 'diff a.ts b.ts', 'stat a.ts', 'pwd', 'grep -rn x . 2>/dev/null', 'git diff 2>&1 | head'].every((c) => runs(c) === 'allow'),
+        JSON.stringify(['git status --short', 'cat a.ts', 'pwd', 'grep -rn x . 2>/dev/null'].map((c) => [c, runs(c)])),
+      );
+      check(
+        'anything else asks: a redirect into a file, a command not on the list, one that is part of a line',
+        ['cat a.ts > b.ts', 'git diff >> out.patch', 'grep x a &> out', "sed -n '1w out' a.ts", 'find . -delete', 'rg --pre ./x y', 'sort -o out a',
+          'git checkout main', 'git stash', 'make test', 'cd src && git diff', 'git status; rm -rf x', 'pwd -P', 'cat a | tee b'].every((c) => runs(c) === 'ask'),
+        JSON.stringify(['cat a.ts > b.ts', 'cd src && git diff', 'pwd -P'].map((c) => [c, runs(c)])),
+      );
+      check(
+        "and git's --output, wherever it is on the line, is refused",
+        runs('git diff --output=x.patch') === 'deny' && runs('git diff --stat --output=x') === 'deny' && runs('git log -1 --output x') === 'deny' &&
+          runs('git show HEAD --output=y') === 'deny' && runs('git log --oneline | head -1; git diff --output=z') === 'deny',
+      );
+      check(
+        "a deny's * matches anywhere, an allow's only at the end: an allow-always saved as `rm *.o` stays exact",
+        toolRuleFor(['Bash(git diff *--output*)'], 'Bash', { command: 'git diff --output=x' }, 'deny') !== null &&
+          toolRuleFor(['Bash(git diff *--output*)'], 'Bash', { command: 'git diff --stat' }, 'deny') === null &&
+          toolRuleFor(['Bash(rm *.o)'], 'Bash', { command: 'rm -rf / x.o' }, 'allow') === null &&
+          toolRuleFor(['Bash(rm *.o)'], 'Bash', { command: 'rm *.o' }, 'allow') === 'Bash(rm *.o)',
+      );
+      check('a writing role without the shell pill still asks for every command', gate('default', 'Bash', { command: 'git status' }) === 'ask');
+    }
     check('whole-tool disallows are kept from the model too, where the names map one to one', excludedFor(['Bash', 'Edit', 'Bash(git push:*)']).join() === 'bash,powershell,edit');
     check(
       'a permission request is named for the Claude call it is',

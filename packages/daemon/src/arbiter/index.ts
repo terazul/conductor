@@ -352,7 +352,8 @@ export class Arbiter {
      * commands its own checks flag: `cd x && git …`, `$VARIABLES`, a clone. The user
      * chose: when shell is on, those don't reach Needs you either. The same for MCP tools
      * under "allow MCP tools" (`mcp__*`). Deny rules were applied before this was asked,
-     * so `no push` still holds; a reading role never has Bash allowed.
+     * so `no push` still holds; a reading role never has Bash allowed, only its read-only
+     * commands (Amendment 148), and a command they don't cover is asked here as before.
      */
     const unattended = allowedUnattended(agent.autonomy.allowedTools, ask.toolName);
     if (unattended) {
@@ -788,7 +789,13 @@ export function ruleCovers(pattern: string, subject: string): boolean {
  * A shell command is split where one command ends and the next begins (`&&`, `;`, `|`,
  * `$(`, …), so `cd x && git push` is a `git push`. A deny needs one part covered; an
  * allow needs every part, or `npm test && rm -rf /` would be allowed by `npm test:*`.
+ * Each part may be covered by a different allow rule; the result names them all.
  * Best effort on purpose: a deny that matches too much is the safe way to be wrong.
+ *
+ * Two more, as Claude Code does them (Amendment 148). A deny's `*` matches anywhere, so
+ * `Bash(git diff *--output*)` covers `git diff --stat --output=x`. And an allow never
+ * covers a command that writes to a file with `>`, so `Bash(cat:*)` doesn't let
+ * `cat a > b` write `b` (`> /dev/null` and `2>&1` write nothing and are let be).
  */
 export function toolRuleFor(
   rules: readonly string[],
@@ -796,6 +803,10 @@ export function toolRuleFor(
   input: Record<string, unknown>,
   mode: 'deny' | 'allow',
 ): string | null {
+  // An allow's parts may each be covered by a rule of its own (Amendment 148), as Claude Code
+  // does it: `git log | head` runs under `Bash(git log:*)` and `Bash(head:*)`.
+  const covering: string[] = [];
+  let parts: string[] | null = null;
   for (const rule of rules) {
     const m = /^([^()]+?)\s*(?:\((.*)\))?$/s.exec(rule.trim());
     if (!m) continue;
@@ -809,10 +820,36 @@ export function toolRuleFor(
     if (!pattern || pattern === '*') return rule;
     const subjects = ruleSubjects(toolName, input);
     if (subjects.length === 0) continue;
-    const covered = (s: string) => ruleCovers(pattern, s);
-    if (mode === 'deny' ? subjects.some(covered) : subjects.every(covered)) return rule;
+    if (mode === 'deny') {
+      if (subjects.some((s) => denyCovers(pattern, s))) return rule;
+      continue;
+    }
+    parts ??= subjects.map(() => '');
+    subjects.forEach((s, i) => {
+      if (!parts![i] && ruleCovers(pattern, s) && !(toolName === 'Bash' && redirectsOut(s))) {
+        parts![i] = rule;
+        if (!covering.includes(rule)) covering.push(rule);
+      }
+    });
   }
-  return null;
+  return parts && parts.every((r) => r !== '') ? covering.join(', ') : null;
+}
+
+/**
+ * A deny rule's cover: `ruleCovers`, or a `*` anywhere in it matching anything. Only for a deny,
+ * where matching too much is the safe way to be wrong; an allow-always rule saved with a `*`
+ * in an exact command (`rm *.o`) must not start to cover others.
+ */
+function denyCovers(pattern: string, subject: string): boolean {
+  if (ruleCovers(pattern, subject)) return true;
+  if (!pattern.slice(0, -1).includes('*')) return false;
+  const glob = pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+  return new RegExp(`^${glob}$`, 's').test(subject);
+}
+
+/** Whether one command of a shell line writes to a file with `>`, `>>` or `&>`; `> /dev/null` doesn't. */
+function redirectsOut(command: string): boolean {
+  return command.replace(/\d*>>?\s*\/dev\/null\b/g, ' ').includes('>');
 }
 
 /** What a rule's pattern is matched against: each command of a shell line, or a path or URL. */

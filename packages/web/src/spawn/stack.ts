@@ -10,7 +10,7 @@
  */
 
 import type { AddAgentRequest, Agent, AgentRole, Autonomy } from '@conductor/shared';
-import { WRITE_TOOLS, createsCycle, isReadOnlyRole, rewireOnRemoval } from '@conductor/shared';
+import { READ_ONLY_BASH, READ_ONLY_BASH_DENIED, WRITE_TOOLS, createsCycle, isReadOnlyRole, rewireOnRemoval } from '@conductor/shared';
 import { CLAUDE, parseTokens, providerOf } from '../lib/providers.js';
 import { DEFAULT_BUDGET_USD, DEFAULT_MODE, defaultPills, toAutonomy } from './autonomy.js';
 import { DEFAULT_BUDGET_TOKENS } from './engine.js';
@@ -129,8 +129,13 @@ export function addedAutonomy(
       ...a,
       mode: a.mode === 'plan' ? 'plan' : 'default',
       // MCP tools can change things outside the folder, so a reading role has none (Amendment 67).
-      allowedTools: a.allowedTools.filter((t) => t !== 'Bash' && t !== 'mcp__*'),
-      disallowedTools: [...a.disallowedTools.filter((t) => !WRITE_TOOLS.includes(t)), ...WRITE_TOOLS],
+      // Its shell is the read-only commands, unasked; any other command asks (Amendment 148).
+      allowedTools: [...a.allowedTools.filter((t) => t !== 'Bash' && t !== 'mcp__*' && !READ_ONLY_BASH.includes(t)), ...READ_ONLY_BASH],
+      disallowedTools: [
+        ...a.disallowedTools.filter((t) => !WRITE_TOOLS.includes(t) && !READ_ONLY_BASH_DENIED.includes(t)),
+        ...WRITE_TOOLS,
+        ...READ_ONLY_BASH_DENIED,
+      ],
     };
   }
   const { budgetTokens: _was, ...rest } = a;

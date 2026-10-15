@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -156,9 +156,12 @@ for (const preset of PRESETS) {
       spec.autonomy.mode,
     );
     check(
-      `${preset.id}/${spec.role}: shell still asks even though "ask before bash" is off`,
-      !spec.autonomy.allowedTools.includes('Bash'),
-      JSON.stringify(spec.autonomy.allowedTools),
+      `${preset.id}/${spec.role}: only read-only shell runs unasked, though "run shell unattended" is on (Amendment 148)`,
+      !spec.autonomy.allowedTools.includes('Bash') &&
+        READ_ONLY_BASH.every((t) => spec.autonomy.allowedTools.includes(t)) &&
+        spec.autonomy.allowedTools.every((t) => !t.startsWith('Bash') || READ_ONLY_BASH.includes(t)) &&
+        READ_ONLY_BASH_DENIED.every((t) => spec.autonomy.disallowedTools.includes(t)),
+      JSON.stringify(spec.autonomy),
     );
     check(
       `${preset.id}/${spec.role}: can still read, or it cannot do its job`,
@@ -340,7 +343,8 @@ const perRole = toAgentSpecs(presetById('full'), defaultPills(), null, undefined
 check(
   'left alone, each role gets the exact id its tier means now — not the tier',
   perRole.find((s) => s.role === 'architect')?.model === 'us.anthropic.claude-opus-5-5' &&
-    perRole.find((s) => s.role === 'developer')?.model === 'us.anthropic.claude-sonnet-5' &&
+    perRole.find((s) => s.role === 'developer')?.model === 'us.anthropic.claude-opus-5-5' &&
+    perRole.find((s) => s.role === 'reviewer')?.model === 'us.anthropic.claude-sonnet-5' &&
     perRole.find((s) => s.role === 'scribe')?.model === 'us.anthropic.claude-sonnet-5',
   perRole.map((s) => `${s.role}=${s.model}`).join(' '),
 );
@@ -389,7 +393,7 @@ check(
 );
 check(
   'picking what a row\'s tier already means puts it back on its tier rather than storing a pick',
-  pickFor(onePick, reviewerRole, TIERS.opus!, TIERS).reviewer === undefined &&
+  pickFor(onePick, reviewerRole, TIERS.sonnet!, TIERS).reviewer === undefined &&
     pickFor({}, scribeRole, TIERS.sonnet!, TIERS).scribe === undefined,
 );
 check(
@@ -434,12 +438,12 @@ check(
 );
 check(
   'a tier the model API does not serve names the rows that need a pick — so Spawn can say which',
-  roles(unresolvedRoles(full, { opus: TIERS.opus }, {})) === 'developer,validator,scribe',
+  roles(unresolvedRoles(full, { opus: TIERS.opus }, {})) === 'validator,reviewer,scribe',
   roles(unresolvedRoles(full, { opus: TIERS.opus }, {})),
 );
 check(
   'picking a model on one of those rows resolves that row only',
-  roles(unresolvedRoles(full, { opus: TIERS.opus }, { validator: GPT })) === 'developer,scribe',
+  roles(unresolvedRoles(full, { opus: TIERS.opus }, { validator: GPT })) === 'reviewer,scribe',
 );
 check(
   'with no catalog yet, every row is unresolved — launching then would send nicknames',
@@ -647,7 +651,7 @@ console.log('\n13 · presets and Custom rows take their personas (Amendment 68)'
   const developer = specs.find((x) => x.role === 'developer')!;
   check('a preset role carries its persona: id, system prompt, skills', developer.persona === 'developer' && developer.systemPrompt === 'Prefer pure functions.' && developer.skills?.join() === 'tdd', JSON.stringify(developer));
   check("the persona's tool rules don't go over the pills: MCP stays off, as clicked (Amendment 147)", !developer.autonomy.allowedTools.includes('mcp__*') && !defaultPills()['mcp']);
-  check("and the preset keeps its own brief and tier, not the persona's", developer.brief === full.roles.find((r) => r.role === 'developer')!.brief && developer.model === tiersNow.sonnet);
+  check("and the preset keeps its own brief and tier, not the persona's", developer.brief === full.roles.find((r) => r.role === 'developer')!.brief && developer.model === tiersNow.opus);
   // Every built-in has a system prompt since Amendment 126, so "nothing to append" is a validator edited down to none.
   const quietSpecs = toAgentSpecs(full, defaultPills(), 5, undefined, {}, tiersNow, {}, undefined, personasFrom(withPersona(raw, { ...personaFor(personas, 'validator')!, systemPrompt: '' })));
   check('a persona with nothing to append sends no system prompt or skills', quietSpecs.find((x) => x.role === 'validator')?.persona === 'validator' && !('systemPrompt' in quietSpecs.find((x) => x.role === 'validator')!) && !('skills' in quietSpecs.find((x) => x.role === 'validator')!));
@@ -753,11 +757,11 @@ console.log('\n16 · fewer built-in personas, and the full pipeline reads the pl
   const full = presetById('full');
   const row = (role: string) => full.roles.find((r) => r.role === role)!;
   check('the full pipeline: architect, developer, validator, reviewer, scribe', full.roles.map((r) => r.role).join() === 'architect,developer,validator,reviewer,scribe');
-  check('its developer runs on sonnet, the architect and reviewer on opus', row('developer').model === 'sonnet' && row('architect').model === 'opus' && row('reviewer').model === 'opus');
+  check('its developer and architect run on opus, the validator, reviewer and scribe on sonnet (Amendment 148)', row('developer').model === 'opus' && row('architect').model === 'opus' && row('validator').model === 'sonnet' && row('reviewer').model === 'sonnet' && row('scribe').model === 'sonnet');
   check('the validator tests what was built, against the plan', row('validator').does === 'tests what was built' && /architect's plan/.test(row('validator').brief) && /what the developer built/.test(row('validator').brief) && (row('validator').dependsOnRoles ?? []).join() === 'developer');
   check("the reviewer waits for the architect too, and reviews against its plan", (row('reviewer').dependsOnRoles ?? []).join() === 'architect,developer,validator' && /architect's plan/.test(row('reviewer').brief));
   check('the scribe waits for the architect and the reviewer', (row('scribe').dependsOnRoles ?? []).join() === 'architect,reviewer' && startsWhen(row('scribe')) === 'after architect and reviewer');
-  check('bug fix and one agent run a developer, on their own tier and brief', presetById('bugfix').roles[1]?.role === 'developer' && presetById('bugfix').roles[1]?.model === 'sonnet' && /regression test/.test(presetById('bugfix').roles[1]!.brief) && presetById('single').roles[0]?.role === 'developer' && presetById('single').roles[0]?.brief === '');
+  check('bug fix and one agent run a developer, on their own tier and brief', presetById('bugfix').roles[1]?.role === 'developer' && presetById('bugfix').roles[1]?.model === 'opus' && presetById('single').roles[0]?.model === 'opus' && /regression test/.test(presetById('bugfix').roles[1]!.brief) && presetById('single').roles[0]?.role === 'developer' && presetById('single').roles[0]?.brief === '');
   check('analysis keeps its id, label and brief; its writer is a scribe', presetById('analysis').label === 'analysis' && presetById('analysis').roles[1]?.role === 'scribe' && /Change documentation only/.test(presetById('analysis').roles[1]!.brief));
   check('no preset names a removed role', PRESETS.every((p) => p.roles.every((r) => !['builder', 'documenter', 'uiux'].includes(r.role))));
 
@@ -765,7 +769,7 @@ console.log('\n16 · fewer built-in personas, and the full pipeline reads the pl
   check('builder, documenter and uiux are no longer built-ins, nor offered as roles', ['builder', 'documenter', 'uiux'].every((id) => !ids.includes(id) && !KNOWN_ROLES.includes(id)));
   check("Custom's first row is a developer", FIRST_ROLE.role === 'developer');
   const dev = personaFor(BUILT_IN_PERSONAS, 'developer')!;
-  check('the developer persona is on sonnet; the validator persona tests what was built', dev.model === 'sonnet' && personaFor(BUILT_IN_PERSONAS, 'validator')?.description === 'Proves the change works: writes the missing tests, runs them all, reports what fails.');
+  check('the developer persona is on opus; the validator persona tests what was built', dev.model === 'opus' && personaFor(BUILT_IN_PERSONAS, 'validator')?.description === 'Proves the change works: writes the missing tests, runs them all, reports what fails.');
 
   const old = JSON.stringify({ edits: { builder: { systemPrompt: 'Old builder.' }, documenter: { brief: 'Old docs.', name: 'documenter' }, uiux: { brief: 'Old ui.' } } });
   const moved = personasFrom(old);
@@ -1173,12 +1177,12 @@ console.log('\n20 · better instructions for the built-in roles (Amendment 126)'
   check('the scribe changes documentation only, and the code wins over the plan', /Change documentation only/.test(br('scribe')) && /Change documentation only/.test(sp('scribe')) && /source of truth/.test(sp('scribe')));
   check('the debugger and the analyst change no files; the debugger writes no fix, the analyst cites every claim', /Change no files/.test(br('debugger')) && /Don't change the project's files/.test(sp('debugger')) && /Don't write the fix/.test(sp('debugger')) && /Change no files/.test(sp('analyst')) && /Cite file and line for every claim/.test(sp('analyst')));
 
-  // Tools and tiers are as they were, and push is the launch's: only the architect says anything about it.
+  // Tools are as they were, tiers as Amendment 148 set them, and push is the launch's: only the architect says anything about it.
   const shape = (id: string): string => { const p = personaFor(BUILT_IN_PERSONAS, id)!; return `${p.model} ${JSON.stringify(p.tools)}`; };
   check(
-    'tiers and tool rules are unchanged: the reading roles write nothing, the rest leave it to the launch',
-    shape('architect') === 'opus {"bash":true,"write":true,"network":true,"push":false}' && shape('developer') === 'sonnet {}' && shape('validator') === 'sonnet {}' && shape('scribe') === 'sonnet {}' &&
-      shape('reviewer') === 'opus {"write":false}' && shape('debugger') === 'opus {"write":false}' && shape('analyst') === 'opus {"write":false}',
+    'tiers and tool rules: architect and developer on opus, the rest on sonnet; the reading roles write nothing, the rest leave it to the launch',
+    shape('architect') === 'opus {"bash":true,"write":true,"network":true,"push":false}' && shape('developer') === 'opus {}' && shape('validator') === 'sonnet {}' && shape('scribe') === 'sonnet {}' &&
+      shape('reviewer') === 'sonnet {"write":false}' && shape('debugger') === 'sonnet {"write":false}' && shape('analyst') === 'sonnet {"write":false}',
     ids.map(shape).join(' | '),
   );
   check('no built-in but the architect sets push', BUILT_IN_PERSONAS.every((p) => p.id === 'architect' || p.tools.push === undefined));
@@ -1225,10 +1229,10 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
 
   // The roles it may start, before launch.
   const defaults = defaultListed(every);
-  check('the roles listed are developer, validator, reviewer and scribe, each on its persona\'s tier', defaults.map((r) => `${r.id}:${r.tier}`).join() === 'developer:sonnet,validator:sonnet,reviewer:opus,scribe:sonnet');
+  check('the roles listed are developer, validator, reviewer and scribe, each on its persona\'s tier', defaults.map((r) => `${r.id}:${r.tier}`).join() === 'developer:opus,validator:sonnet,reviewer:sonnet,scribe:sonnet');
   check('as the full pipeline has their tiers', defaults.every((r) => presetById('full').roles.find((x) => x.role === r.id)!.model === r.tier));
   check('a persona edited to another tier moves its role', defaultListed(personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, model: 'haiku' }))).find((r) => r.id === 'scribe')?.tier === 'haiku');
-  check('with no personas loaded, the built-ins\' tiers', defaultListed().map((r) => r.tier).join() === 'sonnet,sonnet,opus,sonnet');
+  check('with no personas loaded, the built-ins\' tiers', defaultListed().map((r) => r.tier).join() === 'opus,sonnet,sonnet,sonnet');
 
   const specs = specsFor(defaults);
   check('one agent is launched: the orchestrator, as the architect', specs.length === 1 && specs[0]!.role === 'orchestrator' && specs[0]!.persona === 'architect' && specs[0]!.systemPrompt === personaFor(every, 'architect')!.systemPrompt);
@@ -1236,7 +1240,7 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   check('it may start helpers enough for each role once and sent back twice: 4 roles × 3', o.helpers === 12 && o.helpers === helperCapFor(defaults) && o.helpers === pipelineHelperCap(4));
   check('and carries the roles in the launch request', o.helperRoles?.map((r) => r.id).join() === 'developer,validator,reviewer,scribe', JSON.stringify(o.helperRoles?.map((r) => r.id)));
   const role = (id: string) => o.helperRoles!.find((r) => r.id === id)!;
-  check('each with the model its tier means now', role('developer').model === tiersNow.sonnet && role('reviewer').model === tiersNow.opus && role('developer').tier === 'sonnet' && role('reviewer').tier === 'opus');
+  check('each with the model its tier means now', role('developer').model === tiersNow.opus && role('reviewer').model === tiersNow.sonnet && role('developer').tier === 'opus' && role('reviewer').tier === 'sonnet');
   check("and its persona's system prompt, brief and skills", role('developer').systemPrompt === personaFor(every, 'developer')!.systemPrompt && role('developer').brief === personaFor(every, 'developer')!.brief.trim() && /^End with: /.test(role('validator').systemPrompt!.trimEnd().split('\n').at(-1) ?? ''));
   check('and what every tier meant at launch, so it can ask for a cheaper one', JSON.stringify(role('developer').tiers) === JSON.stringify(tiersNow));
   check('a reading role is pinned read-only whatever the pills: write tools denied, no shell, not auto-approved', WRITE_TOOLS.every((t) => role('reviewer').autonomy.disallowedTools.includes(t)) && role('reviewer').autonomy.mode !== 'acceptEdits' && !role('reviewer').autonomy.allowedTools.includes('Bash') && readOnlyRefusal('reviewer', role('reviewer').autonomy) === null);
@@ -1250,7 +1254,7 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   // The request body.
   const body = launchBody({ projectId: 'p', prompt: 'Build it.', method: 'worktree', branch: '', preset: presetLabel(orch.label, false), agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) });
   const wire = JSON.parse(JSON.stringify(body)) as { agents: { helpers?: number; helperRoles?: { id: string; model: string }[] }[]; preset: string };
-  check('the launch request carries the roles and the helper cap', wire.preset === 'orchestrated pipeline' && wire.agents[0]!.helpers === 12 && wire.agents[0]!.helperRoles!.length === 4 && wire.agents[0]!.helperRoles![0]!.model === tiersNow.sonnet);
+  check('the launch request carries the roles and the helper cap', wire.preset === 'orchestrated pipeline' && wire.agents[0]!.helpers === 12 && wire.agents[0]!.helperRoles!.length === 4 && wire.agents[0]!.helperRoles![0]!.model === tiersNow.opus);
   check('an ordinary launch sends neither', ['full', 'bugfix', 'review', 'analysis', 'single'].every((id) => {
     const j = JSON.stringify(toAgentSpecs(presetById(id), PERMISSIVE, 5, undefined, {}, tiersNow, {}, undefined, every, defaults));
     return !j.includes('helperRoles') && !j.includes('"helpers"');
@@ -1262,7 +1266,7 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   const s2 = specsFor(lighter)[0]!;
   check('a role can be removed: it is not listed, and the cap follows', s2.helperRoles?.map((r) => r.id).join() === 'developer,validator,scribe' && s2.helpers === 9);
   check('a tier can be changed: the model follows it, and the others are as they were', s2.helperRoles?.find((r) => r.id === 'developer')?.model === tiersNow.haiku && s2.helperRoles?.find((r) => r.id === 'developer')?.tier === 'haiku' && s2.helperRoles?.find((r) => r.id === 'validator')?.model === tiersNow.sonnet);
-  check('a role can be added, on its persona\'s tier, at the end', withRole(defaults, 'debugger', every).at(-1)?.id === 'debugger' && withRole(defaults, 'debugger', every).at(-1)?.tier === 'opus' && specsFor(withRole(defaults, 'debugger', every))[0]!.helpers === 15);
+  check('a role can be added, on its persona\'s tier, at the end', withRole(defaults, 'debugger', every).at(-1)?.id === 'debugger' && withRole(defaults, 'debugger', every).at(-1)?.tier === 'sonnet' && specsFor(withRole(defaults, 'debugger', every))[0]!.helpers === 15);
   check('a debugger it may start is read-only too', WRITE_TOOLS.every((t) => specsFor(withRole(defaults, 'debugger', every))[0]!.helperRoles!.find((r) => r.id === 'debugger')!.autonomy.disallowedTools.includes(t)));
   check('but not one twice', withRole(defaults, 'developer', every).length === 4 && withRole(defaults, 'developer', every).map((r) => r.id).join() === 'developer,validator,reviewer,scribe');
   check('nor more than eight', withRole(Array.from({ length: 8 }, (_, i) => ({ id: `r${i}`, tier: 'sonnet' as const })), 'architect', every).length === 8);
@@ -1503,11 +1507,11 @@ console.log('\n25 · what you click is what runs: a persona does not change the 
   const revRow = presetById('full').roles.find((r) => r.role === 'reviewer')!;
   check('rowOverrides: nothing for a writing row, whatever is clicked', rowOverrides(devRow, PERMISSIVE, 'bypassPermissions', every) === null && rowOverrides(archRow, defaultPills(), 'auto', every) === null && rowOverrides(devRow, defaultPills(), undefined) === null);
   const said = rowOverrides(revRow, { ...PERMISSIVE, mcp: true }, 'auto', every);
-  check('and for a reading one, why and each thing that changed', said === 'reads only (reviewer): no file edits, asks before shell, no MCP, mode ask me', said ?? 'null');
-  check('only what changed: shell already asks and plan stays plan', rowOverrides(revRow, defaultPills(), 'plan', every) === 'reads only (reviewer): no file edits');
+  check('and for a reading one, why and each thing that changed', said === 'reads only (reviewer): no file edits, read-only shell only, no MCP, mode ask me', said ?? 'null');
+  check('only what changed: plan stays plan, and the shell that asked now runs its read-only commands unasked (Amendment 148)', rowOverrides(revRow, defaultPills(), 'plan', every) === 'reads only (reviewer): no file edits, read-only shell unattended', rowOverrides(revRow, defaultPills(), 'plan', every) ?? 'null');
   const reading = personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, tools: { write: false } }));
   const scribeRow = presetById('full').roles.find((r) => r.role === 'scribe')!;
-  check('a reading persona is named as the reason', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) === 'reads only (scribe persona): no file edits, mode ask me', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) ?? 'null');
+  check('a reading persona is named as the reason', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) === 'reads only (scribe persona): no file edits, read-only shell unattended, mode ask me', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) ?? 'null');
 
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   const pipe = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
@@ -1547,7 +1551,69 @@ console.log('\n25 · what you click is what runs: a persona does not change the 
   check('a writing role (developer) given a write:false persona is pinned too: write tools denied, mode ask me, no unattended shell', WRITE_TOOLS.every((t) => pinnedDev.disallowedTools.includes(t)) && pinnedDev.mode === 'default' && !pinnedDev.allowedTools.includes('Bash'), JSON.stringify(pinnedDev));
 }
 
-console.log('\n26 · an orchestrated stack chooses its helpers in all, and sends work back per lane (Amendment 150)');
+console.log('\n26 · the developer on opus, every other role but the architect on sonnet, and a reading role runs read-only shell unasked (Amendment 148)');
+{
+  const every = personasFrom(null);
+  const OPUS_ROLES = ['architect', 'orchestrator', 'developer'];
+  const offTier = PRESETS.flatMap((p) => p.roles.filter((r) => r.model !== (OPUS_ROLES.includes(r.role) ? 'opus' : 'sonnet')).map((r) => `${p.id}/${r.role}=${r.model}`));
+  check('every preset row: architect, orchestrator and developer on opus, every other role on sonnet', offTier.length === 0, offTier.join(' '));
+  const offPersona = BUILT_IN_PERSONAS.filter((p) => p.model !== (OPUS_ROLES.includes(p.id) ? 'opus' : 'sonnet')).map((p) => `${p.id}=${p.model}`);
+  check('every built-in persona likewise: architect and developer on opus, the other five on sonnet', offPersona.length === 0 && BUILT_IN_PERSONAS.length === 7, offPersona.join(' '));
+  check('the tier hints say so: opus for the architect and the developer, sonnet for the rest', /architect and the developer/.test(TIER_HINTS.opus) && /every other role/.test(TIER_HINTS.sonnet) && !/judge/.test(TIER_HINTS.opus));
+  check('the roles an orchestrated pipeline lists take the same tiers', defaultListed(every).map((r) => `${r.id}:${r.tier}`).join() === 'developer:opus,validator:sonnet,reviewer:sonnet,scribe:sonnet');
+
+  // The allowlist itself: nothing on it can write a file or run another program.
+  const NEVER = ['sed', 'find', 'rg', 'sort', 'uniq', 'file', 'tee', 'xargs', 'make', 'pnpm', 'npm', 'npx', 'node', 'sh', 'bash', 'env', 'rm', 'mv', 'cp', 'touch', 'chmod', 'git checkout', 'git reset', 'git stash', 'git commit', 'git push', 'git restore', 'git switch', 'git clean', 'git apply', 'git am', 'git merge', 'git rebase', 'git branch', 'git tag', 'git add', 'git rm', 'git mv', 'git config', 'git -C', 'git -c'];
+  const commandOf = (rule: string): string => /^Bash\((.*?)(?::\*)?\)$/.exec(rule)?.[1] ?? rule;
+  check('the read-only commands are Bash rules, each once', READ_ONLY_BASH.every((t) => /^Bash\([^()]+\)$/.test(t)) && new Set(READ_ONLY_BASH).size === READ_ONLY_BASH.length);
+  check('and none can write or run something else: no sed (not even -n), find, rg, sort, uniq, file, tee, xargs, make, test runner, or git that changes anything', READ_ONLY_BASH.every((t) => !NEVER.some((n) => commandOf(t) === n || commandOf(t).startsWith(`${n} `))), READ_ONLY_BASH.join(' '));
+  check('the reviewer gets what it reads with: git status, diff, log, show and blame, grep, cat, head, tail, ls, wc, diff, stat, pwd', ['git status', 'git diff', 'git log', 'git show', 'git blame', 'grep', 'cat', 'head', 'tail', 'ls', 'wc', 'diff', 'stat'].every((c) => READ_ONLY_BASH.includes(`Bash(${c}:*)`)) && READ_ONLY_BASH.includes('Bash(pwd)'));
+  check('the one way they could write, --output on git diff, log and show, is denied', ['diff', 'log', 'show'].every((c) => READ_ONLY_BASH_DENIED.includes(`Bash(git ${c} *--output*)`)) && READ_ONLY_BASH_DENIED.length === 3);
+
+  // Every reading role, every way it is launched.
+  const pinnedRight = (a: Agent['autonomy']): boolean =>
+    !a.allowedTools.includes('Bash') && !a.allowedTools.includes('mcp__*') &&
+    READ_ONLY_BASH.every((t) => a.allowedTools.filter((x) => x === t).length === 1) &&
+    WRITE_TOOLS.every((t) => a.disallowedTools.includes(t)) && READ_ONLY_BASH_DENIED.every((t) => a.disallowedTools.includes(t)) &&
+    (a.mode === 'default' || a.mode === 'plan');
+  for (const pills of [defaultPills(), { ...PERMISSIVE, mcp: true }]) {
+    for (const mode of [undefined, 'auto', 'plan', 'bypassPermissions'] as const) {
+      const specs = PRESETS.flatMap((p) => toAgentSpecs(p, pills, 5, undefined, {}, {}, {}, mode, every));
+      const readers = specs.filter((x) => isReadOnlyRole(x.role));
+      check(`shell ${pills['allowBash'] ? 'on' : 'off'}, mode ${mode ?? 'from the pills'}: the reviewer, debugger and analyst each run read-only shell unasked, ask before any other, write nothing`,
+        ['reviewer', 'debugger', 'analyst'].every((r) => readers.some((x) => x.role === r)) && readers.every((x) => pinnedRight(x.autonomy)), JSON.stringify(readers.map((x) => x.autonomy)));
+      check(`  and no writing role gets the read-only list in its place`, specs.filter((x) => !isReadOnlyRole(x.role)).every((x) => !x.autonomy.allowedTools.some((t) => t.startsWith('Bash(')) && !READ_ONLY_BASH_DENIED.some((t) => x.autonomy.disallowedTools.includes(t))));
+    }
+  }
+  const scribeReads = personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, tools: { write: false } }));
+  const scribe = toAgentSpecs(presetById('full'), PERMISSIVE, 5, undefined, {}, {}, {}, 'auto', scribeReads).find((x) => x.role === 'scribe')!;
+  check('a write:false persona gets the same read-only shell', pinnedRight(scribe.autonomy), JSON.stringify(scribe.autonomy));
+  const orchRow: Preset = { id: 'custom', label: 'c', roles: [{ role: 'orchestrator', model: 'opus', does: '', brief: '', persona: 'architect', orchestrates: true }] };
+  const [orch] = toAgentSpecs(orchRow, PERMISSIVE, 5, undefined, {}, { opus: 'o', sonnet: 's' }, {}, 'auto', every, [...defaultListed(every), { id: 'debugger', tier: 'sonnet' }, { id: 'analyst', tier: 'sonnet' }]);
+  const listedReaders = (orch!.helperRoles ?? []).filter((r) => isReadOnlyRole(r.id));
+  check('so do the reading roles an orchestrator may start', listedReaders.map((r) => r.id).join() === 'reviewer,debugger,analyst' && listedReaders.every((r) => pinnedRight(r.autonomy)), JSON.stringify(listedReaders.map((r) => r.autonomy)));
+  check('and the daemon still takes every one as read-only', listedReaders.every((r) => readOnlyRefusal(r.id, r.autonomy) === null));
+
+  // An agent added to a running job.
+  const ag = (id: string, role: string, autonomy: Agent['autonomy']): Agent => ({
+    id, jobId: 'j', projectId: 'p', role, model: 'm', sdkSessionId: null, status: 'queued', blockMode: null,
+    costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], startedAt: null, endedAt: null, autonomy,
+  });
+  const writerRope = toAutonomy(PERMISSIVE, 5, undefined, 'acceptEdits');
+  const readerRope = rowAutonomy({ role: 'reviewer', model: 'sonnet', does: '', brief: '' }, PERMISSIVE, 5, undefined, 'auto', every);
+  const fromWriter = addedAutonomy([ag('d', 'developer', writerRope)], 'debugger', undefined, { usd: 3 });
+  const fromReader = addedAutonomy([ag('d', 'developer', writerRope), ag('r', 'reviewer', readerRope)], 'analyst', undefined, { usd: 3 });
+  check('a reading role added to a running job gets it, from a writer template', pinnedRight(fromWriter), JSON.stringify(fromWriter));
+  check('and from a reader template, without listing anything twice', pinnedRight(fromReader) && new Set(fromReader.disallowedTools).size === fromReader.disallowedTools.length, JSON.stringify(fromReader));
+  const writerAdded = addedAutonomy([ag('r', 'reviewer', readerRope), ag('d', 'developer', writerRope)], 'tester', undefined, { usd: 3 });
+  check('a writer added beside a reader takes the writer, not the read-only list', !writerAdded.allowedTools.some((t) => t.startsWith('Bash(')) && writerAdded.allowedTools.includes('Bash'), JSON.stringify(writerAdded));
+
+  const inspector = readFileSync(new URL('../agent/inspector.tsx', import.meta.url), 'utf8');
+  check("an agent's inspector counts the allowed shell rules beside \"asks\"", /p === 'asks' \? scopedRules\(autonomy\.allowedTools, tool\)/.test(inspector) && /allowed \{allowedSome\.length === 1 \? 'rule' : 'rules'\}/.test(inspector));
+  check('the summary says a reading role runs some shell unasked and asks before the rest', describeAutonomy(readerRope).includes('runs some shell commands unattended, asks before the rest') && describeAutonomy(writerRope).includes('runs shell unattended') && describeAutonomy(toAutonomy(defaultPills(), 5)).includes('asks before shell'));
+}
+
+console.log('\n27 · an orchestrated stack chooses its helpers in all, and sends work back per lane (Amendment 151)');
 {
   const every = personasFrom(null);
   const orch = presetById(ORCHESTRATED_ID);
