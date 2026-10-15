@@ -76,6 +76,21 @@ the last of it on 12 Oct).
   done**, cancellable. Settle: whether a queued message also waits for a question it asked you, and
   whether "done" means its turn or its whole job.
 
+- [ ] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
+  work assigned to orchestrator is done, why does it leave the individual agents it started on the
+  list?" Today every helper is its own row in its job, flat, for as long as the job exists
+  (Amendment 86, CONTRACT.md:4056): the navigator (`web/src/shell/navtree.ts:151-238`) sorts by
+  status but never folds or hides, and only the Project screen places helpers after their
+  orchestrator (`web/src/fleet/nest.ts:18`, `nestHelpers`). A stack of 12 helpers leaves 13 rows.
+  - When the orchestrator has ended (`done`, `failed` or `stopped`), its ended helpers fold into one
+    row under it in the navigator, such as **↳ 12 helpers · all done**, with a chevron to open it.
+    Opened or closed is kept like the other nodes (`conductor.navTree`).
+  - A helper that hasn't ended, or that needs you, stays out of the fold, so nothing that waits on
+    you is hidden; the fold's own dot takes the worst status inside it.
+  - Display only: no helper is removed, and its transcript, last reply and cost stay. The Project
+    screen's lanes can use the same fold.
+  Starts at: `navtree.ts` (reuse `nestHelpers`), `shell/verify.ts` for the checks.
+
 - [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
   and 200); they have run (checked 12 Oct: `metrics_daily` and the new `agents` columns exist).
