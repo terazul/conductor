@@ -13,7 +13,9 @@
  *     turn with a dozen edits otherwise pushes the agent's own prose off the
  *     screen, which is the thing you were reading. A reply folds to one line too,
  *     from its role label, but starts open (Amendment 18) — mechanics hide
- *     themselves, output waits for you to fold it (Amendment 33).
+ *     themselves, output waits for you to fold it (Amendment 33). A turn Conductor
+ *     sent ("auto") folds too, and in an orchestrator's transcript starts folded: its
+ *     helpers' report is theirs, and its own reply is what you read (Amendment 160).
  *
  *  3. A BLOCKED ASK STAYS IN THE TRANSCRIPT after it is answered. The pending
  *     queue clears, but "it asked, I chose this" is the most valuable line in
@@ -29,7 +31,7 @@ import type {
 } from '@conductor/shared';
 import { counts, countingSource, pickString } from '../shell/describe.js';
 import { OUTSIDE, linkablePath, type FileLinks } from './links.js';
-import { foldLine, isFolded, setFold, updateFolds, useFolds } from './folds.js';
+import { foldLine, shownFolded, toggleFold, updateFoldState, useFolds, useUnfolds } from './folds.js';
 import { lineCount, renderMarkdown } from './markdown.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
@@ -283,7 +285,8 @@ function diffFromInput(input: unknown): DiffLine[] | null {
 
 /** A readable one-liner for whatever a tool was handed. */
 function inputSummary(input: unknown): string | null {
-  const s = pickString(input, 'command', 'file_path', 'path', 'pattern', 'url', 'prompt');
+  // `task` is what `start_helper` was asked to do (Amendment 160), rather than its JSON.
+  const s = pickString(input, 'command', 'file_path', 'path', 'pattern', 'url', 'prompt', 'task');
   if (s) return s;
   if (input === undefined || input === null) return null;
   try {
@@ -479,9 +482,10 @@ function AgentTurn({
   links: FileLinks | null;
 }) {
   const folds = useFolds();
-  const folded = isFolded(folds, agentId, turn.key);
+  const unfolds = useUnfolds();
+  const folded = shownFolded({ folds, unfolds }, agentId, turn.key, false);
   const prose = useMemo(() => proseOf(turn), [turn]);
-  const toggle = (): void => updateFolds((f) => setFold(f, agentId, turn.key, !folded));
+  const toggle = (): void => updateFoldState((s) => toggleFold(s, agentId, turn.key, false));
   const lines = prose.length > 0 ? lineCount(prose) : 0;
   const extra = carried(turn);
 
@@ -521,9 +525,59 @@ function AgentTurn({
   );
 }
 
-/** The replies in a transcript, by key — what "fold all" folds. */
+/**
+ * A turn Conductor sent ("auto"): a helpers' report, a resume nudge, a merge note. It folds
+ * from its label as a reply does (Amendment 160). `startFolded` is whether it starts folded:
+ * in an orchestrator's transcript, where the helpers' report is long and its own reply to it
+ * is what you came for. Elsewhere it starts open, as every reply does (Amendment 18).
+ */
+function AutoTurn({ turn, agentId, startFolded }: { turn: Turn; agentId: string; startFolded: boolean }) {
+  const folds = useFolds();
+  const unfolds = useUnfolds();
+  const folded = shownFolded({ folds, unfolds }, agentId, turn.key, startFolded);
+  const toggle = (): void => updateFoldState((s) => toggleFold(s, agentId, turn.key, startFolded));
+  const lines = turn.text.length > 0 ? lineCount(turn.text) : 0;
+
+  return (
+    <div className={`ag-msg is-you is-auto${folded ? ' is-folded' : ''}`} id={`t-${turn.key}`}>
+      <button
+        type="button"
+        className="ag-who ag-who-fold"
+        aria-expanded={!folded}
+        title={folded ? 'Unfold this turn' : 'Fold this turn to one line'}
+        onClick={toggle}
+      >
+        auto
+        <span className="ag-fold-ch" aria-hidden="true">
+          {folded ? '⌄' : '⌃'}
+        </span>
+      </button>
+      {folded ? (
+        <div className="ag-body">
+          <button type="button" className="ag-folded" onClick={toggle}>
+            <span className="ag-folded-line">{foldLine(turn.text) || 'no text'}</span>
+            <span className="ag-folded-n">{lines > 0 ? `${lines} line${lines === 1 ? '' : 's'}` : ''}</span>
+          </button>
+        </div>
+      ) : (
+        <div className="ag-body">{turn.text}</div>
+      )}
+    </div>
+  );
+}
+
+/** The turns that fold, by key — what "fold all" folds: the replies, and the turns Conductor sent. */
 export function replyKeys(turns: readonly Turn[]): string[] {
-  return turns.filter((t) => t.who === 'agent').map((t) => t.key);
+  return turns.filter((t) => t.who === 'agent' || t.synthetic).map((t) => t.key);
+}
+
+/**
+ * The turns that start folded (Amendment 160): in an orchestrator's transcript, the ones
+ * Conductor sent it. None anywhere else. `orchestrator` is whether the agent may start
+ * helpers (`helperCap` above 0), which is what a helpers' report is sent to.
+ */
+export function startFoldedKeys(turns: readonly Turn[], orchestrator: boolean): string[] {
+  return orchestrator ? turns.filter((t) => t.who === 'you' && t.synthetic).map((t) => t.key) : [];
 }
 
 export function Transcript({
@@ -532,12 +586,15 @@ export function Transcript({
   role,
   streaming,
   links,
+  startFolded = [],
 }: {
   /** `buildTranscript`'s answer. The screen builds it, because "fold all" needs the keys too. */
   turns: readonly Turn[];
   agentId: string;
   role: string;
   streaming: boolean;
+  /** `startFoldedKeys`: the turns that start folded, which "fold all" needs too. */
+  startFolded?: readonly string[];
   /** Where this job's file names link to (F16). Null when there's no job to link into. */
   links: FileLinks | null;
 }) {
@@ -552,9 +609,11 @@ export function Transcript({
   return (
     <div className="ag-trans">
       {turns.map((t, i) =>
-        t.who === 'you' ? (
-          <div key={t.key} className={`ag-msg is-you${t.synthetic ? ' is-auto' : ''}`} id={`t-${t.key}`}>
-            <span className="ag-who">{t.synthetic ? 'auto' : 'you'}</span>
+        t.who === 'you' && t.synthetic ? (
+          <AutoTurn key={t.key} turn={t} agentId={agentId} startFolded={startFolded.includes(t.key)} />
+        ) : t.who === 'you' ? (
+          <div key={t.key} className="ag-msg is-you" id={`t-${t.key}`}>
+            <span className="ag-who">you</span>
             <div className="ag-body">{t.text}</div>
           </div>
         ) : (

@@ -200,6 +200,56 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 160 — post-merge, applied. **An orchestrator's auto turns start folded, so its page opens to its own replies; one you open stays open, and fold all reaches them.**
+
+Web only (`agent/folds.ts`, `agent/transcript.tsx`, `agent/agent.tsx`, `agent/verify.ts`), and
+`docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change; the daemon's hand-off and report
+text is as it was. The user, 14 Oct 2026, on wave 11's items O2 and O3: *"O2 is accepted as it is. The
+orchestrator keeps its tools, and there's no lane for it."*, leaving O3 (wave-11.md §3 G): fold the
+orchestrator's long text by default. *Amends Amendment 18*, under which every fold was one you made
+and replies always arrived open: that still holds everywhere except the auto turns of an
+orchestrator, which start folded. *Amends Amendment 33*, whose **auto** turn was a label only and now
+folds like a reply, and *Amendment 51*, whose helper reports arrive as those auto turns.
+
+- **An auto turn folds** (`transcript.tsx:534`). `AutoTurn` is the you-turn Conductor sent
+  (`synthetic`); its **auto** label is the fold button, as an agent's name is on a reply, and folded
+  it shows its first line and "N lines" (`foldLine`), as a reply does. Its key is `u${seq}`, the
+  turn's own key. `replyKeys` (`:571`) now lists them with the `a${seq}` replies, so **⌃ fold all** and
+  its anyOpen test cover them. Your own typed turns don't fold and are unchanged.
+- **Which ones start folded** (`transcript.tsx:579`, `agent.tsx:516`). `startFoldedKeys(turns,
+  orchestrator)` is every auto turn when `orchestrator`, else none; `agent.tsx` passes it to
+  `Transcript` as `startFolded`. An orchestrator is an agent with `helperCap > 0`: that is exactly
+  the condition under which the daemon sends a helper report (`#takeHelperReport`, `if
+  (!agent?.helperCap) return ''`), so it's the agents whose auto turns are long. `marksOrchestrator`
+  (shared `stack.ts:368`) wasn't used: it needs pipeline roles and a stack of two, and misses
+  Amendment 51's orchestrator without roles.
+- **A default fold you open stays open** (`folds.ts:83-121`, `:181-186`). The fold state is two
+  sets of the same shape and bounds, per agent: `conductor.agentFolds` (unchanged: the folds you
+  made on turns that start open) and `conductor.agentUnfolds` (new: the turns you opened that
+  started folded). `shownFolded(s, id, key, byDefault)` reads the one that applies; `toggleFold`
+  writes it; `foldEvery` folds every key, by adding to `folds` and taking the started-folded ones
+  out of `unfolds`; `unfoldEvery` clears `folds` and puts every started-folded key in `unfolds`.
+  `updateFoldState` writes only the sets that changed. The old key is read as before, so there is
+  nothing to migrate; a non-orchestrator's folds use `folds` alone, which is Amendment 18 as it was.
+- **A `start_helper` line shows its task** (`transcript.tsx:289`). `inputSummary` picks `task` after
+  `prompt`, so `mcp__conductor__start_helper` reads as the task given, not the input's JSON.
+
+*Not done / not decided:* not looked at in a browser. Settings' "unfold every reply" clears
+`conductor.agentFolds` only, so an auto turn you opened in an orchestrator stays open after it; not
+changed here. Every auto turn in an orchestrator starts folded, not only its helpers' reports (a
+continue or a hand-off note too): they are the same turn on the page, and the spec asks for "auto
+turns". The tool row's name is still the raw MCP name; only its subject changed.
+
+*Verified:* `agent/verify.ts` "an orchestrator's auto turns start folded" (20 checks) renders a
+`Transcript` with `renderToStaticMarkup`: an orchestrator's auto turn renders folded to its first
+line with "4 lines" and none of its body, and its own reply open; a non-orchestrator's renders open
+and still folds; one opened with `updateFoldState` renders open, while the same key on another
+agent is still folded; fold all folds the reply and both auto turns (three `aria-expanded="false"`,
+no markdown body) and unfold all opens them; a `start_helper` line's subject is its task. With
+`'task'` taken out of `inputSummary`, the `u` keys taken out of `replyKeys`, `startFoldedKeys`
+returning none, or `shownFolded` ignoring `byDefault`, those checks fail; restored, they pass.
+`tsc --noEmit` in `packages/web` is clean and `make test` is green: 28 PASS.
+
 ### Amendment 163 — post-merge, applied. **A Claude run's own context window is kept, under the model's alias and its full id, and every window outlives a restart, so the hand-off cap uses the real one from the first run on.**
 
 Daemon (`session/windows.ts`, `session/backends/claude.ts`, `index.ts`, `session/verify.ts`, migration
