@@ -14,7 +14,7 @@
  */
 
 import type { ModelCatalog, ModelTier } from '@conductor/shared';
-import { DEFAULT_PIPELINE_ROLES, PIPELINE_ROLES_MAX, SEND_BACKS_MAX, pipelineHelperCap, showsOrchestrator } from '@conductor/shared';
+import { DEFAULT_PIPELINE_ROLES, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, SEND_BACKS_MAX, pipelineHelperCap, showsOrchestrator } from '@conductor/shared';
 import { BUILT_IN_PERSONAS, personaFor, type Persona } from './personas.js';
 
 /** The preset's id. */
@@ -74,9 +74,32 @@ export function orchestrates(list: readonly ListedRole[]): boolean {
   return showsOrchestrator(stackAgents(list));
 }
 
-/** How many helpers the orchestrator may start in all: each role once, and sent back as often as allowed. */
+/** How many helpers the orchestrator may start in all, unless you choose: each role once, and sent back as often as allowed. */
 export function helperCapFor(list: readonly ListedRole[]): number {
   return pipelineHelperCap(list.length);
+}
+
+/**
+ * The "helpers in all" a launch may choose (Amendment 150): from one per listed role up to the
+ * default, one at a time, then in fours up to PIPELINE_HELPERS_MAX, so a plan of many lanes can
+ * start one role many times. Empty with no role listed.
+ */
+export function helperChoices(list: readonly ListedRole[]): number[] {
+  if (list.length === 0) return [];
+  const out: number[] = [];
+  for (let n = list.length; n <= helperCapFor(list); n += 1) out.push(n);
+  for (let n = (Math.floor(helperCapFor(list) / 4) + 1) * 4; n <= PIPELINE_HELPERS_MAX; n += 4) out.push(n);
+  if (out.at(-1) !== PIPELINE_HELPERS_MAX) out.push(PIPELINE_HELPERS_MAX);
+  return out;
+}
+
+/**
+ * The helpers in all this launch sends: what you chose, kept within this list's choices, or
+ * `helperCapFor` when you chose nothing. `chosen` is null until you pick one.
+ */
+export function helpersInAll(list: readonly ListedRole[], chosen: number | null): number {
+  if (chosen === null) return helperCapFor(list);
+  return Math.min(PIPELINE_HELPERS_MAX, Math.max(list.length, chosen));
 }
 
 /** The listed roles whose tier the model API serves no model for: they have no id to send, so the launch waits. */
@@ -84,10 +107,11 @@ export function unresolvedListed(list: readonly ListedRole[], tiers: ModelCatalo
   return list.filter((r) => !tiers[r.tier]);
 }
 
-/** What the plan says about sending work back, in the words the daemon enforces. */
+/** What the plan says about sending work back, in the words the daemon enforces: per lane (Amendment 150). */
 export function sendBackWords(): string {
   return (
-    `It starts one role at a time and reads what it did before the next. It may send a role's work back ` +
-    `(start it again, as the developer after a failed review) at most ${SEND_BACKS_MAX} times, then it asks you.`
+    `It starts one role at a time and reads what it did before the next. Each piece of work is a lane, a role and a ` +
+    `name; it may send a lane's work back (start it again, as the developer after a failed review) at most ` +
+    `${SEND_BACKS_MAX} times, then it asks you.`
   );
 }

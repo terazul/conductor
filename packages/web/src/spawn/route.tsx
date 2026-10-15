@@ -91,7 +91,7 @@ import {
 import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { Pipeline } from './Pipeline.js';
-import { defaultListed, helperCapFor, orchestrates, unresolvedListed, type ListedRole } from './orchestrated.js';
+import { defaultListed, helperCapFor, helpersInAll, orchestrates, unresolvedListed, type ListedRole } from './orchestrated.js';
 import { METHODS, branchOptions, branchProblem, launchBody, methodReady, pickedNote, presetLabel, type Method } from './launch.js';
 import { getBranches } from '../branches/endpoints.js';
 import { useReorder } from './reorder.js';
@@ -284,6 +284,11 @@ function Spawn() {
   const [helpers, setHelpers] = useState<Record<string, number>>({});
   /** An orchestrated stack's listed roles, once you change them; null is the default list (Amendment 128). */
   const [listedEdit, setListedEdit] = useState<ListedRole[] | null>(null);
+  /**
+   * Its helpers in all, once you choose; null is `helperCapFor` the list (Amendment 150). Kept for
+   * this launch as the per-role helpers are, and put back when you choose a preset.
+   */
+  const [pipeHelpers, setPipeHelpers] = useState<number | null>(null);
   const [customName, setCustomName] = useState('');
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
@@ -305,6 +310,7 @@ function Spawn() {
    * orchestrator row becomes a plain architect and nothing says it orchestrates (`orchestratedFor`).
    */
   const listed: readonly ListedRole[] = has.helpers ? (listedEdit ?? defaultListed(personas)) : [];
+  const inAll = helpersInAll(listed, pipeHelpers);
   const ownRows = isCustom
     ? toPreset(CUSTOM_ID, customName.trim() || 'custom', custom, personas)
     : arranged?.presetId === presetId
@@ -429,8 +435,8 @@ function Spawn() {
     [pills, budgetPerAgent, effort, mode, launchOn],
   );
   const specs = useMemo(
-    () => specsOn(toAgentSpecs(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed), launchOn),
-    [preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, launchOn],
+    () => specsOn(toAgentSpecs(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll), launchOn),
+    [preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll, launchOn],
   );
   /** The "every role" picker's value: the id every row runs on, or "" for per role. */
   const every = commonPick(preset, picks, tiers);
@@ -457,6 +463,7 @@ function Spawn() {
       setArranged(null);
       setHelpers({});
       setListedEdit(null);
+      setPipeHelpers(null);
       const next = id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : presetById(id);
       setPicks(every ? pickAll(next, every) : {});
     },
@@ -1000,6 +1007,8 @@ function Spawn() {
                     claude={claude}
                     model={launchOn.model}
                     onChange={setListedEdit}
+                    helpers={inAll}
+                    onHelpers={setPipeHelpers}
                     {...(isCustom
                       ? { alone: `No role listed, so ${r.role} launches as an ordinary agent and nothing orchestrates. Add a role to have it run a pipeline.` }
                       : {})}

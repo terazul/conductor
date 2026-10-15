@@ -26,6 +26,7 @@ import type {
   ProjectSpend,
   Question,
 } from '@conductor/shared';
+import { helperSlug } from '@conductor/shared';
 import { row, rows, type Db } from '../db/index.js';
 
 export const nowIso = (): string => new Date().toISOString();
@@ -492,11 +493,21 @@ export function getHelperRole(db: Db, id: string): string | null {
   return r?.helper_role ?? null;
 }
 
-/** How many helpers of this role the orchestrator has started, ended or not (Amendment 128). */
-export function startedAsRole(db: Db, orchestratorId: string, role: string): number {
-  return row<{ n: number }>(
-    db.prepare('SELECT COUNT(*) AS n FROM agents WHERE parent_id = ? AND helper_role = ?').get(orchestratorId, role),
-  )?.n ?? 0;
+/**
+ * How many helpers of this role the orchestrator has started in one lane, ended or not
+ * (Amendment 128; per lane since Amendment 150). A lane is the role and the `name` it was
+ * started with, as `helperSlug` stores it; no name is the role's unnamed lane. The name is kept
+ * in the helper's `role` column, which `Supervisor.startHelper` writes as `<role>-<name>`
+ * (`<role>` with none), and `-2`, `-3` … after it when the lane is started again. So a lane's
+ * helpers are that stem, or that stem and a number.
+ */
+export function startedInLane(db: Db, orchestratorId: string, role: string, name?: string): number {
+  const slug = helperSlug(name);
+  const stem = slug ? `${role}-${slug}` : role;
+  const started = rows<{ role: string }>(
+    db.prepare('SELECT role FROM agents WHERE parent_id = ? AND helper_role = ?').all(orchestratorId, role),
+  );
+  return started.filter((r) => r.role === stem || (r.role.startsWith(`${stem}-`) && /^\d+$/.test(r.role.slice(stem.length + 1)))).length;
 }
 
 export function helpersOf(db: Db, parentId: string): Agent[] {

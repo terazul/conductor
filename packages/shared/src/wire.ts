@@ -208,7 +208,8 @@ export interface AgentSpec {
   /**
    * Put several agents on this role (Amendment 51): this one orchestrates, and may start
    * up to this many helpers. 0 or absent for an ordinary agent; at most HELPERS_MAX, or with
-   * `helperRoles` (Amendment 128) at most `pipelineHelperCap` of them and at least 1.
+   * `helperRoles` (Amendment 128) at least 1 and at most PIPELINE_HELPERS_MAX (Amendment 150).
+   * Spawn sends `pipelineHelperCap` for those unless the launch chose another number.
    */
   helpers?: number;
   /**
@@ -226,7 +227,9 @@ export interface AgentSpec {
    * Amendment 128. Makes this agent the orchestrator of an orchestrated stack: the roles it
    * may start, each with what a helper of that role runs with. `start_helper` takes one of
    * their ids as its `role`, and refuses any other. Needs `helpers` above 0, which is how many
-   * helpers it may start in all, send-backs included (`pipelineHelperCap`).
+   * helpers it may start in all, send-backs included (`pipelineHelperCap` unless the launch chose
+   * another, up to PIPELINE_HELPERS_MAX). Send-backs are counted per lane: a role and the `name`
+   * `start_helper` was given (Amendment 150).
    */
   helperRoles?: HelperRole[];
 }

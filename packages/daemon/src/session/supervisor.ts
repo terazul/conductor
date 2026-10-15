@@ -49,6 +49,7 @@ import {
   createsCycle,
   helperModel,
   helperReads,
+  helperSlug,
   isStuck,
   listedRole,
   readOnlyRefusal,
@@ -129,7 +130,7 @@ import {
   updateProject,
   helpersOf,
   getHelperRoles,
-  startedAsRole,
+  startedInLane,
   markReported,
   setAgentDependsOn,
   unreportedHelpers,
@@ -1718,8 +1719,10 @@ export class Supervisor implements AgentControl {
    * With a `role` (Amendment 128), for the orchestrator of an orchestrated stack, the helper
    * runs as that role instead: its persona's system prompt and skills, its model (the listed
    * tier, or a cheaper `tier` asked for), and its rope, which keeps a reading role read-only.
-   * Only the roles the stack was launched with may be started, and one role at most
-   * `1 + SEND_BACKS_MAX` times, after which the orchestrator is told to ask the user. A
+   * Only the roles the stack was launched with may be started, and one lane at most
+   * `1 + SEND_BACKS_MAX` times, after which the orchestrator is told to ask the user. A lane
+   * is the role and the `name` (Amendment 150): a new name is new work, the same name again is
+   * a send-back, and no name is the role's unnamed lane. A
    * `role` on an orchestrator launched with none, and none on one launched with some, is
    * refused with a sentence; an ordinary orchestrator's helpers are as they always were.
    */
@@ -1735,9 +1738,10 @@ export class Supervisor implements AgentControl {
     if (refused) throw new Error(refused);
     const chosen = listedRole(askedRole, listed);
     if (!chosen && askedTier) throw new Error('tier goes with a role: a helper started without one runs on your model.');
-    // Rule on the role before the total, so the sentence that names it is the one it reads.
+    // Rule on the lane before the total, so the sentence that names it is the one it reads.
+    const slug = helperSlug(name);
     if (chosen) {
-      const again = sendBackRefusal(chosen.id, startedAsRole(this.#db, orch.id, chosen.id));
+      const again = sendBackRefusal(chosen.id, startedInLane(this.#db, orch.id, chosen.id, name), slug);
       if (again) throw new Error(again);
     }
     const mine = helpersOf(this.#db, orch.id);
@@ -1758,10 +1762,10 @@ export class Supervisor implements AgentControl {
     }
 
     const taken = new Set(agentsForJob(this.#db, orch.jobId).map((a) => a.role));
-    const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
     let role: string;
     if (chosen) {
-      // Named for its role (`developer`, then `developer-2` when it is sent back), so the lanes read as the pipeline.
+      // Named for its role and lane (`developer`, or `developer-api` for the name "api"), then `-2`
+      // when that lane is sent back, so the lanes read as the pipeline. `startedInLane` counts by it.
       const stem = slug ? `${chosen.id}-${slug}` : chosen.id;
       role = stem;
       for (let n = 2; taken.has(role); n += 1) role = `${stem}-${n}`;

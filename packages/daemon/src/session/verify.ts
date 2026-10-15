@@ -155,8 +155,8 @@ import { HANDOFF_ASK, NEW_DAY_NUDGE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supe
 import { createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
-import { SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
-import { getHelperRole, getHelperRoles, startedAsRole } from './store.js';
+import { HELPERS_MAX, PIPELINE_HELPERS_MAX, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
+import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
 /*
@@ -6478,8 +6478,9 @@ async function main(): Promise<void> {
     check('more than 8 roles → 400', (await bad({ helperRoles: Array.from({ length: 9 }, (_, i) => ({ ...ROLES[0]!, id: `role-${i}` })), helpers: 8 })).status === 400);
     const none = await bad({ helpers: 0 });
     check('roles with no helpers to start them as → 400', none.status === 400 && /helpers must be above 0/.test(none.detail), none.detail);
-    const tooMany = await bad({ helpers: pipelineHelperCap(ROLES.length) + 1 });
-    check('and no more helpers than the roles, each started and sent back twice → 400', tooMany.status === 400 && /0 to 9/.test(tooMany.detail), tooMany.detail);
+    // Since Amendment 150 the total is a launch choice, up to PIPELINE_HELPERS_MAX; section 25b launches above the default.
+    const tooMany = await bad({ helpers: PIPELINE_HELPERS_MAX + 1 });
+    check('and no more helpers than PIPELINE_HELPERS_MAX → 400', tooMany.status === 400 && /0 to 48/.test(tooMany.detail), tooMany.detail);
     check('an ordinary orchestrator is still held to 8', (await bad({ helperRoles: undefined, helpers: 9 })).status === 400);
 
     // ── an orchestrated stack, launched ──────────────────────────────────────────
@@ -6550,10 +6551,10 @@ async function main(): Promise<void> {
     const again1 = await startOver(orchId, { role: 'developer', task: 'The review found a fault in line 3; fix it.' });
     const again2 = await startOver(orchId, { role: 'developer', task: 'The test still fails; fix it.' });
     check('the developer can be started again, twice: named apart', !again1.isError && /^Started developer-2\./.test(again1.text) && !again2.isError && /^Started developer-3\./.test(again2.text), `${again1.text} | ${again2.text}`);
-    check('and it is counted from the database, by the role it was started as', startedAsRole(db, orchId, 'developer') === 3 && startedAsRole(db, orchId, 'reviewer') === 1 && helpersOf(db, orchId).filter((h) => getHelperRole(db, h.id) === 'developer').length === 3);
+    check('and it is counted from the database, by the role it was started as and its unnamed lane', startedInLane(db, orchId, 'developer') === 3 && startedInLane(db, orchId, 'reviewer') === 1 && helpersOf(db, orchId).filter((h) => getHelperRole(db, h.id) === 'developer').length === 3);
     const third = await startOver(orchId, { role: 'developer', task: 'One more go.' });
-    check('a fourth start of the same role is refused', third.isError && helpersOf(db, orchId).length === 4, third.text);
-    check('with a sentence that tells it to ask the user, with the question tool', /Ask the user with the question tool \(AskUserQuestion, or ask_user\)/.test(third.text) && /sent its work back 2 times/.test(third.text) && /Do not start it again/.test(third.text), third.text);
+    check('a fourth start of the same role, with no name, is refused', third.isError && helpersOf(db, orchId).length === 4, third.text);
+    check('with a sentence that tells it to ask the user, with the question tool', /Ask the user with the question tool \(AskUserQuestion, or ask_user\)/.test(third.text) && /^You have started the developer 3 times: once/.test(third.text) && /sent its work back 2 times/.test(third.text) && /Do not start it again/.test(third.text), third.text);
     check('other roles are not affected', !(await startOver(orchId, { role: 'scribe', task: 'Write it down.', tier: 'haiku' })).isError);
 
     // ── a helper never hands off, and is never held ──────────────────────────────
@@ -6674,6 +6675,60 @@ async function main(): Promise<void> {
     check('a role starts there too, on the same provider, read-only and capped in tokens', !cpHelper.isError && cpH?.provider === 'copilot' && cpH.model === 'gpt-5' && cpH.autonomy.budgetTokens === 500_000 && readOnlyRefusal('reviewer', cpH.autonomy) === null, cpHelper.text);
     check('and a tier is refused there: this engine has none', (await startOver(onCopilot.body.agents?.[0]?.id ?? '~', { role: 'developer', task: 'x', tier: 'haiku' })).isError);
     if (seen.copilot) registerBackend(seen.copilot);
+
+    // ───────────────────────────────────────────────────────────────────────────
+    console.log('\n25b · each piece of work is its own lane: send-backs counted per role and name, and the total a launch choice (Amendment 150)');
+    const FOUR: HelperRole[] = [...ROLES, { id: 'validator', tier: 'sonnet', model: O_SONNET, brief: 'Test it.', autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds }];
+    const laneJobs: string[] = [];
+    check('the pure rules: a lane is the role and the name, as it is stored; the most in all is 48', PIPELINE_HELPERS_MAX === 48 && helperSlug(' W11 A1! ') === 'w11-a1' && helperSlug(undefined) === '' && sendBackRefusal('developer', 2, 'w11-a1') === null);
+    check('a lane at its fourth start is refused by name, and the rest of the sentence is as it was', (() => {
+      const why = sendBackRefusal('developer', 3, 'w11-a1') ?? '';
+      return why.startsWith('You have started the developer for “w11-a1” 3 times: once, and then you sent its work back 2 times') && /Do not start it again/.test(why) && /say what keeps failing/.test(why) && sendBackRefusal('developer', 3) === sendBackRefusal('developer', 3, '');
+    })());
+
+    // A launch may choose the total: above the default, up to PIPELINE_HELPERS_MAX, for a 4-role stack.
+    const fourSpec = { ...orchSpec, helperRoles: FOUR };
+    check('a 4-role stack defaults to 12 helpers, as before', pipelineHelperCap(FOUR.length) === 12);
+    const at48 = await launch([{ ...fourSpec, helpers: 48 }]);
+    check('a 4-role stack launched with 48 helpers in all → 201, and keeps 48', at48.status === 201 && getAgent(db, at48.body.agents?.[0]?.id ?? '~')?.helperCap === 48, `${at48.status} ${at48.body.detail ?? ''}`);
+    laneJobs.push(at48.body.agents?.[0]?.jobId ?? '~');
+    const at49 = await bad({ helperRoles: FOUR, helpers: 49 });
+    check('and with 49 → 400, saying the most', at49.status === 400 && /helpers is a whole number from 0 to 48/.test(at49.detail), at49.detail);
+    const plain9 = await bad({ helperRoles: undefined, helpers: HELPERS_MAX + 1 });
+    check('an ordinary orchestrator is still held to HELPERS_MAX (8), not 48', HELPERS_MAX === 8 && plain9.status === 400 && /from 0 to 8/.test(plain9.detail), plain9.detail);
+
+    const laneMade = await launch([{ ...fourSpec, helpers: 13 }]);
+    const laneOrch = laneMade.body.agents?.[0]?.id ?? '~';
+    laneJobs.push(laneMade.body.agents?.[0]?.jobId ?? '~');
+    check('a 4-role stack launched with 13 helpers in all → 201, and keeps 13', laneMade.status === 201 && getAgent(db, laneOrch)?.helperCap === 13, `${laneMade.status} ${laneMade.body.detail ?? ''}`);
+    await until(() => runs.some((r) => r.options.model === O_OPUS && (r.prompts[0] ?? '').includes('up to 13 helpers in all')));
+    const laneP0 = runs.find((r) => (r.prompts[0] ?? '').includes('up to 13 helpers in all'))?.prompts[0] ?? '';
+    check('its prompt says to give new work its own name, and that the same name again is a send-back', /Give each new piece of work its own `name`/.test(laneP0) && /with the same `name` and a new `task`/.test(laneP0) && /send a lane's work back at most 2 times/.test(laneP0), laneP0);
+    const laneTool = ((await mcp(laneOrch, 'tools/list')).body.result?.tools ?? []).find((t) => t.name === 'start_helper') as { description?: string; inputSchema: { properties?: Record<string, { description?: string }> } } | undefined;
+    check('its start_helper says a new name is new work, and the same name a send-back', /Give new work a new name; the same role with the same name again sends that work back, at most 2 times/.test(laneTool?.description ?? '') && /its lane\. A new name is new work; the same name again is a send-back/.test(laneTool?.inputSchema.properties?.['name']?.description ?? ''), JSON.stringify(laneTool));
+    check('and the closing line it is woken with says the same', /with a new `name` for new work/.test(pipelineReportClosing(2)) && /with the same `name`/.test(pipelineReportClosing(2)) && /A lane's work may be sent back at most 2 times/.test(pipelineReportClosing(2)));
+
+    const go = (name: string | undefined, role = 'developer') => startOver(laneOrch, { role, task: `Lane ${name ?? '(none)'}: build it.`, ...(name === undefined ? {} : { name }) });
+    const newLanes = [await go('w11-a1'), await go('w11-a2'), await go('w11-a3')];
+    check('three starts of the developer under three names all start: three lanes, each its first start', newLanes.every((r) => !r.isError) && /^Started developer-w11-a1\./.test(newLanes[0]!.text) && /^Started developer-w11-a3\./.test(newLanes[2]!.text), newLanes.map((r) => r.text).join(' | '));
+    const fourthLane = await go('w11-a4');
+    check('and a fourth new name still starts, since the total allows it', !fourthLane.isError && /^Started developer-w11-a4\./.test(fourthLane.text), fourthLane.text);
+    const back1 = await go('w11-a1');
+    const back2 = await go('W11 A1');
+    check('the same name again is a send-back of that lane, twice; the name is normalised as it is stored', !back1.isError && /^Started developer-w11-a1-2\./.test(back1.text) && !back2.isError && /^Started developer-w11-a1-3\./.test(back2.text), `${back1.text} | ${back2.text}`);
+    check('counted per lane from the database', startedInLane(db, laneOrch, 'developer', 'w11-a1') === 3 && startedInLane(db, laneOrch, 'developer', 'w11-a2') === 1 && startedInLane(db, laneOrch, 'developer') === 0 && startedInLane(db, laneOrch, 'reviewer', 'w11-a1') === 0);
+    const back3 = await go('w11-a1');
+    check('the same name at its fourth start is refused, and the refusal names the lane', back3.isError && /^You have started the developer for “w11-a1” 3 times: once, and then you sent its work back 2 times/.test(back3.text) && /Ask the user with the question tool/.test(back3.text) && helpersOf(db, laneOrch).length === 6, back3.text);
+    const other = await go('w11-a2');
+    check('while another lane of the same role can still be sent back', !other.isError && /^Started developer-w11-a2-2\./.test(other.text), other.text);
+    const unnamed = [await go(undefined), await go(undefined), await go(undefined)];
+    const unnamed4 = await go(undefined);
+    check('starts with no name keep the limit they had: three, as one lane', unnamed.every((r) => !r.isError) && /^Started developer\./.test(unnamed[0]!.text) && /^Started developer-3\./.test(unnamed[2]!.text) && unnamed4.isError && /^You have started the developer 3 times: once/.test(unnamed4.text), [...unnamed, unnamed4].map((r) => r.text).join(' | '));
+    const fill = [await go('b1', 'reviewer'), await go('b2', 'reviewer'), await go('b3', 'reviewer')];
+    check('other roles have their own lanes', fill.every((r) => !r.isError) && helpersOf(db, laneOrch).length === 13, fill.map((r) => r.text).join(' | '));
+    const over = await go('w11-a5');
+    check('and the total still refuses past the cap the launch chose, whatever the lane', over.isError && /orchestrator may start 13 helpers, and has started 13/.test(over.text) && helpersOf(db, laneOrch).length === 13, over.text);
+    for (const j of laneJobs) await sup.stopJob(j);
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);

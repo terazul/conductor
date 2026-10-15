@@ -22,6 +22,7 @@
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { SEND_BACKS_MAX } from '@conductor/shared';
 import { supervisor } from '../session/supervisor.js';
 
 interface RpcRequest {
@@ -115,7 +116,8 @@ export function startHelperWithRoles(roles: readonly ToolRole[]): McpTool {
     description:
       `Start the next step of the pipeline as one of these roles: ${listed}. It works in this same folder with that ` +
       "role's own instructions, tools and model, and replies with what it did. Write the task in full: it does not see " +
-      'this conversation. Returns its role. Start one step, then end your turn; you are woken with what it did.',
+      'this conversation. Give new work a new name; the same role with the same name again sends that work back, at ' +
+      `most ${SEND_BACKS_MAX} times. Returns its role. Start one step, then end your turn; you are woken with what it did.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -126,7 +128,10 @@ export function startHelperWithRoles(roles: readonly ToolRole[]): McpTool {
           enum: ['opus', 'sonnet', 'haiku'],
           description: 'A cheaper model than the one listed for the role, for an easy step. Optional; a dearer one than listed is refused.',
         },
-        name: { type: 'string', description: 'A short name for it, like "api" or "tests". Optional.' },
+        name: {
+          type: 'string',
+          description: `A short name for this piece of work, like "api" or "tests": its lane. A new name is new work; the same name again is a send-back, at most ${SEND_BACKS_MAX} times. Optional.`,
+        },
       },
       required: ['role', 'task'],
     },

@@ -176,15 +176,36 @@ export const DEFAULT_PIPELINE_ROLES: readonly string[] = ['developer', 'validato
 export const PIPELINE_ROLES_MAX = 8;
 
 /**
- * How many times the orchestrator may send a role's work back (start it again, as the
- * developer after a failed review) before it must ask the user. A role is started once, so the
- * most starts of one role is one more than this.
+ * How many times the orchestrator may send a lane's work back (start it again, as the
+ * developer after a failed review) before it must ask the user. A lane is a role and the name
+ * it was started with (Amendment 150): it is started once, so the most starts of one lane is
+ * one more than this. A new name is new work, its own lane.
  */
 export const SEND_BACKS_MAX = 2;
 
-/** How many helpers a stack listing `roles` roles may start in all: each role once, and sent back as often as allowed. */
+/**
+ * How many helpers a stack listing `roles` roles may start in all, unless the launch chose
+ * another number: each role once, and sent back as often as allowed.
+ */
 export function pipelineHelperCap(roles: number): number {
   return roles * (1 + SEND_BACKS_MAX);
+}
+
+/**
+ * The most helpers an orchestrated stack may be launched to start in all (Amendment 150): a
+ * plan of many lanes needs more than each role once and sent back twice. Spawn offers up to it
+ * ("helpers in all"), and the daemon refuses more. An ordinary orchestrator is still held to
+ * HELPERS_MAX.
+ */
+export const PIPELINE_HELPERS_MAX = 48;
+
+/**
+ * The name a helper is stored under, from the `name` the orchestrator gave `start_helper`:
+ * lowercase, runs of anything else as one dash, at most 24 characters. '' for no name. It is
+ * also what makes two starts one lane (Amendment 150): the same role with the same name.
+ */
+export function helperSlug(name: string | undefined): string {
+  return (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
 }
 
 /** "a", "a and b", "a, b and c". */
@@ -224,14 +245,16 @@ export function listedRole<T extends { id: string }>(asked: string | undefined, 
 }
 
 /**
- * Why a role may not be started again, or null when it may. `started` is how many helpers of
- * this role the orchestrator has started, ended or not. The first start is the work; every one
- * after it is a send-back, and the third is where it must ask.
+ * Why a lane may not be started again, or null when it may. `started` is how many helpers of
+ * this role the orchestrator has started under this name (`lane`, as `helperSlug` stores it;
+ * '' or absent for the role's unnamed lane), ended or not (Amendment 150). The first start is
+ * the work; every one after it is a send-back, and the third is where it must ask.
  */
-export function sendBackRefusal(role: string, started: number): string | null {
+export function sendBackRefusal(role: string, started: number, lane?: string): string | null {
   if (started < 1 + SEND_BACKS_MAX) return null;
+  const who = lane ? `the ${role} for “${lane}”` : `the ${role}`;
   return (
-    `You have started the ${role} ${started} times: once, and then you sent its work back ${SEND_BACKS_MAX} times, ` +
+    `You have started ${who} ${started} times: once, and then you sent its work back ${SEND_BACKS_MAX} times, ` +
     'which is the most you may. Do not start it again. Ask the user with the question tool (AskUserQuestion, or ask_user): ' +
     'say what keeps failing, and ask whether to go on, change the brief, or stop.'
   );

@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -67,6 +67,8 @@ import {
   ORCHESTRATED_ID,
   defaultListed,
   helperCapFor,
+  helperChoices,
+  helpersInAll,
   offeredRoles,
   orchestrates,
   sendBackWords,
@@ -595,7 +597,7 @@ console.log('\n10 · how the agents interact with you, chosen at launch (Amendme
   check('a saved default is read, and a bad one is the default', launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'auto' : null)).mode === 'auto' && launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'yolo' : null)).mode === 'acceptEdits');
   check('the summary says when nothing will ask, shell included', describeAutonomy(bypass).startsWith('⚠ asks you nothing · runs shell unattended'), describeAutonomy(bypass));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
+  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed(, inAll)?)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
 }
 
 console.log('\n11 · MCP tools, and what a reading role never gets (Amendment 67)');
@@ -739,7 +741,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('budget 500k tokens a day') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
+  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd, its hint naming the ceiling set (Amendment 140)', /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title=\{`[^`]*per day[^`]*\$\{ceilingWords\(\)\}[^`]*`\}\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
@@ -1300,7 +1302,7 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
   check('the list can remove a role, change a tier and add one, and says how work is sent back', /withoutRole\(listed, l\.id\)/.test(picker) && /withTier\(listed, l\.id/.test(picker) && /withRole\(listed, e\.target\.value/.test(picker) && /sendBackWords\(\)/.test(picker));
   check('a stack of one says it is one agent, with no orchestrator', /No role listed, so this launches one architect agent and nothing orchestrates/.test(picker));
-  check('the words say what the daemon enforces: twice a role, then it asks', /at most 2 times, then it asks you/.test(sendBackWords()));
+  check('the words say what the daemon enforces: twice a lane, then it asks', /send a lane's work back/.test(sendBackWords()) && /at most 2 times, then it asks you/.test(sendBackWords()));
 
   // Both themes: the new rules use the measured tokens, and no colour of their own, and no status colour.
   const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');
@@ -1545,8 +1547,33 @@ console.log('\n25 · what you click is what runs: a persona does not change the 
   check('a writing role (developer) given a write:false persona is pinned too: write tools denied, mode ask me, no unattended shell', WRITE_TOOLS.every((t) => pinnedDev.disallowedTools.includes(t)) && pinnedDev.mode === 'default' && !pinnedDev.allowedTools.includes('Bash'), JSON.stringify(pinnedDev));
 }
 
+console.log('\n26 · an orchestrated stack chooses its helpers in all, and sends work back per lane (Amendment 150)');
+{
+  const every = personasFrom(null);
+  const orch = presetById(ORCHESTRATED_ID);
+  const four = defaultListed(every);
+  const specsWith = (listed: readonly ListedRole[], inAll?: number) =>
+    toAgentSpecs(orchestratedFor(orch, listed), defaultPills(), 5, undefined, {}, {}, {}, undefined, every, listed, inAll);
+
+  check('the choices run from one per role to the default one at a time, then in fours to 48', JSON.stringify(helperChoices(four)) === JSON.stringify([4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48]) && PIPELINE_HELPERS_MAX === 48, JSON.stringify(helperChoices(four)));
+  check('and with one role, from 1 to 48; with none, no choice', helperChoices(four.slice(0, 1))[0] === 1 && helperChoices(four.slice(0, 1)).at(-1) === 48 && helperChoices([]).length === 0);
+  check('nothing chosen is helperCapFor the list, as before', helpersInAll(four, null) === helperCapFor(four) && helpersInAll(four, null) === 12 && helpersInAll(four.slice(0, 2), null) === 6);
+  check('a choice is kept, within one per role and 48', helpersInAll(four, 20) === 20 && helpersInAll(four, 99) === 48 && helpersInAll(four, 1) === 4);
+  check('what is chosen is sent as helpers', specsWith(four, 20)[0]!.helpers === 20 && specsWith(four, 48)[0]!.helpers === 48);
+  check('and with none chosen, the default, so a launch that does not choose is as it was', specsWith(four)[0]!.helpers === 12 && specsWith(four, helpersInAll(four, null))[0]!.helpers === 12);
+  check('a row that does not orchestrate is not given it', toAgentSpecs(presetById('full'), defaultPills(), 5, undefined, {}, {}, {}, undefined, every, four, 20).every((x) => x.helpers === undefined));
+
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
+  check('Spawn shows a "helpers in all" select on the listed roles, styled as the helpers picker', /className="ui-select sp-helpers sp-pipe-helpers"/.test(picker) && /aria-label="Helpers in all"/.test(picker) && /helperChoices\(listed\)/.test(picker) && /in all/.test(picker) && /onHelpers\(Number\(e\.target\.value\)\)/.test(picker));
+  check('it defaults to helperCapFor and is sent as helpers', /const inAll = helpersInAll\(listed, pipeHelpers\)/.test(route) && /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll\)/.test(route) && /helpers=\{inAll\}/.test(route) && /onHelpers=\{setPipeHelpers\}/.test(route));
+  check('it is kept for the launch as the per-role helpers are: a preset change puts the default back', /useState<number \| null>\(null\)/.test(route) && /setHelpers\(\{\}\);\s*setListedEdit\(null\);\s*setPipeHelpers\(null\);/.test(route));
+  check('a Custom setup that orchestrates shows the same, under its row', /listsRoles && r\.role === listsUnder && \(\s*<Pipeline[\s\S]*?helpers=\{inAll\}/.test(route));
+  check('the plan\'s words say lanes: a role and a name, sent back at most twice each', /Each piece of work is a lane, a role and a name/.test(sendBackWords()) && /send a lane's work back/.test(sendBackWords()) && !/send a role's work back/.test(sendBackWords()));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);
