@@ -200,6 +200,69 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 165 — post-merge, applied. **Metrics draws each day's cost as a bar above the day table, empty days included, and says why time per turn runs high.**
+
+Web only (`metrics/rules.ts`, `metrics/chart.tsx` new, `metrics/route.tsx`, `metrics/metrics.css`,
+`metrics/verify.ts`), and `docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change. Planned on 14
+Oct as wave 11 lane M1 (`docs/plans/wave-11.md` §3 K, "a cost-per-day chart on Metrics"), with the
+user's decision of 14 Oct: *"M1: Cost per day"* (wave-11.md §6). On 15 Oct the user wrote "Run track 6 of
+`docs/plans/wave-11-tracks.md`", whose §2 adds TODO's **Metrics (122)** entry to this lane. *Amends
+Amendment 122*, whose screen had only tables, and *Amendment 136*, whose time-per-turn hovers said a
+turn's subagents are in its time but not that the turns counted are the main agent's alone.
+
+- **One bar per day, empty days included** (`chartBars`, `rules.ts:381`). The daemon's `days` lists only
+  days with something in them, newest first. The chart walks every day from the response's `from` to its
+  `to`, oldest on the left, and takes each day's cost from `days`; a day not there is a bar of no height.
+  The step is `addDays` (`rules.ts:367`), the daemon's own (`session/metrics.ts:542`): local calendar days
+  built with `new Date(y, m - 1, d + n)`, so a clock change or a month's end moves one day. For `all`,
+  `from` is the first day anything was recorded, as the daemon sends it.
+- **Heights scale to the highest day** (`rules.ts:392-393`): a day's cost over the range's highest, so the
+  busiest day is full height. A day whose runs report no dollars (Copilot or OpenRouter only) has no height
+  and says so on hover; with no day reporting dollars there is no chart, since every bar would be empty.
+- **The same rule as the day table.** `chartBars` reads `showDays` (`rules.ts:349`, unchanged) and draws
+  only when it has more than one day, the table's own test (`route.tsx:237`). So `today`, or a range with
+  one day in it, has neither. The chart sits inside the **By day** section, under its heading and above
+  the table (`route.tsx:240`).
+- **Hand-drawn SVG, text inks only** (`chart.tsx`, `metrics.css:315`). No chart library. The bars and the
+  base line are `currentColor`; `.mt-chart` sets `color: var(--ink3)` and a day under the pointer
+  `var(--ink)`. The chart's file sets no colour, token or `fill` of its own. **No colour limit changed**:
+  `metrics/verify.ts` §7 still finds no hex or rgb, text in inks or `--fail` only, `var(--fail)` exactly
+  three times, and no status colour.
+- **The text alternative.** The SVG is `role="img"`, labelled by the caption under it (`chartSummary`,
+  `rules.ts:404`): "Cost per day, Sun 4 Oct to Sat 10 Oct: $7.00 in all. The highest was Thu 8 Oct, $4.00.
+  4 days of 7 had no cost reported." Each day has a `<title>` hover (`barTitle`, `rules.ts:398`): its
+  cost, "no dollars reported", or "nothing ran". The first and last day sit under the bars and the highest
+  cost above them, both `aria-hidden`, since the caption says them.
+- **Why time per turn runs high: a known limit** (`RUNS_HIGH`, `rules.ts:169`). A Claude result's model
+  time includes its subagents' calls, but `num_turns`, the turns it is divided by, are the main agent's.
+  The Time tile's hover (`rules.ts:205`) and the **Per turn** column's (`rules.ts:248`) now add: "The model
+  time includes the subagents' time, but the turns counted are only the main agent's, so when subagents
+  run in parallel this figure runs high." Amendment 136's words before it are unchanged. The result gives
+  no per-subagent split, so the figure itself is not corrected.
+- **The rest of TODO's Metrics (122), checked.** The Errors tile's retry rate is out of Claude's calls
+  (`derive`, `rules.ts:125`; `retryLine`, `rules.ts:173-177`), the per-project filter is there (the picker
+  and `projectId`, `route.tsx:61-82`), and `lib/verify.ts:917`'s made-up screen uses `'x'`, not `'8'`: all
+  from Amendment 136. Its other half of that bullet, that tokens per second pairs a run's model time with
+  all of its output tokens, stands as Amendment 136's *Not done* (3) left it.
+
+*Not done / not decided:* not looked at in a browser, in either theme; the stylesheet checks hold the
+colours. A long `all` range draws one bar per day across the chart's width, so after a few hundred days
+the bars are a pixel or less; there is no grouping by week. The chart is cost only: tokens or runs per day
+are still the table's. Bars are not keyboard-focusable; the caption and the table carry the same numbers.
+
+*Verified:* `metrics/verify.ts` §5b "the cost-per-day chart" (18 checks) and §5c "why time per turn runs
+high" (3). Seven days with three empty give 7 bars, oldest first; heights `0,0.5,0,0,1,0,0.25` for $2,
+$4 and $1 on a $4 top; an `all` range runs from its first day; the day step crosses a month, a year and
+Europe's two 2026 clock-change days; `today`, one day, no dollars and a bad span give none. Rendered with
+`renderToStaticMarkup`, the 7 bars are 0, 30, 0, 0, 60, 0 and 15 of 60 units, left to right by age, in an
+`img` labelled by its caption, with 7 hovers; a single day renders nothing. `chart.tsx` has no hex, rgb,
+token or fill; the chart's CSS fills are `currentColor` and its colours inks; route.tsx draws it inside
+**By day**, above the table. The tooltip text is in both hovers. §7's colour limits pass unchanged. Also
+passes under `TZ` America/Sao_Paulo, Pacific/Auckland, America/Santiago and Asia/Beirut. **Revert check:**
+with the empty days not filled in, 3 checks fail (and the hover check throws); with heights over a fixed
+$4 instead of the top, the `all` check fails; with the tooltip's words changed, §5c fails. Restored, all
+pass. `pnpm -r typecheck` is clean, and `make test` is green: 28 PASS.
+
 ### Amendment 164 — post-merge, applied. **An orchestrator's auto turns start folded, so its page opens to its own replies; one you open stays open, and fold all reaches them.**
 
 Web only (`agent/folds.ts`, `agent/transcript.tsx`, `agent/agent.tsx`, `agent/verify.ts`, `settings/route.tsx`), and

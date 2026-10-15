@@ -1,6 +1,7 @@
 /**
  * Validator checks for Amendment 122's web half (the Metrics screen), and Amendment 136's
- * (the retry rate out of Claude's calls, time per turn, speed per model, the project picker).
+ * (the retry rate out of Claude's calls, time per turn, speed per model, the project picker),
+ * and Amendment 165's (the cost-per-day chart, and why time per turn runs high).
  *
  * No daemon and no DOM: the rates and words are pure and are run on fixture responses;
  * the registration, the status bar, nav.ts and the stylesheet are read as source, because
@@ -10,11 +11,14 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { MetricsBefore, MetricsCounts, MetricsDay, MetricsModelRow, MetricsResponse } from '@conductor/shared';
 import {
   ALL_PROJECTS,
   BEFORE_NOTE,
   DAY_COLUMNS,
+  RUNS_HIGH,
   DEFAULT_RANGE,
   HOW_COUNTED,
   MODEL_COLUMNS,
@@ -23,10 +27,14 @@ import {
   RANGE_KEY,
   asProject,
   asRange,
+  addDays,
   averageSpeed,
+  barTitle,
   beforeLine,
   beforeModelLine,
   cell,
+  chartBars,
+  chartSummary,
   dayLabel,
   derive,
   dollars,
@@ -47,6 +55,7 @@ import {
   tiles,
   tokensText,
 } from './rules.js';
+import { CostChart } from './chart.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -218,6 +227,59 @@ console.log('\n5 · days, ranges and what an empty one says');
   check('the day table is only for a range of days', showDays(resp({ range: 'today' })).length === 0 && showDays(resp({ range: '7d' })).length === 2 && showDays(resp()).length === 2);
 }
 
+console.log('\n5b · the cost-per-day chart (Amendment 165)');
+{
+  // Seven days, three of them with nothing in them, newest first as the daemon sends them.
+  const week = resp({
+    range: '7d',
+    from: '2026-10-04',
+    to: '2026-10-10',
+    days: [
+      day('2026-10-10', { runs: 2, costUsd: 1 }),
+      day('2026-10-08', { runs: 4, costUsd: 4 }),
+      day('2026-10-07', { runs: 1, costUsd: null }),
+      day('2026-10-05', { runs: 3, costUsd: 2 }),
+    ],
+  });
+  const bars = chartBars(week);
+  check('7 days give 7 bars, the empty ones filled in from `from` to `to`, oldest first', bars.map((b) => b.day).join() === '2026-10-04,2026-10-05,2026-10-06,2026-10-07,2026-10-08,2026-10-09,2026-10-10', bars.map((b) => b.day).join());
+  check('bar heights scale to the highest day: $4 is full, $2 half, $1 a quarter, an empty day and a day with no dollars nothing', bars.map((b) => b.height).join() === '0,0.5,0,0,1,0,0.25', bars.map((b) => b.height).join());
+  check('a day with no dollars ran; a day not in the list did not', bars[3]!.ran && bars[3]!.costUsd === null && !bars[2]!.ran && bars[1]!.ran);
+  check('each bar says its day and its cost, or why it has none', barTitle(bars[4]!) === 'Thu 8 Oct: $4.00' && barTitle(bars[2]!) === 'Tue 6 Oct: nothing ran' && barTitle(bars[3]!) === 'Wed 7 Oct: no dollars reported', [barTitle(bars[4]!), barTitle(bars[2]!), barTitle(bars[3]!)].join(' | '));
+  const words = chartSummary(bars);
+  check('the text alternative gives the span, the total, the highest day and the days with no cost', words === 'Cost per day, Sun 4 Oct to Sat 10 Oct: $7.00 in all. The highest was Thu 8 Oct, $4.00. 4 days of 7 had no cost reported.', words);
+  check("days step as the daemon's addDays does: across a month, a year and a clock change", addDays('2026-10-31', 1) === '2026-11-01' && addDays('2026-12-31', 1) === '2027-01-01' && addDays('2026-03-28', 2) === '2026-03-30' && addDays('2026-10-24', 2) === '2026-10-26' && addDays('2026-11-01', -1) === '2026-10-31');
+  check('a single day gives no chart: today, or a range with one day in it, as the day table', chartBars(resp({ range: 'today', from: '2026-10-10', to: '2026-10-10', days: [day('2026-10-10', { runs: 1, costUsd: 3 })] })).length === 0 && chartBars({ ...week, days: [day('2026-10-08', { runs: 4, costUsd: 4 })] }).length === 0);
+  check('no day reporting dollars gives no chart, not seven empty bars', chartBars({ ...week, days: week.days.map((d) => ({ ...d, costUsd: null })) }).length === 0);
+  check('a bad span gives no chart, and never loops', chartBars({ ...week, from: 'nope' }).length === 0 && chartBars({ ...week, from: '2026-10-11' }).length === 0);
+  const all = chartBars(resp({ days: [day('2026-10-10', { runs: 10, costUsd: 2 }), day('2026-10-09', { runs: 15, costUsd: 0.5 })] }));
+  check('`all` runs from the first day recorded to today', all.map((b) => `${b.day}=${b.height}`).join() === '2026-10-08=0,2026-10-09=0.25,2026-10-10=1', JSON.stringify(all));
+
+  const html = renderToStaticMarkup(createElement(CostChart, { resp: week }));
+  const drawn = [...html.matchAll(/<rect class="mt-chart-bar"[^>]*height="([^"]*)"/g)].map((m) => Number(m[1]));
+  check('rendered: 7 bars, and their heights are the shares of the 60-unit drawing', drawn.length === 7 && drawn.join() === '0,30,0,0,60,0,15', drawn.join());
+  check('rendered: oldest on the left', [...html.matchAll(/<rect class="mt-chart-bar" x="([^"]*)"/g)].map((m) => Number(m[1])).every((x, i, all) => i === 0 || x > all[i - 1]!));
+  check('rendered: an image labelled by its caption, which says the chart in words, and each day has a hover', /<svg[^>]*role="img"[^>]*aria-labelledby="mt-chart-caption"/.test(html) && html.includes(`<figcaption id="mt-chart-caption" class="mt-quiet">${words}</figcaption>`) && (html.match(/<title>/g) ?? []).length === 7 && html.includes('<title>Tue 6 Oct: nothing ran</title>'), html.slice(0, 300));
+  check('rendered: the first and last day under the bars, and the highest cost above them', html.includes('<span>Sun 4 Oct</span><span>Sat 10 Oct</span>') && /mt-chart-top[^>]*>\$4\.00</.test(html));
+  check('rendered: a single day draws nothing at all', renderToStaticMarkup(createElement(CostChart, { resp: resp({ range: 'today' }) })) === '');
+  const chart = src('./chart.tsx');
+  check('the chart sets no colour of its own: no hex, no rgb, no token, no fill or stroke but its classes', !/#[0-9a-fA-F]{3,8}\b/.test(chart) && !/rgba?\(/.test(chart) && !/var\(--/.test(chart) && !/\b(fill|stroke|style)=/.test(chart));
+  const route = src('./route.tsx');
+  const byDay = route.slice(route.indexOf('{days.length > 1 && ('));
+  check('it is drawn inside the by-day section, above the day table, under the same rule', byDay.indexOf('<CostChart resp={resp} />') > 0 && byDay.indexOf('<CostChart resp={resp} />') < byDay.indexOf('<table className="mt-table mt-days">') && byDay.indexOf('aria-label="by day"') < byDay.indexOf('<CostChart'));
+  const css = src('./metrics.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const chartCss = css.slice(css.indexOf('.mt-chart {'));
+  check('in the stylesheet, its bars and line are currentColor and its colours are text inks', /\.mt-chart-bar \{\s*fill: currentColor;/.test(chartCss) && /\.mt-chart-base \{\s*stroke: currentColor;/.test(chartCss) && [...chartCss.matchAll(/(?:fill|stroke):\s*([^;]+);/g)].every((m) => ['currentColor', 'transparent'].includes(m[1]!.trim())) && [...chartCss.matchAll(/color:\s*var\((--[a-z0-9-]+)\)/g)].every((m) => ['--ink', '--ink2', '--ink3'].includes(m[1]!)));
+}
+
+console.log('\n5c · why time per turn runs high (Amendment 165)');
+{
+  check('the reason says the model time has the subagents\' time and the turns are the main agent\'s, so it runs high in parallel', /includes the subagents' time/.test(RUNS_HIGH) && /only the main agent's/.test(RUNS_HIGH) && /in parallel this figure runs high/.test(RUNS_HIGH));
+  const time = tiles(total, [opus, gpt]).find((x) => x.id === 'time')!;
+  check('the Time tile\'s hover says it', (time.title ?? '').includes(RUNS_HIGH), time.title);
+  check('the Per turn column\'s hover says it', MODEL_COLUMNS.find((c) => c.id === 'percall')!.title.includes(RUNS_HIGH));
+}
+
 console.log('\n6 · before metrics were recorded');
 {
   const line = beforeLine(before);
@@ -301,7 +363,7 @@ console.log('\n7 · the screen is registered, reachable on 8, and in both themes
 
 console.log(
   failures === 0
-    ? "\nAmendment 122/136 web verify: PASS — the retry rate is out of Claude's calls and says so when others ran; time is per turn, subagents included; speed is each model's own, averaged; the project picker is a setting, with a note on when its counts begin;" + ' every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per turn and speed use only timed turns; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
-    : `\nAmendment 122/136 web verify: FAIL — ${failures} check(s) failed.\n`,
+    ? "\nAmendment 122/136/165 web verify: PASS — a cost-per-day chart has a bar for every day of the range, scaled to the highest, in ink and in words, and none for a single day; time per turn says why it runs high; the retry rate is out of Claude's calls and says so when others ran; time is per turn, subagents included; speed is each model's own, averaged; the project picker is a setting, with a note on when its counts begin;" + ' every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per turn and speed use only timed turns; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
+    : `\nAmendment 122/136/165 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

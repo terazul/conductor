@@ -162,6 +162,13 @@ export interface Tile {
   title?: string;
 }
 
+/**
+ * Why time per turn runs high (Amendment 165, a known limit): the model time a Claude result
+ * reports includes its subagents', but its turns are the main agent's alone.
+ */
+export const RUNS_HIGH =
+  "The model time includes the subagents' time, but the turns counted are only the main agent's, so when subagents run in parallel this figure runs high.";
+
 /** The Errors tile's retry half: Claude's calls are the whole, and it says so when others ran. */
 function retryLine(total: MetricsCounts, others: boolean, retryRate: number | null): string {
   if (!others) return `${total.retries.toLocaleString('en')} of ${plural(total.calls, 'call')} retried (${percent(retryRate)})`;
@@ -195,7 +202,7 @@ export function tiles(total: MetricsCounts, models: ReadonlyArray<MetricsModelRo
       label: 'Time per run',
       value: duration(d.avgRunMs),
       sub: timed,
-      title: `${partly}A Claude turn's model time includes its subagents', which can run side by side, so this is not the length of one API call. Speed is each model's own output tokens per second of model time${speed !== null && speed.of > 1 ? ', averaged over the models' : ''}.`,
+      title: `${partly}A Claude turn's model time includes its subagents', which can run side by side, so this is not the length of one API call. ${RUNS_HIGH} Speed is each model's own output tokens per second of model time${speed !== null && speed.of > 1 ? ', averaged over the models' : ''}.`,
     },
     {
       id: 'errors',
@@ -238,7 +245,7 @@ const COLUMN: Record<ColumnId, Column> = {
   percall: {
     id: 'percall',
     label: 'Per turn',
-    title: "Model time per turn, subagents included, over the turns that were timed. A Claude turn's subagents can run side by side, so this is not the length of one API call",
+    title: `Model time per turn, subagents included, over the turns that were timed. A Claude turn's subagents can run side by side, so this is not the length of one API call. ${RUNS_HIGH}`,
   },
   tps: { id: 'tps', label: 'Speed', title: "Output tokens per second of model time, this row's own, over the turns that were timed" },
   errors: { id: 'errors', label: 'Failed', title: 'Runs that failed, out of runs. A stop of yours, a pause and a budget stop are not failures' },
@@ -341,6 +348,68 @@ export function projectNote(r: Pick<MetricsResponse, 'project' | 'since'>): stri
 /** The days to show: only when the range has more than one. */
 export function showDays(r: Pick<MetricsResponse, 'range' | 'days'>): MetricsDay[] {
   return r.range === 'today' ? [] : r.days;
+}
+
+// ── the cost-per-day chart (Amendment 165) ──────────────────────────────────
+
+/** One bar: a day of the range, its dollars, and its height as a share of the highest day's. */
+export interface ChartBar {
+  day: string;
+  /** Null when nothing that ran that day reports dollars, or nothing ran. */
+  costUsd: number | null;
+  /** Whether anything was recorded that day: `days` lists only those. */
+  ran: boolean;
+  /** 0 to 1: this day's cost over the highest day's. */
+  height: number;
+}
+
+/** `day` moved by `n` days, as the daemon steps them (`addDays`, session/metrics.ts): local calendar days. */
+export function addDays(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  const at = new Date(y, m - 1, d + n);
+  const pad = (v: number): string => String(v).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * One bar per day from `from` to `to`, oldest on the left, the days nothing ran included at
+ * no height. Shown under the same rule as the day table (`showDays`, more than one day with
+ * something in it), and only when some day reports dollars: a chart of dashes says nothing.
+ */
+export function chartBars(r: Pick<MetricsResponse, 'range' | 'from' | 'to' | 'days'>): ChartBar[] {
+  const days = showDays(r);
+  if (days.length <= 1 || !days.some((d) => d.costUsd !== null)) return [];
+  if (!DAY.test(r.from) || !DAY.test(r.to) || r.from > r.to) return [];
+  const byDay = new Map(days.map((d) => [d.day, d]));
+  const bars: ChartBar[] = [];
+  // Ten years of days is far past any range; the cap only keeps a bad `from` from looping.
+  for (let day = r.from; day <= r.to && bars.length < 3660; day = addDays(day, 1)) {
+    const d = byDay.get(day);
+    bars.push({ day, costUsd: d?.costUsd ?? null, ran: d !== undefined, height: 0 });
+  }
+  const max = Math.max(0, ...bars.map((b) => b.costUsd ?? 0));
+  for (const b of bars) b.height = max > 0 ? (b.costUsd ?? 0) / max : 0;
+  return bars;
+}
+
+/** A bar's hover: the day and what it cost, or why it has no height. */
+export function barTitle(b: ChartBar): string {
+  if (!b.ran) return `${dayLabel(b.day)}: nothing ran`;
+  return `${dayLabel(b.day)}: ${b.costUsd === null ? 'no dollars reported' : dollars(b.costUsd)}`;
+}
+
+/** The chart in words, for a screen reader and under the bars: the span, the total, the highest day. */
+export function chartSummary(bars: ReadonlyArray<ChartBar>): string {
+  if (bars.length === 0) return '';
+  const total = bars.reduce((a, b) => a + (b.costUsd ?? 0), 0);
+  const top = bars.reduce((a, b) => ((b.costUsd ?? 0) > (a.costUsd ?? 0) ? b : a));
+  const none = bars.filter((b) => !b.costUsd).length;
+  const span = `${dayLabel(bars[0]!.day)} to ${dayLabel(bars[bars.length - 1]!.day)}`;
+  const highest = (top.costUsd ?? 0) > 0 ? ` The highest was ${dayLabel(top.day)}, ${dollars(top.costUsd)}.` : '';
+  const quiet = none > 0 ? ` ${plural(none, 'day')} of ${bars.length} had no cost reported.` : '';
+  return `Cost per day, ${span}: ${dollars(total)} in all.${highest}${quiet}`;
 }
 
 // ── before metrics were recorded ─────────────────────────────────────────────
