@@ -433,6 +433,19 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
     const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
     return (hi! + 0.05) / (lo! + 0.05);
   };
+  // OKLCH chroma and hue (Björn Ottosson's OKLab, from linear sRGB), for the label backdrops' hue check.
+  const oklch = (hex: string): { c: number; h: number } => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+    return { c: Math.hypot(A, B), h: ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360 };
+  };
 
   const TEXT = ['ink', 'ink2', 'ink3', 'live', 'need', 'fail', 'done', 'queue', 'idle', 'you'];
   const SURFACES = ['bg', 'bg2', 'surf', 'surf2', 'surf3', 'well'];
@@ -486,10 +499,26 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
         .map((st) => `--${b} is --${st}`),
     );
     check(`${name}: no label backdrop is a status colour (or --you)`, clash.length === 0, clash.join(', '));
-    const close = [[0, 1], [0, 2], [1, 2]]
-      .filter(([i, j]) => ratio(hexes[i!]!, hexes[j!]!) < 1.04)
-      .map(([i, j]) => `--${BACKDROPS[i!]} and --${BACKDROPS[j!]} ${ratio(hexes[i!]!, hexes[j!]!).toFixed(3)}`);
-    check(`${name}: any two label backdrops differ in lightness by at least 1.04:1`, close.length === 0, close.join('; '));
+    // Amendment 159 (14 Oct): the floor is 1.06, not 1.04, and the hues are at least 60° apart, so
+    // slate, petrol and wine tell apart at a glance and not only side by side.
+    const PAIRS = [[0, 1], [0, 2], [1, 2]] as const;
+    const close = PAIRS.filter(([i, j]) => ratio(hexes[i]!, hexes[j]!) < 1.06).map(
+      ([i, j]) => `--${BACKDROPS[i]} and --${BACKDROPS[j]} ${ratio(hexes[i]!, hexes[j]!).toFixed(3)}`,
+    );
+    check(`${name}: any two label backdrops differ in lightness by at least 1.06:1`, close.length === 0, close.join('; '));
+    const hues = hexes.map(oklch);
+    // A hue only means something with colour behind it: a near-grey's angle is noise.
+    const grey = BACKDROPS.flatMap((b, i) => (hues[i]!.c < 0.03 ? [`--${b} C ${hues[i]!.c.toFixed(3)}`] : []));
+    check(`${name}: each label backdrop has an OKLCH chroma of at least 0.03, so its hue counts`, grey.length === 0, grey.join('; '));
+    const apart = (a: number, b: number): number => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+    const near = PAIRS.filter(([i, j]) => apart(hues[i]!.h, hues[j]!.h) < 60).map(
+      ([i, j]) => `--${BACKDROPS[i]} ${hues[i]!.h.toFixed(0)}° and --${BACKDROPS[j]} ${hues[j]!.h.toFixed(0)}°`,
+    );
+    check(
+      `${name}: any two label backdrops are at least 60° apart in OKLCH hue`,
+      near.length === 0,
+      near.length ? near.join('; ') : hues.map((h) => `${h.h.toFixed(0)}°`).join(' '),
+    );
   }
 
   // The filled `live`/`done` tags (Amendment 93): named on their own so a
@@ -520,6 +549,15 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
       const r = ratio(theme.get(t)!, tabBg);
       check(`${name}: --${t} on the open top-bar tab's tinted background ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
     }
+    // The label's border, `color-mix(in srgb, var(--crumb) 60%, var(--ink3))` (shell/ui.css), revisited with
+    // the more saturated backdrops (Amendment 159): it still draws a line round each of the three.
+    const edges = ['here', 'here-project', 'here-agent'].map((b) => ({ b, r: ratio(mix95(theme.get(b)!, theme.get('ink3')!, 60), theme.get(b)!) }));
+    const faint = edges.filter((e) => e.r < 1.6);
+    check(
+      `${name}: the label's border stands off each backdrop by 1.6:1 or more`,
+      faint.length === 0,
+      (faint.length ? faint : edges).map((e) => `--${e.b} ${e.r.toFixed(2)}`).join(', '),
+    );
   }
 
   check('no stored choice follows the system', parseChoice(null) === 'system');

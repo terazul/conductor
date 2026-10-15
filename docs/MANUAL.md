@@ -942,6 +942,16 @@ to — darker ink, heavier weight — so the row doesn't fade into the backgroun
 glances. The tab you *are* on stands out further still: its own ink colour, a faint tint
 of it washed under the label, and a 3px underline in place of the old 2px hairline.
 
+**The label at the top** (where you are) sits on one of three backdrops: a slate blue on Fleet,
+Needs You, Preview, Files and Branches, a petrol blue on the Project screen and a wine rose on the
+Agent screen (and on Needs You's label for the request in focus). They are deep in the dark theme
+and pale in the light one. The three are well apart in hue, a sixth of the way round the colour
+wheel or more, and a little apart in lightness too, so they tell apart without colour vision; the
+gap in lightness is small because the label's grey text must stay readable on all three. None of
+them is a status colour or your violet. The colours are `--here`, `--here-project` and
+`--here-agent` in `packages/shared/src/tokens.css`, and `make test` fails if a change brings two
+of them too close.
+
 **The navigator**, the panel down the left of every screen, lists your projects. A
 project's name opens its Project screen, and its **▸** opens it to three submenus:
 
