@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 155 — post-merge, applied. **The three label backdrops carry more chroma, sit 1.06:1 apart in lightness and 60° apart in hue, in both themes.**
+### Amendment 159 — post-merge, applied. **The three label backdrops carry more chroma, sit 1.06:1 apart in lightness and 60° apart in hue, in both themes.**
 
 Shared (`tokens.css`) and web (`lib/verify.ts`), and `docs/MANUAL.md`, `TODO.md`. No behaviour, wire
 or daemon change, no migration, no new token. The user, 14 Oct 2026, on wave 11's item U1 (lane H,

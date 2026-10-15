@@ -499,7 +499,7 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
         .map((st) => `--${b} is --${st}`),
     );
     check(`${name}: no label backdrop is a status colour (or --you)`, clash.length === 0, clash.join(', '));
-    // Amendment 155 (14 Oct): the floor is 1.06, not 1.04, and the hues are at least 60° apart, so
+    // Amendment 159 (14 Oct): the floor is 1.06, not 1.04, and the hues are at least 60° apart, so
     // slate, petrol and wine tell apart at a glance and not only side by side.
     const PAIRS = [[0, 1], [0, 2], [1, 2]] as const;
     const close = PAIRS.filter(([i, j]) => ratio(hexes[i]!, hexes[j]!) < 1.06).map(
@@ -550,7 +550,7 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
       check(`${name}: --${t} on the open top-bar tab's tinted background ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
     }
     // The label's border, `color-mix(in srgb, var(--crumb) 60%, var(--ink3))` (shell/ui.css), revisited with
-    // the more saturated backdrops (Amendment 155): it still draws a line round each of the three.
+    // the more saturated backdrops (Amendment 159): it still draws a line round each of the three.
     const edges = ['here', 'here-project', 'here-agent'].map((b) => ({ b, r: ratio(mix95(theme.get(b)!, theme.get('ink3')!, 60), theme.get(b)!) }));
     const faint = edges.filter((e) => e.r < 1.6);
     check(

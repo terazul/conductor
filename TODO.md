@@ -262,7 +262,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
 
 - [x] **The three backdrops are easier to tell apart (U1).** `--here`, `--here-project` and `--here-agent`
   differed in lightness by 1.06–1.22, and slate and petrol were 36° apart in hue. *Decided (14 Oct): more
-  chroma, floor 1.06, hues ≥ 60° apart.* *Done 15 Oct: Amendment 155 (more saturated slate, petrol and
+  chroma, floor 1.06, hues ≥ 60° apart.* *Done 15 Oct: Amendment 159 (more saturated slate, petrol and
   wine at about the same lightness; `lib/verify.ts` checks the 1.06 floor and the 60° hues).* Still yours:
   look at the three in both themes and say if they are distinct at a glance.
 
