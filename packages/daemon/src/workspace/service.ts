@@ -442,7 +442,7 @@ export class WorkspaceService {
     }
 
     // Asked of the repo that owns the path, so a nested repo's file opens as its copy
-    // (Amendment 155).
+    // (Amendment 158).
     const owner = ownerOf(ws.path, path);
     const repo = join(ws.path, owner);
     const rel = path.slice(owner.length);
@@ -512,7 +512,7 @@ export class WorkspaceService {
     }
 
     // The worktree's own diff, then each nested repo's that has a change in it, its
-    // paths prefixed with its folder (Amendment 155). `git diff` leaves the nested
+    // paths prefixed with its folder (Amendment 158). `git diff` leaves the nested
     // repos' opaque gitlinks out, as `scanChanges` leaves out their entries.
     const owners = new Set([...changes.byPath.keys()].map((p) => ownerOf(ws.path, p)));
     owners.delete('');
@@ -832,7 +832,7 @@ export class WorkspaceService {
   // ── helpers ──────────────────────────────────────────────────────────────
 
   /**
-   * One path's diff, from the repo that owns it (Amendment 155): a file inside a nested
+   * One path's diff, from the repo that owns it (Amendment 158): a file inside a nested
    * clone or a submodule is diffed by that repo's git, its patch naming the path as the
    * worktree does. The outer repo would only say the whole folder is dirty.
    */

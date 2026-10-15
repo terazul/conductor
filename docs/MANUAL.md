@@ -1115,7 +1115,7 @@ by side like tabs from different jobs, and **⑂ review full diff** is for which
 tree your open file is in. A folder inside a larger git repository shows only its own
 changes. A nested repo inside a folder — a clone someone checked in, or a submodule — opens the same
 way, all the way down, with its own folder marked by its branch. Its changes show as its
-own, four levels deep (Amendment 155): a file changed inside it is badged at its own path, its
+own, four levels deep (Amendment 158): a file changed inside it is badged at its own path, its
 folder adds up its files' lines, and the file's diff is the nested repo's diff of it. A nested
 repo with nothing changed shows no badge at all.
 

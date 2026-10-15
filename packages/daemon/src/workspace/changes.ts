@@ -52,7 +52,7 @@ export interface ChangeSet {
  * untracked file — which is bounded by how many files an agent has created, not
  * by the size of the repo.
  *
- * Nested repos (Amendment 155): the outer `git status` names a nested clone or a
+ * Nested repos (Amendment 158): the outer `git status` names a nested clone or a
  * submodule only as one opaque entry for its whole folder (`?? inner/`, ` M inner`),
  * never a path inside it. Each such entry is scanned again as its own repo, its
  * paths prefixed with its folder, and the opaque entry itself is dropped, so the
@@ -182,7 +182,7 @@ async function scanRepo(
 
 /**
  * The nested repo that owns `relPath`, as its worktree-relative folder with a
- * trailing slash, or `''` when the worktree's own repo does (Amendment 155). The
+ * trailing slash, or `''` when the worktree's own repo does (Amendment 158). The
  * deepest boundary on the way down wins, up to `MAX_NESTED_DEPTH` of them: a path
  * past that is the deepest scanned repo's, which sees only an opaque folder, so no
  * route gives it a badge or a diff. The boundary test is the tree's (`tree.ts`

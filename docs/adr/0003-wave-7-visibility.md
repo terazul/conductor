@@ -137,7 +137,7 @@ Otherwise, use `recall().projectId`. Otherwise, use the first project.
   project with many nested repos pays for this on each watcher refresh. Lane A measures it.
 - **Changes in nested repos** are still invisible to Changes and diffs (`workspace/changes.ts`).
   That's a deliberate gap, and a later amendment can close it.
-  *Closed 15 Oct 2026 by Amendment 155:* `scanChanges` scans each nested repo the outer
+  *Closed 15 Oct 2026 by Amendment 158:* `scanChanges` scans each nested repo the outer
   `git status` names as dirty, down to four levels, takes its paths with the folder in front and
   drops the opaque entry; each diff comes from the repo that owns its path. The tree puts a
   nested repo's changed files in the nested share of its cap.

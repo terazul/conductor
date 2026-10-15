@@ -313,7 +313,7 @@ export async function numstat(cwd: string, paths: string[] = []): Promise<NumSta
 
 /**
  * Unified diff against HEAD. Empty string when nothing is dirty. `prefix` is a
- * nested repo's folder (`inner/`, Amendment 155): its patch then names
+ * nested repo's folder (`inner/`, Amendment 158): its patch then names
  * `a/inner/app.js`, the path the outer worktree knows the file by.
  * `--ignore-submodules=all` leaves out a nested repo's gitlink, the opaque
  * "Subproject commit" entry: its own files are diffed by its own repo instead.

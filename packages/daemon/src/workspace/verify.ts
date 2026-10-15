@@ -1416,7 +1416,7 @@ async function main(): Promise<void> {
   rmSync(BROWSE, { recursive: true, force: true });
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n15 · nested repos browse all the way down (Amendment 90), changes and all (Amendment 155)');
+  console.log('\n15 · nested repos browse all the way down (Amendment 90), changes and all (Amendment 158)');
 
   /*
    * `uncapped` (section 12) is already a full tree of the fixture, which
@@ -1491,7 +1491,7 @@ async function main(): Promise<void> {
       cappedFlat.find((n) => n.path === 'vendor-lib')?.repo?.branch === 'main',
   );
 
-  // Amendment 155: a nested repo's changes are its own. Dirt is made here, not in the
+  // Amendment 158: a nested repo's changes are its own. Dirt is made here, not in the
   // fixture, so every count above stays the same, and put back below. `inner/` is a
   // committed nested clone (` M inner` to the outer repo); `loose-clone/` is a clone
   // nothing tracks (`?? loose-clone/`); `quiet-clone/` and `vendor-lib/` are clean.
@@ -1503,7 +1503,7 @@ async function main(): Promise<void> {
   const innerApp0 = readFileSync(join(INNER, 'app.js'), 'utf8');
   const innerReadme0 = readFileSync(join(INNER, 'README.md'), 'utf8');
   const readmeLines = innerReadme0.split('\n').length - 1;
-  const seq155 = eventsFor('job_inplace', 'file_edit').at(-1)?.seq ?? 0;
+  const seq158 = eventsFor('job_inplace', 'file_edit').at(-1)?.seq ?? 0;
   for (const clone of [LOOSE, QUIET]) {
     rmSync(clone, { recursive: true, force: true });
     mkdirSync(clone);
@@ -1526,7 +1526,7 @@ async function main(): Promise<void> {
   const nestedEdits = await waitForEdits(
     'job_inplace',
     ['inner/app.js', 'inner/fresh.txt', 'loose-clone/a.txt'],
-    { afterSeq: seq155 },
+    { afterSeq: seq158 },
   );
   const innerEdit = nestedEdits.get('inner/app.js')?.payload;
   check(
@@ -1573,8 +1573,8 @@ async function main(): Promise<void> {
     [...nestedScan.byPath.keys()].join(' '),
   );
 
-  const nested155 = (await get<FileTreeResponse>('/api/jobs/job_inplace/tree')).body;
-  const innerAppNode = find(nested155, 'inner/app.js');
+  const nested158 = (await get<FileTreeResponse>('/api/jobs/job_inplace/tree')).body;
+  const innerAppNode = find(nested158, 'inner/app.js');
   check(
     "the badge shows inside inner/ in the tree",
     innerAppNode?.change?.added === 1 && innerAppNode.change.removed === 0,
@@ -1582,10 +1582,10 @@ async function main(): Promise<void> {
   );
   check(
     "inner's deleted file stays in the tree, flagged",
-    find(nested155, 'inner/README.md')?.change?.deleted === true,
-    JSON.stringify(find(nested155, 'inner/README.md')),
+    find(nested158, 'inner/README.md')?.change?.deleted === true,
+    JSON.stringify(find(nested158, 'inner/README.md')),
   );
-  const innerRoll = find(nested155, 'inner')?.change;
+  const innerRoll = find(nested158, 'inner')?.change;
   check(
     "inner/'s folder rolls up its own files' change",
     innerRoll?.added === 3 && innerRoll.removed === readmeLines,
@@ -1593,22 +1593,22 @@ async function main(): Promise<void> {
   );
   check(
     'an untracked clone is a folder marked as a repo, its file badged',
-    find(nested155, 'loose-clone')?.type === 'dir' &&
-      find(nested155, 'loose-clone')?.repo !== undefined &&
-      find(nested155, 'loose-clone/a.txt')?.change?.added === 1,
-    JSON.stringify(find(nested155, 'loose-clone')),
+    find(nested158, 'loose-clone')?.type === 'dir' &&
+      find(nested158, 'loose-clone')?.repo !== undefined &&
+      find(nested158, 'loose-clone/a.txt')?.change?.added === 1,
+    JSON.stringify(find(nested158, 'loose-clone')),
   );
   check(
     "clean nested repos' folders carry no badge",
-    find(nested155, 'quiet-clone')?.repo !== undefined &&
-      find(nested155, 'quiet-clone')?.change === undefined &&
-      find(nested155, 'vendor-lib')?.change === undefined,
-    `${JSON.stringify(find(nested155, 'quiet-clone'))} ${JSON.stringify(find(nested155, 'vendor-lib')?.change)}`,
+    find(nested158, 'quiet-clone')?.repo !== undefined &&
+      find(nested158, 'quiet-clone')?.change === undefined &&
+      find(nested158, 'vendor-lib')?.change === undefined,
+    `${JSON.stringify(find(nested158, 'quiet-clone'))} ${JSON.stringify(find(nested158, 'vendor-lib')?.change)}`,
   );
   check(
     "the tree's totals count the nested files",
-    nested155.changedFiles === nestedScan.files && nested155.added === nestedScan.added,
-    `${nested155.changedFiles}/${nestedScan.files}`,
+    nested158.changedFiles === nestedScan.files && nested158.added === nestedScan.added,
+    `${nested158.changedFiles}/${nestedScan.files}`,
   );
 
   const innerOwn = gitIn(INNER, [
@@ -1723,9 +1723,9 @@ async function main(): Promise<void> {
   // too, so this guards the mixed batch end to end rather than that filter alone.)
   const EXCLUDE = join(SCRATCH, '.git', 'info', 'exclude');
   const exclude0 = readFileSync(EXCLUDE, 'utf8');
-  writeFileSync(EXCLUDE, `${exclude0}noise-155.log\n`);
+  writeFileSync(EXCLUDE, `${exclude0}noise-158.log\n`);
   const seqMixed = eventsFor('job_inplace', 'file_edit').at(-1)?.seq ?? 0;
-  writeFileSync(join(SCRATCH, 'noise-155.log'), 'noise\n');
+  writeFileSync(join(SCRATCH, 'noise-158.log'), 'noise\n');
   writeFileSync(join(INNER, 'app.js'), `${innerApp0}console.log('changed inside inner');\nconsole.log('again');\n`);
   const mixed = await waitForEdits('job_inplace', ['inner/app.js'], { afterSeq: seqMixed });
   await settleAndFlush('job_inplace');
@@ -1735,11 +1735,11 @@ async function main(): Promise<void> {
     mixedEdit?.kind === 'file_edit' &&
       mixedEdit.added === 2 &&
       !eventsFor('job_inplace', 'file_edit').some(
-        (e) => e.seq > seqMixed && e.payload.kind === 'file_edit' && e.payload.path === 'noise-155.log',
+        (e) => e.seq > seqMixed && e.payload.kind === 'file_edit' && e.payload.path === 'noise-158.log',
       ),
     JSON.stringify(mixedEdit),
   );
-  rmSync(join(SCRATCH, 'noise-155.log'), { force: true });
+  rmSync(join(SCRATCH, 'noise-158.log'), { force: true });
   writeFileSync(EXCLUDE, exclude0);
 
   writeFileSync(join(INNER, 'app.js'), innerApp0);

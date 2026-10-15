@@ -215,7 +215,7 @@ export class Watcher {
     // One probe per flush, not per path, and the flush is already debounced.
     const gitless = !(await isRepo(root));
 
-    // Each path is asked of the repo that owns it (Amendment 155): the outer repo
+    // Each path is asked of the repo that owns it (Amendment 158): the outer repo
     // knows a nested clone or submodule only as one opaque folder, and refuses a
     // `check-ignore` for a path inside it. With no git there is one group.
     const groups = new Map<string, Pending[]>();

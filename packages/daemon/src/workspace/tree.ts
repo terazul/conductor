@@ -25,7 +25,7 @@
  * `isRepo` answers true for every folder inside the outer repo, nested or
  * not), and `expandNestedRepo` re-lists it with its own `listFiles`, grafting
  * the result in and marking the folder with its branch. Its changes are its
- * own too (Amendment 155): `scanChanges` scans it as a repo, so its badges and
+ * own too (Amendment 158): `scanChanges` scans it as a repo, so its badges and
  * the folder's roll-up are what its own `git status` says.
  */
 
@@ -378,7 +378,7 @@ export async function buildTree(
 
   // A deleted file is gone from ls-files but is exactly what a human wants to
   // see flagged, so changed paths are unioned in. `scanChanges` scans each
-  // nested repo as its own (Amendment 155), so a path inside one goes into the
+  // nested repo as its own (Amendment 158), so a path inside one goes into the
   // nested pool, under the same budget as that repo's listed files; never the
   // nested folder itself, which is a folder, not a file.
   const ownPaths = new Set(top.files);
