@@ -196,6 +196,80 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 150 — post-merge, applied. **Send-backs are counted per lane, a role with a name, so new work under a new name starts while the total allows; and an orchestrated stack's helpers in all are a launch choice, up to 48.**
+
+Shared (`stack.ts`, `wire.ts`), daemon (`session/store.ts`, `session/supervisor.ts`, `session/handoff.ts`,
+`routes/helpers.ts`, `routes/session.ts`, `session/verify.ts`), web (`spawn/orchestrated.ts`,
+`spawn/Pipeline.tsx`, `spawn/presets.ts`, `spawn/route.tsx`, `spawn/verify.ts`), and `docs/MANUAL.md`.
+The user, 14 Oct 2026: "Conductor won't let me start a 4th developer. It counts every developer start
+against the "sent back at most 2 times" rule, even when it's a new lane." Answer: "Fix the rule in code".
+*Amends Amendment 128*: its "a role is started at most three times in all" is now a lane (a role and
+the `name` it was started with) started at most three times; and its "`helpers` is then 1 to
+`pipelineHelperCap(roles)`" is now up to `max(pipelineHelperCap(roles), PIPELINE_HELPERS_MAX)`, with
+`pipelineHelperCap` still the default. No migration: a running job keeps the cap it was launched with.
+
+- **What was wrong.** `startHelper` refused a start when `startedAsRole` (`COUNT(*)` of the
+  orchestrator's helpers with that `helper_role`) reached `1 + SEND_BACKS_MAX`, so the fourth
+  developer was refused even when it was new work under a new name, not a send-back. The rule
+  meant "send the same work back at most twice", but nothing told one piece of work from another.
+- **A lane is the role and the normalised `name`.** `helperSlug` (`shared/stack.ts:207`) is the
+  normalisation the stored name already used (lowercase, runs of anything else to `-`, trimmed, 24
+  characters), moved to shared so the count and the name agree. `startedInLane(db, orchId, role,
+  name?)` (`store.ts:504`) counts the orchestrator's helpers of that role whose stored name is the
+  lane's stem (`<role>-<slug>`, or `<role>` with no name) or that stem with the `-N` added while a
+  name is taken. A new name is a first start; the same name again is a send-back; unnamed starts are
+  one lane, so they keep the limit they had. `startedAsRole` is gone.
+- **The refusal names the lane** (`sendBackRefusal(role, started, lane?)`, `stack.ts:253`; called at
+  `supervisor.ts:1744`): "You have started the developer for “w11-a1” 3 times: once, and then you
+  sent its work back 2 times, which is the most you may. …", the rest of the sentence unchanged.
+  With no name it reads as before.
+- **The orchestrator is told.** `pipelineSection` step 3 (`handoff.ts:575`): give each new piece of
+  work its own `name`, send work back with the same `name`, at most `SEND_BACKS_MAX` times a lane.
+  `pipelineReportClosing` (`handoff.ts:610`) says the same when it is woken. The roles'
+  `start_helper` description and its `name` parameter (`routes/helpers.ts:119`, `:133`): a new name
+  is new work, the same name a send-back. The ordinary `start_helper` is unchanged.
+- **Helpers in all, a launch choice.** `PIPELINE_HELPERS_MAX = 48` (`stack.ts:200`). The daemon takes
+  `helpers` above 0 and up to `max(pipelineHelperCap(roles), 48)` for a stack with `helperRoles`
+  (`routes/session.ts:280`), saying "from 0 to 48" past it; an ordinary orchestrator is still held to
+  `HELPERS_MAX` (8). The total still refuses a start past it, whatever the lane. Wire docs
+  (`wire.ts:211`, `:231`).
+- **Spawn shows it.** The listed roles' head line reads "may start up to [N helpers in all], as these
+  roles and no others" (`Pipeline.tsx:77`), a select styled as the "+ up to N helpers" picker, from
+  one per role to the default one at a time, then in fours to 48 (`helperChoices`,
+  `orchestrated.ts:87`). It defaults to `helperCapFor(list)` (`helpersInAll`, `:100`), is kept for the
+  launch as the per-role helpers are and put back by choosing a preset (`route.tsx:291`, `:313`), and
+  is sent as `helpers` (`toAgentSpecs`' `helpersInAll`, `presets.ts:405`). `sendBackWords`
+  (`orchestrated.ts:111`) says lanes.
+- **Unchanged.** `roleRefusal`, the read-only pin, the tier rules, `HELPERS_MAX`, and running jobs.
+
+*Not done / not decided:* the lane is read back from the stored name (`agents.role`); no column
+keeps the `name` as given. A name of only digits, or one ending in `-<digits>` (`api-2`), can share a
+count with the lane it looks like (`developer` and `developer-2`; `api` and `api-2`). That only
+counts more starts than there were, so it refuses sooner, never later; a `helper_name` column would
+end it, and was left out to keep this without a migration. "Remembered like the other launch
+choices" is taken as the per-role helpers count is kept: for the launch, until the preset changes,
+not as a Settings default, which Spawn keeps only for the preset, pills and budget. A Custom setup
+does not save the number.
+
+*Verified:* `session/verify.ts` §25b (`:6680`), on a four-role stack: "the pure rules: a lane is the
+role and the name, as it is stored; the most in all is 48"; "a 4-role stack defaults to 12 helpers,
+as before"; "… launched with 48 helpers in all → 201, and keeps 48", "and with 49 → 400, saying the
+most", "… with 13 … → 201, and keeps 13"; "an ordinary orchestrator is still held to HELPERS_MAX (8),
+not 48"; the prompt, `start_helper` and closing-line checks; "three starts of the developer under
+three names all start: three lanes, each its first start", "and a fourth new name still starts,
+since the total allows it", "the same name again is a send-back of that lane, twice; the name is
+normalised as it is stored", "counted per lane from the database", "the same name at its fourth
+start is refused, and the refusal names the lane", "while another lane of the same role can still be
+sent back", "starts with no name keep the limit they had: three, as one lane", "other roles have
+their own lanes", "and the total still refuses past the cap the launch chose, whatever the lane".
+§25's unnamed checks now read "a fourth start of the same role, with no name, is refused" (`:6556`)
+and the cap check "and no more helpers than PIPELINE_HELPERS_MAX → 400" (`:6483`). `spawn/verify.ts`
+§26 (`:1550`): the choices, the default, what is sent, the select and its reset, and the words. With
+`supervisor.ts` put back as it was on `main`, eight of the new checks fail, the fourth new name
+among them, refused with "You have started the developer 3 times"; with `routes/session.ts` put back
+too, the 13- and 48-helper launches are refused with "from 0 to 12". `pnpm -r typecheck` clean;
+`make test`: 27 PASS.
+
 ### Amendment 149 — post-merge, applied. **With two calls of one tool waiting for you, each call parks on its own request and each answer reaches only its own call.**
 
 Daemon only (`arbiter/index.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of

@@ -439,24 +439,35 @@ whose steps you already know.
   it before it decides whether the step is ready, and then writes the next brief. A step that
   stopped is not a step that is ready.
 - **Each helper runs as its role.** It has that persona's system prompt (what the built-in roles
-  are told, above), skills, tools and model, and its lane is named for the role (`developer`,
-  `reviewer`, …), under the orchestrator's. A reading role (reviewer, debugger, analyst) stays
-  read-only: the write tools are denied outright, whatever the pills say. The orchestrator may
+  are told, above), skills, tools and model, and its lane is named for the role and the work's
+  name (`developer-api`, `reviewer`, …), under the orchestrator's. A reading role (reviewer,
+  debugger, analyst) stays read-only: the write tools are denied outright, whatever the pills
+  say. The orchestrator may
   ask for a **cheaper tier** than the one listed for a step that is easy (`tier` on
   `start_helper`); a dearer one than you chose is refused.
-- **It can send work back**, at most **twice per role**. After a failed review it starts the
-  developer again with a new brief that says what failed; that is the first send-back. The
-  second is the last: a role is started at most three times in all, and a fourth start is
-  refused with a sentence telling it to ask you with the question tool, which puts the question
-  in **Needs You**. It also asks you, in the same way, whenever it is unsure: a choice that is
-  yours, a result it cannot judge, a step that keeps failing.
+- **Each piece of work has a name.** The orchestrator gives each new piece of work its own
+  `name` on `start_helper` (`api`, `parser`, `w11-a1`); the role and the name together are that
+  work's **lane** (the helper is named for both: `developer-api`). A new name is new work, so
+  four developers on four pieces of work all start, as long as the helpers in all allow it.
+- **It can send work back**, at most **twice per lane**. After a failed review it starts the
+  developer again with the **same name** and a new brief that says what failed; that is the
+  first send-back. The second is the last: one role with one name is started at most three
+  times in all, and a fourth start is refused with a sentence that names the lane ("You have
+  started the developer for “api” 3 times: …") and tells it to ask you with the question tool,
+  which puts the question in **Needs You**. Another lane of the same role can still be sent back.
+  Starts with no name are one lane together, so they keep the three starts they had. It also asks
+  you, in the same way, whenever it is unsure: a choice that is yours, a result it cannot judge,
+  a step that keeps failing.
 - **Its helpers have no `hand_off`.** The orchestrator's own judgement of each result replaces
   it, so a helper is never **held** as "not handed off" and never waits in Needs You for you to
   hand off for it.
 - **Cost.** Each helper takes a slot and one agent's budget, so the job's budget is the sum of
   its agents' budgets, as for helpers above. The launch allows the orchestrator as many helpers
-  as the roles listed times three (four roles, twelve helpers): each role once, and sent back
-  twice. The orchestrator wakes with a growing conversation each time and is the one
+  as the roles listed times three (four roles, twelve helpers) unless you choose another number:
+  the head of the listed roles reads **may start up to [12 helpers in all]**, and the select goes
+  from one per role up to **48**, for a plan of many lanes. Every start counts against it, new work
+  and send-backs alike. It is for this launch, like the list; choosing the preset again puts the
+  default back. The orchestrator wakes with a growing conversation each time and is the one
   agent to put on a strong model; a fixed stack costs less. If it misjudges a step the mistake
   runs through every step after it, where a fixed stack's agents each judge their own.
 - **How it looks.** The orchestrator wears a **◆ orchestrator** mark and a heavier edge in plain
