@@ -11,7 +11,8 @@ the last of it on 12 Oct).
 ## How to work this list
 
 - One item at a time in one checkout, each committed with its own CONTRACT amendment and a
-  green `make test` (decided 30 Sep). The next amendment is 148.
+  green `make test` (decided 30 Sep). The next amendment's number is the top one in CONTRACT.md
+  plus one.
 - Open items are `- [ ]`. A question that needs the user's answer before building is under
   **Decide:**, and the answer goes beside it in italics, as *Decided (date): …*.
 - Not planned: Windows (dropped 10 Oct). The terminal (Amendment 112) and the rest are built and
@@ -96,6 +97,7 @@ the last of it on 12 Oct).
 
 - [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 152 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
 
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
@@ -110,6 +112,7 @@ the last of it on 12 Oct).
 ## Checks that need a person
 
 - [ ] **Look at what was built in Amendments 99-129 in a browser, in both themes.** Found (10 Oct).
+  The UI test plan goes in [docs/checks/ui-test-plan.md](docs/checks/ui-test-plan.md).
   `make test` passes and the colour checks hold, but nobody has seen most of it.
   - Spawn: the ↑ ↓ buttons, the drag grip and the **waits for** ticks on preset and Custom rows, and
     **↺ back to …** (99); the three branch pills and the name box (115); the label backdrops of

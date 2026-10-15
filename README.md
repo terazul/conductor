@@ -4,7 +4,7 @@ Orchestrator for many Claude Code agents across many projects, in a browser.
 
 **How to use it: [docs/MANUAL.md](docs/MANUAL.md)** — start there if you want to get work done. Its §0 covers installing, starting and stopping.
 
-**How it's built: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the code, the architecture and how to change it, written for a coding agent picking it up cold.
+**Why it's built this way: [docs/adr/](docs/adr/)** — the architecture decision records, one per decision.
 
 Design reference: [mockups/conductor.html](mockups/conductor.html) — open it directly, press `a` for interaction notes.
 Plan and architecture: [PLAN.md](PLAN.md) · Build rules and amendment log: [CONTRACT.md](CONTRACT.md)
@@ -157,8 +157,7 @@ Every suite must be green. In order:
 - the daemon verifies: workspace, preview and session, against a scratch repo that
   `fixtures/make-scratch-repo.sh` rebuilds.
 
-None of them reach the real SDK or spend anything. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-says what each one covers and how to add to it.
+None of them reach the real SDK or spend anything.
 
 The spike that cleared the durability gate is kept as runnable evidence:
 
@@ -178,12 +177,12 @@ packages/web/       shell + navigator + 9 screens (8 with a key, plus Spawn) ·
                     feed (WS cursor) · store (projection)
 fixtures/           recorded sessions, scratch repo generator
 mockups/            the design, as clickable HTML
-docs/               the manual, the architecture guide, plans
+docs/               the manual, decision records (adr/), plans
 ```
 
 Everything the UI shows is a projection of one append-only event log. The browser
 holds a cursor and resubscribes from it after a reconnect, so a dropped socket replays
-rather than losing state. The full map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+rather than losing state.
 
 ## Known gaps
 
