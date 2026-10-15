@@ -358,6 +358,16 @@ export interface SendMessageRequest {
 }
 
 /**
+ * POST /api/agents/:agentId/message. `sent` into a live run; `resumed` a finished or parked one
+ * in a free slot; `queued` with every slot taken (Amendment 158): it waits as a `slot`
+ * scheduled message, and goes when one frees.
+ */
+export interface SendMessageResponse {
+  ok: true;
+  delivery: 'sent' | 'resumed' | 'queued';
+}
+
+/**
  * Hand off for an agent that ended its turn without calling `hand_off` (Amendment 104):
  * the summary the agents after it are told, edited by the person.
  */
@@ -837,8 +847,8 @@ export const PAUSE_UNTIL_KEY = 'conductor.pauseUntil';
 
 /**
  * What sends a scheduled message (Amendment 157): its time; its agent's turn ending as `done`
- * (one per turn, oldest first; a question, a failure or a pause don't count); or, reserved for
- * wave 11 A2 and not written yet, a free slot.
+ * (one per turn, oldest first; a question, a failure or a pause don't count); or a free slot
+ * (Amendment 158), for a message sent while every slot was taken, which only the daemon writes.
  */
 export type ScheduleTrigger = 'at' | 'done' | 'slot';
 
@@ -859,7 +869,7 @@ export interface ScheduledMessage {
 /** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 157). */
 export interface ScheduleMessageRequest {
   at?: string;
-  /** Default `at`. `slot` is refused: nothing sends it yet. */
+  /** Default `at`. `slot` is refused: only the daemon makes one (Amendment 158). */
   trigger?: ScheduleTrigger;
   text: string;
 }

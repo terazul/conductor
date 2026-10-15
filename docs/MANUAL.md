@@ -1395,7 +1395,14 @@ once adds up quickly.
   *live* agents, and extra ones queue. It applies at once: raising it starts queued agents,
   and lowering it stops nobody, so nothing new starts until fewer than the limit are
   running. `CONDUCTOR_SLOTS` sets the default when Settings hasn't. A message sent to a
-  finished agent restarts it straight away, even when every slot is taken.
+  finished agent restarts it straight away when a slot is free. When every slot is taken it
+  **waits for a slot**: the agent reads *queued*, the composer says *Waiting for a slot: it
+  goes when one frees*, and the message sits above the box as **⏲ waiting for a slot**, where
+  ✕ cancels it and the agent goes back to what it was. It is kept in the database, so it
+  survives a restart, and it goes, word for word, in the agent's own session, as soon as a slot
+  frees, ahead of the agent's other waiting messages. Several go one per turn, oldest first.
+  A message due at its time, and the ask to hand off when an agent ends without `hand_off`,
+  wait the same way.
   Parked agents don't occupy a slot, and nor does an agent waiting on a question it asked
   you. When you answer, it counts again, so for a moment more may run than the limit.
 - Cheaper models for mechanical roles is the easiest saving — validators and
@@ -1509,7 +1516,7 @@ quick picks. From then until that time:
 - nothing starts by itself: queued agents, new jobs you start, and agents you **▶ resume**
   wait in the queue;
 - an agent waiting on your answer keeps its question, and a message you send still goes
-  through, because those are you acting;
+  through, because those are you acting (with every slot taken, it waits for a slot first);
 - a message scheduled for that time waits too.
 
 The status bar reads **⏸ all paused until <time> · in 3 h**, and **▶ resume now** ends it

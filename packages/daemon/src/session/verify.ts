@@ -159,6 +159,9 @@ import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@con
 import { rerunNote, rerunStatusNote } from './rerun.js';
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
+import { lastStatusNote } from './store.js';
+import { listScheduled } from './schedule.js';
+import { SLOT_WAIT_NOTE } from './supervisor.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
 /*
@@ -2229,6 +2232,108 @@ async function main(): Promise<void> {
   await until(() => sup.slots.used === 0);
 
   /*
+   * A message to an idle agent with every slot taken (Amendment 158). It used to start the
+   * agent at once, one over the limit. It waits for a slot now, as a 'slot' row the file keeps,
+   * and goes when one frees — held or not: the fleet hold never applied to your own message.
+   * Held here, so nothing but these messages starts, and nothing is paused: nothing works yet.
+   */
+  setAgentStatus(db, 'agt_sibling', 'done'); // §14's fixture, 'working' with no run behind it
+  const workingBeforeHold = listAgents(db).filter((a) => a.status === 'working').map((a) => a.id);
+  check('held, with nothing working: it pauses nobody', (await sup.hold()) === 0 && sup.held, JSON.stringify(workingBeforeHold));
+  job('job_reply', null);
+  for (let i = 0; sup.slots.used < slotLimit(); i += 1) {
+    const before = sup.slots.used;
+    fixture(`agt_rbusy_${i}`, 'job_reply', { sdkSessionId: `sess_rbusy_${i}`, autonomy: DEFAULT_AUTONOMY });
+    await send('POST', `/api/agents/agt_rbusy_${i}/message`, { text: 'keep busy' });
+    if (!(await until(() => sup.slots.used > before))) break;
+  }
+  check('held, your messages still start agents, up to the limit', sup.slots.used === slotLimit(), `${sup.slots.used} of ${slotLimit()}`);
+  fixture('agt_replied', 'job_reply', { sdkSessionId: 'sess_replied', autonomy: DEFAULT_AUTONOMY });
+  const fullRuns = runs.length;
+  const firstSent = await send<{ delivery?: string }>('POST', '/api/agents/agt_replied/message', { text: 'one more thing: the README' });
+  const secondSent = await send<{ delivery?: string }>('POST', '/api/agents/agt_replied/message', { text: 'and then the CHANGELOG' });
+  await settle(100);
+  check(
+    'with every slot taken, a message to an idle agent starts nothing: the live count does not rise (Amendment 158)',
+    firstSent.status === 200 && runs.length === fullRuns && sup.slots.used === slotLimit(),
+    `${firstSent.status}, ${runs.length - fullRuns} new run(s), ${sup.slots.used} of ${slotLimit()}`,
+  );
+  check("the answer says it waits: 'queued'", firstSent.body.delivery === 'queued' && secondSent.body.delivery === 'queued', JSON.stringify([firstSent.body, secondSent.body]));
+  const replyRows = (d: Db = db) => listScheduled(d).filter((m) => m.agentId === 'agt_replied');
+  check(
+    "each waits as a 'slot' message, in the order sent",
+    JSON.stringify(replyRows().map((m) => [m.trigger, m.text])) === JSON.stringify([['slot', 'one more thing: the README'], ['slot', 'and then the CHANGELOG']]),
+    JSON.stringify(replyRows()),
+  );
+  check('and the agent is queued, saying why', getAgent(db, 'agt_replied')?.status === 'queued' && lastStatusNote(db, 'agt_replied') === SLOT_WAIT_NOTE, `${getAgent(db, 'agt_replied')?.status}: ${lastStatusNote(db, 'agt_replied')}`);
+  const reopenedSlot = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+  check(
+    'a daemon that opens the file afresh finds both, and the agent queued',
+    replyRows(reopenedSlot).filter((m) => m.trigger === 'slot').length === 2 && getAgent(reopenedSlot, 'agt_replied')?.status === 'queued',
+  );
+  reopenedSlot.close();
+  sup.pump();
+  await settle(50);
+  check('pumping with every slot taken still starts nothing', runs.length === fullRuns && sup.slots.used === slotLimit());
+  runs.find((r) => !r.finished)?.finish({ cost: 0, reason: 'completed' });
+  check('a freed slot goes to it, held as everything is', await until(() => runs.length === fullRuns + 1), `${runs.length - fullRuns} new run(s)`);
+  const replyRun = runs[fullRuns];
+  check('in its own session', replyRun?.options.resume === 'sess_replied', String(replyRun?.options.resume));
+  await until(() => (replyRun?.prompts.length ?? 0) > 0);
+  check('with the first message, word for word', replyRun?.prompts[0] === 'one more thing: the README', JSON.stringify(replyRun?.prompts));
+  check('and no more than the limit run', sup.slots.used === slotLimit(), `${sup.slots.used} of ${slotLimit()}`);
+  check('the first is gone from the list; the second still waits', JSON.stringify(replyRows().map((m) => m.text)) === '["and then the CHANGELOG"]', JSON.stringify(replyRows()));
+  replyRun?.finish({ cost: 0, reason: 'completed' });
+  check('its turn over, the second goes next, one per turn', await until(() => runs.length === fullRuns + 2) && runs[fullRuns + 1]?.options.resume === 'sess_replied', `${runs.length - fullRuns} new run(s)`);
+  await until(() => (runs[fullRuns + 1]?.prompts.length ?? 0) > 0);
+  check('with the second message', runs[fullRuns + 1]?.prompts[0] === 'and then the CHANGELOG' && replyRows().length === 0, JSON.stringify(runs[fullRuns + 1]?.prompts));
+  runs[fullRuns + 1]?.finish({ cost: 0, reason: 'completed' });
+  check('and it ends done', await until(() => getAgent(db, 'agt_replied')?.status === 'done'));
+
+  // Cancelled before it goes: the agent is back where it was, and nothing starts it.
+  await until(() => sup.slots.used === slotLimit() - 1);
+  fixture('agt_rfill', 'job_reply', { sdkSessionId: 'sess_rfill', autonomy: DEFAULT_AUTONOMY });
+  await send('POST', '/api/agents/agt_rfill/message', { text: 'keep busy' });
+  await until(() => sup.slots.used === slotLimit());
+  const unsentRuns = runs.length;
+  await send('POST', '/api/agents/agt_replied/message', { text: 'never mind' });
+  const unsent = listScheduled(db).find((m) => m.agentId === 'agt_replied');
+  check('done again, it waits the same way', unsent?.trigger === 'slot' && getAgent(db, 'agt_replied')?.status === 'queued');
+  const cancelled = await send('DELETE', `/api/scheduled/${unsent?.id}`);
+  check('cancelled, it is done again, as it was', cancelled.status === 200 && getAgent(db, 'agt_replied')?.status === 'done', getAgent(db, 'agt_replied')?.status);
+  runs.find((r) => !r.finished)?.finish({ cost: 0, reason: 'completed' });
+  await settle(150);
+  check('and a freed slot does not start it unasked', runs.length === unsentRuns && getAgent(db, 'agt_replied')?.status === 'done', `${runs.length - unsentRuns} new run(s)`);
+
+  // After a restart: a second Supervisor, on a second connection, knowing only the file, sends it.
+  await until(() => sup.slots.used === slotLimit() - 1);
+  fixture('agt_rfill2', 'job_reply', { sdkSessionId: 'sess_rfill2', autonomy: DEFAULT_AUTONOMY });
+  await send('POST', '/api/agents/agt_rfill2/message', { text: 'keep busy' });
+  await until(() => sup.slots.used === slotLimit());
+  fixture('agt_restarted', 'job_reply', { sdkSessionId: 'sess_restarted', autonomy: DEFAULT_AUTONOMY });
+  const restartRuns = runs.length;
+  await send('POST', '/api/agents/agt_restarted/message', { text: 'after the restart' });
+  await settle(50);
+  check('one more waits for a slot', getAgent(db, 'agt_restarted')?.status === 'queued' && runs.length === restartRuns, `${getAgent(db, 'agt_restarted')?.status}, ${runs.length - restartRuns} new run(s)`);
+  const reopenedPump = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+  const supSlot = new Supervisor(reopenedPump);
+  await supSlot.hold();
+  supSlot.pump();
+  check('a restarted daemon sends it in the first slot it has, held or not', await until(() => runs.length === restartRuns + 1), `${runs.length - restartRuns} new run(s)`);
+  await until(() => (runs[restartRuns]?.prompts.length ?? 0) > 0);
+  check(
+    'in its session, with the message as you sent it',
+    runs[restartRuns]?.options.resume === 'sess_restarted' && runs[restartRuns]?.prompts[0] === 'after the restart' && listScheduled(reopenedPump).every((m) => m.agentId !== 'agt_restarted'),
+    JSON.stringify(runs[restartRuns]?.prompts),
+  );
+  runs[restartRuns]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_restarted')?.status === 'done');
+  reopenedPump.close();
+  sup.release();
+  for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === 0);
+
+  /*
    * The limit is a setting now (Amendment 47), changed while agents run. Lowering it
    * stops nobody; raising it starts what was waiting.
    */
@@ -2238,8 +2343,8 @@ async function main(): Promise<void> {
   check('a good one is taken', (await setSlots('2')).status === 200 && slotLimit() === 2, String(slotLimit()));
   job('job_limit', null);
   const limitRuns = runs.length;
-  // Through the queue, the way launches are scheduled. (A reply to an idle agent starts
-  // it at once, over the limit or not — see Amendment 47's open question.)
+  // Through the queue, the way launches are scheduled. (A reply to an idle agent waits for
+  // a slot the same way since Amendment 158; it used to start at once, over the limit.)
   for (let i = 0; i < 3; i += 1) {
     fixture(`agt_lim_${i}`, 'job_limit', { status: 'queued', sdkSessionId: `sess_lim_${i}`, autonomy: DEFAULT_AUTONOMY });
   }

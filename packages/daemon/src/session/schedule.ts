@@ -16,6 +16,10 @@
  *     (`nextWhenDone`), so several go one per turn, in order. A question it stops on, a
  *     failure or a pause aren't `done`, so it keeps waiting through them; while everything is
  *     paused it waits for the pause to end. It survives a restart, and goes at the next `done`.
+ *   - **Wait for a slot** (Amendment 158). Not one you make: a message sent while every slot is
+ *     taken — from the composer, a time, a `done` — becomes a `trigger = 'slot'` row, and its
+ *     agent `queued`. `Supervisor.pump` sends the oldest one when it gives the agent a slot
+ *     (`nextForSlot`), so it survives a restart too. Cancelling it puts the agent back.
  *
  * TIME. Instants are ISO, compared as numbers. The browser turns the local date and time
  * you picked into one; nothing here reads or sets a time zone.
@@ -83,6 +87,8 @@ interface Row {
   text: string;
   created_at: string;
   error: string | null;
+  /** 1 for a message of Conductor's, shown as `auto` when it goes (255, Amendment 158). */
+  synthetic: number;
 }
 
 const toMessage = (r: Row): ScheduledMessage => ({
@@ -107,6 +113,7 @@ export function insertScheduled(
   at: string | null,
   text: string,
   trigger: ScheduleTrigger = 'at',
+  synthetic = false,
 ): ScheduledMessage {
   const created = new Date().toISOString();
   const r: Row = {
@@ -117,10 +124,11 @@ export function insertScheduled(
     text,
     created_at: created,
     error: null,
+    synthetic: synthetic ? 1 : 0,
   };
   db.prepare(
-    'INSERT INTO scheduled_messages (id, agent_id, at, trigger, text, created_at, error) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(r.id, r.agent_id, r.at, r.trigger, r.text, r.created_at, r.error);
+    'INSERT INTO scheduled_messages (id, agent_id, at, trigger, text, created_at, error, synthetic) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(r.id, r.agent_id, r.at, r.trigger, r.text, r.created_at, r.error, r.synthetic);
   return toMessage(r);
 }
 
@@ -146,6 +154,26 @@ export function nextWhenDone(db: Db, agentId: string): ScheduledMessage | null {
     )
     .get(agentId) as Row | undefined;
   return r ? toMessage(r) : null;
+}
+
+/** One row, or null. */
+export function getScheduled(db: Db, id: string): ScheduledMessage | null {
+  const r = db.prepare('SELECT * FROM scheduled_messages WHERE id = ?').get(id) as Row | undefined;
+  return r ? toMessage(r) : null;
+}
+
+/**
+ * The oldest message waiting for a slot for this agent, or null (Amendment 158): sent by
+ * `Supervisor.pump` when it gives the agent one. `synthetic` is whether it is Conductor's. In the
+ * order sent: two in one millisecond go by `rowid`, as the id is random.
+ */
+export function nextForSlot(db: Db, agentId: string): (ScheduledMessage & { synthetic: boolean }) | null {
+  const r = db
+    .prepare(
+      "SELECT * FROM scheduled_messages WHERE agent_id = ? AND trigger = 'slot' AND error IS NULL ORDER BY created_at, rowid LIMIT 1",
+    )
+    .get(agentId) as Row | undefined;
+  return r ? { ...toMessage(r), synthetic: r.synthetic === 1 } : null;
 }
 
 /** Every open page is told the whole list: from the clock, a route, or the supervisor (Amendment 157). */

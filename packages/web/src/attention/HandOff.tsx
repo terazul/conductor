@@ -18,7 +18,7 @@
 
 import { useState } from 'react';
 import type { Agent } from '@conductor/shared';
-import { sendMessage, type CommandHandle } from '../agent/endpoints.js';
+import { sendMessage, sentText, type CommandHandle } from '../agent/endpoints.js';
 import { useAgentEvents } from '../lib/store.js';
 import { handOff, handOffDraft, handOffMissing, handOffProblem } from './alerts.js';
 
@@ -51,7 +51,7 @@ export function HandOffPanel({ agent, editing, onClose, cmd }: HandOffPanelProps
     const text = reply.trim();
     if (text === '') return;
     void cmd
-      .run('Replying', () => sendMessage(agent.id, { text }), 'sent — it works again, and hands off when it is done')
+      .run('Replying', () => sendMessage(agent.id, { text }), (r) => sentText(r, 'sent — it works again, and hands off when it is done'))
       .then((ok) => {
         if (ok) setReply('');
       });

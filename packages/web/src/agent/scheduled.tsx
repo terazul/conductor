@@ -10,6 +10,9 @@
  * One queued for when the agent is done (Amendment 157) says **⏲ when done** instead of a
  * time, and what it is waiting for: this turn to end, or, while the agent is stopped on a
  * question, a failure or a pause, that it is waiting through it. Several go one per turn.
+ *
+ * One you sent while every slot was taken (Amendment 158) says **⏲ waiting for a slot**: the
+ * daemon made it, it goes when a slot frees, and cancelling it puts the agent back.
  */
 
 import { useMemo, useState } from 'react';
@@ -59,6 +62,24 @@ export function whenDoneWaits(status: AgentStatus | undefined, first: boolean): 
   }
 }
 
+/**
+ * What a message waiting for a slot is waiting for (Amendment 158). `first` is the next to go;
+ * the ones behind it go one per turn after it.
+ */
+export function slotWaits(status: AgentStatus | undefined, first: boolean): string {
+  if (!first) return 'after the one before it';
+  switch (status) {
+    case 'working':
+      return 'after this turn';
+    case 'blocked':
+      return 'waiting: it asked you something';
+    case 'paused':
+      return 'waiting: it is paused';
+    default:
+      return 'goes when one frees';
+  }
+}
+
 const firstLine = (text: string): string => {
   const line = text.split('\n').find((l) => l.trim()) ?? '';
   return line.length > 90 ? `${line.slice(0, 89)}…` : line;
@@ -68,6 +89,7 @@ export function ScheduledList({ agentId }: { agentId: string }) {
   const items = useAgentScheduled(agentId);
   const status = useAgent(agentId)?.status;
   const firstDone = items.find((m) => m.trigger === 'done' && !m.error)?.id;
+  const firstSlot = items.find((m) => m.trigger === 'slot' && !m.error)?.id;
   const now = new Date(useNow(30_000));
   const [why, setWhy] = useState<string | null>(null);
   // Which rows are open to their full text (Amendment 118). A row shows one line until clicked.
@@ -94,11 +116,15 @@ export function ScheduledList({ agentId }: { agentId: string }) {
           >
             <span className="ag-sched-chev" aria-hidden="true">{open.has(m.id) ? '▾' : '▸'}</span>
             <span className="ag-sched-when">
-              {m.trigger === 'done' ? '⏲ when done' : `⏲ ${fmtWhen(m.at, now)}`}
+              {m.trigger === 'done' ? '⏲ when done' : m.trigger === 'slot' ? '⏲ waiting for a slot' : `⏲ ${fmtWhen(m.at, now)}`}
               {!m.error && (
                 <span className="ag-sched-in">
                   {' · '}
-                  {m.trigger === 'done' ? whenDoneWaits(status, m.id === firstDone) : fmtIn(m.at, now)}
+                  {m.trigger === 'done'
+                    ? whenDoneWaits(status, m.id === firstDone)
+                    : m.trigger === 'slot'
+                      ? slotWaits(status, m.id === firstSlot)
+                      : fmtIn(m.at, now)}
                 </span>
               )}
             </span>
@@ -120,7 +146,11 @@ export function ScheduledList({ agentId }: { agentId: string }) {
         {open.has(m.id) && (
           <div className="ag-sched-full" role="region" aria-label="the scheduled message">
             <div className="ag-sched-meta">
-              {m.trigger === 'done' ? 'to be sent when it is done · queued' : `to be sent ${fmtWhen(m.at, now)} · scheduled`}{' '}
+              {m.trigger === 'done'
+                ? 'to be sent when it is done · queued'
+                : m.trigger === 'slot'
+                  ? 'to be sent when a slot frees · sent'
+                  : `to be sent ${fmtWhen(m.at, now)} · scheduled`}{' '}
               {fmtWhen(m.createdAt, now)}
             </div>
             <div className="ag-sched-body">{m.text}</div>
