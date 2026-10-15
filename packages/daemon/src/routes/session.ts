@@ -272,7 +272,7 @@ function parseAgentSpec(entry: unknown): AgentSpec {
   if (refused) throw new Error(`agent ${role}: ${refused}`);
   // An orchestrated stack (Amendment 128) lists the roles its orchestrator may start. Its helpers
   // are counted in all, send-backs included. Spawn sends the roles times the starts each may have
-  // unless you chose another number, up to PIPELINE_HELPERS_MAX (Amendment 150): a plan of many
+  // unless you chose another number, up to PIPELINE_HELPERS_MAX (Amendment 151): a plan of many
   // lanes starts one role many times.
   const helperRoles = parseHelperRoles(role, provider, e['helperRoles']);
   const helpers = e['helpers'] ?? 0;

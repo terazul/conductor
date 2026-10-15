@@ -87,17 +87,17 @@ the last of it on 12 Oct).
   either run the install or stop with one sentence saying to. Add a row to the troubleshooting table
   in `docs/MANUAL.md` too.
 
-- [x] **A throw before a run begins keeps its slot (wave 11, A1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 148.*
+- [x] **A throw before a run begins keeps its slot (wave 11, A1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 149.*
 
-- [x] **The arbiter matches the wrong request (wave 11, A3).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 149.*
+- [x] **The arbiter matches the wrong request (wave 11, A3).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 150.*
 
-- [x] **A 4th developer is refused as a send-back, even on new work.** Found (14 Oct) by the user: send-backs were counted per role, not per piece of work. *Done 14 Oct: Amendment 150 (counted per lane, a role and a name; helpers in all a launch choice, up to 48).*
+- [x] **A 4th developer is refused as a send-back, even on new work.** Found (14 Oct) by the user: send-backs were counted per role, not per piece of work. *Done 14 Oct: Amendment 151 (counted per lane, a role and a name; helpers in all a launch choice, up to 48).*
 
-- [x] **`/api/workspaces` takes any input (wave 11, A4).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 151 (gated: a known project, one of its folders, git's ref rules; DELETE 404, 409 and a strict `force`).*
+- [x] **`/api/workspaces` takes any input (wave 11, A4).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 152 (gated: a known project, one of its folders, git's ref rules; DELETE 404, 409 and a strict `force`).*
 
-- [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 152 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
+- [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 153 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
 
-- [x] **Docs: D1, D2, D3, the test plan and ADR 0001 (wave 11, F).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): D2 drops the links.* *Done 15 Oct: Amendment 153 (no links to the missing architecture guide; `scripts/verify-docs-links.mjs` in `make test`).*
+- [x] **Docs: D1, D2, D3, the test plan and ADR 0001 (wave 11, F).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): D2 drops the links.* *Done 15 Oct: Amendment 154 (no links to the missing architecture guide; `scripts/verify-docs-links.mjs` in `make test`).*
 
 ## Housekeeping
 

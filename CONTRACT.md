@@ -196,7 +196,11 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
-### Amendment 153 — post-merge, applied. **The docs link only to files in git, and `make test` checks that they do.**
+*Renumbered 15 Oct 2026: Amendments 149–154 were merged locally as 148–153, and moved up by one
+because Amendment 148 was published first from another session. Their commit messages keep the
+old numbers.*
+
+### Amendment 154 — post-merge, applied. **The docs link only to files in git, and `make test` checks that they do.**
 
 Docs (`README.md`, `TODO.md`, `docs/MANUAL.md`, `docs/adr/0001-preset-stacks.md`,
 `docs/adr/0002-edit-running-stack.md`, `docs/plans/multi-provider-lanes.md`,
@@ -252,7 +256,7 @@ docs/checks/ui-test-plann.md` and exit 1, then was put back. A throwaway probe f
 reference definition fail, and http, mailto, `#anchor`, a code span, a ``` fence and a `~~~~` fence
 holding a ``` line are skipped. `pnpm -r typecheck` clean; `make test`: 28 PASS.
 
-### Amendment 152 — post-merge, applied. **An empty folder .gitignore excludes is not listed in Files, inside an untracked folder or under an ignored one.**
+### Amendment 153 — post-merge, applied. **An empty folder .gitignore excludes is not listed in Files, inside an untracked folder or under an ignored one.**
 
 Daemon only (`workspace/tree.ts`, `workspace/verify-files-verbs.ts`). The user, 14 Oct 2026: "Execute
 wave 1 of docs/plans/wave-11.md … following §0"; this is the plan's item N7 (lane E1, §2 "an ignored
@@ -299,7 +303,7 @@ With `tree.ts` put back as on `main`, 3 of the 7 fail (the two "hidden" checks a
 nothing git calls ignored", naming `scratch/deep/ign,scratch/ign,scratch/ign/kid,scratch/x.tmp`).
 `pnpm -r typecheck` clean; `make test`: 27 PASS, "Amendment 138 files: PASS — 108 checks".
 
-### Amendment 151 — post-merge, applied. **The bootstrap `/api/workspaces` routes open and remove a workspace only in a project that exists, in one of its own folders.**
+### Amendment 152 — post-merge, applied. **The bootstrap `/api/workspaces` routes open and remove a workspace only in a project that exists, in one of its own folders.**
 
 Daemon only (`routes/workspace.ts`, `workspace/worktree.ts`, `workspace/service.ts`,
 `session/supervisor.ts`, `workspace/verify.ts`, `workspace/verify-files-verbs.ts`). The user, 14 Oct
@@ -380,7 +384,7 @@ and `supervisor.ts` put back as on `main`, 41 of §1b's 42 checks fail: `a/b` cu
 `.conductor/wt/a/b`, `prj_nope` and any folder opened, and bad refs were 500s. `pnpm -r typecheck`
 clean; `make test`: 27 PASS.
 
-### Amendment 150 — post-merge, applied. **Send-backs are counted per lane, a role with a name, so new work under a new name starts while the total allows; and an orchestrated stack's helpers in all are a launch choice, up to 48.**
+### Amendment 151 — post-merge, applied. **Send-backs are counted per lane, a role with a name, so new work under a new name starts while the total allows; and an orchestrated stack's helpers in all are a launch choice, up to 48.**
 
 Shared (`stack.ts`, `wire.ts`), daemon (`session/store.ts`, `session/supervisor.ts`, `session/handoff.ts`,
 `routes/helpers.ts`, `routes/session.ts`, `session/verify.ts`), web (`spawn/orchestrated.ts`,
@@ -448,13 +452,13 @@ sent back", "starts with no name keep the limit they had: three, as one lane", "
 their own lanes", "and the total still refuses past the cap the launch chose, whatever the lane".
 §25's unnamed checks now read "a fourth start of the same role, with no name, is refused" (`:6556`)
 and the cap check "and no more helpers than PIPELINE_HELPERS_MAX → 400" (`:6483`). `spawn/verify.ts`
-§26 (`:1550`): the choices, the default, what is sent, the select and its reset, and the words. With
+§27 (`:1616`): the choices, the default, what is sent, the select and its reset, and the words. With
 `supervisor.ts` put back as it was on `main`, eight of the new checks fail, the fourth new name
 among them, refused with "You have started the developer 3 times"; with `routes/session.ts` put back
 too, the 13- and 48-helper launches are refused with "from 0 to 12". `pnpm -r typecheck` clean;
 `make test`: 27 PASS.
 
-### Amendment 149 — post-merge, applied. **With two calls of one tool waiting for you, each call parks on its own request and each answer reaches only its own call.**
+### Amendment 150 — post-merge, applied. **With two calls of one tool waiting for you, each call parks on its own request and each answer reaches only its own call.**
 
 Daemon only (`arbiter/index.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of
 docs/plans/wave-11.md … following §0"; this is the plan's item A3 (lane B, §2 "the arbiter matches
@@ -507,7 +511,7 @@ behind a waiting one is declined" and "a built-in one is still parked with it" p
 call parked on the first; the allow ran the first's call; the second's answer was gone). `pnpm -r
 typecheck` clean; `make test`: 27 PASS.
 
-### Amendment 148 — post-merge, applied. **A run that throws before it begins gives its slot back and fails as a launch, rather than holding the slot for good and crashing the daemon.**
+### Amendment 149 — post-merge, applied. **A run that throws before it begins gives its slot back and fails as a launch, rather than holding the slot for good and crashing the daemon.**
 
 Daemon only (`session/supervisor.ts`, `session/verify.ts`). The user, 14 Oct: "Execute wave 1 of
 docs/plans/wave-11.md … following §0"; this is the plan's item A1 (lane S1, §2 "a throw before

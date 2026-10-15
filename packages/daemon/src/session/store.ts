@@ -495,7 +495,7 @@ export function getHelperRole(db: Db, id: string): string | null {
 
 /**
  * How many helpers of this role the orchestrator has started in one lane, ended or not
- * (Amendment 128; per lane since Amendment 150). A lane is the role and the `name` it was
+ * (Amendment 128; per lane since Amendment 151). A lane is the role and the `name` it was
  * started with, as `helperSlug` stores it; no name is the role's unnamed lane. The name is kept
  * in the helper's `role` column, which `Supervisor.startHelper` writes as `<role>-<name>`
  * (`<role>` with none), and `-2`, `-3` … after it when the lane is started again. So a lane's

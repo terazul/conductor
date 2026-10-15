@@ -223,7 +223,7 @@ export const PIPELINE_ROLES_MAX = 8;
 /**
  * How many times the orchestrator may send a lane's work back (start it again, as the
  * developer after a failed review) before it must ask the user. A lane is a role and the name
- * it was started with (Amendment 150): it is started once, so the most starts of one lane is
+ * it was started with (Amendment 151): it is started once, so the most starts of one lane is
  * one more than this. A new name is new work, its own lane.
  */
 export const SEND_BACKS_MAX = 2;
@@ -237,7 +237,7 @@ export function pipelineHelperCap(roles: number): number {
 }
 
 /**
- * The most helpers an orchestrated stack may be launched to start in all (Amendment 150): a
+ * The most helpers an orchestrated stack may be launched to start in all (Amendment 151): a
  * plan of many lanes needs more than each role once and sent back twice. Spawn offers up to it
  * ("helpers in all"), and the daemon refuses more. An ordinary orchestrator is still held to
  * HELPERS_MAX.
@@ -247,7 +247,7 @@ export const PIPELINE_HELPERS_MAX = 48;
 /**
  * The name a helper is stored under, from the `name` the orchestrator gave `start_helper`:
  * lowercase, runs of anything else as one dash, at most 24 characters. '' for no name. It is
- * also what makes two starts one lane (Amendment 150): the same role with the same name.
+ * also what makes two starts one lane (Amendment 151): the same role with the same name.
  */
 export function helperSlug(name: string | undefined): string {
   return (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
@@ -292,7 +292,7 @@ export function listedRole<T extends { id: string }>(asked: string | undefined, 
 /**
  * Why a lane may not be started again, or null when it may. `started` is how many helpers of
  * this role the orchestrator has started under this name (`lane`, as `helperSlug` stores it;
- * '' or absent for the role's unnamed lane), ended or not (Amendment 150). The first start is
+ * '' or absent for the role's unnamed lane), ended or not (Amendment 151). The first start is
  * the work; every one after it is a send-back, and the third is where it must ask.
  */
 export function sendBackRefusal(role: string, started: number, lane?: string): string | null {

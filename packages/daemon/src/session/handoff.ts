@@ -554,7 +554,7 @@ export interface ListedRole {
  * the same files. A pipeline is the opposite: the steps run in order, the orchestrator reads each
  * result before it writes the next brief, asks the user when it is unsure, and sends work back
  * when a step fails. It says which roles it may start and how often it may send a lane back: a
- * role and a name, so new work is a new name and a send-back reuses one (Amendment 150).
+ * role and a name, so new work is a new name and a send-back reuses one (Amendment 151).
  */
 export function pipelineSection(role: string, cap: number, roles: readonly ListedRole[], sendBacks = 2): string {
   const named = roles

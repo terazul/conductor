@@ -56,6 +56,8 @@ Decisions are in §6. Changed since the plan was first drafted:
 - **Wave 1:** 148 A1, 149 A3, 150 A4, 151 N7, 152 docs.
 - **Wave 2:** 153 R3, 154 A2, 155 R2, 156 O1, 157 O3, 158 U1, 159 N3, 160 N5, 161 N6, 162 M1.
 - **Wave 3:** 163 N4, 164 N9, 165 H1, 166 G1, 167 H3, 168 H2, 169 N13.
+- *15 Oct: numbers shifted by one for the published Amendment 148; wave 1 is 149 A1, 150 A3,
+  151 lane counting, 152 A4, 153 N7, 154 docs; wave 2 starts at 155.*
 
 **Chains** (the lanes in a chain run one after another):
 - **S:** `session/supervisor.ts`.

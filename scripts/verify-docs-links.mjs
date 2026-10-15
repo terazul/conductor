@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Verify Amendment 153: every relative `.md` link in the docs points to a file git tracks.
+// Verify Amendment 154: every relative `.md` link in the docs points to a file git tracks.
 //
 //   node scripts/verify-docs-links.mjs
 //

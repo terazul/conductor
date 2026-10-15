@@ -156,7 +156,7 @@ const MAX_EMPTY_PROBES = 2_000;
  * the untracked folders; this opens them, `budget` folders at most per tree read, and
  * returns the ones with nothing listable in them. A nested repo is left to Amendment 90.
  *
- * Level by level, so .gitignore is asked once per depth (Amendment 152): an ignored
+ * Level by level, so .gitignore is asked once per depth (Amendment 153): an ignored
  * subfolder is dropped before it is opened, so neither it nor anything under it is
  * listed — what `git status --ignored` calls ignored stays out of Files.
  */

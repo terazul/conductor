@@ -1751,7 +1751,7 @@ async function main(): Promise<void> {
   );
 
   /*
-   * Amendment 148. A throw after the slot is taken but before the run begins — here the
+   * Amendment 149. A throw after the slot is taken but before the run begins — here the
    * engine itself can't be made — used to keep the slot for good, leave the agent `working`
    * and reject a promise nobody awaited. Each agent has its own job, so one failing doesn't
    * settle the job the next one is in. One slot is free, so the next starts only if the
@@ -2051,7 +2051,7 @@ async function main(): Promise<void> {
   check('a built-in one is still parked with it', bash.kind === 'park', JSON.stringify(bash));
   resolveRequest(db, 'req_bash', { type: 'deny', by: 'human' });
 
-  // Two Bash calls wait for you: each is its own request, and so is each answer (Amendment 149).
+  // Two Bash calls wait for you: each is its own request, and so is each answer (Amendment 150).
   job('job_two_bash', null);
   fixture('agt_two_bash', 'job_two_bash', { sdkSessionId: 'sess_two_bash', status: 'blocked', blockMode: 'parked', autonomy: DEFAULT_AUTONOMY });
   const R1 = { id: 'req_bash_1', toolUseId: 'toolu_r1', input: { command: 'rm -rf build' } };
@@ -6508,7 +6508,7 @@ async function main(): Promise<void> {
     check('more than 8 roles → 400', (await bad({ helperRoles: Array.from({ length: 9 }, (_, i) => ({ ...ROLES[0]!, id: `role-${i}` })), helpers: 8 })).status === 400);
     const none = await bad({ helpers: 0 });
     check('roles with no helpers to start them as → 400', none.status === 400 && /helpers must be above 0/.test(none.detail), none.detail);
-    // Since Amendment 150 the total is a launch choice, up to PIPELINE_HELPERS_MAX; section 25b launches above the default.
+    // Since Amendment 151 the total is a launch choice, up to PIPELINE_HELPERS_MAX; section 25b launches above the default.
     const tooMany = await bad({ helpers: PIPELINE_HELPERS_MAX + 1 });
     check('and no more helpers than PIPELINE_HELPERS_MAX → 400', tooMany.status === 400 && /0 to 48/.test(tooMany.detail), tooMany.detail);
     check('an ordinary orchestrator is still held to 8', (await bad({ helperRoles: undefined, helpers: 9 })).status === 400);
@@ -6707,7 +6707,7 @@ async function main(): Promise<void> {
     if (seen.copilot) registerBackend(seen.copilot);
 
     // ───────────────────────────────────────────────────────────────────────────
-    console.log('\n25b · each piece of work is its own lane: send-backs counted per role and name, and the total a launch choice (Amendment 150)');
+    console.log('\n25b · each piece of work is its own lane: send-backs counted per role and name, and the total a launch choice (Amendment 151)');
     const FOUR: HelperRole[] = [...ROLES, { id: 'validator', tier: 'sonnet', model: O_SONNET, brief: 'Test it.', autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds }];
     const laneJobs: string[] = [];
     check('the pure rules: a lane is the role and the name, as it is stored; the most in all is 48', PIPELINE_HELPERS_MAX === 48 && helperSlug(' W11 A1! ') === 'w11-a1' && helperSlug(undefined) === '' && sendBackRefusal('developer', 2, 'w11-a1') === null);

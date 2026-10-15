@@ -177,7 +177,7 @@ export class Arbiter {
   #held = new Map<string, Held>();
   /**
    * agentId → decisions to apply from PreToolUse on the next run, one per request answered,
-   * oldest first. One per agent let a second answer overwrite the first (Amendment 149).
+   * oldest first. One per agent let a second answer overwrite the first (Amendment 150).
    */
   #decided = new Map<string, PendingDecision[]>();
 
@@ -306,7 +306,7 @@ export class Arbiter {
     //    Its own request, by id. Copilot gives a re-offered call a fresh id, so by name too,
     //    but only when that can't be another call's: one open request of the tool, or the
     //    same input. Matching any of the name found the oldest of two Bash calls for the
-    //    second (Amendment 149).
+    //    second (Amendment 150).
     const open = openRequestsForAgent(this.#db, ctx.agentId);
     const named = open.filter((r) => r.toolName === ctx.toolName);
     const stillOpen =
@@ -728,7 +728,7 @@ export class Arbiter {
   /**
    * The staged decision for this call, taken off the list: its request's id, or the same
    * tool with the same input when the call came back under a fresh id. By name alone, the
-   * answer to one Bash call ran another's command (Amendment 149).
+   * answer to one Bash call ran another's command (Amendment 150).
    */
   #takeStaged(ctx: { agentId: string; toolName: string; toolUseId: string; input: unknown }): PendingDecision | undefined {
     const staged = this.#decided.get(ctx.agentId) ?? [];

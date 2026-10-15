@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   await app.listen({ host: '127.0.0.1', port: PORT });
 
   // The bootstrap routes open a workspace only in a project that exists, in one of its
-  // folders (Amendment 151), so each project these sections name is a row first.
+  // folders (Amendment 152), so each project these sections name is a row first.
   const db = openDb();
   const project = (id: string, path: string): void => {
     db.prepare(
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   check('GET /api/workspaces lists it', listed.body.workspaces.some((w) => w.jobId === 'job_inplace'));
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n1b · the bootstrap routes refuse what they cannot vouch for (Amendment 151)');
+  console.log('\n1b · the bootstrap routes refuse what they cannot vouch for (Amendment 152)');
   type Refusal = { error?: string; detail?: string };
   const open = (body: Record<string, unknown>) =>
     send<Refusal & { workspace?: WorkspaceRecord }>('POST', '/api/workspaces', {
@@ -1013,7 +1013,7 @@ async function main(): Promise<void> {
     inplaceJob?.prompt === '' && inplaceJob.status === 'queued',
     JSON.stringify({ prompt: inplaceJob?.prompt, status: inplaceJob?.status }),
   );
-  // Over HTTP a workspace's project now exists (Amendment 151). In-process, as Track A opens
+  // Over HTTP a workspace's project now exists (Amendment 152). In-process, as Track A opens
   // one, it need not, and then the slice names the project from the repo.
   await workspace().open({ jobId: 'job_noproject', projectId: 'prj_noproject', repoPath: SCRATCH, isolation: 'in_place' });
   const orphanSlice = workspace().snapshotSlice();

@@ -103,7 +103,7 @@ export class LaunchBranchError extends Error {
 
 /**
  * The folder cannot take the isolation asked for: it is not a repository, or it has no commit
- * to cut a worktree from. The request's to fix, so a 400 and not a 500 (Amendment 151). `name`
+ * to cut a worktree from. The request's to fix, so a 400 and not a 500 (Amendment 152). `name`
  * stays `Error`: the supervisor puts `String(err)` into the sentence the person reads.
  */
 export class RepoUnfitError extends Error {
@@ -111,7 +111,7 @@ export class RepoUnfitError extends Error {
 }
 
 /**
- * Whether `ref` is a commit-ish a request may cut a worktree from (Amendment 151): a ref name
+ * Whether `ref` is a commit-ish a request may cut a worktree from (Amendment 152): a ref name
  * by git's rule (`check-ref-format --allow-onelevel`, so `HEAD` and `main` pass) or a sha. A
  * leading `-` is refused first: `worktree add` would read it as an option.
  */

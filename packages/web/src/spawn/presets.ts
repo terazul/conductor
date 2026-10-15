@@ -404,7 +404,7 @@ export function toAgentSpecs(
   listed: readonly ListedRole[] = [],
   /**
    * The helpers in all the orchestrator of an orchestrated stack may start, as chosen on Spawn
-   * (Amendment 150, `helpersInAll`); absent, `helperCapFor(listed)`.
+   * (Amendment 151, `helpersInAll`); absent, `helperCapFor(listed)`.
    */
   helpersInAll?: number,
 ): AgentSpec[] {

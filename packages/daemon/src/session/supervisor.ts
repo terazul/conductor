@@ -1229,7 +1229,7 @@ export class Supervisor implements AgentControl {
     let outcome;
     const began = Date.now();
     // From the slot being taken, not from the run: whatever throws before the run begins
-    // ends it as a failed launch and gives the slot back (Amendment 148).
+    // ends it as a failed launch and gives the slot back (Amendment 149).
     try {
       this.#openRun(agent);
       setAgentStatus(this.#db, agentId, 'working');
@@ -1721,7 +1721,7 @@ export class Supervisor implements AgentControl {
    * tier, or a cheaper `tier` asked for), and its rope, which keeps a reading role read-only.
    * Only the roles the stack was launched with may be started, and one lane at most
    * `1 + SEND_BACKS_MAX` times, after which the orchestrator is told to ask the user. A lane
-   * is the role and the `name` (Amendment 150): a new name is new work, the same name again is
+   * is the role and the `name` (Amendment 151): a new name is new work, the same name again is
    * a send-back, and no name is the role's unnamed lane. A
    * `role` on an orchestrator launched with none, and none on one launched with some, is
    * refused with a sentence; an ordinary orchestrator's helpers are as they always were.
@@ -1917,7 +1917,7 @@ export class Supervisor implements AgentControl {
     return this.#runners.get(agentId)?.isLive ?? false;
   }
 
-  /** A run in flight or a live session: `deleteProject`'s test, for one agent (Amendment 151). */
+  /** A run in flight or a live session: `deleteProject`'s test, for one agent (Amendment 152). */
   isBusy(agentId: string): boolean {
     return this.#active.has(agentId) || this.isLive(agentId);
   }
@@ -2155,7 +2155,7 @@ export class Supervisor implements AgentControl {
 
     let outcome;
     const began = Date.now();
-    // As in #launch: a throw before the run begins is a failed resume, and frees the slot (Amendment 148).
+    // As in #launch: a throw before the run begins is a failed resume, and frees the slot (Amendment 149).
     try {
       // Continuing a failed agent makes its job live again (Amendment 88): a job settled
       // `failed` behind it would otherwise keep its queued agents from ever starting.

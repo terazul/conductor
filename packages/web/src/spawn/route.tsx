@@ -285,7 +285,7 @@ function Spawn() {
   /** An orchestrated stack's listed roles, once you change them; null is the default list (Amendment 128). */
   const [listedEdit, setListedEdit] = useState<ListedRole[] | null>(null);
   /**
-   * Its helpers in all, once you choose; null is `helperCapFor` the list (Amendment 150). Kept for
+   * Its helpers in all, once you choose; null is `helperCapFor` the list (Amendment 151). Kept for
    * this launch as the per-role helpers are, and put back when you choose a preset.
    */
   const [pipeHelpers, setPipeHelpers] = useState<number | null>(null);

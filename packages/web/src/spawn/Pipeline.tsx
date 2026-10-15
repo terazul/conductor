@@ -51,7 +51,7 @@ export function Pipeline({
   /** The one model every role runs on, off Claude. */
   model: string;
   onChange: (next: ListedRole[]) => void;
-  /** The helpers it may start in all, as this launch sends them (`helpersInAll`), and the place to choose (Amendment 150). */
+  /** The helpers it may start in all, as this launch sends them (`helpersInAll`), and the place to choose (Amendment 151). */
   helpers: number;
   onHelpers: (n: number) => void;
   /**
@@ -68,7 +68,7 @@ export function Pipeline({
           <div className="sp-pipe-head">
             may start up to{' '}
             {/*
-             * Helpers in all (Amendment 150), styled as the "+ up to N helpers" picker: each role
+             * Helpers in all (Amendment 151), styled as the "+ up to N helpers" picker: each role
              * once and sent back twice unless you choose more, for a plan of many lanes.
              */}
             <select

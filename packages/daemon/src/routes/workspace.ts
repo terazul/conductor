@@ -37,7 +37,7 @@
  * creation. Track A creates jobs IN-PROCESS via `workspace().open(...)`, which
  * runs the same WorktreeMgr — not over HTTP. Nothing in the frozen four depends on them.
  *
- * **Gated at I4 (Amendment 151), not removed: the Files screen still lists and opens through
+ * **Gated at I4 (Amendment 152), not removed: the Files screen still lists and opens through
  * them.** A `jobId` has the daemon's own shape; the project must exist (404), named or found
  * by `repoPath`; `repoPath` must be its path or one of its directories, by `dirRoot`'s rule;
  * `branch` and `baseRef` pass `git check-ref-format`; a folder git cannot use is a 400. A
@@ -102,7 +102,7 @@ const ISOLATIONS = new Set<Isolation>(['worktree', 'branch', 'in_place']);
 
 /**
  * What a job id can look like (`job_` and twelve characters, from store.ts's newId), loosely:
- * no `/` and no `.`, so `<repo>/.conductor/wt/<jobId>` stays under `wt` (Amendment 151).
+ * no `/` and no `.`, so `<repo>/.conductor/wt/<jobId>` stays under `wt` (Amendment 152).
  */
 const JOB_ID = /^job_[A-Za-z0-9_-]{1,64}$/;
 const JOB_ID_BAD = 'jobId must be job_ followed by letters, digits, _ or -';
@@ -425,7 +425,7 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
 
   verbs('/api/projects/:projectId/dir', root);
 
-  // ── bootstrap: gated at I4 (Amendment 151) ──────────────────────────────
+  // ── bootstrap: gated at I4 (Amendment 152) ──────────────────────────────
 
   const db = openDb();
   const optionalString = (v: unknown): boolean => v === undefined || typeof v === 'string';

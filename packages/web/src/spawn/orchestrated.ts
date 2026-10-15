@@ -81,7 +81,7 @@ export function helperCapFor(list: readonly ListedRole[]): number {
 }
 
 /**
- * The "helpers in all" a launch may choose (Amendment 150): from one per listed role up to the
+ * The "helpers in all" a launch may choose (Amendment 151): from one per listed role up to the
  * default, one at a time, then in fours up to PIPELINE_HELPERS_MAX, so a plan of many lanes can
  * start one role many times. Empty with no role listed.
  */
@@ -108,7 +108,7 @@ export function unresolvedListed(list: readonly ListedRole[], tiers: ModelCatalo
   return list.filter((r) => !tiers[r.tier]);
 }
 
-/** What the plan says about sending work back, in the words the daemon enforces: per lane (Amendment 150). */
+/** What the plan says about sending work back, in the words the daemon enforces: per lane (Amendment 151). */
 export function sendBackWords(): string {
   return (
     `It starts one role at a time and reads what it did before the next. Each piece of work is a lane, a role and a ` +

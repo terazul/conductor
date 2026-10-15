@@ -170,7 +170,7 @@ async function verbsOn(r: Root, opts: { git: boolean }): Promise<void> {
     rmSync(at('src/empty'), { recursive: true });
     rmSync(at('node_modules'), { recursive: true });
 
-    // Amendment 152: inside an untracked folder, an empty folder .gitignore excludes is not listed.
+    // Amendment 153: inside an untracked folder, an empty folder .gitignore excludes is not listed.
     put(r.dir, 'scratch/.gitignore', 'ign/\n*.tmp\n');
     for (const d of ['plain', 'ign/kid', 'x.tmp', 'deep/ign', 'deep/ok', 'nested/e']) mkdirSync(at(`scratch/${d}`), { recursive: true });
     sh(at('scratch/nested'), 'init', '-q');
@@ -187,7 +187,7 @@ async function verbsOn(r: Root, opts: { git: boolean }): Promise<void> {
     check('a nested repo in the untracked folder still reads: 200, and its folder is there', reply.status === 200 && shown.includes('scratch/nested'), `${reply.status} ${shown.join(',')}`);
     rmSync(at('scratch'), { recursive: true });
   } else {
-    // No git, so no .gitignore applies: every empty folder is listed (Amendment 152).
+    // No git, so no .gitignore applies: every empty folder is listed (Amendment 153).
     put(r.dir, 'scratch/.gitignore', 'ign/\n');
     mkdirSync(at('scratch/ign/kid'), { recursive: true });
     mkdirSync(at('scratch/plain'));
@@ -326,7 +326,7 @@ async function main(): Promise<void> {
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
   const db = openDb();
-  // The bootstrap route opens a workspace only in a project's own folder (Amendment 151).
+  // The bootstrap route opens a workspace only in a project's own folder (Amendment 152).
   const repoProject = insertProject(db, { path: REPO, name: 'verbs-repo', defaultBranch: 'main' });
 
   const opened = await send<Err>('POST', '/api/workspaces', {
@@ -384,7 +384,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 152).\n`
+      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 153).\n`
       : `\nAmendment 138 files: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
