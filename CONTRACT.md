@@ -200,6 +200,63 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 166 — post-merge, applied. **Once an orchestrator has ended, the navigator folds its ended helpers into one row under it.**
+
+Web only (`shell/navtree.ts`, `shell/Navigator.tsx`, `shell/shell.css`, `shell/verify.ts`), and
+`docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change. The user, 15 Oct 2026: *"when the
+work assigned to orchestrator is done, why does it leave the individual agents it started on the
+list?"*; decided the same day (docs/plans/wave-11-tracks.md §3): *"FH — Fold, display only, nothing
+removed."* Run as lane FH of track 4. *Amends Amendment 86*, whose "Helpers (Amendment 51) are listed
+in their job, not under the agent that made them" still holds while the orchestrator runs, and for
+any helper still going or waiting on you.
+
+- **The fold** (`foldHelpers`, `shell/navtree.ts:288`). Whose helper is whose is the Project screen's
+  `nestHelpers` (`fleet/nest.ts:18`), over the job's agents in the rows' order: a top-level agent's
+  helpers, and theirs, follow it. When that agent's own status is `done`, `failed` or `stopped`
+  (`ENDED`, `:278`, as `shared/rerun.ts:65` counts it), its helpers that have ended and have nothing
+  waiting on them (`needs === 0`, the Agent tab's count of requests and alerts) become one `NavFold`
+  (`:90`), placed right after it. The rest keep their rows and places, so a fold row is never amber
+  and never blocked. A fold needs two helpers or more: one would be a row for a row. The orchestrator
+  is any agent with helpers, not only `marksOrchestrator`'s, so Amendment 51's orchestrator without
+  pipeline roles folds too.
+- **What it says.** `foldLabel` (`:333`): "↳ 12 helpers · all done" (or "all failed", "all
+  stopped"), else each ending with its count, done, failed, stopped in that order: "↳ 5 helpers · 4
+  done, 1 failed". Its dot is the worst inside by the Fleet's `SORT_RANK`, as a job's heading's is;
+  it says **finished** when a helper in it finished and you haven't opened it (Amendment 105).
+- **Where it is.** `NavJob` gains `rows: NavRow[]` (`:113`), the agent rows with the folds in;
+  `groupByJob` gives the plain rows (`:272`) and `navTree` folds them (`:233`). The job's `agents`,
+  count, dot, needs and budget are over every agent, folded or not. `JobGroup` draws `rows`
+  (`shell/Navigator.tsx:255`), and a fold is `FoldRow` (`:179`): chevron, dot, label, opening to the
+  helpers' own `AgentRow`s; its style is the job heading's, quiet (`.sh-nav-fhead`,
+  `shell/shell.css:604`).
+- **Open and closed.** A fold is `p:<projectId>:fold:<orchestratorId>` (`navFoldId`, `:407`) in the
+  same `conductor.navTree` set, beside `p:<id>:job:<jobId>` and `p:<id>:files:…`, which it can't
+  match. It **starts closed**: its id in the set means open, as a project's and a submenu's do (not
+  the job group's inverted rule).
+- **The agent you are on is never hidden.** Arriving on a helper inside a closed fold (its Agent
+  tab, a link, Needs you) opens that fold: `foldOf` (`:416`) names the fold that holds the agent,
+  and an effect keyed on it and the agent (`Navigator.tsx:777`) opens it once. Close it after and
+  it stays closed. The selected helper was not kept out of the fold instead, because a click on a
+  row inside an open fold would then move that row out of it under the pointer.
+- **Display only.** No helper is removed or changed: each is still in its job's and its project's
+  `agents`, and its transcript, last reply and cost are untouched.
+
+*Not done / not decided.* The Project screen's lanes don't fold: its lanes have no open state of
+their own, so a fold there needs a new setting and its own row, not a small reuse. A fold doesn't
+show its helpers' summed budget meter. Not looked at in a browser in either theme.
+
+*Verified.* `shell/verify.ts` §14 (`:577`, 27 checks): a working or queued orchestrator folds
+nothing; a done one with 12 done helpers is two rows, the fold saying "↳ 12 helpers · all done";
+failed and stopped orchestrators fold too; a working helper and one with a pending request keep
+their rows and places, and the rest read "↳ 4 helpers · 2 done, 1 failed, 1 stopped" with a failed
+dot; a failed helper whose alert waits stays out; one ended helper isn't folded; a helper's helper
+folds with the rest; an agent of the job that is no one's helper keeps its row; every helper is
+still in `agents` and the input is unchanged; the fold's id differs from every other node's, starts
+closed, toggles alone and survives the setting; `foldOf` finds a folded helper's fold only; the
+panel draws `rows`, opens a fold by `isOpen` on `navFoldId` and opens it on arrival. With the
+needs test, the orchestrator's ended test or the two-or-more rule taken out, 5, 2 and 1 checks
+fail; restored, they pass. `tsc --noEmit` in `packages/web` is clean.
+
 ### Amendment 165 — post-merge, applied. **Files moves an entry by drag or Move to…, and the navigator renames and deletes.**
 
 Web (`files/moving.ts` new, `files/naming.ts`, `files/NewFileForm.tsx`, `files/FileTree.tsx`,

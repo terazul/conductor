@@ -13,7 +13,7 @@
  * opens Needs you by the `requestId` / `alertId` deep link it already reads.
  *
  * OPEN STATE IS A SET OF NODE IDS, `p:<id>` for a project and `p:<id>:agents`,
- * `p:<id>:needs`, `p:<id>:files` for its submenus. Each opens and closes on its own:
+ * `p:<id>:needs`, `p:<id>:files` for its submenus, `p:<id>:fold:<agentId>` for a fold. Each opens and closes on its own:
  * toggling one never touches another, in that project or any other. The set is kept in
  * the settings file as a JSON array (`conductor.navTree`), so it is the same after a
  * reload and in every browser; whether the panel is up at all is `conductor.navOpen`.
@@ -25,6 +25,12 @@
  * show without a click, and a project with one job still gets its heading, so the rows
  * never change shape as a second job starts. Helpers sit in their job like any agent;
  * they aren't nested under the agent that made them.
+ *
+ * ONCE AN ORCHESTRATOR HAS ENDED, ITS ENDED HELPERS FOLD (Amendment 166) into one row right
+ * after it, "↳ 12 helpers · all done" (`foldHelpers`, on the Project screen's `nestHelpers`).
+ * A helper still going, or one that waits on you, stays out, so nothing you're needed for is
+ * hidden. A fold is `p:<id>:fold:<orchestratorId>` (`navFoldId`) and starts closed. Display
+ * only: every helper is still in `agents` and in its job's `agents`.
  *
  * PROJECTS COME IN THE FLEET'S ORDER (Amendment 69). `navProjects` reads the Fleet's two
  * settings, `conductor.fleetSort` and `conductor.fleetOrder`, through the very functions
@@ -43,6 +49,7 @@
 
 import type { Agent, AgentStatus, Alert, Job, PendingRequest, Project } from '@conductor/shared';
 import { agentTabs } from '../agent/tabs.js';
+import { nestHelpers } from '../fleet/nest.js';
 import { requestTitle } from '../attention/describe.js';
 import { dirRoot } from '../files/tabs.js';
 import { alertTitle, projectNeeds } from './describe.js';
@@ -76,12 +83,34 @@ export interface NavAgent {
   budget: Budget | null;
 }
 
+/**
+ * An ended orchestrator's ended helpers, as one row under it (Amendment 166). Its node is
+ * `navFoldId(projectId, orchestratorId)`.
+ */
+export interface NavFold {
+  orchestratorId: string;
+  /** In the order the job's rows have them. */
+  helpers: NavAgent[];
+  /** "↳ 12 helpers · all done", or "↳ 5 helpers · 4 done, 1 failed" (`foldLabel`). */
+  label: string;
+  /** The worst inside, by the Fleet's SORT_RANK, as a job's is. */
+  status: AgentStatus;
+  /** One of them finished and you haven't opened it (Amendment 105). */
+  finished: boolean;
+}
+
+/** What a job's group draws, in order: an agent's row, or a fold of helpers. */
+export type NavRow = { kind: 'agent'; agent: NavAgent } | { kind: 'fold'; fold: NavFold };
+
 /** One job's agents in a project (Amendment 86). */
 export interface NavJob {
   id: string;
   /** The job's prompt on one line; the job id when the job isn't known. */
   label: string;
+  /** Every one of them, folded or not. */
   agents: NavAgent[];
+  /** What the group draws: `agents`, with each ended orchestrator's ended helpers folded (Amendment 166). */
+  rows: NavRow[];
   /** Its unhappiest agent's, by the Fleet's SORT_RANK, so a closed group still shows a failure. */
   status: AgentStatus;
   /** What waits on you across its agents. */
@@ -201,7 +230,7 @@ export function navTree(
       name: p.name,
       needs: projectNeeds(p.id, pending, alerts),
       agents: rows,
-      jobs: groupByJob(rows, jobs, finished),
+      jobs: groupByJob(rows, jobs, finished).map((j) => ({ ...j, rows: foldHelpers(j.agents, agents) })),
       needsRows: [...requests, ...stopped],
       folders: projectFolders(p),
     };
@@ -226,6 +255,7 @@ export function groupByJob(
         id: a.jobId,
         label: prompt || a.jobId,
         agents: [],
+        rows: [],
         status: a.status,
         needs: 0,
         finished: finished.has(a.jobId),
@@ -237,8 +267,77 @@ export function groupByJob(
     g.needs += a.needs;
     if (SORT_RANK[a.status] < SORT_RANK[g.status]) g.status = a.status;
   }
-  for (const g of out.values()) g.budget = sumBudgets(g.agents.map((a) => a.budget ?? null));
+  for (const g of out.values()) {
+    g.budget = sumBudgets(g.agents.map((a) => a.budget ?? null));
+    g.rows = g.agents.map((agent) => ({ kind: 'agent', agent }));
+  }
   return [...out.values()];
+}
+
+/** An agent that has ended, as `rerun.ts` and the Project screen count it. */
+const ENDED: ReadonlySet<AgentStatus> = new Set(['done', 'failed', 'stopped']);
+
+/**
+ * One job's rows, with each ended orchestrator's ended helpers folded into one row right
+ * after it (Amendment 166). Whose helper is whose is `nestHelpers`, the Project screen's
+ * nesting: an orchestrator's helpers, theirs included, follow it. Its own status decides
+ * whether it has ended, so an orchestrator whose failure waits on you still folds. A helper
+ * folds only when it has ended and nothing waits on it; the others keep their rows and
+ * their places. A fold holds two or more: one helper would be a row for a row.
+ */
+export function foldHelpers(rows: readonly NavAgent[], agents: readonly Agent[]): NavRow[] {
+  const mine = rows.map((r) => agents.find((a) => a.id === r.id)).filter((a): a is Agent => a !== undefined);
+  const row = new Map(rows.map((r) => [r.id, r]));
+  const folds = new Map<string, NavAgent[]>();
+  const into = new Map<string, string>();
+  let head: Agent | null = null;
+  let kept: NavAgent[] = [];
+  const close = (): void => {
+    if (head && kept.length >= 2) {
+      folds.set(head.id, kept);
+      for (const h of kept) into.set(h.id, head.id);
+    }
+  };
+  for (const { agent, helperOf } of nestHelpers(mine)) {
+    if (helperOf === null) {
+      close();
+      head = ENDED.has(agent.status) ? agent : null;
+      kept = [];
+      continue;
+    }
+    const r = row.get(agent.id);
+    if (head && r && ENDED.has(agent.status) && r.needs === 0) kept.push(r);
+  }
+  close();
+
+  const out: NavRow[] = [];
+  for (const r of rows) {
+    if (into.has(r.id)) continue;
+    out.push({ kind: 'agent', agent: r });
+    const helpers = folds.get(r.id);
+    if (!helpers) continue;
+    let status = helpers[0]!.status;
+    for (const h of helpers) if (SORT_RANK[h.status] < SORT_RANK[status]) status = h.status;
+    out.push({
+      kind: 'fold',
+      fold: { orchestratorId: r.id, helpers, label: foldLabel(helpers.map((h) => h.status)), status, finished: helpers.some((h) => h.finished) },
+    });
+  }
+  return out;
+}
+
+/**
+ * A fold's words: how many, then "all done" when they are, else each ended status with its
+ * count, done first, as "↳ 5 helpers · 4 done, 1 failed".
+ */
+export function foldLabel(statuses: readonly AgentStatus[]): string {
+  const n = statuses.length;
+  const head = `↳ ${n} ${n === 1 ? 'helper' : 'helpers'}`;
+  const counts = (['done', 'failed', 'stopped'] as const)
+    .map((s) => [s, statuses.filter((x) => x === s).length] as const)
+    .filter(([, c]) => c > 0);
+  if (counts.length === 1) return `${head} · all ${counts[0]![0]}`;
+  return `${head} · ${counts.map(([s, c]) => `${c} ${s}`).join(', ')}`;
 }
 
 /**
@@ -302,6 +401,25 @@ export function navId(projectId: string, part?: NavPart): string {
 /** A job's group under a project's Agents (Amendment 86). */
 export function navJobId(projectId: string, jobId: string): string {
   return `p:${projectId}:job:${jobId}`;
+}
+
+/** An ended orchestrator's fold of helpers (Amendment 166). Starts closed: its id in the set means open. */
+export function navFoldId(projectId: string, orchestratorId: string): string {
+  return `p:${projectId}:fold:${orchestratorId}`;
+}
+
+/**
+ * The fold that holds `agentId`, or null when it is in none (Amendment 166). The panel opens
+ * it as you arrive on that agent, so the agent you are on isn't hidden behind a closed fold;
+ * close it after, and it stays closed.
+ */
+export function foldOf(tree: readonly NavProject[], agentId: string | undefined): string | null {
+  if (!agentId) return null;
+  for (const p of tree)
+    for (const j of p.jobs)
+      for (const r of j.rows)
+        if (r.kind === 'fold' && r.fold.helpers.some((h) => h.id === agentId)) return navFoldId(p.id, r.fold.orchestratorId);
+  return null;
 }
 
 /**

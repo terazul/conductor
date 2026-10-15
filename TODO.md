@@ -80,7 +80,7 @@ the last of it on 12 Oct).
   *Done 15 Oct: Amendment 157 (a `trigger` on scheduled messages, migration 250; the supervisor sends
   the oldest `done` one as a turn settles done; **⏲ when done** in the composer and the list).*
 
-- [ ] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
+- [x] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
   work assigned to orchestrator is done, why does it leave the individual agents it started on the
   list?" Today every helper is its own row in its job, flat, for as long as the job exists
   (Amendment 86, CONTRACT.md:4056): the navigator (`web/src/shell/navtree.ts:151-238`) sorts by
@@ -94,6 +94,10 @@ the last of it on 12 Oct).
   - Display only: no helper is removed, and its transcript, last reply and cost stay. The Project
     screen's lanes can use the same fold.
   Starts at: `navtree.ts` (reuse `nestHelpers`), `shell/verify.ts` for the checks.
+  *Done 15 Oct: Amendment 166 (an ended orchestrator's ended helpers, two or more, fold into one
+  row after it in the navigator, closed to start with under `p:<id>:fold:<agentId>`; a running or
+  waiting one keeps its row; arriving on a folded helper opens its fold; the Project screen is not
+  folded).*
 
 - [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
