@@ -350,9 +350,8 @@ removed, since the Files screen still lists and opens through them. The route he
 *Not done / not decided:* `repoPath` outside the project is a 404, `dirRoot`'s own status, not the
 400 or 403 the plan offered: the plan said to reuse `dirRoot`, and it answers 404. The `jobId` rule
 is loose rather than `newId`'s exact `job_xxxxxxxx-xxx`. The exact shape would have renamed a dozen
-fixed test ids across the verify files for no safety the loose rule lacks. A POST naming a `jobId`
-that already has a workspace still gets that workspace back (`ensure` reuses), whatever project it
-names. Workspaces opened before this, in no project, are listed still and refused on DELETE.
+fixed test ids across the verify files for no safety the loose rule lacks. Workspaces opened
+before this, in no project, are listed still and refused on DELETE.
 
 *Verified:* `workspace/verify.ts` §1b (`:208`), "the bootstrap routes refuse what they cannot vouch
 for":
@@ -383,6 +382,36 @@ uses its id (the input fixed, not the rule). The other callers the plan names (`
 and `supervisor.ts` put back as on `main`, 41 of §1b's 42 checks fail: `a/b` cut
 `.conductor/wt/a/b`, `prj_nope` and any folder opened, and bad refs were 500s. `pnpm -r typecheck`
 clean; `make test`: 27 PASS.
+
+**Follow-up (15 Oct, review).** Two findings of the review, fixed. Daemon only; nothing a person
+sees changed (the Files screen POSTs no `jobId` and sends no DELETE), so `docs/MANUAL.md` is
+unchanged.
+- **DELETE no longer removes a worktree with unfinished work.** `isBusy` sees only a run in flight,
+  so an agent paused at a ceiling, `queued` behind a cap or waiting to retry, or `blocked` on a
+  parked request had its worktree removed. The route now asks `hasUnfinishedWork`
+  (`supervisor.ts:1933`): busy, or a status other than `done`, `failed` and `stopped`
+  (`ENDED_STATUSES`, `supervisor.ts:347`; the statuses are `AgentStatus`, `shared/src/events.ts:26`).
+  The live runner still counts, since the status can lag a run that is starting. The 409 names each
+  agent's role and status, `builder (paused)`, in `error` and `detail` (`routes/workspace.ts:503`).
+  `deleteProject`'s test is unchanged: there a stale `working` row must not make a dead project
+  unremovable, whereas here the row is what says the worktree is still wanted.
+- **A `jobId` stays in its project.** `ensure` reused a job's workspace whatever project the
+  request named, so a POST for project B with a `jobId` open under A got A's workspace back with a
+  201, and one whose workspace was removed was re-created under B. `#ensureLocked` now refuses,
+  first and inside the job's lock, when the stored record's project, or Track A's jobs row's when
+  there is no record, is not the request's: `JobElsewhereError` (`worktree.ts:118`, `:211`), a 409
+  "job … already has a workspace in another project" (`routes/workspace.ts:127`). The same project
+  reuses as before. The two in-process callers of `open` never cross projects: `createJob`
+  (`supervisor.ts:811`) opens a fresh `newId('job')` under its own project, and `restoreFolder`
+  reads the job's own project and does not call `ensure`.
+
+*Verified:* `workspace/verify.ts` §1b: "POST with a jobId open under another project → 409, saying
+so", "and the workspace is unchanged", "the same POST naming its own project → the same workspace"
+(`:363`); "DELETE while an agent of the job is queued behind a cap, with no runner → 409, naming its
+role and status", the same for "paused at a ceiling" and "waiting on a request", each with the
+worktree still there (`:392`); "once every agent of the job is done, force=1 removes it" (`:411`).
+With the source put back as before, all but the same-project check fail (the POST was 201 with
+`prj_b`'s record, each DELETE 200). `pnpm -r typecheck` clean; `make test`: 28 PASS.
 
 ### Amendment 151 — post-merge, applied. **Send-backs are counted per lane, a role with a name, so new work under a new name starts while the total allows; and an orchestrated stack's helpers in all are a launch choice, up to 48.**
 

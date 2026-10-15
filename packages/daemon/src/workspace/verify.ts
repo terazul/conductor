@@ -359,8 +359,58 @@ async function main(): Promise<void> {
     `got ${whileLive.status} ${JSON.stringify(whileLive.body)}`,
   );
   check('and the worktree is still there', existsSync(busyPath), busyPath);
+
+  // A jobId is its project's: a POST naming another one is refused, and touches nothing.
+  const otherPath = join(tmpdir(), `conductor-other-${Date.now()}`);
+  project('prj_b', otherPath);
+  mkdirSync(otherPath, { recursive: true });
+  // A repo with a commit, so nothing but the project refuses it.
+  execFileSync('git', ['init', '-q'], { cwd: otherPath });
+  execFileSync('git', ['-c', 'user.email=c@example.invalid', '-c', 'user.name=C', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: otherPath });
+  const wsBefore = JSON.stringify(workspace().list().find((w) => w.jobId === 'job_busy'));
+  const crossProject = await open({ jobId: 'job_busy', projectId: 'prj_b', repoPath: otherPath });
+  check(
+    "POST with a jobId open under another project → 409, saying so",
+    crossProject.status === 409 && (crossProject.body.error ?? '').includes('already has a workspace in another project'),
+    `got ${crossProject.status} ${JSON.stringify(crossProject.body)}`,
+  );
+  check(
+    'and the workspace is unchanged',
+    JSON.stringify(workspace().list().find((w) => w.jobId === 'job_busy')) === wsBefore && existsSync(busyPath),
+    `${wsBefore} → ${JSON.stringify(workspace().list().find((w) => w.jobId === 'job_busy'))}`,
+  );
+  const sameProject = await open({ jobId: 'job_busy', repoPath: extra });
+  check(
+    'the same POST naming its own project → the same workspace',
+    sameProject.status === 201 &&
+      sameProject.body.workspace?.path === busyPath &&
+      sameProject.body.workspace?.projectId === 'prj_scratch',
+    `got ${sameProject.status} ${JSON.stringify(sameProject.body).slice(0, 200)}`,
+  );
+  rmSync(otherPath, { recursive: true, force: true });
+
+  // No run in flight, but not finished either: each comes back to this worktree, so removing it
+  // would lose the work (Amendment 152, review). The status is set in the db, no runner behind it.
+  const setStatus = (status: string, blockMode: string | null = null) =>
+    db.prepare('UPDATE agents SET status = ?, block_mode = ? WHERE id = ?').run(status, blockMode, 'agt_busy');
+  for (const [status, blockMode, why] of [
+    ['queued', null, 'queued behind a cap, with no runner'],
+    ['paused', null, 'paused at a ceiling'],
+    ['blocked', 'parked', 'waiting on a request'],
+  ] as const) {
+    setStatus(status, blockMode);
+    const r = await send<Refusal>('DELETE', '/api/workspaces/job_busy?force=1');
+    check(
+      `DELETE while an agent of the job is ${why} → 409, naming its role and status`,
+      r.status === 409 && (r.body.error ?? '').includes(`builder (${status})`),
+      `got ${r.status} ${JSON.stringify(r.body)}`,
+    );
+    check('and the worktree is still there', existsSync(busyPath), busyPath);
+  }
+
+  setStatus('done');
   const afterLive = await send<{ removed?: boolean }>('DELETE', '/api/workspaces/job_busy?force=1');
-  check('once it is not, force=1 removes it', afterLive.status === 200 && afterLive.body.removed === true && !existsSync(busyPath), JSON.stringify(afterLive.body));
+  check('once every agent of the job is done, force=1 removes it', afterLive.status === 200 && afterLive.body.removed === true && !existsSync(busyPath), JSON.stringify(afterLive.body));
   db.prepare('DELETE FROM agents WHERE id = ?').run('agt_busy');
   db.prepare('DELETE FROM jobs WHERE id = ?').run('job_busy');
 

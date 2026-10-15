@@ -40,9 +40,10 @@
  * **Gated at I4 (Amendment 152), not removed: the Files screen still lists and opens through
  * them.** A `jobId` has the daemon's own shape; the project must exist (404), named or found
  * by `repoPath`; `repoPath` must be its path or one of its directories, by `dirRoot`'s rule;
- * `branch` and `baseRef` pass `git check-ref-format`; a folder git cannot use is a 400. A
- * DELETE is 404 for a job with no workspace and 409 while one of its agents is busy, and reads
- * `force` as strictly as `recursive`. GET takes `?projectId=`.
+ * `branch` and `baseRef` pass `git check-ref-format`; a folder git cannot use is a 400; a
+ * `jobId` whose workspace is another project's is a 409. A DELETE is 404 for a job with no
+ * workspace and 409 while one of its agents is busy or not yet done, failed or stopped, and
+ * reads `force` as strictly as `recursive`. GET takes `?projectId=`.
  *
  * This file contains no `fs` import on purpose. Every path crosses
  * workspace/paths.ts inside the service, and that single door is the only reason
@@ -61,6 +62,7 @@ import { initWorkspace, WorkspaceError, workspace } from '../workspace/service.j
 import { PathEscape } from '../workspace/paths.js';
 import { GitError } from '../workspace/git.js';
 import {
+  JobElsewhereError,
   LaunchBranchError,
   RepoUnfitError,
   baseRefProblem,
@@ -121,6 +123,9 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
     // Same shape `POST /api/jobs` answers (Amendment 115), so a refusal reads as a sentence
     // with its 400 or 409, not as a 500 (Amendment 139).
     return reply.code(err.status).send({ error: 'could not use that branch', detail: err.message });
+  }
+  if (err instanceof JobElsewhereError) {
+    return reply.code(err.status).send({ error: err.message });
   }
   if (err instanceof RepoUnfitError) {
     return reply.code(err.status).send({ error: 'could not open the workspace', detail: err.message });
@@ -493,11 +498,14 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       if (!JOB_ID.test(jobId)) return reply.code(400).send({ error: JOB_ID_BAD });
       const force = recursiveOf(req.query.force);
       if (force === null) return reply.code(400).send({ error: FORCE_BAD });
-      const busy = agentsForJob(db, jobId).filter((a) => supervisor().isBusy(a.id));
+      // Not only a run in flight: an agent paused, queued or blocked comes back to this
+      // worktree, so removing it would lose that work (Amendment 152, review).
+      const busy = agentsForJob(db, jobId).filter((a) => supervisor().hasUnfinishedWork(a.id));
       if (busy.length > 0) {
+        const who = busy.map((a) => `${a.role} (${a.status})`).join(', ');
         return reply.code(409).send({
-          error: `job ${jobId} has agents at work in this workspace`,
-          detail: busy.map((a) => a.role).join(', '),
+          error: `job ${jobId} has agents that are not finished in this workspace: ${who}`,
+          detail: who,
         });
       }
       // A workspace left by a project that is gone, or by a request from before the gate, is
