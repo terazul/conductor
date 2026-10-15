@@ -111,6 +111,15 @@ export class RepoUnfitError extends Error {
 }
 
 /**
+ * A `jobId` whose workspace was opened for another project (Amendment 152, review). A job's
+ * workspace stays in the project it was opened for: reusing it would hand one project's
+ * checkout to a request for another, and re-creating it would move the job's record there.
+ */
+export class JobElsewhereError extends Error {
+  readonly status = 409;
+}
+
+/**
  * Whether `ref` is a commit-ish a request may cut a worktree from (Amendment 152): a ref name
  * by git's rule (`check-ref-format --allow-onelevel`, so `HEAD` and `main` pass) or a sha. A
  * leading `-` is refused first: `worktree add` would read it as an option.
@@ -196,6 +205,14 @@ export class WorktreeMgr {
   }
 
   async #ensureLocked(req: EnsureRequest): Promise<EnsureResult> {
+    // First, before git is asked anything: a removed record, or Track A's jobs row when there
+    // is no record, still says whose job this is, and it is not another project's to reuse or
+    // re-create (Amendment 152, review).
+    const owner = this.#store.get(req.jobId)?.projectId ?? this.#store.jobWorktree(req.jobId)?.projectId;
+    if (owner !== undefined && owner !== req.projectId) {
+      throw new JobElsewhereError(`job ${req.jobId} already has a workspace in another project`);
+    }
+
     const repo = canonicalRoot(req.repoPath);
     const inRepo = await isRepo(repo);
 

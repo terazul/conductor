@@ -1922,6 +1922,20 @@ export class Supervisor implements AgentControl {
     return this.#active.has(agentId) || this.isLive(agentId);
   }
 
+  /**
+   * Busy, or at a status it can still run from: what `DELETE /api/workspaces/:jobId` refuses on
+   * (Amendment 152, review). Unlike `deleteProject`'s test, the status counts: an agent paused
+   * at a ceiling, `queued` behind a cap or waiting to retry, or `blocked` on a parked request
+   * has no run in flight, yet its work is in the worktree and it runs there again. The live
+   * runner still counts too, because the status can lag a run that is just starting. Only
+   * `done`, `failed` and `stopped` are over (`ENDED_STATUSES`).
+   */
+  hasUnfinishedWork(agentId: string): boolean {
+    if (this.isBusy(agentId)) return true;
+    const agent = getAgent(this.#db, agentId);
+    return agent !== undefined && !ENDED_STATUSES.has(agent.status);
+  }
+
   async interrupt(agentId: string): Promise<void> {
     await this.#runners.get(agentId)?.interrupt();
   }
