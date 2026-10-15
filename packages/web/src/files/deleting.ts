@@ -129,3 +129,12 @@ export function onYes(steps: readonly DeleteStep[], at: number): { next: number 
   if (!step || !step.ready) return null;
   return step.last ? { send: { recursive: step.recursive } } : { next: at + 1 };
 }
+
+/**
+ * Whether `node` is on disk, so there is something to rename or delete: a file git lists
+ * only because it was deleted is not (Amendment 29). The navigator asks this, since it
+ * reads no change marks itself.
+ */
+export function onDisk(node: FileNode): boolean {
+  return node.change?.deleted !== true;
+}

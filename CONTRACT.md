@@ -200,6 +200,60 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 165 — post-merge, applied. **Files moves an entry by drag or Move to…, and the navigator renames and deletes.**
+
+Web (`files/moving.ts` new, `files/naming.ts`, `files/NewFileForm.tsx`, `files/FileTree.tsx`,
+`files/route.tsx`, `files/deleting.ts`, `files/files.css`, `files/verify.ts`, `shell/Navigator.tsx`,
+`shell/shell.css`, `shell/verify.ts`), daemon (`workspace/verify-files-verbs.ts`) and docs
+(`docs/MANUAL.md`, `TODO.md`). This lane came from analysis, not from the user: it is
+docs/plans/wave-11.md §3 J (N6), run as track 4 of docs/plans/wave-11-tracks.md on 15 Oct 2026.
+*Amends Amendment 138*, whose "Not done: drag and drop to move; … a rename or delete in the
+navigator" and "Only a new file here; rename and delete are on Files" no longer hold. Nothing on the
+wire or in the daemon changes: a move is the existing rename, whose refusals (into itself, 400; a
+taken name, 409) are `renameOf`'s (`workspace/service.ts:669`).
+
+- **A move is a rename into a folder.** `moveInto` (`files/moving.ts:40`) gives the new path, nothing
+  to do when the folder is the one the entry sits in (`parentOf`, `:29`), or a refusal when the folder
+  is the entry or under it. `moveEntry` (`:60`) calls `renameEntry` and then `followRename`, as a
+  rename does, so open tabs and their edits follow; a refusal rejects with the daemon's sentence.
+- **Drag.** Each row on disk is draggable (`dragProps`, `files/FileTree.tsx:74`) and carries its path
+  as `application/x-conductor-path` (`MOVE_MIME`, `moving.ts:26`), plus `text/plain` for Firefox, as
+  `spawn/reorder.tsx` does. Folder rows and the section's heading (the top, `route.tsx:719`) are
+  targets (`dropProps`, `FileTree.tsx:90`); a file row is not. `canDrop` (`moving.ts:51`) takes only
+  that MIME from a drag that started in the same section, so a project's drag in the navigator
+  (text/plain only) is never taken for one, and it refuses the entry's own folder and anything under
+  the entry. The drag is held per section (`route.tsx:599`); the dragged row fades and the target is
+  marked (`dragMark`, `FileTree.tsx:110`, theme tokens in `files.css:1227`). A taken name shows the
+  daemon's sentence under the target folder (`moveErrorFor`, `FileTree.tsx:291`) until the next verb
+  or drag. After a move the target folder is opened down to (`openDown`, `route.tsx:612`).
+- **Move to… from the keyboard.** A `→/` button beside ✎ and ⌫ (`FileTree.tsx:263`) opens the name
+  box (`NewFileForm` kind `move`, `NewFileForm.tsx:51`) in the row's place, prefilled with the folder
+  it sits in, selected (`prefillMove`, `naming.ts:103`); empty or `.` is the top
+  (`checkMoveFolder`, `:113`), and the same folder closes the box with nothing sent.
+- **The navigator renames and deletes.** A file or folder row on disk under a folder node has ✎ and ⌫
+  (`EditButtons`, `shell/Navigator.tsx:284`; F2 and Delete or ⌘⌫ on the row, `editKeys`, `:311`). ✎
+  opens the Files tree's own name box (`RenameForm`, `:319`), which calls `renameEntry` and
+  `followRename` (`:490`); ⌫ opens the Files tree's `DeleteConfirm` (`DeleteForm`, `:333`), which
+  closes the deleted tabs with `closeDeleted` as on Files. One box at a time per folder node, a +
+  included. The folder node's root has none, as on Files; a row shown only because it was deleted
+  (`onDisk`, `files/deleting.ts:138`) has none either. Only the file and folder rows change.
+
+*Not done / not decided.* No drag in the navigator, and no keyboard shortcut for Move to… (it is a
+button in the tab order). A folded folder does not open while a drag hovers on it, so a move into a
+folder deep down is Move to…, or a drag after opening it. The navigator's open folders are not
+carried over a rename of one. Not looked at in a browser in either theme, nor a drag in Firefox.
+
+*Verified.* `files/verify.ts` (`:853`): the drop rules (into itself and anything under it refused, the
+folder it sits in a no-op, a file row no target, a text/plain-only drag and no drag both refused);
+the drag carries the MIME and text/plain; dragover and drop accept and refuse as the rules say; the
+Move to… button, box, prefill and top; the marks and the refused message under its folder and at the
+top; with a stubbed daemon, a move posts the rename and the tab and its edit follow, a 409 rejects
+with the daemon's sentence, and into-itself or staying sends nothing. `shell/verify.ts` §13 (`:543`):
+the navigator's file and folder rows have ✎ and ⌫, the folder node and a deleted row have none, they
+reuse `renameEntry`, `followRename` and `DeleteConfirm`, and a project's drag ignores a file's.
+`workspace/verify-files-verbs.ts` (`:226`): a file and a folder moved into a subfolder, and a move
+onto a taken name refused with 409 and both left as they were. `make test` green.
+
 ### Amendment 164 — post-merge, applied. **An orchestrator's auto turns start folded, so its page opens to its own replies; one you open stays open, and fold all reaches them.**
 
 Web only (`agent/folds.ts`, `agent/transcript.tsx`, `agent/agent.tsx`, `agent/verify.ts`, `settings/route.tsx`), and

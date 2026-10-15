@@ -694,6 +694,22 @@
   }
 }
 
+/*
+ * Rename (✎) and delete (⌫) beside a file or folder (Amendment 165): a file's row is a
+ * .sh-nav-dirrow too, so they show as the + does. Delete turns to --fail, as in Files.
+ */
+.sh-nav-del:hover,
+.sh-nav-del:focus-visible {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
+/* The Files tree's confirm (files.css .c5-delconfirm), under the row it is about. */
+.sh-nav-dir > .c5-delconfirm,
+.sh-nav-file > .c5-delconfirm {
+  margin: 2px 0 4px;
+}
+
 /* ── status bar ────────────────────────────────────────────────────────────── */
 
 .sh-statusbar {

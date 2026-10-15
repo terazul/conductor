@@ -93,3 +93,25 @@ export function prefillRename(path: string, type: 'file' | 'dir'): { value: stri
 export function checkFolderName(raw: string): NameCheck {
   return checkName(raw.trim().replace(/\/+$/, ''), 'folder');
 }
+
+// ── moving ─────────────────────────────────────────────────────────────
+
+/**
+ * Move to…'s box starts with the folder the entry sits in, all of it selected, so typing
+ * names another; '' is the top, and starts the box empty.
+ */
+export function prefillMove(path: string): { value: string; from: number; to: number } {
+  const value = path.slice(0, Math.max(path.lastIndexOf('/'), 0));
+  return { value, from: 0, to: value.length };
+}
+
+/**
+ * The folder typed for Move to…, as a tree path. An empty box, `.` or `/` is the top, and
+ * a leading `/` is read from the top too, since that is what a person typing it means;
+ * otherwise a folder's name, by `checkFolderName`'s rules.
+ */
+export function checkMoveFolder(raw: string): NameCheck {
+  const typed = raw.trim().replace(/^\/+/, '');
+  if (typed === '' || typed === '.') return { ok: true, path: '' };
+  return checkFolderName(typed);
+}

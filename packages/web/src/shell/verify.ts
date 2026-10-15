@@ -20,7 +20,7 @@
  * `navFileLink` is the link a file row hands `navigate('files', …)`.
  */
 
-import type { Agent, Alert, PendingRequest } from '@conductor/shared';
+import type { Agent, Alert, FileNode, PendingRequest } from '@conductor/shared';
 import { agentTabs } from '../agent/tabs.js';
 import { readFileSync } from 'node:fs';
 import { ORDER_KEY, SORTS, SORT_KEY, SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects } from '../fleet/order.js';
@@ -540,9 +540,35 @@ console.log('\n12 · each agent row has its budget meter, and a job row the sum 
   check('the panel only sizes it: no colour of its own, so the tones are the Fleet\'s tokens', rule !== '' && !/#|rgb|hsl|background|color/.test(rule), rule);
 }
 
+console.log('\n13 · a file or folder in the navigator can be renamed and deleted (Amendment 165)');
+{
+  const nav = src('./Navigator.tsx');
+  const css = src('./shell.css');
+  check('the verbs are labelled, with their keys in the title', /title=\{`Rename \$\{node\.path\} \(F2\)`\}\s*aria-label=\{`Rename \$\{node\.path\}`\}/.test(nav) && /title=\{`Delete \$\{node\.path\} \(Delete\)`\}\s*aria-label=\{`Delete \$\{node\.path\}`\}/.test(nav));
+  check('a file row has them beside its button, as a folder row has its +', /\{row\}\s*<EditButtons node=\{kid\} edit=\{edit\} \/>/.test(nav) && /<div className="sh-nav-file" key=\{`f:\$\{kid\.path\}`\}>\s*<div className="sh-nav-dirrow">/.test(nav));
+  check('a folder row has them after its +', /<AddButton dir=\{kid\.path\} label=\{kid\.path\} add=\{add\} \/>\s*<EditButtons node=\{kid\} edit=\{edit\} \/>/.test(nav));
+  check("a project's folder itself has neither, as the Files tree's root has neither", /<AddButton dir="" label=\{folder\.name\} add=\{add\} \/>\s*<\/div>/.test(nav));
+  const { onDisk } = await import('../files/deleting.js');
+  const gone: FileNode = { path: 'x.md', name: 'x.md', type: 'file', change: { added: 0, removed: 1, created: false, at: '', deleted: true } };
+  check('a file only git still lists has neither, asked of deleting.ts rather than read here', !onDisk(gone) && onDisk({ ...gone, change: undefined }) && /const here = onDisk\(kid\);/.test(nav) && /return here \? \(/.test(nav));
+  check("rename is the Files tree's: its box in the row's place, renameEntry, then followRename", /kind=\{node\.type === 'dir' \? 'rename-dir' : 'rename-file'\}/.test(nav) && /const done = await renameEntry\(folder\.root, from, to\);\s*followRename\(folder\.root, done\.from, done\.to\);/.test(nav));
+  check("delete is the Files tree's DeleteConfirm, which closes the tabs it took", /import \{ DeleteConfirm \} from '\.\.\/files\/DeleteConfirm\.js';/.test(nav) && /<DeleteConfirm key=\{node\.path\} root=\{root\} node=\{edit\.deleting\}/.test(nav));
+  check('F2 renames the focused row, and Delete or ⌘⌫ deletes it', /if \(e\.key === 'F2'\) edit\.rename\(node\.path\);\s*else if \(e\.key === 'Delete' \|\| \(e\.key === 'Backspace' && e\.metaKey\)\) edit\.remove\(node\);/.test(nav) && (nav.match(/onKeyDown=\{[^}]*editKeys\(e, kid, edit\)/g) ?? []).length === 2);
+  check('one box at a time: the + puts a rename or a confirm away, and they the +', /open: \(dir\) => \{\s*edit\.done\(\);/.test(nav) && /rename: \(path\) => \{\s*setAt\(null\);/.test(nav) && /remove: \(node\) => \{\s*setAt\(null\);/.test(nav));
+  const ours = css.slice(css.indexOf('Rename (✎) and delete (⌫) beside a file or folder'));
+  check('delete turns to --fail as in Files, in existing tokens only', /\.sh-nav-del:hover,\s*\.sh-nav-del:focus-visible \{\s*color: var\(--fail\);/.test(ours) && !/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(ours.slice(0, ours.indexOf('/* ── status bar'))));
+
+  // A file dragged from the Files tree passes over the navigator on its way; a project's
+  // drag passes over the Files tree. Neither is taken for the other.
+  check("a project's drag ignores any other drag: every target returns before taking it", (nav.match(/if \(drag\.dragging === null\) return;/g) ?? []).length === 2 && (nav.match(/if \(!dragging\) return;/g) ?? []).length === 2);
+  check('and only a project row sets what is being dragged', (nav.match(/drag\.start\(/g) ?? []).length === 1 && /drag\.start\(project\.id\);/.test(nav) && !/MOVE_MIME|x-conductor-path/.test(nav));
+  const { canDrop } = await import('../files/moving.js');
+  check("and a project's drag, text/plain only, is never a move in the Files tree", !canDrop(['text/plain'], 'README.md', 'docs'));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

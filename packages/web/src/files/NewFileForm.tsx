@@ -10,6 +10,8 @@
  * The same box names a new folder and a rename (Amendment 138), by `kind`: a folder
  * starts at `new-folder` and may end in `/`; a rename starts at the entry's own path with
  * its last name selected, and Enter on the name it already has just puts the box away.
+ * Move to… asks for a folder: it starts at the one the entry is in, and
+ * Enter on that one puts the box away too.
  *
  * Presentational: making the file, and what happens after, is the caller's. `onCreate`
  * rejects with the reason, which is shown as it came.
@@ -17,10 +19,20 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorText } from '../lib/errors.js';
-import { checkFolderName, checkName, prefill, prefillFolder, prefillRename, type NameCheck } from './naming.js';
+import {
+  checkFolderName,
+  checkMoveFolder,
+  checkName,
+  prefill,
+  prefillFolder,
+  prefillMove,
+  prefillRename,
+  type NameCheck,
+} from './naming.js';
+import { parentOf } from './moving.js';
 
 /** What the box names. `file` is Amendment 121's, and the default. */
-export type NameKind = 'file' | 'folder' | 'rename-file' | 'rename-dir';
+export type NameKind = 'file' | 'folder' | 'rename-file' | 'rename-dir' | 'move';
 
 interface Kind {
   start: (dir: string) => { value: string; from: number; to: number };
@@ -36,17 +48,18 @@ const KINDS: Record<NameKind, Kind> = {
   folder: { start: prefillFolder, check: checkFolderName, what: 'new folder', make: 'create the folder' },
   'rename-file': { start: (p) => prefillRename(p, 'file'), check: (v) => checkName(v), what: 'file', make: 'rename it' },
   'rename-dir': { start: (p) => prefillRename(p, 'dir'), check: checkFolderName, what: 'folder', make: 'rename it' },
+  move: { start: prefillMove, check: checkMoveFolder, what: 'folder', make: 'move it' },
 };
 
 interface Props {
   /**
    * The folder the name starts in, as a tree path ('' is the root); for a rename, the
-   * path of what is being renamed.
+   * path of what is being renamed or moved.
    */
   dir: string;
   /** Left padding in px, so the box sits where the folder's children do. */
   indent: number;
-  /** Make the file at this path. Rejects with the reason it could not. */
+  /** Make the file at this path (for a move, the folder). Rejects with the reason it could not. */
   onCreate: (path: string) => Promise<void>;
   onCancel: () => void;
   kind?: NameKind;
@@ -55,6 +68,7 @@ interface Props {
 export function NewFileForm({ dir, indent, onCreate, onCancel, kind = 'file' }: Props) {
   const k = KINDS[kind];
   const renaming = kind === 'rename-file' || kind === 'rename-dir';
+  const moving = kind === 'move';
   const start = useMemo(() => k.start(dir), [k, dir]);
   const [value, setValue] = useState(start.value);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +96,11 @@ export function NewFileForm({ dir, indent, onCreate, onCancel, kind = 'file' }: 
       onCancel();
       return;
     }
+    // Nor is a move to the folder it is already in.
+    if (moving && named.path === parentOf(dir)) {
+      onCancel();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -95,7 +114,11 @@ export function NewFileForm({ dir, indent, onCreate, onCancel, kind = 'file' }: 
   };
 
   const where = dir.length > 0 ? dir : 'the top';
-  const label = renaming ? `new name for the ${k.what} ${dir}` : `name of the ${k.what} in ${where}`;
+  const label = moving
+    ? `folder to move ${dir} into (empty for the top)`
+    : renaming
+      ? `new name for the ${k.what} ${dir}`
+      : `name of the ${k.what} in ${where}`;
 
   return (
     <div
@@ -121,6 +144,7 @@ export function NewFileForm({ dir, indent, onCreate, onCancel, kind = 'file' }: 
           disabled={busy}
           spellCheck={false}
           autoComplete="off"
+          placeholder={moving ? 'the top' : undefined}
           aria-label={label}
           aria-invalid={error !== null}
           aria-describedby={error ? errId : undefined}
