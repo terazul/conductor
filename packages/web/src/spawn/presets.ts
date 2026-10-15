@@ -393,10 +393,16 @@ export function toAgentSpecs(
   personas?: readonly Persona[],
   /**
    * An orchestrated stack's listed roles (Amendment 128). The orchestrator row takes them, and a
-   * helper cap that covers each starting once and being sent back; absent or empty, the row
+   * helper cap that covers each starting once and being sent back, or the one chosen
+   * (`helpersInAll`); absent or empty, the row
    * is an ordinary agent. A preset with no orchestrator row ignores it.
    */
   listed: readonly ListedRole[] = [],
+  /**
+   * The helpers in all the orchestrator of an orchestrated stack may start, as chosen on Spawn
+   * (Amendment 150, `helpersInAll`); absent, `helperCapFor(listed)`.
+   */
+  helpersInAll?: number,
 ): AgentSpec[] {
   return preset.roles.map((r) => {
     const runs = r.orchestrates === true && orchestrates(listed);
@@ -412,7 +418,7 @@ export function toAgentSpecs(
       ...(p && p.skills.length > 0 ? { skills: p.skills } : {}),
       dependsOnRoles: r.dependsOnRoles ?? [],
       ...(runs
-        ? { helpers: helperCapFor(listed) }
+        ? { helpers: helpersInAll ?? helperCapFor(listed) }
         : (helpers[r.role] ?? 0) > 0
           ? { helpers: helpers[r.role] }
           : {}),

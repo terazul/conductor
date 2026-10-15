@@ -15,7 +15,7 @@ import type { PillState } from './autonomy.js';
 import { personaFor, type Persona } from './personas.js';
 import { isReadOnlyRole, rowOverrides } from './presets.js';
 import {
-  helperCapFor,
+  helperChoices,
   offeredRoles,
   orchestrates,
   sendBackWords,
@@ -36,6 +36,8 @@ export function Pipeline({
   claude,
   model,
   onChange,
+  helpers,
+  onHelpers,
   alone,
 }: {
   listed: readonly ListedRole[];
@@ -49,6 +51,9 @@ export function Pipeline({
   /** The one model every role runs on, off Claude. */
   model: string;
   onChange: (next: ListedRole[]) => void;
+  /** The helpers it may start in all, as this launch sends them (`helpersInAll`), and the place to choose (Amendment 150). */
+  helpers: number;
+  onHelpers: (n: number) => void;
   /**
    * What it says with no role listed. Absent, the preset's words; a Custom row that orchestrates
    * (Amendment 142) says its own agent launches plainly, since it does not become an architect.
@@ -61,7 +66,27 @@ export function Pipeline({
       {orchestrates(listed) ? (
         <>
           <div className="sp-pipe-head">
-            may start up to {helperCapFor(listed)} helpers, as these roles and no others
+            may start up to{' '}
+            {/*
+             * Helpers in all (Amendment 150), styled as the "+ up to N helpers" picker: each role
+             * once and sent back twice unless you choose more, for a plan of many lanes.
+             */}
+            <select
+              className="ui-select sp-helpers sp-pipe-helpers"
+              value={helpers}
+              aria-label="Helpers in all"
+              title="Helpers in all: how many agents the orchestrator may start, every lane and send-back counted. Each takes a slot and its own budget."
+              onChange={(e) => onHelpers(Number(e.target.value))}
+            >
+              {[...new Set([...helperChoices(listed), helpers])]
+                .sort((a, b) => a - b)
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n} helper{n === 1 ? '' : 's'} in all
+                  </option>
+                ))}
+            </select>
+            , as these roles and no others
           </div>
           {listed.map((l) => {
             const persona = personaFor(personas, l.id);

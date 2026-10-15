@@ -34,7 +34,7 @@ import type {
   SetModelResponse,
   StopRetryingResponse,
 } from '@conductor/shared';
-import { HELPERS_MAX, NOTE_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
+import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
@@ -271,10 +271,13 @@ function parseAgentSpec(entry: unknown): AgentSpec {
   const refused = provider === 'claude' ? refusal(model) : null;
   if (refused) throw new Error(`agent ${role}: ${refused}`);
   // An orchestrated stack (Amendment 128) lists the roles its orchestrator may start. Its helpers
-  // are counted in all, send-backs included, so its cap is the roles times the starts each may have.
+  // are counted in all, send-backs included. Spawn sends the roles times the starts each may have
+  // unless you chose another number, up to PIPELINE_HELPERS_MAX (Amendment 150): a plan of many
+  // lanes starts one role many times.
   const helperRoles = parseHelperRoles(role, provider, e['helperRoles']);
   const helpers = e['helpers'] ?? 0;
-  const helpersMax = helperRoles.length > 0 ? pipelineHelperCap(helperRoles.length) : HELPERS_MAX;
+  const helpersMax =
+    helperRoles.length > 0 ? Math.max(pipelineHelperCap(helperRoles.length), PIPELINE_HELPERS_MAX) : HELPERS_MAX;
   if (typeof helpers !== 'number' || !Number.isInteger(helpers) || helpers < 0 || helpers > helpersMax) {
     throw new Error(`agent ${role}: helpers is a whole number from 0 to ${helpersMax}`);
   }

@@ -553,7 +553,8 @@ export interface ListedRole {
  * (Amendment 128). That one is written for parallel work: split it into parts that do not touch
  * the same files. A pipeline is the opposite: the steps run in order, the orchestrator reads each
  * result before it writes the next brief, asks the user when it is unsure, and sends work back
- * when a step fails. It says which roles it may start and how often it may send one back.
+ * when a step fails. It says which roles it may start and how often it may send a lane back: a
+ * role and a name, so new work is a new name and a send-back reuses one (Amendment 150).
  */
 export function pipelineSection(role: string, cap: number, roles: readonly ListedRole[], sendBacks = 2): string {
   const named = roles
@@ -571,9 +572,10 @@ export function pipelineSection(role: string, cap: number, roles: readonly Liste
     '2. End your turn after you start a helper. You are woken with its whole conversation: what it was told, what it ' +
       'said, and a line for each tool it called. Read it before you decide anything. A step that stopped is not a step ' +
       'that is ready: start the next when the result does what was asked and its checks passed.',
-    `3. When a step fails (a review that finds a fault, a test that does not pass), send the work back: start the role ` +
-      `that must fix it again, with a new \`task\` that quotes what failed. You may send a role's work back at most ` +
-      `${sendBacks} times (a role is started at most ${1 + sendBacks} times in all; a start after that is refused). ` +
+    `3. Give each new piece of work its own \`name\` (a lane, like "api" or "parser"). When a step fails (a review that ` +
+      'finds a fault, a test that does not pass), send the work back: start the role that must fix it again, with the ' +
+      `same \`name\` and a new \`task\` that quotes what failed. You may send a lane's work back at most ${sendBacks} ` +
+      `times (one role with one name is started at most ${1 + sendBacks} times in all; a start after that is refused). ` +
       'When the same step keeps failing, ask the user before you get that far.',
     '4. When you are unsure (a choice that is the user\'s, a result you cannot judge, a step that keeps failing), ask the ' +
       'user with the question tool (AskUserQuestion, or ask_user), not in your reply: a question in your reply only ends ' +
@@ -604,8 +606,9 @@ export function pipelineHelperBrief(orchestrator: string, role: string, roleBrie
 export function pipelineReportClosing(sendBacks = 2): string {
   return (
     '\nRead what each did before you decide anything. If the step is ready, write the next brief in full and start the ' +
-    'next role. If it is not (a review that found a fault, a test that fails), send the work back: start the role that ' +
-    `must fix it, with a new brief that says what failed. A role's work may be sent back at most ${sendBacks} times; after ` +
+    'next role, with a new `name` for new work. If it is not (a review that found a fault, a test that fails), send the ' +
+    'work back: start the role that must fix it, with the same `name` and a new brief that says what failed. A lane\'s ' +
+    `work may be sent back at most ${sendBacks} times; after ` +
     'that, ask the user with the question tool (AskUserQuestion, or ask_user). When the last step is ready, finish with ' +
     'a short summary for the user.'
   );
