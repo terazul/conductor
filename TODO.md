@@ -141,6 +141,8 @@ the last of it on 12 Oct).
 - [x] **An orchestrator's page opens to its helpers' reports, not its own replies (wave 11, O3).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): O2 accepted as is; the orchestrator's auto turns start folded.* *Done 15 Oct: Amendment 164 (auto turns fold under `u${seq}`; in an agent that can start helpers they start folded, and one you open stays open in `conductor.agentUnfolds`; fold all reaches them; a `start_helper` line shows its task).*
 - [x] **Drag to move in Files, and rename/delete in the Navigator (wave 11, N6).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 165 (a drag onto a folder or Move to… is a rename into it, with tabs following; into itself, or anything under it, refused; a taken name shows the daemon's reason; ✎ and ⌫ on the navigator's file and folder rows reuse the Files tree's box and confirm).*
 
+- [x] **A cost-per-day chart on Metrics (wave 11, M1).** Found (14 Oct) for docs/plans/wave-11.md; it is the chart TODO's Metrics (122) left out. *Decided (14 Oct): cost per day.* *Done 15 Oct: Amendment 169 (a bar per day from `from` to `to` above the day table, empty days at no height, scaled to the highest day, in ink, with a caption in words; none for a single day).*
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
@@ -230,7 +232,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   separate items if wanted. A name that differs from an existing one only in case is refused only on a
   case-insensitive filesystem, such as macOS.
 
-- [ ] **Metrics (122).** *13 Oct, Amendment 136: the Errors rate, time per turn, the speed average, the stale `lib/verify.ts` comment and a per-project filter are done; a chart beyond the day table is not.*
+- [x] **Metrics (122).** *13 Oct, Amendment 136: the Errors rate, time per turn, the speed average, the stale `lib/verify.ts` comment and a per-project filter are done; a chart beyond the day table is not.* *Decided (14 Oct): cost per day.* *Done 15 Oct: Amendment 169 (the cost-per-day chart; the Errors tile's whole is Claude's calls and the filter and comment are done, checked; time per turn's hover says it runs high with parallel subagents, a known limit; tokens per second stays as Amendment 136 left it).*
   - The Errors tile divides retried calls by every engine's calls, though only Claude reports retries.
     The per-model rows are exact.
   - Claude's model-call time includes subagents, but `calls` counts main-loop turns, so time per call
