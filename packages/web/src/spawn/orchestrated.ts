@@ -20,10 +20,15 @@ import { BUILT_IN_PERSONAS, personaFor, type Persona } from './personas.js';
 /** The preset's id. */
 export const ORCHESTRATED_ID = 'orchestrated';
 
-/** One role as the plan lists it: its persona's id, and the tier its helpers run on. */
+/**
+ * One role as the plan lists it: its persona's id, and the tier its helpers run on. A persona
+ * whose model is an exact id rather than a tier keeps it as `model`, which its helpers run on
+ * (Amendment 155); the tier is still what the orchestrator may ask to go down from.
+ */
 export interface ListedRole {
   id: string;
   tier: ModelTier;
+  model?: string;
 }
 
 const TIERS: readonly ModelTier[] = ['opus', 'sonnet', 'haiku'];
@@ -34,6 +39,18 @@ export function tierOf(persona: Persona | undefined): ModelTier {
   return TIERS.find((t) => t === m) ?? 'sonnet';
 }
 
+/** A persona's exact model id, when its model is one rather than a tier or empty. */
+export function exactOf(persona: Persona | undefined): string | undefined {
+  const m = persona?.model ?? '';
+  return m && !TIERS.some((t) => t === m) ? m : undefined;
+}
+
+/** A role listed as its persona has it: the persona's tier, and its exact id if it names one. */
+function listedAs(id: string, persona: Persona | undefined): ListedRole {
+  const model = exactOf(persona);
+  return { id, tier: tierOf(persona), ...(model ? { model } : {}) };
+}
+
 /**
  * The roles listed unless you change them: developer, validator, reviewer and scribe, each on
  * the tier its persona asks for (opus, sonnet, sonnet, sonnet, as the full pipeline has them since
@@ -41,12 +58,17 @@ export function tierOf(persona: Persona | undefined): ModelTier {
  */
 export function defaultListed(personas?: readonly Persona[]): ListedRole[] {
   const all = personas ?? BUILT_IN_PERSONAS;
-  return DEFAULT_PIPELINE_ROLES.map((id) => ({ id, tier: tierOf(personaFor(all, id)) }));
+  return DEFAULT_PIPELINE_ROLES.map((id) => listedAs(id, personaFor(all, id)));
 }
 
-/** The list with `id` moved to `tier`; the same list when it isn't there. */
+/** The list with `id` moved to `tier`, and off any exact id; the same list when it isn't there. */
 export function withTier(list: readonly ListedRole[], id: string, tier: ModelTier): ListedRole[] {
-  return list.map((r) => (r.id === id ? { ...r, tier } : r));
+  return list.map((r) => (r.id === id ? { id: r.id, tier } : r));
+}
+
+/** The list with `id` on the exact `model`, its tier kept (Amendment 155); the same list when it isn't there. */
+export function withModel(list: readonly ListedRole[], id: string, model: string): ListedRole[] {
+  return list.map((r) => (r.id === id ? { ...r, model } : r));
 }
 
 /** The list without `id`. */
@@ -54,10 +76,10 @@ export function withoutRole(list: readonly ListedRole[], id: string): ListedRole
   return list.filter((r) => r.id !== id);
 }
 
-/** The list with `id` added at the end, on its persona's tier. Unchanged when it is there already or the list is full. */
+/** The list with `id` added at the end, on its persona's tier or exact id. Unchanged when it is there already or the list is full. */
 export function withRole(list: readonly ListedRole[], id: string, personas?: readonly Persona[]): ListedRole[] {
   if (list.some((r) => r.id === id) || list.length >= PIPELINE_ROLES_MAX) return [...list];
-  return [...list, { id, tier: tierOf(personaFor(personas ?? BUILT_IN_PERSONAS, id)) }];
+  return [...list, listedAs(id, personaFor(personas ?? BUILT_IN_PERSONAS, id))];
 }
 
 /** The personas not yet listed, in the order Settings shows them: what the add control offers. */
@@ -103,9 +125,9 @@ export function helpersInAll(list: readonly ListedRole[], chosen: number | null)
   return Math.min(PIPELINE_HELPERS_MAX, Math.max(list.length, chosen));
 }
 
-/** The listed roles whose tier the model API serves no model for: they have no id to send, so the launch waits. */
+/** The listed roles with no exact id whose tier the model API serves no model for: they have no id to send, so the launch waits. */
 export function unresolvedListed(list: readonly ListedRole[], tiers: ModelCatalog['tiers']): ListedRole[] {
-  return list.filter((r) => !tiers[r.tier]);
+  return list.filter((r) => !r.model && !tiers[r.tier]);
 }
 
 /** What the plan says about sending work back, in the words the daemon enforces: per lane (Amendment 151). */

@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, helperModel, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -73,7 +73,9 @@ import {
   orchestrates,
   sendBackWords,
   stackAgents,
+  exactOf,
   unresolvedListed,
+  withModel,
   withRole,
   withTier,
   withoutRole,
@@ -1274,6 +1276,31 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   check('the list is this launch\'s only: the default is untouched by an edit', defaultListed(every).length === 4 && defaults.length === 4 && noReviewer.length === 3);
   check('a tier with no model served blocks the launch, and names the role', unresolvedListed(defaults, { opus: tiersNow.opus, sonnet: tiersNow.sonnet }).map((r) => r.id).join() === '' && unresolvedListed(lighter, { opus: tiersNow.opus, sonnet: tiersNow.sonnet }).map((r) => r.id).join() === 'developer');
 
+  // A persona whose model is an exact id: its role runs on that id, not on sonnet (Amendment 155).
+  const exactClaude = 'us.anthropic.claude-opus-4-1-20250805-v1:0';
+  const exactOther = 'anthropic/claude-sonnet-4.5';
+  const exactPersonas = personasFrom(withPersona(withPersona(null, { ...personaFor(every, 'developer')!, model: exactClaude }), { ...personaFor(every, 'scribe')!, model: exactOther }));
+  const exactListed = defaultListed(exactPersonas);
+  check('a persona with an exact Claude id is listed with it, and its tier is the fallback sonnet', exactListed.find((r) => r.id === 'developer')?.model === exactClaude && exactListed.find((r) => r.id === 'developer')?.tier === 'sonnet' && exactOf(personaFor(exactPersonas, 'developer')) === exactClaude);
+  check('and one with an exact non-Claude id too', exactListed.find((r) => r.id === 'scribe')?.model === exactOther);
+  const exactSpec = specsFor(exactListed, exactPersonas)[0]!;
+  const exactRole = (id: string) => exactSpec.helperRoles!.find((r) => r.id === id)!;
+  check('both reach the launch request as the role\'s model, its tier kept beside it', exactRole('developer').model === exactClaude && exactRole('developer').tier === 'sonnet' && exactRole('scribe').model === exactOther && exactRole('scribe').tier === 'sonnet', JSON.stringify(exactSpec.helperRoles!.map((r) => [r.id, r.tier, r.model])));
+  check('the roles on a tier are as they were', exactRole('validator').model === tiersNow.sonnet && exactRole('reviewer').model === tiersNow.sonnet && JSON.stringify(exactRole('developer').tiers) === JSON.stringify(tiersNow));
+  check('tier personas are listed with no exact id, and send what they always sent', defaults.every((r) => !('model' in r)) && JSON.stringify(specsFor(defaults)) === JSON.stringify(specs));
+  check('the daemon runs a helper on the exact id, and a cheaper tier is still the tier\'s', (() => {
+    const d = helperModel(exactRole('developer'), undefined);
+    const cheaper = helperModel(exactRole('developer'), 'haiku');
+    return 'model' in d && d.model === exactClaude && 'model' in cheaper && cheaper.model === tiersNow.haiku && 'why' in helperModel(exactRole('developer'), 'opus');
+  })());
+  check('a role added with an exact id keeps it', withRole(withoutRole(exactListed, 'scribe'), 'scribe', exactPersonas).at(-1)?.model === exactOther);
+  check('a tier picked for it drops the exact id, and the exact id can be picked back', !('model' in withTier(exactListed, 'developer', 'opus').find((r) => r.id === 'developer')!) && specsFor(withTier(exactListed, 'developer', 'opus'), exactPersonas)[0]!.helperRoles!.find((r) => r.id === 'developer')!.model === tiersNow.opus && withModel(withTier(exactListed, 'developer', 'opus'), 'developer', exactClaude).find((r) => r.id === 'developer')!.model === exactClaude);
+  check('a role with an exact id does not wait for a tier', unresolvedListed(exactListed, { sonnet: tiersNow.sonnet }).length === 0 && unresolvedListed(exactListed, {}).map((r) => r.id).join() === 'validator,reviewer');
+  const savedExact = parseSetups(JSON.stringify([{ name: 'x', roles: [{ role: 'lead', orchestrates: true }], models: {}, listed: [...exactListed, { id: 'debugger', tier: 'haiku', model: 'opus' }] }]))[0]?.listed ?? [];
+  check('a saved setup keeps the exact id, and a tier written as one is not an exact id', JSON.stringify(savedExact.map((r) => r.model ?? r.tier)) === JSON.stringify([exactClaude, 'sonnet', 'sonnet', exactOther, 'haiku']), JSON.stringify(savedExact));
+  const onExact = specsOn([exactSpec], { provider: 'openrouter', caps: ALL_ON, model: exactOther, budgetTokens: null });
+  check('off Claude every role still runs on the launch\'s one model (Amendment 80)', onExact[0]!.helperRoles!.every((r) => r.model === exactOther && !('tier' in r)));
+
   // One agent needs no orchestrator.
   check('with every role removed it is one agent, and one agent has no orchestrator', !orchestrates([]) && !showsOrchestrator(stackAgents([])) && orchestrates(withoutRole(withoutRole(withoutRole([{ id: 'developer', tier: 'sonnet' }, { id: 'scribe', tier: 'sonnet' }], 'developer'), 'scribe'), 'x')) === false);
   const lone = orchestratedFor(orch, []);
@@ -1305,6 +1332,8 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   check('a launch waits for a tier with no model, as it does for a row', /missingListed\.length === 0/.test(route) && /unresolvedListed\(listed, tiers\)/.test(route));
   const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
   check('the list can remove a role, change a tier and add one, and says how work is sent back', /withoutRole\(listed, l\.id\)/.test(picker) && /withTier\(listed, l\.id/.test(picker) && /withRole\(listed, e\.target\.value/.test(picker) && /sendBackWords\(\)/.test(picker));
+  check('the role select shows the exact id it runs on, over the tiers, and picking it keeps it (Amendment 155)', /value=\{l\.model \?\? l\.tier\}/.test(picker) && /\{exact && <option value=\{exact\}>\{exact\}<\/option>\}/.test(picker) && /withModel\(listed, l\.id, e\.target\.value\)/.test(picker));
+  check('its row note still reads the role as its tier, as Amendment 147 has it', /rowOverrides\(\{ role: l\.id, model: l\.tier, does: '', brief: '' \}, pills, mode, personas\)/.test(picker));
   check('a stack of one says it is one agent, with no orchestrator', /No role listed, so this launches one architect agent and nothing orchestrates/.test(picker));
   check('the words say what the daemon enforces: twice a lane, then it asks', /send a lane's work back/.test(sendBackWords()) && /at most 2 times, then it asks you/.test(sendBackWords()));
 

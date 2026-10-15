@@ -19,6 +19,8 @@ import {
   offeredRoles,
   orchestrates,
   sendBackWords,
+  exactOf,
+  withModel,
   withRole,
   withTier,
   withoutRole,
@@ -93,6 +95,8 @@ export function Pipeline({
             const reads = isReadOnlyRole(l.id) || persona?.tools.write === false;
             // As `helperRolesFor` builds the role: its persona is the one of its id.
             const note = rowOverrides({ role: l.id, model: l.tier, does: '', brief: '' }, pills, mode, personas);
+            // The exact id it runs on, its own or its persona's: offered over the tiers (Amendment 155).
+            const exact = l.model ?? exactOf(persona);
             return (
               <Fragment key={l.id}>
                 <div className="sp-pipe-row">
@@ -105,11 +109,24 @@ export function Pipeline({
                   {claude ? (
                     <select
                       className="ui-select sp-pipe-tier"
-                      value={l.tier}
+                      value={l.model ?? l.tier}
                       aria-label={`Model tier for ${l.id}`}
-                      title={tiers[l.tier] ? `${l.tier}: ${tiers[l.tier]}` : `${l.tier}: no such model is served right now`}
-                      onChange={(e) => onChange(withTier(listed, l.id, e.target.value as ModelTier))}
+                      title={
+                        l.model
+                          ? `${l.model}: the exact model its persona names`
+                          : tiers[l.tier]
+                            ? `${l.tier}: ${tiers[l.tier]}`
+                            : `${l.tier}: no such model is served right now`
+                      }
+                      onChange={(e) =>
+                        onChange(
+                          TIERS.some((t) => t === e.target.value)
+                            ? withTier(listed, l.id, e.target.value as ModelTier)
+                            : withModel(listed, l.id, e.target.value),
+                        )
+                      }
                     >
+                      {exact && <option value={exact}>{exact}</option>}
                       {TIERS.map((t) => (
                         <option key={t} value={t}>
                           {t}
