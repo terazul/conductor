@@ -259,7 +259,8 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - The model-window registry is in memory (`session/windows.ts`). After a restart a resumed stack uses
     the floor table until a model list is asked for. Claude's result carries
     `modelUsage[model].contextWindow`, which would fill it from the `result` case in
-    `session/backends/claude.ts`.
+    `session/backends/claude.ts`. *Done 15 Oct: Amendment 161 (each result's window, under the alias and
+    the full id; kept in `model_windows`, migration 270).*
   - The cap on a handed-off conversation is still counted in characters (3 per token); there is no
     tokenizer.
   - Nothing checks that a model actually puts the closing headings in its `hand_off` summary, and "tests

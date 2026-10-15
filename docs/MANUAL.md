@@ -554,14 +554,14 @@ same folder, so what an earlier agent changed is already there.
 
 How much of it is passed on is about a quarter of the next agent's model's context window,
 shared between the agents it waited for. The window is the real one when the engine says what
-it is (OpenRouter's, Copilot's, and a Claude gateway's when it reports one); when it doesn't,
-Conductor assumes a small one, so an unknown model is given less rather than more. The
+it is (OpenRouter's, Copilot's, a Claude gateway's when it reports one, and for Claude the
+window each finished run reports, which wins over a list's); when it doesn't, Conductor
+assumes a small one, so an unknown model is given less rather than more. The
 amount is counted in characters, at about three to a token: it is an estimate, not a count.
 Over it, the oldest goes first and the last reply is always whole. When the agent waits for
 several that were each given the same earlier text (three agents that share a parent), that
-text is passed on once, and a line says where it went. Right after the daemon restarts it
-doesn't yet know the real windows, and uses the small assumption until the model list has
-been asked for again (opening Spawn does it).
+text is passed on once, and a line says where it went. The windows are kept across a restart
+of the daemon, so a resumed stack uses the real ones at once.
 
 Roles that only read — reviewer, debugger, analyst, and auditor (from older analysis
 jobs) — are marked
