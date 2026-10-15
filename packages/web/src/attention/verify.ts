@@ -49,7 +49,7 @@ import {
   toggleChoice,
 } from './interaction.js';
 import { alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, resumable, waitingRoles, type AlertAction } from './alerts.js';
-import { badgeState, dueForChime } from './notify.js';
+import { badgeState, dueForChime, soundHint } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
 let failures = 0;
@@ -795,6 +795,18 @@ console.log('\n11 · a job finished: merge it, merge and clean up, or open Branc
   check('the card dismisses itself after a merge', /await mergeFinished\(a\);\s*await dismissAlert\(alert\.id\)/.test(card));
   check('open Branches goes to the project’s Branches screen', /case 'branches':\s*openBranches\(a\.projectId\)/.test(card));
   check('the labels', /return 'merge and clean up'/.test(card) && /return 'open Branches'/.test(card) && /finished: \{ label: 'Finished'/.test(card));
+}
+
+console.log('\n12 · the sound plays after a reload too, once you click or type (Amendment 172)');
+{
+  const notify = readFileSync(new URL('./notify.ts', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('./QueuePanel.tsx', import.meta.url), 'utf8');
+  check('on, but this page load has had no click yet: the pill says so instead of when it fires', soundHint(true, false, 'at 1m 0s') === 'click anywhere to allow sound');
+  check('once allowed, or switched off, the pill says when it fires, as before', soundHint(true, true, 'at 1m 0s') === 'at 1m 0s' && soundHint(false, false, 'at 1m 0s') === 'at 1m 0s');
+  check('the always-on mount arms it on the first click or key when the sound is already on', /if \(soundEnabled\) armOnFirstGesture\(\);/.test(notify) && /addEventListener\('pointerdown', arm, true\)/.test(notify) && /addEventListener\('keydown', arm, true\)/.test(notify));
+  check('that gesture makes and resumes the audio, once, and lets go of the listeners', /removeEventListener\('pointerdown', arm, true\)/.test(notify) && /armAudio\(\);\s*void audioCtx\?\.resume\(\)/.test(notify));
+  check('switching it on resumes the audio there and then too', /armAudio\(\);\s*void audioCtx\?\.resume\(\)\.catch\(\(\) => undefined\);\s*patch\(\{ soundArmed/.test(notify));
+  check('the Needs You panel shows the sound pill through soundHint', /soundHint\(ladderPrefs\.soundEnabled, ladderPrefs\.soundArmed, channelHint\(c, oldestMs\)\)/.test(panel));
 }
 
 console.log(

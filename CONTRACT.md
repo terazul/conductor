@@ -200,6 +200,25 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 172 — post-merge, applied. **The sound plays after a reload too, once you click or type.**
+
+Web only (`attention/notify.ts`, `attention/QueuePanel.tsx`, `attention/verify.ts`). Reported 15 Oct:
+"sound after 60s" didn't sound. The chime is synthesised through an `AudioContext`, which a browser
+lets a page start only inside a click or key press. It was made only in the click that switched the
+sound on, and kept in memory, so after any reload, a new tab or a restart that reloaded the page, the
+switch read on from Settings but there was no audio to play through: silent until you switched it
+off and on again.
+- **Armed on the first gesture.** While the sound is on and this page load has no audio yet, the
+  always-on mount listens once for the first `pointerdown` or `keydown` anywhere in the app, makes and
+  resumes the audio there, and lets go of the listeners. Switching the sound on still does it at once.
+- **Said on the switch.** `LadderPrefs.soundArmed`; until it is true the sound pill in Needs You reads
+  **click anywhere to allow sound** in place of when it fires (`soundHint`).
+- Checked in `attention/verify.ts` §12: the pill's words, and that the arming, the listeners and the
+  resume are wired.
+- **Not done.** Nothing can play a sound before the first click after a load: a request that waits
+  60 s in a tab you haven't touched since it loaded stays silent until you do. Not heard by a person:
+  headless checks can't hear audio.
+
 ### Amendment 171 — post-merge, applied. **A folder too big to watch is left unwatched, and a spawn that throws can't crash the daemon.**
 
 Daemon only (`workspace/watcher.ts`, `preview/probe.ts`, `workspace/verify.ts`). Found 15 Oct: the

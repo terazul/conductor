@@ -15,7 +15,7 @@
 import type { Agent, Alert, PendingRequest, Project } from '@conductor/shared';
 import type { Decisions } from './decisions.js';
 import type { LadderPrefs } from './notify.js';
-import { CHANNELS, channelHint, ladderActions } from './notify.js';
+import { CHANNELS, channelHint, ladderActions, soundHint } from './notify.js';
 import { AgeBar } from './bits.jsx';
 import { ageLabel, ageToken, ageTier, waitingMs } from './aging.js';
 import { requestTitle } from './describe.js';
@@ -198,7 +198,13 @@ export function QueuePanel({
                   <span>{on ? '◉' : '○'}</span>
                   <span>{c.label}</span>
                   <span className="hint">
-                    {blocked ? 'blocked' : unsupported ? 'n/a' : channelHint(c, oldestMs)}
+                    {blocked
+                      ? 'blocked'
+                      : unsupported
+                        ? 'n/a'
+                        : c.id === 'sound'
+                          ? soundHint(ladderPrefs.soundEnabled, ladderPrefs.soundArmed, channelHint(c, oldestMs))
+                          : channelHint(c, oldestMs)}
                   </span>
                 </button>
               );

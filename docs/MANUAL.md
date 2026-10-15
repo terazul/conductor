@@ -873,7 +873,10 @@ The browser tab's title and icon show how many things need you, and turn red onc
 request has waited 12 minutes. Two more are off until you turn them on, in the panel on
 the right of Needs you: **desktop notifications** (your browser asks permission the first
 time), and a **sound**. The sound plays once a request has waited 60 seconds, and at once
-for an alert. These work on every screen.
+for an alert. These work on every screen. A browser lets a page play sound only after you have
+clicked or typed in it, so after you reload or open Conductor in a new tab the sound waits for
+your first click or key anywhere in the app. Until then its switch says **click anywhere to allow
+sound**.
 
 ### When a job finishes
 

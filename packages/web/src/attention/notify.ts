@@ -93,12 +93,19 @@ export interface LadderPrefs {
   desktopEnabled: boolean;
   soundEnabled: boolean;
   desktopPermission: PermissionState;
+  /**
+   * The page may make sound (Amendment 172). A browser lets a page play audio only after you
+   * have clicked or typed in it since it loaded, so after a reload the sound is on but silent
+   * until your first click or key anywhere in the app.
+   */
+  soundArmed: boolean;
 }
 
 let prefs: LadderPrefs = {
   desktopEnabled: readFlag('desktop'),
   soundEnabled: readFlag('sound'),
   desktopPermission: notificationPermission(),
+  soundArmed: false,
 };
 
 const listeners = new Set<() => void>();
@@ -222,6 +229,33 @@ function armAudio(): void {
   }
 }
 
+/**
+ * The sound is on but this page load has had no click or key yet (Amendment 172): it used to
+ * stay silent until you toggled the sound off and on again, since only that click made the
+ * audio context. The first click or key anywhere in the app now makes it, once.
+ */
+let gestureWait: (() => void) | null = null;
+
+function armOnFirstGesture(): void {
+  if (audioCtx || gestureWait || typeof window === 'undefined') return;
+  const arm = (): void => {
+    window.removeEventListener('pointerdown', arm, true);
+    window.removeEventListener('keydown', arm, true);
+    gestureWait = null;
+    armAudio();
+    void audioCtx?.resume().catch(() => undefined);
+    patch({ soundArmed: audioCtx !== null });
+  };
+  gestureWait = arm;
+  window.addEventListener('pointerdown', arm, true);
+  window.addEventListener('keydown', arm, true);
+}
+
+/** What the sound's pill says beside its label: when it fires, or that it waits for a click. */
+export function soundHint(enabled: boolean, armed: boolean, whenHint: string): string {
+  return enabled && !armed ? 'click anywhere to allow sound' : whenHint;
+}
+
 function playChime(): void {
   const ctx = audioCtx;
   if (!ctx) return;
@@ -285,6 +319,8 @@ export const ladderActions = Object.freeze({
     const next = !prefs.soundEnabled;
     if (next) {
       armAudio();
+      void audioCtx?.resume().catch(() => undefined);
+      patch({ soundArmed: audioCtx !== null });
       // Anything already due shouldn't fire a backlog of beeps.
       for (const key of dueForChime(pending, alerts, Date.now(), sounded)) sounded.add(key);
     }
@@ -434,6 +470,11 @@ export function useLadderEffects(
     for (const a of alerts) show(alertKey(a.id), a.title, a.body, { alertId: a.id });
     for (const f of finished) show(f.key, f.title, f.body, { projectId: f.projectId });
   }, [pending, alerts, finished, desktopEnabled, desktopPermission]);
+
+  // The sound is on from an earlier page load: make the audio on the first click or key (Amendment 172).
+  useEffect(() => {
+    if (soundEnabled) armOnFirstGesture();
+  }, [soundEnabled]);
 
   // Rung 3 — a chime once per request after 60s, and once per alert straight away. A
   // finished job doesn't chime: nothing is waiting on you.
