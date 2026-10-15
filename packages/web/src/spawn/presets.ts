@@ -11,7 +11,7 @@
  */
 
 import type { AgentSpec, AgentRole, Autonomy, EffortLevel, HelperRole, ModelCatalog, ModelTier } from '@conductor/shared';
-import { WRITE_TOOLS, isReadOnlyRole } from '@conductor/shared';
+import { READ_ONLY_BASH, READ_ONLY_BASH_DENIED, WRITE_TOOLS, isReadOnlyRole } from '@conductor/shared';
 import { MODES, toAutonomy, type PillState } from './autonomy.js';
 import { personaFor, type Persona } from './personas.js';
 import { ORCHESTRATED_ID, helperCapFor, orchestrates, type ListedRole } from './orchestrated.js';
@@ -19,13 +19,15 @@ import { ORCHESTRATED_ID, helperCapFor, orchestrates, type ListedRole } from './
 /**
  * What each tier is for — the plan preview says it beside the id the tier resolves to.
  *
- * The presets assign a tier PER ROLE on purpose — a reviewer that judges wants the
- * strongest reasoning, a scribe updating a plan does not — and that stays the default.
- * Spawn lets you replace it per row, or for every row at once. (Amendment 41)
+ * The presets assign a tier PER ROLE on purpose, and that stays the default. Since Amendment
+ * 148 opus goes to the roles that design and build (the architect, the orchestrator, which is
+ * the architect persona, and the developer) and sonnet to every other role: the validator,
+ * reviewer, scribe, debugger and analyst. Spawn lets you replace it per row, or for every row
+ * at once. (Amendment 41)
  */
 export const TIER_HINTS: Record<ModelTier, string> = {
-  opus: 'Strongest reasoning. What the presets give to roles that design or judge.',
-  sonnet: 'Fast and capable. What the presets give to roles executing a decided plan.',
+  opus: 'Strongest reasoning. What the presets give to the roles that design and build: the architect and the developer.',
+  sonnet: 'Fast and capable. What the presets give to every other role: testing, reviewing, debugging, analysing, writing docs.',
   haiku: 'Cheapest and fastest. Suited to mechanical work, not to judgement.',
 };
 
@@ -70,7 +72,7 @@ export const PRESETS: Preset[] = [
       },
       {
         role: 'developer',
-        model: 'sonnet',
+        model: 'opus',
         does: 'implements the plan',
         brief:
           "Implement the work described above, following the architect's plan. Prefer small, reviewable changes.",
@@ -87,7 +89,7 @@ export const PRESETS: Preset[] = [
       },
       {
         role: 'reviewer',
-        model: 'opus',
+        model: 'sonnet',
         does: 'spec + quality review',
         brief:
           "Review the change against the instruction and against the architect's plan for correctness " +
@@ -138,14 +140,14 @@ export const PRESETS: Preset[] = [
     roles: [
       {
         role: 'debugger',
-        model: 'opus',
+        model: 'sonnet',
         does: 'finds the root cause',
         brief:
           'Find the root cause before proposing any fix. Report the cause with file and line evidence.',
       },
       {
         role: 'developer',
-        model: 'sonnet',
+        model: 'opus',
         does: 'fixes at the source',
         brief:
           'Fix the root cause the debugger identified. Add the regression test it describes, and check that it ' +
@@ -160,7 +162,7 @@ export const PRESETS: Preset[] = [
     roles: [
       {
         role: 'reviewer',
-        model: 'opus',
+        model: 'sonnet',
         does: 'reads and reports, writes nothing',
         brief: 'Review only. Report findings with file and line references. Change no files.',
       },
@@ -186,7 +188,7 @@ export const PRESETS: Preset[] = [
     roles: [
       {
         role: 'analyst',
-        model: 'opus',
+        model: 'sonnet',
         does: 'maps the codebase and explains it',
         brief:
           'Explain how this code works: entry points, module boundaries, data flow, and the ' +
@@ -218,7 +220,7 @@ export const PRESETS: Preset[] = [
     roles: [
       {
         role: 'analyst',
-        model: 'opus',
+        model: 'sonnet',
         does: 'maps the codebase and explains it',
         brief:
           'Explain how this code works: entry points, module boundaries, data flow, and the ' +
@@ -242,7 +244,7 @@ export const PRESETS: Preset[] = [
     roles: [
       {
         role: 'developer',
-        model: 'sonnet',
+        model: 'opus',
         does: 'does the work',
         brief: '',
       },
@@ -297,10 +299,12 @@ export function readsOnly(r: PresetRole, personas?: readonly Persona[]): boolean
  * distrust. `disallowedTools` is the only setting that survives every permission
  * mode (docs/MANUAL.md §5), which makes it the only one that can carry a promise.
  *
- * Bash is deliberately NOT here. It is already absent from `allowedTools` for
- * these roles, so every command stops and asks, and an analyst that cannot run
- * `git log` is an analyst that cannot answer how the code got this way. The line
- * is "cannot change files unattended or otherwise", not "cannot act".
+ * Bash is deliberately NOT here. An analyst that cannot run `git log` is an analyst
+ * that cannot answer how the code got this way. The line is "cannot change files
+ * unattended or otherwise", not "cannot act". Since Amendment 148 the read-only
+ * commands (`READ_ONLY_BASH`, shared) run without asking, the one way they could
+ * write (`git diff --output=…`) is denied (`READ_ONLY_BASH_DENIED`), and every other
+ * command still stops and asks: bare `Bash` is never in their `allowedTools`.
  */
 
 /**
@@ -365,9 +369,9 @@ export function helperRolesFor(
  * Turn the chosen preset into the AgentSpec[] the daemon takes.
  *
  * A reading role is pinned read-only regardless of the pills — in both directions:
- * nothing it does is auto-approved, and the write tools are denied outright. The
- * pills describe what the user wants for the work; they cannot promote a reviewer
- * into a writer.
+ * nothing it changes is auto-approved (only its reads and read-only shell commands run
+ * unasked, Amendment 148), and the write tools are denied outright. The pills describe
+ * what the user wants for the work; they cannot promote a reviewer into a writer.
  *
  * With personas (Amendment 68), each role takes its persona — the one it picked, else the
  * one of its role's name. The spec carries the persona's id, system prompt and skills, and a
@@ -426,8 +430,10 @@ export function toAgentSpecs(
 /**
  * The autonomy one row runs with: the launch's pills, effort and mode, as clicked. A persona's
  * tool rules don't change them (Amendment 147); only the read-only pin does, for a reading role
- * or a reading persona: nothing auto-accepted, no unattended shell, no MCP, the write tools
- * denied outright, and the mode `plan` if that was chosen, else "ask me".
+ * or a reading persona: nothing auto-accepted, no MCP, the write tools denied outright, and the
+ * mode `plan` if that was chosen, else "ask me". Its shell is the read-only commands
+ * (`READ_ONLY_BASH`), which run without asking whatever the shell pill says; every other
+ * command asks, even with the pill on (Amendment 148).
  */
 export function rowAutonomy(
   r: PresetRole,
@@ -443,7 +449,12 @@ export function rowAutonomy(
   // A reading role stays read-only whatever was chosen: planning is reading, the rest asks.
   const roleMode = mode === undefined ? undefined : mode === 'plan' ? 'plan' : 'default';
   const a = toAutonomy(pinned, budgetPerAgent, effort, roleMode);
-  return { ...a, disallowedTools: [...a.disallowedTools, ...WRITE_TOOLS] };
+  // Read-only shell commands run without asking; any other command asks (Amendment 148).
+  return {
+    ...a,
+    allowedTools: [...a.allowedTools, ...READ_ONLY_BASH],
+    disallowedTools: [...a.disallowedTools, ...WRITE_TOOLS, ...READ_ONLY_BASH_DENIED],
+  };
 }
 
 /**
@@ -461,7 +472,10 @@ export function rowOverrides(
   const runs = rowAutonomy(r, pills, null, undefined, mode, personas);
   const changed: string[] = [];
   if (WRITE_TOOLS.some((t) => runs.disallowedTools.includes(t) && !clicked.disallowedTools.includes(t))) changed.push('no file edits');
-  if (clicked.allowedTools.includes('Bash') && !runs.allowedTools.includes('Bash')) changed.push('asks before shell');
+  // A reading row's shell is the read-only commands, unasked, and nothing else (Amendment 148).
+  if (READ_ONLY_BASH.every((t) => runs.allowedTools.includes(t)) && !runs.allowedTools.includes('Bash')) {
+    changed.push(clicked.allowedTools.includes('Bash') ? 'read-only shell only' : 'read-only shell unattended');
+  }
   if (clicked.allowedTools.includes('mcp__*') && !runs.allowedTools.includes('mcp__*')) changed.push('no MCP');
   if (runs.mode !== clicked.mode) changed.push(`mode ${MODES.find((m) => m.id === runs.mode)?.label ?? runs.mode}`);
   if (changed.length === 0) return null;

@@ -196,6 +196,109 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 148 — post-merge, applied. **The developer runs on opus and every role but the architect on sonnet; a reading role runs read-only shell commands without asking.**
+
+Asked for (14 Oct), two things. Amends Amendments 41 (the tier per role), 67 (a reading role
+has no unattended shell), 126 (the built-ins' tiers "as they were") and 147 (the plan row's note).
+
+**1. The default model per role.** The developer moves to the opus tier, the architect stays
+there, and every other built-in role is on sonnet: the validator and scribe as before, and now
+the reviewer, debugger and analyst too. Both places that keep a tier per role changed: each
+preset row (`PRESETS`, `spawn/presets.ts`: full, bug fix, review only, analysis, Analysis Only,
+one agent) and each built-in persona (`BUILT_IN_PERSONAS`, `spawn/personas.ts`). The
+orchestrated pipeline's orchestrator is the architect persona and stays on opus. The roles it
+lists by default follow their personas, so they are now developer on opus and validator,
+reviewer and scribe on sonnet (`defaultListed`, `orchestrated.ts`); a role added there, or a
+Custom row whose persona names no tier, is still sonnet (`tierOf`, `custom.ts`). Nothing in the
+daemon or `shared` sets a tier per role; they only check and resolve one. A tier is still turned
+into the newest model the catalog serves at launch (`lib/models.ts`): today opus is Opus 5.5 and
+sonnet Sonnet 5.5, and no model id is written down. `TIER_HINTS` said opus is "what the presets
+give to roles that design or judge", which stopped being true for the reviewer; it now says opus
+goes to the architect and the developer, and sonnet to every other role.
+
+A persona you edited keeps your model (only what differs from a built-in is stored), and a saved
+Custom setup or a running agent keeps the tier or id it has.
+
+**2. A reading role runs read-only shell without asking.** Until now every reading role (the
+reviewer, debugger and analyst, the old auditor, and any row with a **write: off** persona) was
+pinned to no unattended shell, so every Bash call it made that Claude Code's own read-only check
+did not pass reached Needs You (seen: piped `git diff … | grep … | head`, `for` loops over
+branches, `cd` before `git`). The owner's choice: read-only commands run without asking,
+anything else still asks, and the write tools stay denied. For every reading role, not only the
+reviewer.
+
+- `READ_ONLY_BASH` (`shared/src/stack.ts`, beside `WRITE_TOOLS`) is the list, in Claude Code's
+  rule syntax: `Bash(git status:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(git show:*)`,
+  `Bash(git blame:*)`, `Bash(grep:*)`, `Bash(cat:*)`, `Bash(head:*)`, `Bash(tail:*)`,
+  `Bash(ls:*)`, `Bash(wc:*)`, `Bash(diff:*)`, `Bash(stat:*)` and `Bash(pwd)`.
+  `READ_ONLY_BASH_DENIED` denies `Bash(git diff *--output*)`, `Bash(git log *--output*)` and
+  `Bash(git show *--output*)`: `--output=<file>` is the one way those can write, and git refuses
+  an abbreviated `--output`.
+- `rowAutonomy` (`spawn/presets.ts`) adds both to a reading row's rope: the list to
+  `allowedTools`, the denials to `disallowedTools` with `WRITE_TOOLS`. Bare `Bash` is still never
+  in it, so any command off the list still goes to `canUseTool` and asks, and the arbiter's "run
+  shell unattended" answer (`allowedUnattended`, Amendment 67) never applies to it. A Spawn row,
+  a preset row and an orchestrator's listed reading role (`helperRolesFor`, so its helpers) all
+  get it. An agent added to a running job gets the same (`addedAutonomy`, `spawn/stack.ts`),
+  from a reader's template or a writer's, without listing anything twice.
+- The plan row's note (`rowOverrides`) no longer says "asks before shell". With **run shell
+  unattended** on, a reading row says `read-only shell only`; with it off, `read-only shell
+  unattended`, since the row now does something the pills did not grant. The resulting SDK
+  options summary (`describeAutonomy`) says `runs some shell commands unattended, asks before
+  the rest` for such a rope, and an agent's inspector shows `bash asks · 14 allowed rules`
+  (`agent/inspector.tsx`; hover for the list) beside the denied ones.
+- The rules reach Claude Code as they are: `allowedTools` and `disallowedTools` pass to the SDK
+  unchanged (`session/backends/claude.ts`), and Claude Code applies prefix and `*` rules itself.
+  For Copilot and OpenRouter, which apply no rules, Conductor's `toolRuleFor`
+  (`arbiter/index.ts`) does, and it learned three things to match Claude Code: each part of a
+  shell line (`git log | head`) may be covered by a different allow rule; a deny rule's `*`
+  matches anywhere (only a deny: an allow-always saved as an exact `rm *.o` stays exact); and an
+  allow never covers a part that writes with `>`, `>>` or `&>` (`> /dev/null` and `2>&1` are let
+  be), so `Bash(cat:*)` cannot write with `cat a > b`.
+
+**What was left off the list, and why.** Checked on 14 Oct against the Claude Code the SDK runs
+(2.1.284): a prefix rule lets every option of its command through, and Claude Code then skips
+its own check of those options (under `Bash(sed -n:*)`, `sed -n '1w out' f` wrote `out`; under
+`Bash(git diff:*)`, `git diff --output=out` wrote `out` until the deny above was added). So:
+`sed`, even `sed -n` (`w` writes, `e` runs a command); `find` (`-delete`, `-exec`, `-fprint`);
+`rg` (`--pre` runs a program); `sort` (`-o` writes, seen); `uniq` (a second file is its output);
+`file` (`-C` writes `magic.mgc`); `tee` and `xargs`; every git command that changes the tree,
+the index or the refs (`checkout`, `reset`, `stash`, `restore`, `switch`, `clean`, `commit`,
+…); and `make` and the test runners, which write build output, since the code has no notion of
+a safe test command. Claude Code's own read-only check still runs the plain forms of most of
+these without asking (`find . -name x`, `rg x`, `sed -n 1p f` did, and it refused `find -fprint`
+and `git diff --output` by itself). A redirect into a file is asked about by Claude Code
+whatever the rules say (`cat a > b`, seen), and so is a read outside the agent's folders
+(`cat /etc/hostname`, `ls /etc/ssh`, seen). On Copilot and OpenRouter, Conductor's gate does
+not look at the paths a shell command names, so there `cat /etc/hostname` runs unasked: a read,
+not a write, and left as it is.
+
+**Not changed.** A writing role's shell is still the **run shell unattended** pill. The write
+tools are still denied outright, a reading role's mode is still plan or ask me, MCP is still
+off, and `readOnlyRefusal` (the daemon's check) is unchanged and passes these ropes. A running
+agent keeps the rope it launched with: a reviewer launched before this asks as it did until it
+is launched again. What Claude Code double-checks whatever the rules say still asks a reading
+role: a `for` loop, `$VARIABLES` or `$(…)`, and `cd` into another folder before `git`. The pill's "Conductor
+answers those for you" (Amendment 67) is for unattended shell, which a reading role never has.
+
+**Verified:** `spawn/verify.ts` §26 (new, 32 checks): every preset row and built-in persona is
+on its tier (architect, orchestrator and developer opus; the rest sonnet), and the hints and
+the listed roles agree; the list has no command that writes or runs another (sed, find, rg,
+sort, uniq, file, tee, xargs, make, test runners, git that changes anything); the reviewer,
+debugger and analyst in every preset, with shell on or off and in every mode, have exactly the
+list, no bare `Bash`, and the write tools and `--output` denied; a write:false persona, an
+orchestrator's listed readers and an added agent the same; no writing role gets it; the
+inspector counts the allowed rules. §2's
+per-preset check now asserts the list as well as no bare `Bash`, and §5, §13, §16, §20, §21
+and §25 assert the new tiers and the new wording. `session/verify.ts` (5 new checks): under the
+reading rope, on the engines Conductor gates itself, read-only commands run alone and piped; a
+redirect, a command off the list, `sed -n`, `find -delete`, `git checkout` and `cd x && git
+diff` ask; `--output` anywhere on the line is refused; a deny's `*` matches anywhere and an
+allow's does not. `make test`: 25 PASS. `preview/verify.ts` and `terminal/verify.ts` fail on this machine, the same
+checks failing on unchanged `main` (Vite's file watcher stops with ELOOP on the scratch repo's
+`inner/loopback` symlink under Node 24.18; the terminal's alternate screen and `pwd -P`), so not
+from this change.
+
 ### Amendment 147 — post-merge, applied. **What you click on Spawn is what runs: a persona's tool rules no longer go over the pills.**
 
 Found (14 Oct), the TODO.md item "A Custom launch loses the interaction, guardrails and effort

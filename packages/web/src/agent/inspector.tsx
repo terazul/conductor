@@ -196,11 +196,19 @@ export function Inspector({
             // folded into it: `Bash(git push:*)` constrains one command, and letting it
             // decide the word for the whole tool is what made bash read as denied.
             const partial = scopedRules(autonomy.disallowedTools, tool);
+            // And the commands it runs unasked where the tool asks: a reading role's read-only shell (Amendment 148).
+            const allowedSome = p === 'asks' ? scopedRules(autonomy.allowedTools, tool) : [];
             return (
               <div className="pj-kv" key={tool}>
                 <span>{tool.toLowerCase()}</span>
                 <span className={`ag-policy is-${p}`}>
                   {p}
+                  {allowedSome.length > 0 && (
+                    <i className="ag-policy-x" title={allowedSome.join(', ')}>
+                      {' '}
+                      · {allowedSome.length} allowed {allowedSome.length === 1 ? 'rule' : 'rules'}
+                    </i>
+                  )}
                   {partial.length > 0 && (
                     <i className="ag-policy-x">
                       {' '}
