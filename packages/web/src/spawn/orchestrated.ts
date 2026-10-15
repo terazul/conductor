@@ -28,7 +28,7 @@ export interface ListedRole {
 
 const TIERS: readonly ModelTier[] = ['opus', 'sonnet', 'haiku'];
 
-/** A persona's tier: its model when that is a tier, else `sonnet`, which the presets give to roles that execute a plan. */
+/** A persona's tier: its model when that is a tier, else `sonnet`, which the presets give to every role but the architect and developer (Amendment 148). */
 export function tierOf(persona: Persona | undefined): ModelTier {
   const m = persona?.model;
   return TIERS.find((t) => t === m) ?? 'sonnet';
@@ -36,7 +36,8 @@ export function tierOf(persona: Persona | undefined): ModelTier {
 
 /**
  * The roles listed unless you change them: developer, validator, reviewer and scribe, each on
- * the tier its persona asks for (sonnet, sonnet, opus, sonnet, as the full pipeline has them).
+ * the tier its persona asks for (opus, sonnet, sonnet, sonnet, as the full pipeline has them since
+ * Amendment 148).
  */
 export function defaultListed(personas?: readonly Persona[]): ListedRole[] {
   const all = personas ?? BUILT_IN_PERSONAS;

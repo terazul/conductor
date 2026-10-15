@@ -207,7 +207,14 @@ export function describeAutonomy(a: Autonomy): string {
             : 'asks before changing anything',
   );
   // Under bypass nothing asks, whatever the tool lists say (Amendment 65).
-  bits.push(a.allowedTools.includes('Bash') || a.mode === 'bypassPermissions' ? 'runs shell unattended' : 'asks before shell');
+  bits.push(
+    a.allowedTools.includes('Bash') || a.mode === 'bypassPermissions'
+      ? 'runs shell unattended'
+      : // A reading role's read-only commands (Amendment 148).
+        a.allowedTools.some((t) => t.startsWith('Bash('))
+        ? 'runs some shell commands unattended, asks before the rest'
+        : 'asks before shell',
+  );
   if (a.disallowedTools.length > 0) bits.push(`${a.disallowedTools.length} deny rule(s)`);
   if (a.effort) bits.push(`${a.effort} effort`);
   if (a.budgetUsd !== null) bits.push(`budget $${a.budgetUsd} a day`);

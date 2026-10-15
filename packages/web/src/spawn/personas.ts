@@ -106,7 +106,8 @@ export const BUILT_IN_PERSONAS: readonly Persona[] = [
    * The other six (Amendment 126): a system prompt each, since it is the one field every stack
    * takes from the persona (a preset keeps its own brief). Each is a line of purpose, a few
    * rules about HOW rather than what, and the headings it closes with. The limits that are
-   * only words stay words: tests only, docs only. The tools and the tiers are as they were.
+   * only words stay words: tests only, docs only. The tools are as they were. The tiers changed
+   * in Amendment 148: the developer is on opus with the architect, every other role on sonnet.
    */
   base({
     id: 'developer',
@@ -127,7 +128,7 @@ export const BUILT_IN_PERSONAS: readonly Persona[] = [
       '',
       endWith('**Changed** (each file, one line), **How I checked** (commands and results), **Departures from the plan**, **Left undone**'),
     ].join('\n'),
-    model: 'sonnet',
+    model: 'opus',
     tools: {},
   }),
   base({
@@ -169,7 +170,7 @@ export const BUILT_IN_PERSONAS: readonly Persona[] = [
       '',
       endWith('**Verdict** (approve, approve with fixes, or changes needed), **Findings** (ranked), **What I checked**'),
     ].join('\n'),
-    model: 'opus',
+    model: 'sonnet',
     tools: { write: false },
   }),
   base({
@@ -212,7 +213,7 @@ export const BUILT_IN_PERSONAS: readonly Persona[] = [
       '',
       endWith('**Symptom**, **Reproduction**, **Root cause** (file and line), **Evidence**, **Fix belongs at**, **Regression test** (what it should assert), **Confidence**'),
     ].join('\n'),
-    model: 'opus',
+    model: 'sonnet',
     tools: { write: false },
   }),
   base({
@@ -231,7 +232,7 @@ export const BUILT_IN_PERSONAS: readonly Persona[] = [
       '',
       endWith('**Overview** (a paragraph), **Map** (the modules and how they connect), **Flows** (the two to four that matter, step by step), **Decisions encoded**, **Open questions**, **Not read**'),
     ].join('\n'),
-    model: 'opus',
+    model: 'sonnet',
     tools: { write: false },
   }),
 ];
