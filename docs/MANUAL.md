@@ -418,6 +418,16 @@ The job's budget is the sum of its agents' budgets, so each helper adds one agen
 works as an agent's does: Needs You warns when the job passes it, and agents still to start
 are held only at its ceiling, twice it unless Settings says otherwise (§6).
 
+**A new task clears the last one's helpers.** When you send a finished orchestrator a message
+(typed, scheduled, or queued for when it's done), the helpers of its last task are removed first,
+as **Remove** removes one, so their lanes leave the job. That happens only when every one of them
+has ended and the orchestrator has already been told what each did: their whole conversations are
+in its own transcript. One still going, one with a message of yours waiting, or one with a shell
+of yours still running keeps them all. The orchestrator's helper count and send-backs start again
+from nothing, so a new task can use its whole allowance and the lane names (`developer-api`) are
+free again. The project's spend keeps what they spent; the job's budget, as after any Remove,
+counts only the agents it still has.
+
 **An orchestrated pipeline.** The other presets fix the order before you launch and have each
 agent judge its own work and hand it on (`hand_off`). **orchestrated pipeline** is the other
 kind: one agent, the **orchestrator** (the architect persona, on opus), decides the order while

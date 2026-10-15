@@ -159,6 +159,7 @@ import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@con
 import { rerunNote, rerunStatusNote } from './rerun.js';
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
+import { deleteScheduled, insertScheduled } from './schedule.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
 /*
@@ -3071,6 +3072,38 @@ async function main(): Promise<void> {
     woke?.finish({ cost: 0, reason: 'completed' });
     check('its next turn ends done: nothing left to hear from', await until(() => getAgent(db, 'agt_orch')?.status === 'done'));
     check('the job holds all three agents, and its cap counts each', agentsForJob(db, 'job_orch').filter((a) => a.id !== 'agt_plain').length === 3);
+
+    // ── Amendment 167: a new task from you removes the helpers of the last one, once they have all finished ──
+    const helperIds = helpers.map((h) => h.id);
+    const stillThere = () => helperIds.every((id) => getAgent(db, id) !== undefined);
+    const wake167 = async (text: string, synthetic: boolean) => {
+      const n = runs.length;
+      sup.sendMessage('agt_orch', text, synthetic);
+      await until(() => runs.length === n + 1);
+      runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
+      await until(() => getAgent(db, 'agt_orch')?.status === 'done');
+    };
+    await wake167('a nudge of ours', true);
+    check('a message of ours (synthetic) is not a new task: the helpers stay', stillThere());
+    const later = insertScheduled(db, helperIds[0]!, new Date(Date.now() + 3_600_000).toISOString(), 'one more thing');
+    await wake167('the next task', false);
+    check('nor while one has a message of yours waiting to be sent', stillThere());
+    deleteScheduled(db, later.id);
+    const eyes167 = await connect();
+    await settle(); // subscribed before the message, as an HTTP round-trip would have given it
+    await wake167('and the task after', false);
+    check('all ended and reported, a message of yours removes them', helperIds.every((id) => getAgent(db, id) === undefined) && helpersOf(db, 'agt_orch').length === 0);
+    check('and only them: the orchestrator and the job’s other agent stay', getAgent(db, 'agt_orch') !== undefined && getAgent(db, 'agt_plain') !== undefined);
+    await settle();
+    check('every browser is told to resync', eyes167.frames.some((f) => f.type === 'resync'), eyes167.frames.map((f) => f.type).join(','));
+    const again = said(await mcp('agt_orch', 'tools/call', { name: 'start_helper', arguments: { task: 'Build the next API.', name: 'API' } }));
+    check('its cap counts from nothing again, and the lane name is free', !again.isError && /^Started builder-api\./.test(again.text), again.text);
+    const fresh = helpersOf(db, 'agt_orch')[0];
+    const n167 = runs.length;
+    sup.sendMessage('agt_orch', 'while it works', false);
+    await until(() => runs.length > n167);
+    check('one not yet ended keeps them all', fresh !== undefined && getAgent(db, fresh.id) !== undefined && helpersOf(db, 'agt_orch').length === 1);
+    eyes167.close();
     const badHelpers = await send('POST', '/api/jobs', { projectId: pid, prompt: 'x', isolation: 'in_place', agents: [{ role: 'builder', model: OPUS, helpers: 9, autonomy: DEFAULT_AUTONOMY }] });
     check('a job asking for more than 8 helpers → 400', badHelpers.status === 400);
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
