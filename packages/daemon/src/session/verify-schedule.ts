@@ -1,7 +1,7 @@
 /**
  * Validator checks for Amendment 111: pause everything until a time, and send a message
  * to an agent at a time. §8 is Amendment 157's: a message queued until the agent is done.
- * §9 is Amendment 158's: a message due with every slot taken waits for one.
+ * §9 is Amendment 167's: a message due with every slot taken waits for one.
  *
  * No agent reaches the real SDK: `sdk.query` is swapped for a fake for the whole run, as
  * in session/verify.ts, so a launch is a count in `runs`. Jobs and agents are inserted
@@ -483,7 +483,7 @@ async function main(): Promise<void> {
   check('the pause ends: it goes', await until(() => said(runs.at(-1), 'after the pause')) && queuedFor('agt_q').length === 0, JSON.stringify(runs.at(-1)?.prompts));
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n9 · a message due with every slot taken waits for one (Amendment 158)');
+  console.log('\n9 · a message due with every slot taken waits for one (Amendment 167)');
   for (const r of runs) r.finish();
   await until(() => sup.slots.used === 0);
   const limitWas = slotLimit();
@@ -526,8 +526,8 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 157) messages queued until the agent is done, one per done turn; and (Amendment 158) a message due with every slot taken waits for one.\n`
-      : `\nAmendment 111/157/158 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
+      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 157) messages queued until the agent is done, one per done turn; and (Amendment 167) a message due with every slot taken waits for one.\n`
+      : `\nAmendment 111/157/167 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
 }

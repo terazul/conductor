@@ -16,7 +16,7 @@
  *     (`nextWhenDone`), so several go one per turn, in order. A question it stops on, a
  *     failure or a pause aren't `done`, so it keeps waiting through them; while everything is
  *     paused it waits for the pause to end. It survives a restart, and goes at the next `done`.
- *   - **Wait for a slot** (Amendment 158). Not one you make: a message sent while every slot is
+ *   - **Wait for a slot** (Amendment 167). Not one you make: a message sent while every slot is
  *     taken — from the composer, a time, a `done` — becomes a `trigger = 'slot'` row, and its
  *     agent `queued`. `Supervisor.pump` sends the oldest one when it gives the agent a slot
  *     (`nextForSlot`), so it survives a restart too. Cancelling it puts the agent back.
@@ -87,7 +87,7 @@ interface Row {
   text: string;
   created_at: string;
   error: string | null;
-  /** 1 for a message of Conductor's, shown as `auto` when it goes (255, Amendment 158). */
+  /** 1 for a message of Conductor's, shown as `auto` when it goes (255, Amendment 167). */
   synthetic: number;
 }
 
@@ -163,7 +163,7 @@ export function getScheduled(db: Db, id: string): ScheduledMessage | null {
 }
 
 /**
- * The oldest message waiting for a slot for this agent, or null (Amendment 158): sent by
+ * The oldest message waiting for a slot for this agent, or null (Amendment 167): sent by
  * `Supervisor.pump` when it gives the agent one. `synthetic` is whether it is Conductor's. In the
  * order sent: two in one millisecond go by `rowid`, as the id is random.
  */

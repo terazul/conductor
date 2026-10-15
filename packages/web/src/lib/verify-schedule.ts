@@ -130,7 +130,7 @@ console.log('\n5 · a message queued until the agent is done (Amendment 157)');
   check('the list shows it as "when done", with what it waits on', /m\.trigger === 'done' \? '⏲ when done'/.test(list) && /whenDoneWaits\(status, m\.id === firstDone\)/.test(list));
 }
 
-console.log('\n6 · a message that waits for a slot (Amendment 158)');
+console.log('\n6 · a message that waits for a slot (Amendment 167)');
 {
   check('sent with every slot taken, the notice says it waits for one', sentText({ ok: true, delivery: 'queued' }) === SLOT_WAIT_TEXT && /slot/.test(SLOT_WAIT_TEXT));
   check('sent or resumed, it says nothing new', sentText({ ok: true, delivery: 'resumed' }) === '' && sentText({ ok: true, delivery: 'sent' }, 'sent') === 'sent');
@@ -145,7 +145,7 @@ console.log('\n6 · a message that waits for a slot (Amendment 158)');
 
 console.log(
   failures === 0
-    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer; and (Amendment 157) "⏲ when done"; and (Amendment 158) "⏲ waiting for a slot".'
+    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer; and (Amendment 157) "⏲ when done"; and (Amendment 167) "⏲ waiting for a slot".'
     : `\nAmendment 111 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

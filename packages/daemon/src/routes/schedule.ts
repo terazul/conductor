@@ -12,7 +12,7 @@
  * time, and is sent by the supervisor then. Refused for an agent that is already done or was
  * stopped, since no turn of its would end to send it: send it now instead.
  *
- * `trigger: 'slot'` (Amendment 158) is never made here: the supervisor writes one for a message
+ * `trigger: 'slot'` (Amendment 167) is never made here: the supervisor writes one for a message
  * sent while every slot is taken. Deleting one is cancelling it, and an agent queued only for it
  * goes back to what it was (`Supervisor.slotMessageCancelled`).
  *
@@ -60,7 +60,7 @@ export default async function scheduleRoutes(app: FastifyInstance): Promise<void
         if (agent.status === 'done') return fail(reply, 400, 'it has already finished its turn: send the message now');
         if (agent.status === 'stopped') return fail(reply, 400, 'it was stopped, so no turn of its will end: send the message now');
       } else if (trigger !== 'at') {
-        // 'slot' is the supervisor's, for a message sent with every slot taken (Amendment 158).
+        // 'slot' is the supervisor's, for a message sent with every slot taken (Amendment 167).
         return fail(reply, 400, `trigger is 'at' or 'done'`);
       } else {
         const why = timeProblem(body.at);

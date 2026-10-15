@@ -2232,7 +2232,7 @@ async function main(): Promise<void> {
   await until(() => sup.slots.used === 0);
 
   /*
-   * A message to an idle agent with every slot taken (Amendment 158). It used to start the
+   * A message to an idle agent with every slot taken (Amendment 167). It used to start the
    * agent at once, one over the limit. It waits for a slot now, as a 'slot' row the file keeps,
    * and goes when one frees — held or not: the fleet hold never applied to your own message.
    * Held here, so nothing but these messages starts, and nothing is paused: nothing works yet.
@@ -2254,7 +2254,7 @@ async function main(): Promise<void> {
   const secondSent = await send<{ delivery?: string }>('POST', '/api/agents/agt_replied/message', { text: 'and then the CHANGELOG' });
   await settle(100);
   check(
-    'with every slot taken, a message to an idle agent starts nothing: the live count does not rise (Amendment 158)',
+    'with every slot taken, a message to an idle agent starts nothing: the live count does not rise (Amendment 167)',
     firstSent.status === 200 && runs.length === fullRuns && sup.slots.used === slotLimit(),
     `${firstSent.status}, ${runs.length - fullRuns} new run(s), ${sup.slots.used} of ${slotLimit()}`,
   );
@@ -2344,7 +2344,7 @@ async function main(): Promise<void> {
   job('job_limit', null);
   const limitRuns = runs.length;
   // Through the queue, the way launches are scheduled. (A reply to an idle agent waits for
-  // a slot the same way since Amendment 158; it used to start at once, over the limit.)
+  // a slot the same way since Amendment 167; it used to start at once, over the limit.)
   for (let i = 0; i < 3; i += 1) {
     fixture(`agt_lim_${i}`, 'job_limit', { status: 'queued', sdkSessionId: `sess_lim_${i}`, autonomy: DEFAULT_AUTONOMY });
   }
@@ -2370,7 +2370,7 @@ async function main(): Promise<void> {
    * A decision that lands while the agent's run is still unwinding is relaunched when the run
    * lets go (`#resumeWanted`). The run gives its own slot back first, so every slot is taken
    * then only when the limit came down while it ran: it waits, queued, and goes once a slot
-   * frees, rather than starting one over (Amendment 158).
+   * frees, rather than starting one over (Amendment 167).
    */
   await setSlots('2');
   job('job_unwind', null);
@@ -2387,7 +2387,7 @@ async function main(): Promise<void> {
   unwound?.finish({ cost: 0, reason: 'completed' });
   await settle(150);
   check(
-    'a decision that landed while its run unwound, every slot taken by then: no second run, and the live count does not rise (Amendment 158)',
+    'a decision that landed while its run unwound, every slot taken by then: no second run, and the live count does not rise (Amendment 167)',
     runs.length === unwindAt + 2 && sup.slots.used === 1,
     `${runs.length - unwindAt - 2} new run(s), ${sup.slots.used} of ${slotLimit()}`,
   );
@@ -5335,31 +5335,31 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
 
     /*
-     * Asked with every slot taken (Amendment 158). Its own run gives its slot back first, so that is
+     * Asked with every slot taken (Amendment 167). Its own run gives its slot back first, so that is
      * when the limit came down while it ran: the ask waits for a slot, as your message would, and
      * goes in its session, as auto, once. A pause of everything holds it, being ours.
      */
     await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '2' } });
-    hjobRow('job_handoff158');
-    hjobRow('job_handoff158_busy');
-    hfix('hs_a', 'job_handoff158', { role: 'analyst', status: 'working', sdkSessionId: 'sess_hs_a', autonomy: DEFAULT_AUTONOMY });
-    hfix('hs_b', 'job_handoff158', { role: 'developer', status: 'queued', dependsOn: ['hs_a'], autonomy: DEFAULT_AUTONOMY });
-    hfix('hs_busy', 'job_handoff158_busy', { role: 'builder', sdkSessionId: 'sess_hs_busy', autonomy: DEFAULT_AUTONOMY });
-    const at158 = runs.length;
+    hjobRow('job_handoff167');
+    hjobRow('job_handoff167_busy');
+    hfix('hs_a', 'job_handoff167', { role: 'analyst', status: 'working', sdkSessionId: 'sess_hs_a', autonomy: DEFAULT_AUTONOMY });
+    hfix('hs_b', 'job_handoff167', { role: 'developer', status: 'queued', dependsOn: ['hs_a'], autonomy: DEFAULT_AUTONOMY });
+    hfix('hs_busy', 'job_handoff167_busy', { role: 'builder', sdkSessionId: 'sess_hs_busy', autonomy: DEFAULT_AUTONOMY });
+    const at167 = runs.length;
     sup.reconcile();
     sup.pump();
-    await until(() => runs.slice(at158).some((r) => r.options.resume === 'sess_hs_a'));
-    const hs1 = runs.slice(at158).find((r) => r.options.resume === 'sess_hs_a')!;
+    await until(() => runs.slice(at167).some((r) => r.options.resume === 'sess_hs_a'));
+    const hs1 = runs.slice(at167).find((r) => r.options.resume === 'sess_hs_a')!;
     await send('POST', '/api/agents/hs_busy/message', { text: 'keep busy' });
     await until(() => sup.slots.used === 2);
     await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '1' } });
-    const before158 = runs.length;
+    const before167 = runs.length;
     hs1.finish({ cost: 0, reason: 'completed' });
     await settle(150);
     check(
-      'the restarted agent ends its turn without hand_off with every slot taken: the ask starts nothing, and the live count does not rise (Amendment 158)',
-      runs.length === before158 && sup.slots.used === 1,
-      `${runs.length - before158} new run(s), ${sup.slots.used} of ${slotLimit()}`,
+      'the restarted agent ends its turn without hand_off with every slot taken: the ask starts nothing, and the live count does not rise (Amendment 167)',
+      runs.length === before167 && sup.slots.used === 1,
+      `${runs.length - before167} new run(s), ${sup.slots.used} of ${slotLimit()}`,
     );
     const askRows = () => listScheduled(db).filter((m) => m.agentId === 'hs_a');
     const askRow = nextForSlot(db, 'hs_a');
@@ -5378,13 +5378,13 @@ async function main(): Promise<void> {
     await settle(150);
     check(
       'with everything paused, a freed slot does not send it',
-      sup.slots.used === 0 && !runs.slice(before158).some((r) => r.options.resume === 'sess_hs_a') && askRows().length === 1 && getAgent(db, 'hs_a')?.status === 'queued',
+      sup.slots.used === 0 && !runs.slice(before167).some((r) => r.options.resume === 'sess_hs_a') && askRows().length === 1 && getAgent(db, 'hs_a')?.status === 'queued',
       `${sup.slots.used} running, ${getAgent(db, 'hs_a')?.status}`,
     );
     setAgentStatus(db, 'hs_busy', 'done'); // so the release wakes only the ask, not the busy one too
     sup.release();
-    check('the pause over, it goes, in its own session', await until(() => runs.slice(before158).some((r) => r.options.resume === 'sess_hs_a')));
-    const hs2 = runs.slice(before158).find((r) => r.options.resume === 'sess_hs_a')!;
+    check('the pause over, it goes, in its own session', await until(() => runs.slice(before167).some((r) => r.options.resume === 'sess_hs_a')));
+    const hs2 = runs.slice(before167).find((r) => r.options.resume === 'sess_hs_a')!;
     await until(() => hs2.prompts.length > 0);
     const hsSaid = userTexts('hs_a').filter((p) => p.text === HANDOFF_ASK);
     check('told to hand off, shown as auto, once', hs2.prompts[0] === HANDOFF_ASK && hsSaid.length === 1 && hsSaid[0]?.synthetic === true && askRows().length === 0, JSON.stringify(hsSaid));
@@ -5392,7 +5392,7 @@ async function main(): Promise<void> {
     hs2.finish({ cost: 0, reason: 'completed' });
     check('ending that turn without it as well: it is held, as before', await until(() => getAgent(db, 'hs_a')?.status === 'done' && getHandoff(db, 'hs_a').held));
     await settle(150);
-    check('asked once: no third run of it', runs.slice(at158).filter((r) => r.options.resume === 'sess_hs_a').length === 2, `${runs.slice(at158).filter((r) => r.options.resume === 'sess_hs_a').length} run(s)`);
+    check('asked once: no third run of it', runs.slice(at167).filter((r) => r.options.resume === 'sess_hs_a').length === 2, `${runs.slice(at167).filter((r) => r.options.resume === 'sess_hs_a').length} run(s)`);
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: null } });

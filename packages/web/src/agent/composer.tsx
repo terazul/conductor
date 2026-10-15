@@ -274,7 +274,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const submit = async () => {
     const body = text.trim();
     if (body.length === 0) return;
-    // Every slot taken (Amendment 158): it waits for one, and the notice says so.
+    // Every slot taken (Amendment 167): it waits for one, and the notice says so.
     const ok = await send.run('Sending a message', () => sendMessage(agent.id, { text: body }), (r) => sentText(r));
     // Only clear the box on success — a 404 must not eat what you wrote.
     if (ok) setText('');

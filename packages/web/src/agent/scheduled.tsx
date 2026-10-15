@@ -11,7 +11,7 @@
  * time, and what it is waiting for: this turn to end, or, while the agent is stopped on a
  * question, a failure or a pause, that it is waiting through it. Several go one per turn.
  *
- * One you sent while every slot was taken (Amendment 158) says **⏲ waiting for a slot**: the
+ * One you sent while every slot was taken (Amendment 167) says **⏲ waiting for a slot**: the
  * daemon made it, it goes when a slot frees, and cancelling it puts the agent back.
  */
 
@@ -63,7 +63,7 @@ export function whenDoneWaits(status: AgentStatus | undefined, first: boolean): 
 }
 
 /**
- * What a message waiting for a slot is waiting for (Amendment 158). `first` is the next to go;
+ * What a message waiting for a slot is waiting for (Amendment 167). `first` is the next to go;
  * the ones behind it go one per turn after it.
  */
 export function slotWaits(status: AgentStatus | undefined, first: boolean): string {

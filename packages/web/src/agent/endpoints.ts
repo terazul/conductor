@@ -39,7 +39,7 @@ export function sendMessage(agentId: string, body: SendMessageRequest): Promise<
   return api(agentPath(agentId, 'message'), { method: 'POST', body });
 }
 
-/** What a message sent while every slot was taken says (Amendment 158). */
+/** What a message sent while every slot was taken says (Amendment 167). */
 export const SLOT_WAIT_TEXT = 'Waiting for a slot: it goes when one frees.';
 
 /** The notice for a sent message: the slot wait when it waits, else `otherwise`. */

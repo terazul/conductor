@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 158 — post-merge, applied. **A message sent with every slot taken waits for a slot, in the database, and goes in the first one that frees.**
+### Amendment 167 — post-merge, applied. **A message sent with every slot taken waits for a slot, in the database, and goes in the first one that frees.**
 
 Daemon (`db/migrations/255_scheduled_synthetic.sql` new, `session/schedule.ts`, `session/supervisor.ts`,
 `routes/schedule.ts`, `session/verify.ts`, `session/verify-schedule.ts`), shared (`wire.ts`), web

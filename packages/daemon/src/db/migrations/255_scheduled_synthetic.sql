@@ -1,4 +1,4 @@
--- 255_scheduled_synthetic — Track A. A message waiting for a slot keeps whether it was ours (Amendment 158).
+-- 255_scheduled_synthetic — Track A. A message waiting for a slot keeps whether it was ours (Amendment 167).
 --
 -- APPEND-ONLY. Once applied, never edited (db/index.ts records it by name).
 --
