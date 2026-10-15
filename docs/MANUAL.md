@@ -709,13 +709,27 @@ start once its turn ends, and are told that summary first, above the whole conve
 are given. The last agent in a chain has nobody to hand off to: it has no tool, and finishes
 **done** as before.
 
+**A summary short of its headings is kept, and the agent is told.** The headings are the ones in
+bold on the "End with:" line of the system prompt the agent was launched with (a built-in's are
+in the table under "Choose who works on it"; an edited persona's are its own). Each must open a line
+of the summary: as a Markdown heading (`## Plan`), in bold or italic (`**Plan**`, `- **Plan:**`),
+or plain with a colon or on a line of its own (`Plan:`). The same word opening a sentence
+("Plan to …") or inside one doesn't count, nor does another name for it (**Departures** for
+**Departures from the plan**). If one is missing, the summary is still saved and the agents after
+it still start with it, but `hand_off` answers *Handed off, but your summary has no heading for
+Plan. It is saved …* and asks the agent to call it again with the whole summary, which replaces
+the first. A prompt with no "End with:" line, or nothing bold on it, has no headings, and nothing
+is checked.
+
 If its turn ends **without** calling it, nothing after it starts. It stays **done**, and Needs
 You shows **Not handed off**: *architect stopped without handing off, so the agents after it
 have not started*, with the agents waiting listed.
 
 - **hand off** opens the summary for editing, filled in with the agent's last reply. Change it
   to say what the next agents need, and **hand off with this** sends exactly that text; they
-  start. Putting it away (**dismiss**) leaves them waiting.
+  start. Putting it away (**dismiss**) leaves them waiting. If what is in the box has no
+  heading for one of the agent's headings, the box says so under it (*missing: Plan*); it is a
+  warning, and **hand off with this** still sends it.
 - **Reply to it instead**, in the box on the card: the agent works again, and hands off when
   it is done.
 - The hold is kept if the daemon restarts. The job stays working while one is held.

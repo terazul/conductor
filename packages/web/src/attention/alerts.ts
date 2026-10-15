@@ -8,7 +8,7 @@
  * when someone clicks it, which is the worst moment to find out.
  */
 
-import { HANDOFF_SUMMARY_MAX, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
+import { HANDOFF_SUMMARY_MAX, missingHeadings, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
@@ -289,6 +289,17 @@ export function handOffProblem(summary: string): string | null {
     return `${n.toLocaleString('en')} characters; the most a hand-off takes is ${HANDOFF_SUMMARY_MAX.toLocaleString('en')}.`;
   }
   return null;
+}
+
+/**
+ * What the card warns of: "missing: …", the closing headings the agent's persona
+ * asks for that the summary has none of, or null when it has them all, is empty, or the agent has
+ * none. Only a warning: the summary can be sent without them, as the daemon takes it.
+ */
+export function handOffMissing(summary: string, agent: Pick<Agent, 'closingHeadings'>): string | null {
+  if (summary.trim() === '') return null;
+  const missing = missingHeadings(summary, agent.closingHeadings ?? []);
+  return missing.length > 0 ? `missing: ${missing.join(', ')}` : null;
 }
 
 /**

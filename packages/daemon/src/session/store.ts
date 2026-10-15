@@ -26,7 +26,7 @@ import type {
   ProjectSpend,
   Question,
 } from '@conductor/shared';
-import { helperSlug } from '@conductor/shared';
+import { closingHeadingsOf, helperSlug } from '@conductor/shared';
 import { row, rows, type Db } from '../db/index.js';
 
 export const nowIso = (): string => new Date().toISOString();
@@ -406,6 +406,12 @@ export const DEFAULT_AUTONOMY: Autonomy = {
   budgetUsd: null,
 };
 
+/** The headings an agent's hand-off closes with, as the wire carries them: only when there are some. */
+function closingHeadingsField(systemPrompt: string | null | undefined): Pick<Agent, 'closingHeadings'> {
+  const headings = closingHeadingsOf(systemPrompt);
+  return headings.length > 0 ? { closingHeadings: headings } : {};
+}
+
 const toAgent = (r: AgentRow, day: string): Agent => ({
   id: r.id,
   jobId: r.job_id,
@@ -433,6 +439,8 @@ const toAgent = (r: AgentRow, day: string): Agent => ({
   ...(r.status === 'done' && r.handoff_held === 1 ? { handoffHeld: true } : {}),
   // Only on the orchestrator of an orchestrated stack (Amendment 128): the ids, nothing of the roles' prompts.
   ...pipelineRolesField(r.helper_roles),
+  // Only when its system prompt names some: the prompt stays on the row.
+  ...closingHeadingsField(r.system_prompt),
   // What it spent today, stamped with the day, which is what its budget is read against (Amendment 129).
   spentToday: { day, usd: r.spent_usd ?? 0, tokens: r.spent_tokens ?? 0 },
 });
@@ -695,6 +703,7 @@ export function insertAgent(
     ...(a.parentId ? { parentId: a.parentId } : {}),
     ...(a.provider && a.provider !== 'claude' ? { provider: a.provider } : {}),
     ...(a.helperRoles?.length ? { pipelineRoles: a.helperRoles.map((r) => r.id) } : {}),
+    ...closingHeadingsField(a.systemPrompt),
     // A new agent has spent nothing today (Amendment 129).
     spentToday: { day: localDay(), usd: 0, tokens: 0 },
   };

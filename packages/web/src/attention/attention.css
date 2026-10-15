@@ -368,6 +368,11 @@
   font-size: var(--fs-md);
   color: var(--fail);
 }
+/* A warning, not a refusal: the summary can still be sent. */
+.atn-handoff-missing {
+  font-size: var(--fs-md);
+  color: var(--need);
+}
 .atn-handoff-hint {
   font-size: var(--fs-md);
   color: var(--ink3);

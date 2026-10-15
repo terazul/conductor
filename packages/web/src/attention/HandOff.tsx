@@ -10,7 +10,8 @@
  *  - **reply**, a box of its own: say something to the agent and it works again, and hands
  *    off when it is done.
  *
- * What the choices are, and what a summary may be, is in ./alerts.ts, where it is checked.
+ * What the choices are, and what a summary may be, is in ./alerts.ts, where it is checked. A
+ * summary short of the agent's closing headings says "missing: …" and can still be sent.
  * The card is not removed when a send is accepted: the daemon clears the alert once the
  * agent has handed off or is working, so a refusal stays on screen, with its reason.
  */
@@ -19,7 +20,7 @@ import { useState } from 'react';
 import type { Agent } from '@conductor/shared';
 import { sendMessage, type CommandHandle } from '../agent/endpoints.js';
 import { useAgentEvents } from '../lib/store.js';
-import { handOff, handOffDraft, handOffProblem } from './alerts.js';
+import { handOff, handOffDraft, handOffMissing, handOffProblem } from './alerts.js';
 
 export interface HandOffPanelProps {
   agent: Agent;
@@ -38,6 +39,7 @@ export function HandOffPanel({ agent, editing, onClose, cmd }: HandOffPanelProps
   const [reply, setReply] = useState('');
   const summary = edited ?? suggested;
   const problem = handOffProblem(summary);
+  const missing = handOffMissing(summary, agent);
   const busy = cmd.busy;
 
   const sendSummary = () => {
@@ -79,6 +81,7 @@ export function HandOffPanel({ agent, editing, onClose, cmd }: HandOffPanelProps
               cancel
             </button>
             {problem !== null && summary !== '' && <span className="atn-handoff-problem">{problem}</span>}
+            {problem === null && missing !== null && <span className="atn-handoff-missing">{missing}</span>}
           </div>
           <div className="atn-handoff-hint">
             It starts as {agent.role}’s last reply. It goes above the whole conversation, which they are given as well.

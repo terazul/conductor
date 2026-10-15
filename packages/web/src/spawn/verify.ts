@@ -20,7 +20,7 @@
  * denied and nothing is auto-approved.
  */
 
-import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, helperModel, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
+import { MODEL_NICKNAMES, PIPELINE_HELPERS_MAX, closingHeadingsOf, helperModel, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, pipelineHelperCap, readOnlyRefusal, showsOrchestrator, type Agent, type AgentSpec, type BranchInfo, type ModelCatalog } from '@conductor/shared';
 import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptions, jobEngine, parseCap, rewirePreview, waitOptions, type AddDraft } from './stack.js';
 import {
   DEFAULT_BUDGET_USD,
@@ -1163,6 +1163,23 @@ console.log('\n20 · better instructions for the built-in roles (Amendment 126)'
     BUILT_IN_PERSONAS.every((p) => p.systemPrompt.length > 600 && p.systemPrompt.length < 3_000),
     BUILT_IN_PERSONAS.map((p) => `${p.id} ${p.systemPrompt.length}`).join(', '),
   );
+
+  // The daemon reads those headings back from the system prompt a spec carries (closingHeadingsOf).
+  check(
+    'the headings read from each prompt are those, and only those',
+    ids.every((id) => closingHeadingsOf(personaFor(BUILT_IN_PERSONAS, id)!.systemPrompt).join('|') === HEADINGS[id]!.join('|')),
+    ids.map((id) => `${id}: ${closingHeadingsOf(personaFor(BUILT_IN_PERSONAS, id)!.systemPrompt).join('|')}`).join('; '),
+  );
+  const launched = toAgentSpecs(presetById('full'), defaultPills(), null, undefined, {}, {}, {}, undefined, personasFrom(null));
+  check(
+    "a launched role's spec carries its persona's headings",
+    launched.length > 1 && launched.every((s) => s.persona !== undefined && closingHeadingsOf(s.systemPrompt).join('|') === HEADINGS[s.persona]!.join('|')),
+    launched.map((s) => `${s.role}: ${closingHeadingsOf(s.systemPrompt).join('|')}`).join('; '),
+  );
+  const ownEnd = personasFrom(withPersona(null, { ...personaFor(BUILT_IN_PERSONAS, 'developer')!, systemPrompt: 'Be brief.\nEnd with: **Diff**, **Tests**.' }));
+  const ownNone = personasFrom(withPersona(null, { ...personaFor(BUILT_IN_PERSONAS, 'developer')!, systemPrompt: 'Be brief.' }));
+  const devOf = (ps: ReturnType<typeof personasFrom>): AgentSpec | undefined => toAgentSpecs(presetById('full'), defaultPills(), null, undefined, {}, {}, {}, undefined, ps).find((s) => s.role === 'developer');
+  check('an edited prompt brings its own headings, and one with no "End with:" line brings none', closingHeadingsOf(devOf(ownEnd)?.systemPrompt).join('|') === 'Diff|Tests' && closingHeadingsOf(devOf(ownNone)?.systemPrompt).length === 0);
 
   // The architect keeps what it had, plus one rule; its old rule about "your last reply" went with Amendment 101 and 104.
   const arch = personaFor(BUILT_IN_PERSONAS, 'architect')!;

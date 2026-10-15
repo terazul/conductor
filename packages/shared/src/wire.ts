@@ -139,6 +139,13 @@ export interface Agent {
    */
   pipelineRoles?: string[];
   /**
+   * Amendment 166. The headings its hand-off closes with, read from the system prompt it was
+   * launched with (`closingHeadingsOf`): what `hand_off` checks its summary for, and what the
+   * hand-off card in Needs You checks a person's draft for. Present only when there are some,
+   * so every other agent's shape is what it was. The prompt itself stays off the wire.
+   */
+  closingHeadings?: string[];
+  /**
    * Amendment 129. What the agent has spent TODAY, stamped with the day it is for: the figure
    * its budget (`autonomy.budgetUsd` or `budgetTokens`) is read against. `costUsd` stays the
    * agent's lifetime spend and is no longer what the budget counts. `agentBudget` (budget.ts)
