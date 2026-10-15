@@ -376,7 +376,7 @@ function FileRows({
               <span className="sh-nav-label">{kid.name}</span>
             </button>
           );
-          // A file git lists only because it went has nothing on disk to rename or delete.
+          // A file git lists only because it was deleted has nothing on disk to rename or delete.
           return here ? (
             <div className="sh-nav-file" key={`f:${kid.path}`}>
               <div className="sh-nav-dirrow">
