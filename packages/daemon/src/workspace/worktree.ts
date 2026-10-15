@@ -102,6 +102,31 @@ export class LaunchBranchError extends Error {
 }
 
 /**
+ * The folder cannot take the isolation asked for: it is not a repository, or it has no commit
+ * to cut a worktree from. The request's to fix, so a 400 and not a 500 (Amendment 151). `name`
+ * stays `Error`: the supervisor puts `String(err)` into the sentence the person reads.
+ */
+export class RepoUnfitError extends Error {
+  readonly status = 400;
+}
+
+/**
+ * Whether `ref` is a commit-ish a request may cut a worktree from (Amendment 151): a ref name
+ * by git's rule (`check-ref-format --allow-onelevel`, so `HEAD` and `main` pass) or a sha. A
+ * leading `-` is refused first: `worktree add` would read it as an option.
+ */
+export async function baseRefProblem(cwd: string, ref: string): Promise<string | null> {
+  if (ref.startsWith('-')) return `"${ref}" is not a ref`;
+  try {
+    await git(cwd, ['check-ref-format', '--allow-onelevel', ref]);
+    return null;
+  } catch (err) {
+    if (err instanceof GitError && err.code === 1) return `"${ref}" is not a ref git accepts`;
+    throw err;
+  }
+}
+
+/**
  * Whether `name` is a branch name git accepts, by git's own rule (`check-ref-format
  * --branch`), or the sentence that says why not. The name must come back from git unchanged:
  * `--branch` also expands `@{-1}` to the previous branch's name, which is not a name anyone
@@ -178,7 +203,7 @@ export class WorktreeMgr {
     // demanding a repo there rejected the one mode that exists for scratch
     // directories — which is what the manual has always pointed people at.
     if (!inRepo && req.isolation !== 'in_place') {
-      throw new Error(`${repo} is not a git repository`);
+      throw new RepoUnfitError(`${repo} is not a git repository`);
     }
 
     // A path inside a repo is not the same thing as the repo root, and a worktree
@@ -234,7 +259,7 @@ export class WorktreeMgr {
       mkdirSync(join(root, WT_DIR), { recursive: true });
       const baseRef = req.baseRef ?? ((await hasHead(root)) ? 'HEAD' : null);
       if (!baseRef) {
-        throw new Error(
+        throw new RepoUnfitError(
           `${root} has no commits yet — commit once before cutting a worktree from it`,
         );
       }

@@ -1917,6 +1917,11 @@ export class Supervisor implements AgentControl {
     return this.#runners.get(agentId)?.isLive ?? false;
   }
 
+  /** A run in flight or a live session: `deleteProject`'s test, for one agent (Amendment 151). */
+  isBusy(agentId: string): boolean {
+    return this.#active.has(agentId) || this.isLive(agentId);
+  }
+
   async interrupt(agentId: string): Promise<void> {
     await this.#runners.get(agentId)?.interrupt();
   }
