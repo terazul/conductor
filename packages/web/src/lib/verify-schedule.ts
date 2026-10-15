@@ -112,7 +112,7 @@ console.log('\n4 · wired where it should be');
   check('--need is not used for it: a pause is not you being needed', !/--need/.test(ours.replace(/\/\*[\s\S]*?\*\//g, '')));
 }
 
-console.log('\n5 · a message queued until the agent is done (Amendment 155)');
+console.log('\n5 · a message queued until the agent is done (Amendment 157)');
 {
   check('offered while a turn can still end: working, queued, blocked, failed, paused', (['working', 'queued', 'blocked', 'failed', 'paused'] as const).every((s) => whenDoneRefusal(s) === null));
   check('not for one already done, or stopped: send it now', /send the message now/.test(whenDoneRefusal('done') ?? '') && /stopped/.test(whenDoneRefusal('stopped') ?? ''));
@@ -131,7 +131,7 @@ console.log('\n5 · a message queued until the agent is done (Amendment 155)');
 
 console.log(
   failures === 0
-    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer; and (Amendment 155) "⏲ when done".'
+    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer; and (Amendment 157) "⏲ when done".'
     : `\nAmendment 111 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

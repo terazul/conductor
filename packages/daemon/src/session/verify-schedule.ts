@@ -1,6 +1,6 @@
 /**
  * Validator checks for Amendment 111: pause everything until a time, and send a message
- * to an agent at a time. §8 is Amendment 155's: a message queued until the agent is done.
+ * to an agent at a time. §8 is Amendment 157's: a message queued until the agent is done.
  *
  * No agent reaches the real SDK: `sdk.query` is swapped for a fake for the whole run, as
  * in session/verify.ts, so a launch is a count in `runs`. Jobs and agents are inserted
@@ -339,7 +339,7 @@ async function main(): Promise<void> {
   check('removing the agent removes its messages', !listScheduled(db).some((m) => m.agentId === 'agt_unstarted'));
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n8 · a message queued until the agent is done (Amendment 155)');
+  console.log('\n8 · a message queued until the agent is done (Amendment 157)');
   for (const r of runs) r.finish();
   await until(() => sup.slots.used === 0);
   const whenDone = (id: string, text: string, trigger = 'done') =>
@@ -491,8 +491,8 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 155) messages queued until the agent is done, one per done turn.\n`
-      : `\nAmendment 111/155 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
+      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 157) messages queued until the agent is done, one per done turn.\n`
+      : `\nAmendment 111/157 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
 }

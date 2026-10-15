@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 155 — post-merge, applied. **A message can wait for the agent instead of a time: it goes when the agent's turn ends `done`, one per turn.**
+### Amendment 157 — post-merge, applied. **A message can wait for the agent instead of a time: it goes when the agent's turn ends `done`, one per turn.**
 
 Daemon (`db/migrations/250_scheduled_trigger.sql` new, `session/schedule.ts`, `routes/schedule.ts`,
 `session/supervisor.ts`, `session/verify-schedule.ts`), shared (`wire.ts`), web (`agent/endpoints.ts`,

@@ -1,4 +1,4 @@
--- 250_scheduled_trigger — Track A. A scheduled message waits for a time, or for its agent's turn (Amendment 155).
+-- 250_scheduled_trigger — Track A. A scheduled message waits for a time, or for its agent's turn (Amendment 157).
 --
 -- APPEND-ONLY. Once applied, never edited (db/index.ts records it by name).
 --

@@ -7,7 +7,7 @@
  * stays, in the failure colour, with the reason, until you clear it: it is never tried
  * again by itself.
  *
- * One queued for when the agent is done (Amendment 155) says **⏲ when done** instead of a
+ * One queued for when the agent is done (Amendment 157) says **⏲ when done** instead of a
  * time, and what it is waiting for: this turn to end, or, while the agent is stopped on a
  * question, a failure or a pause, that it is waiting through it. Several go one per turn.
  */
@@ -28,7 +28,7 @@ export function useAgentScheduled(agentId: string): ScheduledMessage[] {
 
 /**
  * Why "⏲ when done" is not offered for an agent at this status, or null when it is (Amendment
- * 155): one that is done or stopped has no turn left to end. The daemon refuses the same.
+ * 157): one that is done or stopped has no turn left to end. The daemon refuses the same.
  */
 export function whenDoneRefusal(status: AgentStatus): string | null {
   if (status === 'done') return 'It has finished its turn: send the message now';

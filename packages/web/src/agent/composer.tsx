@@ -297,7 +297,7 @@ export function Composer({ agent }: { agent: Agent }) {
     }
   };
 
-  // Send it when the agent is done (Amendment 155): the same text, once its turn ends as `done`.
+  // Send it when the agent is done (Amendment 157): the same text, once its turn ends as `done`.
   const doneRefused = whenDoneRefusal(agent.status);
   const whenDone = async () => {
     const body = text.trim();

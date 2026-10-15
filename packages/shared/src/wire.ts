@@ -829,7 +829,7 @@ export interface ProjectSpend {
 export const PAUSE_UNTIL_KEY = 'conductor.pauseUntil';
 
 /**
- * What sends a scheduled message (Amendment 155): its time; its agent's turn ending as `done`
+ * What sends a scheduled message (Amendment 157): its time; its agent's turn ending as `done`
  * (one per turn, oldest first; a question, a failure or a pause don't count); or, reserved for
  * wave 11 A2 and not written yet, a free slot.
  */
@@ -841,7 +841,7 @@ export interface ScheduledMessage {
   agentId: string;
   /** When to send it, ISO. Chosen in the browser's local time. For a `trigger` other than `at`, when it was made. */
   at: string;
-  /** What sends it (Amendment 155). `at` for every message made before there was a choice. */
+  /** What sends it (Amendment 157). `at` for every message made before there was a choice. */
   trigger: ScheduleTrigger;
   text: string;
   createdAt: string;
@@ -849,7 +849,7 @@ export interface ScheduledMessage {
   error: string | null;
 }
 
-/** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 155). */
+/** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 157). */
 export interface ScheduleMessageRequest {
   at?: string;
   /** Default `at`. `slot` is refused: nothing sends it yet. */

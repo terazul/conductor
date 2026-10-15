@@ -77,7 +77,7 @@ the last of it on 12 Oct).
   whether "done" means its turn or its whole job.
   *Decided (14 Oct): sent when the turn ends as `done`; a question doesn't count; it waits through
   `failed`/`paused`; one per turn; "done" means the turn, not the job.*
-  *Done 15 Oct: Amendment 155 (a `trigger` on scheduled messages, migration 250; the supervisor sends
+  *Done 15 Oct: Amendment 157 (a `trigger` on scheduled messages, migration 250; the supervisor sends
   the oldest `done` one as a turn settles done; **⏲ when done** in the composer and the list).*
 
 - [ ] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the

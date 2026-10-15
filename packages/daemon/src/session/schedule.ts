@@ -10,7 +10,7 @@
  *     the agent exactly as if you had pressed send then (`Supervisor.sendMessage`): into a
  *     live run, or resuming a finished one. Sent, the row is deleted: the transcript has it.
  *     While everything is paused, a message that comes due waits for the pause to end.
- *   - **Send a message when the agent is done** (Amendment 155). The same row, with
+ *   - **Send a message when the agent is done** (Amendment 157). The same row, with
  *     `trigger = 'done'` and no time of its own (`at` is when it was made). The clock never
  *     reads it: `Supervisor.#settle` sends the oldest one when the agent's turn ends as `done`
  *     (`nextWhenDone`), so several go one per turn, in order. A question it stops on, a
@@ -100,7 +100,7 @@ export function listScheduled(db: Db): ScheduledMessage[] {
   return rows<Row>(db.prepare('SELECT * FROM scheduled_messages ORDER BY at, created_at').all()).map(toMessage);
 }
 
-/** `at` is read only for an `at` row; any other has its creation time there (Amendment 155). */
+/** `at` is read only for an `at` row; any other has its creation time there (Amendment 157). */
 export function insertScheduled(
   db: Db,
   agentId: string,
@@ -138,7 +138,7 @@ function due(db: Db, now: number): ScheduledMessage[] {
   return listScheduled(db).filter((m) => m.trigger === 'at' && m.error === null && Date.parse(m.at) <= now);
 }
 
-/** The oldest message waiting for this agent's turn to end as `done`, or null (Amendment 155). */
+/** The oldest message waiting for this agent's turn to end as `done`, or null (Amendment 157). */
 export function nextWhenDone(db: Db, agentId: string): ScheduledMessage | null {
   const r = db
     .prepare(
@@ -148,7 +148,7 @@ export function nextWhenDone(db: Db, agentId: string): ScheduledMessage | null {
   return r ? toMessage(r) : null;
 }
 
-/** Every open page is told the whole list: from the clock, a route, or the supervisor (Amendment 155). */
+/** Every open page is told the whole list: from the clock, a route, or the supervisor (Amendment 157). */
 export function broadcastScheduled(db: Db): void {
   try {
     hub().broadcast({ type: 'scheduled', scheduled: listScheduled(db) });

@@ -1,5 +1,5 @@
 /**
- * Messages sent to an agent at a time you choose (Amendment 111), or when it is done (Amendment 155).
+ * Messages sent to an agent at a time you choose (Amendment 111), or when it is done (Amendment 157).
  *
  *   GET    /api/scheduled                    → { scheduled: ScheduledMessage[] }
  *   POST   /api/agents/:agentId/scheduled    ← { at, text } | { trigger: 'done', text } → 201 { message }
@@ -8,7 +8,7 @@
  * Pausing everything until a time is the `conductor.pauseUntil` setting, through
  * PATCH /api/settings like any other; session/schedule.ts watches it.
  *
- * `trigger: 'done'` (Amendment 155) waits for the agent's turn to end as `done` instead of a
+ * `trigger: 'done'` (Amendment 157) waits for the agent's turn to end as `done` instead of a
  * time, and is sent by the supervisor then. Refused for an agent that is already done or was
  * stopped, since no turn of its would end to send it: send it now instead.
  *

@@ -183,7 +183,7 @@ export function scheduleMessage(agentId: string, at: string, text: string): Prom
   return api(agentPath(agentId, 'scheduled'), { method: 'POST', body });
 }
 
-/** Send `text` once the agent's turn next ends as done (Amendment 155). */
+/** Send `text` once the agent's turn next ends as done (Amendment 157). */
 export function queueWhenDone(agentId: string, text: string): Promise<{ message: ScheduledMessage }> {
   const body: ScheduleMessageRequest = { trigger: 'done', text };
   return api(agentPath(agentId, 'scheduled'), { method: 'POST', body });

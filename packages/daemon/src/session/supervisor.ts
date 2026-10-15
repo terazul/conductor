@@ -1463,14 +1463,14 @@ export class Supervisor implements AgentControl {
         { projectId: agent.projectId, jobId: agent.jobId, agentId },
         { kind: 'status', status: 'done', ...(held ? { error: HANDOFF_HELD_NOTE } : {}) },
       );
-      // Before the roll-up, so a job whose agent is about to go again isn't finished (Amendment 155).
+      // Before the roll-up, so a job whose agent is about to go again isn't finished (Amendment 157).
       this.#sendWhenDone(agent);
     }
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.#rollUpJob(agent.jobId);
   }
 
-  // ── a message queued for when the agent is done (Amendment 155) ───────────
+  // ── a message queued for when the agent is done (Amendment 157) ───────────
 
   /** Agents whose turn ended `done` while everything was paused: `release` sends theirs. */
   #owedWhenDone = new Set<string>();
@@ -2436,7 +2436,7 @@ export class Supervisor implements AgentControl {
         this.#pause(a.id, budgetNote(a));
       }
     }
-    // A turn that ended `done` during the pause: its queued message goes now (Amendment 155).
+    // A turn that ended `done` during the pause: its queued message goes now (Amendment 157).
     for (const id of [...this.#owedWhenDone]) {
       this.#owedWhenDone.delete(id);
       const a = getAgent(this.#db, id);
