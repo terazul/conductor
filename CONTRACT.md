@@ -248,7 +248,7 @@ numbers; the person still looks.
   OKLab from linear sRGB. The "not a status colour (or `--you`)" and the 4.5:1 ink checks are as they
   were.
 - **The crumb border, revisited and kept** (`shell/ui.css:33`, `color-mix(in srgb, var(--crumb) 60%,
-  var(--ink3))`). Measured against its backdrop it is 1.94 / 1.93 / 1.84 in dark (was 1.95 / 1.98 /
+  var(--ink3))`). Measured against its backdrop it is 1.94 / 1.98 / 1.84 in dark (was 1.95 / 1.98 /
   1.89) and 1.73 / 1.75 / 1.70 in light (was 1.71 / 1.75 / 1.69), and the mix now carries a little of
   each backdrop's hue. So it still draws the same line, and `ui.css` and `verify-crumb.ts` are
   unchanged. A new check in section 9 (`:554`, beside the top-bar tab's) recomputes the mix as
