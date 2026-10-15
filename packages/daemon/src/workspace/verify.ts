@@ -40,7 +40,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
@@ -56,6 +56,8 @@ import { build } from '../index.js';
 import { eventLog } from '../eventlog.js';
 import { openDb } from '../db/index.js';
 import { registerSnapshotContributor } from '../hub.js';
+import { DEFAULT_AUTONOMY, addProjectDir, insertAgent, insertJob } from '../session/store.js';
+import { supervisor } from '../session/supervisor.js';
 import { WorkspaceError, publishNew, workspace } from './service.js';
 import { type CompleteResult } from './browse.js';
 import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
@@ -172,6 +174,16 @@ async function main(): Promise<void> {
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
 
+  // The bootstrap routes open a workspace only in a project that exists, in one of its
+  // folders (Amendment 151), so each project these sections name is a row first.
+  const db = openDb();
+  const project = (id: string, path: string): void => {
+    db.prepare(
+      `INSERT INTO projects (id, name, path, default_branch, created_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run(id, basename(path), path, 'main', new Date().toISOString());
+  };
+  project('prj_scratch', SCRATCH);
+
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n1 · open a workspace (in_place — where the fixture is dirty)');
   const opened = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
@@ -191,6 +203,173 @@ async function main(): Promise<void> {
 
   const listed = await get<{ workspaces: WorkspaceRecord[] }>('/api/workspaces');
   check('GET /api/workspaces lists it', listed.body.workspaces.some((w) => w.jobId === 'job_inplace'));
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n1b · the bootstrap routes refuse what they cannot vouch for (Amendment 151)');
+  type Refusal = { error?: string; detail?: string };
+  const open = (body: Record<string, unknown>) =>
+    send<Refusal & { workspace?: WorkspaceRecord }>('POST', '/api/workspaces', {
+      repoPath: SCRATCH,
+      projectId: 'prj_scratch',
+      isolation: 'worktree',
+      ...body,
+    });
+  const wtRoot = join(SCRATCH, '.conductor', 'wt');
+  const leftovers = () => (existsSync(wtRoot) ? readdirSync(wtRoot) : []);
+  const outsideWt = [join(SCRATCH, '.conductor', 'x'), join(SCRATCH, '.conductor', 'wt', 'a')];
+
+  for (const jobId of ['../x', 'a/b', '', 'prj_abc', 'job_../x', 'job_a.b', 7]) {
+    const r = await open({ jobId });
+    check(`jobId ${JSON.stringify(jobId)} → 400`, r.status === 400, `got ${r.status} ${JSON.stringify(r.body)}`);
+  }
+  check(
+    'and no worktree was cut for any of them, inside .conductor/wt or out of it',
+    leftovers().length === 0 && outsideWt.every((p) => !existsSync(p)),
+    leftovers().join(','),
+  );
+
+  const noProject = await open({ jobId: 'job_noproj', projectId: 'prj_nope' });
+  check('an unknown projectId → 404', noProject.status === 404, `got ${noProject.status}`);
+  const noProjectAtPath = await open({ projectId: undefined, repoPath: tmpdir() });
+  check('no projectId, and repoPath is no project → 404', noProjectAtPath.status === 404, `got ${noProjectAtPath.status}`);
+
+  const linkToScratch = join(tmpdir(), `conductor-link-${Date.now()}`);
+  symlinkSync(SCRATCH, linkToScratch);
+  for (const repoPath of [
+    tmpdir(),
+    join(SCRATCH, 'docs'),
+    `${SCRATCH}/../scratch-repo`,
+    `${SCRATCH}/`,
+    linkToScratch,
+  ]) {
+    const r = await open({ jobId: 'job_outside', repoPath });
+    check(`repoPath ${repoPath.replace(SCRATCH, '<scratch>')} is not the project's → 404`, r.status === 404, `got ${r.status}`);
+  }
+  rmSync(linkToScratch);
+  check('and none of them cut a worktree', leftovers().length === 0, leftovers().join(','));
+
+  for (const ref of ['a..b', '-x', 'refs/../x']) {
+    const asBranch = await open({ jobId: 'job_badref', branch: ref });
+    check(`branch ${ref} → 400`, asBranch.status === 400, `got ${asBranch.status} ${JSON.stringify(asBranch.body)}`);
+    const asBase = await open({ jobId: 'job_badref', baseRef: ref });
+    check(`baseRef ${ref} → 400`, asBase.status === 400, `got ${asBase.status} ${JSON.stringify(asBase.body)}`);
+  }
+  check('and no worktree was cut for a bad ref', leftovers().length === 0, leftovers().join(','));
+
+  // As the Files screen sends it: a path and an isolation, nothing else.
+  const fromScreen = await send<{ workspace?: WorkspaceRecord }>('POST', '/api/workspaces', {
+    repoPath: SCRATCH,
+    isolation: 'in_place',
+  });
+  check(
+    "the screen's request finds the project by its folder → 201",
+    fromScreen.status === 201 && fromScreen.body.workspace?.projectId === 'prj_scratch',
+    `got ${fromScreen.status} ${JSON.stringify(fromScreen.body).slice(0, 160)}`,
+  );
+  check(
+    "and its job id is the daemon's own shape",
+    /^job_[0-9a-f]{8}-[0-9a-f]{3}$/.test(fromScreen.body.workspace?.jobId ?? ''),
+    fromScreen.body.workspace?.jobId,
+  );
+  await send('DELETE', `/api/workspaces/${fromScreen.body.workspace?.jobId}`);
+
+  // One of the project's other folders is its own too, and a folder git cannot use is a 400.
+  const extra = join(tmpdir(), `conductor-extra-${Date.now()}`);
+  const fresh = join(tmpdir(), `conductor-fresh-${Date.now()}`);
+  const plain = join(tmpdir(), `conductor-plain-${Date.now()}`);
+  for (const dir of [extra, fresh, plain]) {
+    mkdirSync(dir, { recursive: true });
+    addProjectDir(db, 'prj_scratch', dir);
+  }
+  execFileSync('git', ['init', '-q'], { cwd: extra });
+  execFileSync('git', ['-c', 'user.email=c@example.invalid', '-c', 'user.name=C', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: extra });
+  execFileSync('git', ['init', '-q'], { cwd: fresh });
+  const noRepo = await open({ jobId: 'job_plain', repoPath: plain });
+  check(
+    'not a repository → 400, saying so',
+    noRepo.status === 400 && (noRepo.body.detail ?? '').includes('is not a git repository'),
+    `got ${noRepo.status} ${JSON.stringify(noRepo.body)}`,
+  );
+  const noCommits = await open({ jobId: 'job_fresh', repoPath: fresh });
+  check(
+    'no commits → 400, saying so',
+    noCommits.status === 400 && (noCommits.body.detail ?? '').includes('has no commits yet'),
+    `got ${noCommits.status} ${JSON.stringify(noCommits.body)}`,
+  );
+  const busyWs = await open({ jobId: 'job_busy', repoPath: extra });
+  check("one of the project's other folders → 201", busyWs.status === 201, `got ${busyWs.status} ${JSON.stringify(busyWs.body)}`);
+  const busyPath = busyWs.body.workspace?.path ?? '';
+
+  const scopedList = await get<{ workspaces: WorkspaceRecord[] }>('/api/workspaces?projectId=prj_scratch');
+  project('prj_other', join(tmpdir(), `conductor-other-${Date.now()}`));
+  const otherScope = await get<{ workspaces: WorkspaceRecord[] }>('/api/workspaces?projectId=prj_other');
+  const unknownScope = await get<Refusal>('/api/workspaces?projectId=prj_nope');
+  check(
+    'GET ?projectId= lists that project\'s workspaces',
+    scopedList.status === 200 && scopedList.body.workspaces.length > 0 && scopedList.body.workspaces.every((w) => w.projectId === 'prj_scratch'),
+    JSON.stringify(scopedList.body).slice(0, 160),
+  );
+  check('and only those', otherScope.status === 200 && otherScope.body.workspaces.length === 0, JSON.stringify(otherScope.body));
+  check('an unknown project there → 404', unknownScope.status === 404, `got ${unknownScope.status}`);
+
+  const neverOpened = await send<Refusal>('DELETE', '/api/workspaces/job_never_opened');
+  check('DELETE of a job with no workspace → 404', neverOpened.status === 404, `got ${neverOpened.status} ${JSON.stringify(neverOpened.body)}`);
+  const badShape = await send<Refusal>('DELETE', `/api/workspaces/${encodeURIComponent('../x')}`);
+  check('DELETE of a jobId of the wrong shape → 400', badShape.status === 400, `got ${badShape.status}`);
+  for (const force of ['yes', 'TRUE', '']) {
+    const r = await send<Refusal>('DELETE', `/api/workspaces/job_busy?force=${force}`);
+    check(`force=${force} → 400`, r.status === 400, `got ${r.status} ${JSON.stringify(r.body)}`);
+  }
+  check('and the worktree is still there', existsSync(busyPath), busyPath);
+
+  // Standing in for a live session, as session/verify.ts does: `isLive` is what isBusy asks.
+  insertJob(db, {
+    id: 'job_busy',
+    projectId: 'prj_scratch',
+    prompt: 'keep busy',
+    isolation: 'worktree',
+    worktreePath: busyPath,
+    branch: 'conductor/job_busy',
+    status: 'working',
+    budgetUsd: null,
+  });
+  insertAgent(db, {
+    id: 'agt_busy',
+    jobId: 'job_busy',
+    projectId: 'prj_scratch',
+    role: 'builder',
+    model: 'claude-sonnet-5',
+    sdkSessionId: null,
+    status: 'working',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: DEFAULT_AUTONOMY,
+  });
+  const sup = supervisor();
+  const reallyIsLive = sup.isLive.bind(sup);
+  sup.isLive = (agentId: string) => agentId === 'agt_busy';
+  const whileLive = await send<Refusal>('DELETE', '/api/workspaces/job_busy?force=true');
+  sup.isLive = reallyIsLive;
+  check(
+    'DELETE while an agent of the job is live → 409, naming it',
+    whileLive.status === 409 && (whileLive.body.detail ?? '').includes('builder'),
+    `got ${whileLive.status} ${JSON.stringify(whileLive.body)}`,
+  );
+  check('and the worktree is still there', existsSync(busyPath), busyPath);
+  const afterLive = await send<{ removed?: boolean }>('DELETE', '/api/workspaces/job_busy?force=1');
+  check('once it is not, force=1 removes it', afterLive.status === 200 && afterLive.body.removed === true && !existsSync(busyPath), JSON.stringify(afterLive.body));
+  db.prepare('DELETE FROM agents WHERE id = ?').run('agt_busy');
+  db.prepare('DELETE FROM jobs WHERE id = ?').run('job_busy');
+
+  // A workspace whose project is gone is outside every known project: not removed over HTTP.
+  await workspace().open({ jobId: 'job_orphan', projectId: 'prj_orphan', repoPath: plain, isolation: 'in_place' });
+  const orphan = await send<Refusal>('DELETE', '/api/workspaces/job_orphan');
+  check("DELETE of a workspace whose project doesn't exist → 404", orphan.status === 404, `got ${orphan.status} ${JSON.stringify(orphan.body)}`);
+  await workspace().forget('job_orphan');
+  for (const dir of [extra, fresh, plain]) rmSync(dir, { recursive: true, force: true });
 
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n2 · browse the tree, with change badges');
@@ -645,6 +824,7 @@ async function main(): Promise<void> {
   writeFileSync(join(temp, 'a.txt'), 'one\n');
   execFileSync('git', ['add', '-A'], { cwd: temp });
   execFileSync('git', ['commit', '-qm', 'init'], { cwd: temp });
+  project('prj_temp', temp);
 
   const branched = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
     jobId: 'job_branch',
@@ -692,6 +872,7 @@ async function main(): Promise<void> {
   writeFileSync(join(gone, 'staged.md'), 'only in the index\n');
   execFileSync('git', ['add', 'staged.md'], { cwd: gone });
   rmSync(join(gone, 'staged.md'));
+  project('prj_gone', gone);
 
   const goneWs = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
     jobId: 'job_gone',
@@ -774,7 +955,6 @@ async function main(): Promise<void> {
   // Track A owns the `jobs` table and may create a job without going through
   // WorktreeMgr. Reading it is allowed; writing it is not, and the service never
   // does. Rows are inserted HERE, in the test, to stand in for that track.
-  const db = openDb();
   db.prepare(
     `INSERT INTO projects (id, name, path, default_branch, created_at) VALUES (?, ?, ?, ?, ?)`,
   ).run('prj_from_a', 'scratch', `${SCRATCH}#a`, 'main', new Date().toISOString());
@@ -833,11 +1013,16 @@ async function main(): Promise<void> {
     inplaceJob?.prompt === '' && inplaceJob.status === 'queued',
     JSON.stringify({ prompt: inplaceJob?.prompt, status: inplaceJob?.status }),
   );
+  // Over HTTP a workspace's project now exists (Amendment 151). In-process, as Track A opens
+  // one, it need not, and then the slice names the project from the repo.
+  await workspace().open({ jobId: 'job_noproject', projectId: 'prj_noproject', repoPath: SCRATCH, isolation: 'in_place' });
+  const orphanSlice = workspace().snapshotSlice();
   check(
     'publishes a project for it, named from the repo',
-    (slice.projects ?? []).some((p) => p.id === 'prj_scratch' && p.name === 'scratch-repo'),
-    JSON.stringify(slice.projects),
+    (orphanSlice.projects ?? []).some((p) => p.id === 'prj_noproject' && p.name === 'scratch-repo'),
+    JSON.stringify(orphanSlice.projects),
   );
+  await workspace().forget('job_noproject');
   check(
     'does NOT publish a project the session engine owns',
     !(slice.projects ?? []).some((p) => p.id === 'prj_from_a'),
@@ -923,6 +1108,7 @@ async function main(): Promise<void> {
   writeFileSync(join(NOGIT, 'notes.md'), '# scratch\n\nnot a repo.\n');
   writeFileSync(join(NOGIT, 'src', 'app.js'), 'const a = 1;\n');
   writeFileSync(join(NOGIT, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
+  project('prj_nogit', NOGIT);
 
   const refusedWt = await send<{ detail?: string }>('POST', '/api/workspaces', {
     jobId: 'job_nogit_wt',

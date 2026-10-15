@@ -301,10 +301,12 @@ async function main(): Promise<void> {
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
   const db = openDb();
+  // The bootstrap route opens a workspace only in a project's own folder (Amendment 151).
+  const repoProject = insertProject(db, { path: REPO, name: 'verbs-repo', defaultBranch: 'main' });
 
   const opened = await send<Err>('POST', '/api/workspaces', {
     jobId: 'job_verbs',
-    projectId: 'prj_verbs',
+    projectId: repoProject.id,
     repoPath: REPO,
     isolation: 'in_place',
   });

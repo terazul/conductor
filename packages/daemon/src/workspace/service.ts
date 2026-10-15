@@ -225,6 +225,8 @@ export class WorkspaceService {
   }
 
   async close(jobId: string, force = false): Promise<{ removed: boolean; reason?: string }> {
+    // A job nothing ever opened is a 404, not a 200 saying nothing was removed (Amendment 151).
+    if (!this.#store.get(jobId)) throw new WorkspaceError(404, `no workspace for job ${jobId}`);
     const watcher = this.#watchers.get(jobId);
     if (watcher) {
       await watcher.stop();

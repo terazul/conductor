@@ -196,6 +196,87 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 151 — post-merge, applied. **The bootstrap `/api/workspaces` routes open and remove a workspace only in a project that exists, in one of its own folders.**
+
+Daemon only (`routes/workspace.ts`, `workspace/worktree.ts`, `workspace/service.ts`,
+`session/supervisor.ts`, `workspace/verify.ts`, `workspace/verify-files-verbs.ts`). The user, 14 Oct
+2026: "Execute wave 1 of docs/plans/wave-11.md … following §0"; this is the plan's item A4 (lane C,
+§2 "`/api/workspaces` takes any input"). *Amends Amendment 2*, whose "Not changed" kept the three
+routes as bootstrap and said "Expect these to be gated or removed at I4": they are gated, not
+removed, since the Files screen still lists and opens through them. The route header's note says so
+(`routes/workspace.ts:36`). Nothing a person sees changed, so `docs/MANUAL.md` is unchanged.
+
+- **What was wrong.** `POST /api/workspaces` took any `jobId`, `projectId`, `repoPath`, `branch` and
+  `baseRef`. A `jobId` of `a/b` cut a worktree at `.conductor/wt/a/b`, `../x` reached git as a path
+  out of `wt`, an unknown project or any folder on disk was opened, and a bad ref was a 500 with
+  git's usage text. `DELETE` answered 200 for a job it had never seen, read `force=yes` as true,
+  and removed a worktree an agent was working in.
+- **`jobId` has the daemon's shape, loosely** (`JOB_ID`, `routes/workspace.ts:107`): `job_` then 1–64
+  of `[A-Za-z0-9_-]`, as `metrics.ts`'s `PROJECT_ID` is loose. No `/` and no `.`, so
+  `<repo>/.conductor/wt/<jobId>` stays under `wt`. Absent, it is `newId('job')` (`:466`). A bad one
+  is a 400 on POST (`:452`) and DELETE (`:493`).
+- **The project must exist** (`:460`): the `projectId` given, or the project whose path is
+  `repoPath`, which is what the Files screen sends (`useWorkspace.ts:470`, `{repoPath, isolation}`).
+  Neither is a 404.
+- **`repoPath` must be the project's folder or one of its directories**, by `dirRoot`'s own rule
+  (`service.ts:308`, called at `routes/workspace.ts:470`): 404 for a folder that is not one of its
+  own, 410 for one that is gone. `dirRoot` compares exact paths, not real ones, so a subfolder,
+  `<folder>/../<name>`, a trailing `/` or a link to the folder is not the project's.
+- **`branch` and `baseRef` pass `git check-ref-format`** (`:472`): `branch` by `branchNameProblem`,
+  the rule launches use (Amendment 115), and `baseRef` by the new `baseRefProblem`
+  (`worktree.ts:118`, `--allow-onelevel`, so `HEAD`, `main` and a sha pass), which refuses a leading
+  `-` first. Either one is a 400 with the sentence.
+- **A folder git cannot use is a 400.** `ensure`'s "is not a git repository" and "has no commits yet"
+  throw `RepoUnfitError` (`worktree.ts:109`, `:206`, `:262`), which `fail` answers with 400
+  `{error: 'could not open the workspace', detail}` (`routes/workspace.ts:125`). Its `name` stays
+  `Error`, so the supervisor's "could not prepare a … workspace: …" reads as before.
+- **DELETE** reads `force` as `recursive` is read (`recursiveOf`, `:494`): `1`/`true`, `0`/`false` or
+  absent, else 400. It is 409 while an agent of the job is busy (`:496`), by `deleteProject`'s test
+  for one agent, now `supervisor().isBusy` (`supervisor.ts:1921`), naming the roles in `detail`.
+  It is 404 for a workspace whose project is gone (`:507`), and 404 for a job with no workspace
+  (`service.ts:229`), where it was 200 `removed: false`.
+- **GET takes `?projectId=`** (`routes/workspace.ts:433`): that project's workspaces, 404 for an
+  unknown one. Without it, all of them, as before.
+- **Unchanged.** `workspace().open` in-process (Track A's jobs), `POST /api/jobs`, and the Files and
+  folder verbs.
+
+*Not done / not decided:* `repoPath` outside the project is a 404, `dirRoot`'s own status, not the
+400 or 403 the plan offered: the plan said to reuse `dirRoot`, and it answers 404. The `jobId` rule
+is loose rather than `newId`'s exact `job_xxxxxxxx-xxx`. The exact shape would have renamed a dozen
+fixed test ids across the verify files for no safety the loose rule lacks. A POST naming a `jobId`
+that already has a workspace still gets that workspace back (`ensure` reuses), whatever project it
+names. Workspaces opened before this, in no project, are listed still and refused on DELETE.
+
+*Verified:* `workspace/verify.ts` §1b (`:208`), "the bootstrap routes refuse what they cannot vouch
+for":
+- "jobId "../x" → 400", and the same for `a/b`, empty, `prj_abc`, `job_../x`, `job_a.b` and `7`, "and
+  no worktree was cut for any of them, inside .conductor/wt or out of it";
+- "an unknown projectId → 404"; "no projectId, and repoPath is no project → 404";
+- "repoPath … is not the project's → 404" for the temp folder, a subfolder, `/../scratch-repo`, a
+  trailing `/` and a link to the folder;
+- "branch a..b → 400", and the same for baseRef, `-x` and `refs/../x`, with no worktree cut;
+- "the screen's request finds the project by its folder → 201", "and its job id is the daemon's own
+  shape";
+- "not a repository → 400, saying so"; "no commits → 400, saying so"; "one of the project's other
+  folders → 201";
+- "GET ?projectId= lists that project's workspaces", "and only those", "an unknown project there →
+  404";
+- "DELETE of a job with no workspace → 404"; "… of a jobId of the wrong shape → 400"; "force=yes →
+  400" (and `TRUE`, empty), with the worktree still there;
+- "DELETE while an agent of the job is live → 409, naming it" (with `isLive` stood in, as
+  `session/verify.ts` does), with the worktree still there; "once it is not, force=1 removes it";
+- "DELETE of a workspace whose project doesn't exist → 404".
+
+The project ids the file already used are now rows (`:185`, and `prj_temp`, `prj_gone`,
+`prj_nogit` where their folders are made). §11's "publishes a project for it, named from the repo"
+now opens in-process, as Track A does, under a project with no row (`:1018`).
+`verify-files-verbs.ts:305` named `prj_verbs`, which was no project: it now adds the repo as one and
+uses its id (the input fixed, not the rule). The other callers the plan names (`workspace/verify.ts`
+§7, `session/verify.ts`) pass unchanged. With `routes/workspace.ts`, `service.ts`, `worktree.ts`
+and `supervisor.ts` put back as on `main`, 41 of §1b's 42 checks fail: `a/b` cut
+`.conductor/wt/a/b`, `prj_nope` and any folder opened, and bad refs were 500s. `pnpm -r typecheck`
+clean; `make test`: 27 PASS.
+
 ### Amendment 150 — post-merge, applied. **Send-backs are counted per lane, a role with a name, so new work under a new name starts while the total allows; and an orchestrated stack's helpers in all are a launch choice, up to 48.**
 
 Shared (`stack.ts`, `wire.ts`), daemon (`session/store.ts`, `session/supervisor.ts`, `session/handoff.ts`,

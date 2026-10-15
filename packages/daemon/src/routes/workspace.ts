@@ -35,8 +35,14 @@
  *
  * They exist so screen 5 is demonstrable and testable before Track A ships job
  * creation. Track A creates jobs IN-PROCESS via `workspace().open(...)`, which
- * runs the same WorktreeMgr — not over HTTP. **Expect these to be gated or
- * removed at I4.** Nothing in the frozen four depends on them.
+ * runs the same WorktreeMgr — not over HTTP. Nothing in the frozen four depends on them.
+ *
+ * **Gated at I4 (Amendment 151), not removed: the Files screen still lists and opens through
+ * them.** A `jobId` has the daemon's own shape; the project must exist (404), named or found
+ * by `repoPath`; `repoPath` must be its path or one of its directories, by `dirRoot`'s rule;
+ * `branch` and `baseRef` pass `git check-ref-format`; a folder git cannot use is a 400. A
+ * DELETE is 404 for a job with no workspace and 409 while one of its agents is busy, and reads
+ * `force` as strictly as `recursive`. GET takes `?projectId=`.
  *
  * This file contains no `fs` import on purpose. Every path crosses
  * workspace/paths.ts inside the service, and that single door is the only reason
@@ -54,7 +60,15 @@ import type { WorkspaceRecord } from '../workspace/service.js';
 import { initWorkspace, WorkspaceError, workspace } from '../workspace/service.js';
 import { PathEscape } from '../workspace/paths.js';
 import { GitError } from '../workspace/git.js';
-import { LaunchBranchError } from '../workspace/worktree.js';
+import {
+  LaunchBranchError,
+  RepoUnfitError,
+  baseRefProblem,
+  branchNameProblem,
+} from '../workspace/worktree.js';
+import { openDb } from '../db/index.js';
+import { agentsForJob, getProject, getProjectByPath, newId } from '../session/store.js';
+import { supervisor } from '../session/supervisor.js';
 
 interface JobParams {
   jobId: string;
@@ -86,6 +100,13 @@ interface OpenBody {
 
 const ISOLATIONS = new Set<Isolation>(['worktree', 'branch', 'in_place']);
 
+/**
+ * What a job id can look like (`job_` and twelve characters, from store.ts's newId), loosely:
+ * no `/` and no `.`, so `<repo>/.conductor/wt/<jobId>` stays under `wt` (Amendment 151).
+ */
+const JOB_ID = /^job_[A-Za-z0-9_-]{1,64}$/;
+const JOB_ID_BAD = 'jobId must be job_ followed by letters, digits, _ or -';
+
 function fail(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof PathEscape) {
     // Deliberately terse: the resolved path is not echoed back, because the
@@ -100,6 +121,9 @@ function fail(reply: FastifyReply, err: unknown): FastifyReply {
     // Same shape `POST /api/jobs` answers (Amendment 115), so a refusal reads as a sentence
     // with its 400 or 409, not as a 500 (Amendment 139).
     return reply.code(err.status).send({ error: 'could not use that branch', detail: err.message });
+  }
+  if (err instanceof RepoUnfitError) {
+    return reply.code(err.status).send({ error: 'could not open the workspace', detail: err.message });
   }
   if (err instanceof GitError) {
     return reply.code(500).send({ error: 'git failed', detail: err.message });
@@ -120,6 +144,7 @@ const createOnlyOk = (v: unknown): boolean => v === undefined || typeof v === 'b
 /**
  * `recursive` on a delete, read as strictly as `createOnly` and for the same reason: it is
  * the flag that takes a whole folder, so `recursive=yes` is a 400, not a guess either way.
+ * `force` on a workspace's teardown is read the same way: it discards uncommitted work.
  */
 function recursiveOf(v: unknown): boolean | null {
   if (v === undefined || v === '0' || v === 'false') return false;
@@ -127,6 +152,7 @@ function recursiveOf(v: unknown): boolean | null {
   return null;
 }
 const RECURSIVE_BAD = 'recursive must be 1 or 0';
+const FORCE_BAD = 'force must be true or false';
 
 const isName = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
@@ -399,9 +425,18 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
 
   verbs('/api/projects/:projectId/dir', root);
 
-  // ── bootstrap: expected to be gated or removed at I4 ─────────────────────
+  // ── bootstrap: gated at I4 (Amendment 151) ──────────────────────────────
 
-  app.get('/api/workspaces', async () => ({ workspaces: workspace().list() }));
+  const db = openDb();
+  const optionalString = (v: unknown): boolean => v === undefined || typeof v === 'string';
+
+  app.get<{ Querystring: { projectId?: string } }>('/api/workspaces', async (req, reply) => {
+    const { projectId } = req.query;
+    if (projectId === undefined) return { workspaces: workspace().list() };
+    if (typeof projectId !== 'string') return reply.code(400).send({ error: 'projectId must be one id' });
+    if (!getProject(db, projectId)) return reply.code(404).send({ error: `no such project ${projectId}` });
+    return { workspaces: workspace().list().filter((w) => w.projectId === projectId) };
+  });
 
   app.post<{ Body: OpenBody }>('/api/workspaces', async (req, reply) => {
     const body = req.body ?? {};
@@ -414,12 +449,32 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
         .code(400)
         .send({ error: `isolation must be one of ${[...ISOLATIONS].join(', ')}` });
     }
+    if (body.jobId !== undefined && (typeof body.jobId !== 'string' || !JOB_ID.test(body.jobId))) {
+      return reply.code(400).send({ error: JOB_ID_BAD });
+    }
+    if (![body.projectId, body.branch, body.baseRef].every(optionalString)) {
+      return reply.code(400).send({ error: 'projectId, branch and baseRef must be strings' });
+    }
 
-    const jobId = body.jobId ?? `job_${Math.random().toString(36).slice(2, 10)}`;
+    // Named, or the project whose folder `repoPath` is: the Files screen sends only the path.
+    const projectId = body.projectId ?? getProjectByPath(db, body.repoPath)?.id;
+    if (projectId === undefined) {
+      return reply
+        .code(404)
+        .send({ error: `no project at ${body.repoPath} — add it as a project first` });
+    }
+    const jobId = body.jobId ?? newId('job');
     try {
+      // 404 for a project that does not exist or a folder that is not one of its own, 410 for
+      // one that is gone. By exact path, so `..` or a link inside the folder is not its own.
+      workspace().dirRoot(projectId, body.repoPath);
+      const bad =
+        (body.branch ? await branchNameProblem(body.repoPath, body.branch) : null) ??
+        (body.baseRef ? await baseRefProblem(body.repoPath, body.baseRef) : null);
+      if (bad) return reply.code(400).send({ error: bad });
       const ws = await workspace().open({
         jobId,
-        projectId: body.projectId ?? `prj_${jobId}`,
+        projectId,
         repoPath: body.repoPath,
         isolation,
         ...(body.branch ? { branch: body.branch } : {}),
@@ -434,8 +489,25 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
   app.delete<{ Params: JobParams; Querystring: { force?: string } }>(
     '/api/workspaces/:jobId',
     async (req, reply) => {
+      const { jobId } = req.params;
+      if (!JOB_ID.test(jobId)) return reply.code(400).send({ error: JOB_ID_BAD });
+      const force = recursiveOf(req.query.force);
+      if (force === null) return reply.code(400).send({ error: FORCE_BAD });
+      const busy = agentsForJob(db, jobId).filter((a) => supervisor().isBusy(a.id));
+      if (busy.length > 0) {
+        return reply.code(409).send({
+          error: `job ${jobId} has agents at work in this workspace`,
+          detail: busy.map((a) => a.role).join(', '),
+        });
+      }
+      // A workspace left by a project that is gone, or by a request from before the gate, is
+      // outside every known project: not removed over HTTP.
+      const ws = workspace().list().find((w) => w.jobId === jobId);
+      if (ws && !getProject(db, ws.projectId)) {
+        return reply.code(404).send({ error: `no such project ${ws.projectId}` });
+      }
       try {
-        return await workspace().close(req.params.jobId, req.query.force === 'true');
+        return await workspace().close(jobId, force);
       } catch (err) {
         return fail(reply, err);
       }
