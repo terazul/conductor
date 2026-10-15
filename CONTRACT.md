@@ -200,6 +200,77 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 163 — post-merge, applied. **A Claude run's own context window is kept, under the model's alias and its full id, and every window outlives a restart, so the hand-off cap uses the real one from the first run on.**
+
+Daemon (`session/windows.ts`, `session/backends/claude.ts`, `index.ts`, `session/verify.ts`, migration
+`270_model_windows.sql` new) and `docs/MANUAL.md` (§ the hand-off, one paragraph). No wire, shared or web
+change. TODO.md, "Hand-off, windows and roles (120, 126)", found 10 Oct and planned on 14 Oct as wave 11
+lane H1 (`docs/plans/wave-11.md` §4 M): "The model-window registry is in memory (`session/windows.ts`).
+After a restart a resumed stack uses the floor table until a model list is asked for. Claude's result
+carries `modelUsage[model].contextWindow`, which would fill it from the `result` case in
+`session/backends/claude.ts`." On 15 Oct the user wrote "Run track 5 of `docs/plans/wave-11-tracks.md`".
+*Amends Amendment 120*: its registry was filled only by the model lists and held "what the daemon has heard
+since it started". Now a Claude result fills it too, a run's window wins over a list's, and it is kept in
+the database. `handoffCap`, `contextWindow`, the floor table and the `[1m]` rule are unchanged.
+
+- **From each result.** The Claude backend's `result` case calls `recordRunWindows('claude', modelUsage,
+  model)` right after the Metrics record (`backends/claude.ts:668-674`), with the agent's model as the run
+  has it (`#scope.model`, which a model switch updates, `:750`). It is in a `try`: a window is never worth
+  ending a run over, as with `#record`.
+- **Under which names** (`windowsFromResult`, `windows.ts:101`, pure). Each `modelUsage` entry's
+  `contextWindow` is kept under its `canonicalModel` (else its key) and under the key when that differs, and
+  under the agent's own model when that is an alias that names the entry as `matchModel` does
+  (`metrics.ts:165`: `opus` names `claude-opus-4-7`). The supervisor looks the window up by the agent's model
+  (`#handoffCapOf`, `supervisor.ts:1158-1160`, unchanged), so an agent launched on `opus` finds the window
+  its own run reported. `default`, or an alias that names none of the entries, adds no name. Other models a
+  run used (a subagent's) are kept under their own ids.
+- **`[1m]` is still not looked up** (`reportedWindow`, `windows.ts:150-152`, as before), and now not
+  recorded either. A `[1m]` key is skipped, and so is the entry a `[1m]` agent model names (`:116-118`),
+  because its window is the 1,000,000 one and would be given to the base id.
+- **A run's window beats a list's** (`keep`, `windows.ts:57-61`). **Decision:** the result's `contextWindow`
+  is the window that run had, and a list says what the model can take. For Claude these can differ: the
+  gateway's `max_input_tokens` can be the 1M window, while Claude Code runs the base one unless asked for
+  `[1m]`. So a list never overwrites a window a run reported, and a run always overwrites a list's or an
+  earlier run's. For Copilot and OpenRouter only the lists write, so nothing there changes.
+- **Kept across a restart** (migration 270). `model_windows (provider, model, tokens, source, updated_at)`,
+  key `(provider, model)`, `source` `list` or `run`. `initWindows(db)` (`windows.ts:137`) loads it and keeps
+  the handle, and the daemon calls it at startup beside `initEventLog` (`index.ts:100-102`). From then on
+  `keep` upserts each window that changed. One that is the same, from the same source, is not written again,
+  so a result doesn't write the database every turn. A failed write is logged, and the window is still kept
+  in memory. Without `initWindows` (a test that never calls it) the registry is in memory only, as before.
+- **The writers keep their signatures.** `recordWindows(provider, models)` is unchanged for its three callers
+  (`copilot.ts:227`, `:250`; `models.ts:290`), and they now persist too. `reportedWindow` is unchanged for
+  the supervisor, and for H2 (track 2) when it reads the registry. `forgetWindows` (verify only) clears the
+  table as well.
+- **The MANUAL** (`docs/MANUAL.md:555-564`) says a Claude run's window counts and wins over a list's, and
+  that the windows are kept across a restart. Its line saying the daemon forgets them until Spawn is opened
+  is gone.
+
+*Not done / not decided:* the window is learned when the first run on a model ends. That run's own
+launch prompt, and any agent started before it ends, still use the list's window or the floor. So "from
+the first run on" means from the first result, and then for good, restarts included. A window stays until
+a later result or list (where allowed) changes it. Nothing ages out, and a model that is gone keeps its
+row, which costs one row. An alias whose model changes (a new `opus`) takes the new window with the next
+result on it. Tokens are still not counted (Amendment 120; H2 measures the ratio). Not looked at on a real
+model: wave-11.md §5 lists "the H1 windows" among the person's checks after wave 3.
+
+*Verified:* `daemon/src/session/verify.ts`. Pure, beside 120's checks (`:2715-2754`): the canonical id, the
+key and the alias are kept; an exact id is not kept twice, and `default` or a non-matching alias adds no
+name; `[1m]` is not kept, under a `[1m]` key or for a `[1m]` agent's base id; junk is skipped; a run beats a
+list, and a later run beats an earlier one. Live, in §21 (`:5328-5405`): an agent launched on the alias
+`tinyrun-h1` ends with a `modelUsage` keyed `claude-tinyrun-h1-20261015` (canonical `claude-tinyrun-h1`,
+`contextWindow` 2,000), a helper model and a `[1m]` entry. The window is then kept under all three names,
+the helper's under its own, and the `[1m]` one not at all. A model list after it doesn't overwrite it. The
+rows are in `model_windows`, read from the file on a fresh connection with their sources. The same window
+again doesn't change `updated_at`. `initWindows` on that fresh connection, the restart, has every window
+back before any list is asked for, and a window only in memory is gone. A downstream agent on the alias is
+then given a quarter of 2,000 tokens (the newest of 40 replies, under 3,500 characters), not the floor. The
+model-list checks of 120 in §21 pass unchanged, now with the table attached. **Revert check:** with the
+`recordRunWindows` call removed from `claude.ts` and `initWindows` made to load nothing, 5 of the live
+checks fail: the alias and full id read `undefined undefined undefined`, the list check fails, the table
+check fails, the restart check reads "0 loaded", and the downstream prompt is 5,306 characters. Restored,
+the session verify passes (1,462 checks). `pnpm -r typecheck` is clean, and `make test` exits 0 in one run, 28 suites PASS ("Track A session: PASS", "docs links: PASS — 33 links in 47 files").
+
 ### Amendment 162 — post-merge, applied. **Branches shows every repo Files shows: the project's own folder, its extra directories that are repos, and the repos nested in either, picked in the header.**
 
 Daemon (`workspace/project-repo.ts`, `routes/branches.ts`, `workspace/verify-branches.ts`), shared

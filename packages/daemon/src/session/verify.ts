@@ -132,7 +132,7 @@ import {
 } from './retry.js';
 import { BUDGET_CEILING_KEY, BUDGET_RESUME_KEY, RETRY_DELAYS_KEY, budgetCeiling } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
-import { forgetWindows, recordWindows, reportedWindow } from './windows.js';
+import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
   HAND_OFF_LINE,
   REPEAT_MARKER,
@@ -275,6 +275,8 @@ interface FakeRun {
     deferred?: { id: string; name: string; input: Record<string, unknown> };
     /** The HTTP status a failed result names (`api_error_status`), Amendment 123. */
     apiStatus?: number | null;
+    /** The result's `modelUsage`, as the SDK keys it (Amendment 163). */
+    models?: Record<string, unknown>;
   }): void;
   finished: boolean;
 }
@@ -342,6 +344,7 @@ function fakeQuery({
       ...(r.errors ? { errors: r.errors } : {}),
       ...(r.deferred ? { deferred_tool_use: r.deferred } : {}),
       ...(r.apiStatus !== undefined ? { api_error_status: r.apiStatus } : {}),
+      ...(r.models ? { modelUsage: r.models } : {}),
       usage: { input_tokens: 10, output_tokens: 5 },
       session_id: sessionId,
     };
@@ -2708,6 +2711,46 @@ async function main(): Promise<void> {
     'a [1m] model is not looked up: the list gives the base model’s window, and [1m] is the 1,000,000 one the floor says (Amendment 120)',
     reportedWindow('claude', 'claude-x') === 200_000 && reportedWindow('claude', 'claude-x[1m]') === undefined && contextWindow('claude-x[1m]', reportedWindow('claude', 'claude-x[1m]')) === 1_000_000,
   );
+  forgetWindows();
+  const winsOf = (usage: unknown, model: string): string =>
+    windowsFromResult(usage, model)
+      .map((w) => `${w.id}=${w.tokens}`)
+      .sort()
+      .join(' ');
+  const cw = (contextWindow: unknown, canonicalModel?: string): Record<string, unknown> => ({ inputTokens: 1, outputTokens: 1, costUSD: 0, contextWindow, ...(canonicalModel ? { canonicalModel } : {}) });
+  check(
+    'a result’s windows are kept under the canonical id, the key, and the alias the agent was launched on, as matchModel names it (Amendment 163)',
+    winsOf({ 'claude-opus-9-20260101': cw(200_000, 'claude-opus-9'), 'claude-haiku-9': cw(50_000.5) }, 'opus') === 'claude-haiku-9=50000 claude-opus-9-20260101=200000 claude-opus-9=200000 opus=200000',
+    winsOf({ 'claude-opus-9-20260101': cw(200_000, 'claude-opus-9'), 'claude-haiku-9': cw(50_000.5) }, 'opus'),
+  );
+  check(
+    'an exact model is not kept twice, and default or an alias that names none of them adds no name (Amendment 163)',
+    winsOf({ 'claude-opus-9': cw(200_000) }, 'claude-opus-9') === 'claude-opus-9=200000' &&
+      winsOf({ 'claude-opus-9': cw(200_000) }, 'default') === 'claude-opus-9=200000' &&
+      winsOf({ 'claude-opus-9': cw(200_000) }, 'sonnet') === 'claude-opus-9=200000',
+  );
+  check(
+    'a [1m] window is not kept: not under a [1m] key, and not for the model a [1m] agent names, whose base id would be given 1,000,000 (Amendment 163)',
+    winsOf({ 'claude-opus-9[1m]': cw(1_000_000, 'claude-opus-9') }, 'opus') === '' &&
+      winsOf({ 'claude-opus-9': cw(1_000_000), 'claude-haiku-9': cw(50_000) }, 'claude-opus-9[1m]') === 'claude-haiku-9=50000' &&
+      winsOf({ 'claude-opus-9': cw(1_000_000) }, 'opus[1m]') === '',
+  );
+  check(
+    'what is not a usable window, or not a modelUsage, is skipped (Amendment 163)',
+    winsOf({ a: cw(0), b: cw(null), c: cw('big'), d: cw(Number.POSITIVE_INFINITY), e: null, f: { inputTokens: 1 } }, 'a') === '' &&
+      winsOf(null, 'opus') === '' && winsOf([cw(5)], 'opus') === '' && winsOf('x', 'opus') === '',
+  );
+  recordWindows('claude', [{ id: 'claude-y', tokens: 1_000_000 }]);
+  recordRunWindows('claude', { 'claude-y': cw(200_000) }, 'claude-y');
+  const runOverList = reportedWindow('claude', 'claude-y');
+  recordWindows('claude', [{ id: 'claude-y', tokens: 1_000_000 }]);
+  check(
+    'a run’s window beats a list’s: it overwrites one, and a list after it does not (Amendment 163)',
+    runOverList === 200_000 && reportedWindow('claude', 'claude-y') === 200_000,
+    String(reportedWindow('claude', 'claude-y')),
+  );
+  recordRunWindows('claude', { 'claude-y': cw(180_000) }, 'claude-y');
+  check('and a later run overwrites an earlier one (Amendment 163)', reportedWindow('claude', 'claude-y') === 180_000);
   forgetWindows();
 
   // Text said twice: a part quoted inside another agent's launch prompt, seen by an agent that waits for several.
@@ -5280,6 +5323,85 @@ async function main(): Promise<void> {
     check('one with no reported window is given what the floor says — all 40 replies (Amendment 120)', floor.includes('#w01#') && floor.includes('#w40#') && !/left out to fit/.test(floor) && floor.length > 4_800, `${floor.length} characters`);
     for (const r of [tinyRun, floorRun]) r.finish({ cost: 0, reason: 'completed' });
     await until(() => getAgent(db, 'w_tiny')?.status === 'done' && getAgent(db, 'w_floor')?.status === 'done');
+    forgetWindows();
+
+    // ── a Claude result's own window, kept under the alias and the full id, across a restart (Amendment 163) ──
+    const jobR = 'job_h1_run';
+    ljob(jobR);
+    lfix('r_run', jobR, { role: 'developer', status: 'queued', model: 'tinyrun-h1' });
+    const atR = runs.length;
+    sup.pump();
+    check('an agent on the alias tinyrun-h1 starts (Amendment 163)', await until(() => runs.length === atR + 1));
+    runs[atR]?.finish({
+      cost: 0,
+      reason: 'completed',
+      models: {
+        'claude-tinyrun-h1-20261015': { inputTokens: 10, outputTokens: 5, costUSD: 0, contextWindow: 2_000, canonicalModel: 'claude-tinyrun-h1' },
+        'claude-helper-h1': { inputTokens: 1, outputTokens: 1, costUSD: 0, contextWindow: 50_000 },
+        'claude-wide-h1[1m]': { inputTokens: 1, outputTokens: 1, costUSD: 0, contextWindow: 1_000_000, canonicalModel: 'claude-wide-h1' },
+      },
+    });
+    check('and ends done', await until(() => getAgent(db, 'r_run')?.status === 'done'));
+    check(
+      'its result’s contextWindow is kept under the alias it was launched on and the full id, and a model it used besides under its own (Amendment 163)',
+      reportedWindow('claude', 'tinyrun-h1') === 2_000 && reportedWindow('claude', 'claude-tinyrun-h1') === 2_000 && reportedWindow('claude', 'claude-tinyrun-h1-20261015') === 2_000 &&
+        reportedWindow('claude', 'claude-helper-h1') === 50_000,
+      `${reportedWindow('claude', 'tinyrun-h1')} ${reportedWindow('claude', 'claude-tinyrun-h1')} ${reportedWindow('claude', 'claude-helper-h1')}`,
+    );
+    check(
+      'a [1m] entry is still not kept, under its key or its base id (Amendment 163)',
+      reportedWindow('claude', 'claude-wide-h1') === undefined && reportedWindow('claude', 'claude-wide-h1[1m]') === undefined,
+    );
+    // A list after the run says the largest window the model can take; the run's stands.
+    recordWindows('claude', [
+      { id: 'claude-tinyrun-h1', tokens: 1_000_000 },
+      { id: 'claude-listed-h1', tokens: 64_000 },
+    ]);
+    check('a model list after it does not overwrite the run’s window, and a model only the list names is kept (Amendment 163)', reportedWindow('claude', 'claude-tinyrun-h1') === 2_000 && reportedWindow('claude', 'claude-listed-h1') === 64_000);
+    const keptRows = (d: DatabaseSync): string =>
+      (d.prepare("SELECT model, tokens, source FROM model_windows WHERE provider = 'claude' AND model LIKE '%h1%' ORDER BY model").all() as Array<{ model: string; tokens: number; source: string }>)
+        .map((r) => `${r.model}=${r.tokens}/${r.source}`)
+        .join(' ');
+    const reopenedW = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    check(
+      'each is in model_windows, read from the file afresh, with where it came from (Amendment 163, migration 270)',
+      keptRows(reopenedW) === 'claude-helper-h1=50000/run claude-listed-h1=64000/list claude-tinyrun-h1=2000/run claude-tinyrun-h1-20261015=2000/run tinyrun-h1=2000/run',
+      keptRows(reopenedW),
+    );
+    const stampOf = (): string => String(row<{ at: string }>(db.prepare("SELECT updated_at AS at FROM model_windows WHERE provider = 'claude' AND model = 'tinyrun-h1'").get())?.at);
+    const stamped = stampOf();
+    await settle(5);
+    recordRunWindows('claude', { 'claude-tinyrun-h1': { contextWindow: 2_000 } }, 'tinyrun-h1');
+    check('the same window again is not written again (Amendment 163)', stampOf() === stamped, `${stamped} → ${stampOf()}`);
+
+    // The restart: a daemon that starts again loads what is in the file, and nothing else.
+    recordWindows('openrouter', [{ id: 'vendor/memory-only-h1', tokens: 9_000 }]);
+    reopenedW.prepare("DELETE FROM model_windows WHERE model = 'vendor/memory-only-h1'").run();
+    const loaded = initWindows(reopenedW);
+    check(
+      'after a restart the windows are there before any model list is asked for: the run’s under its alias and full id, and the list’s (Amendment 163)',
+      loaded >= 5 && reportedWindow('claude', 'tinyrun-h1') === 2_000 && reportedWindow('claude', 'claude-tinyrun-h1') === 2_000 && reportedWindow('claude', 'claude-listed-h1') === 64_000 &&
+        reportedWindow('openrouter', 'vendor/memory-only-h1') === undefined && reportedWindow('claude', 'claude-wide-h1') === undefined,
+      `${loaded} loaded`,
+    );
+    // And the hand-off cap uses it: a downstream agent on the alias is given a quarter of 2,000 tokens, not the floor.
+    lfix('r_up', jobR, { role: 'analyst', status: 'done', sdkSessionId: 'sess_r_up' });
+    for (let i = 1; i <= 40; i++) sayL(jobR, 'r_up', `#r${String(i).padStart(2, '0')}# ${'v'.repeat(100)}`);
+    lfix('r_down', jobR, { role: 'builder', status: 'queued', dependsOn: ['r_up'], model: 'tinyrun-h1' });
+    const atD = runs.length;
+    sup.pump();
+    check('the downstream agent starts', await until(() => runs.length === atD + 1));
+    await until(() => (runs[atD]?.prompts.length ?? 0) > 0);
+    const down = runs[atD]?.prompts[0] ?? '';
+    check(
+      'and its hand-off is cut to the window its alias’s run reported, after the restart (Amendment 163)',
+      down.includes('#r40#') && !down.includes('#r01#') && /the first \d+ of 40 entries are left out to fit/.test(down) && down.length < 3_500,
+      `${down.length} characters`,
+    );
+    runs[atD]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'r_down')?.status === 'done');
+    initWindows(db);
+    reopenedW.close();
     forgetWindows();
 
     // ── text said once, through the real prompts ─────────────────────────────

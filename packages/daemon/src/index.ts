@@ -27,6 +27,7 @@ import { WS_PATH, DEFAULT_PORT } from '@conductor/shared';
 import { openDb } from './db/index.js';
 import { initEventLog } from './eventlog.js';
 import { initHub, hub } from './hub.js';
+import { initWindows } from './session/windows.js';
 import { refuseNonLocal } from './guard.js';
 import { decideAtBoot, storageNow } from './storage.js';
 import { askFirst } from './setup.js';
@@ -97,6 +98,8 @@ export async function build(): Promise<FastifyInstance> {
   const db = openDb();
   initEventLog(db);
   initHub();
+  // The models' windows kept before a restart, for the hand-off cap (Amendment 163).
+  initWindows(db);
 
   // Before the token check, and unconditional: a token is opt-in, this is not.
   app.addHook('onRequest', async (req, reply) => {

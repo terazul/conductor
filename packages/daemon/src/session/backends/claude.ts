@@ -51,6 +51,7 @@ import { classifyRetry } from '../retry.js';
 import { lifetimeCost, runLimit } from '../budget.js';
 import { broadcastSpend, costChanged } from '../../daily.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
+import { recordRunWindows } from '../windows.js';
 import {
   addCostToday,
   addSpendToday,
@@ -664,6 +665,13 @@ export class ClaudeBackend implements AgentBackend {
         // The per-model tokens are taken from `modelUsage` as differences from the last
         // result, for the same reason `previous` is above.
         const metrics = this.#record(m, usage, outcome.costUsd - previous);
+        // The window this run had, by model, for the hand-off cap: the real one from the first
+        // run on, and kept across a restart (Amendment 163). Never worth ending a run over.
+        try {
+          recordRunWindows('claude', m['modelUsage'], this.#scope.model);
+        } catch (err) {
+          console.error(`[windows] ${this.#scope.agentId} could not record a result's window`, err);
+        }
 
         setAgentUsage(this.#db, this.#scope.agentId, { costUsd, inputTokens, outputTokens });
         this.#emit({
