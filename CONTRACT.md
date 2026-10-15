@@ -200,6 +200,45 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 167 — post-merge, applied. **A new task to an orchestrator removes the helpers of its last one, once they have all finished.**
+
+Daemon (`session/supervisor.ts`, `session/verify.ts`) and `docs/MANUAL.md`. The user, 15 Oct 2026: "when an
+orchestrator starts, it creates a bunch of agents and leaves them hanging around (seems like forever)", then
+"can we automatically remove them once they are all finished and the orchestrator starts a new task".
+*Decided (15 Oct): delete, not archive* (archiving would have kept their rows and spend on the job, hidden).
+*Amends Amendments 51 and 128*: a helper's row was kept until you removed it, and an orchestrator's helper cap
+and send-backs counted every helper it had ever started, so one that used its cap on one task could start
+none on the next.
+
+- **When.** `sendMessage` (`supervisor.ts:2094`), on the resume path only, after its refusals (budget, folder
+  gone) and before the run, when the message is not `synthetic`: typed, an `at` scheduled message, or one
+  queued for when it is done (Amendment 157), since all three go through it. Not a message to a live run, not
+  one of Conductor's own, not **re-run from here** (Amendment 102).
+- **All or none.** `#clearFinishedHelpers` (`supervisor.ts:1939`) removes them only if the orchestrator has
+  helpers, none is unreported (`unreportedHelpers`: its report has already carried each one's conversation,
+  Amendment 120), every one is `done`, `failed` or `stopped`, none has a `scheduled_messages` row still to
+  send, and none has a terminal whose shell is running (closing it would end what you ran). Otherwise every
+  one is kept.
+- **As Remove removes one.** Each is rewired out of any `dependsOn` (`rewireOnRemoval`) and dropped by
+  `#dropAgentRow` (`supervisor.ts:2723`), the row-removal steps now shared with `deleteAgent`: its pending
+  resume forgotten, its terminals closed, its row deleted. One `resync` for the lot. The event log keeps their
+  events.
+- **What follows.** `helpersOf` and `startedInLane` count only the helpers still there, so the cap and
+  send-backs start from nothing and the lane names are free (`developer-api`, not `developer-api-2`).
+  The project's spend keeps theirs (`project_spend_daily`, Amendment 146). The job's daily budget,
+  `jobCostToday` against `jobCap`, loses both their spend and their budgets, as after any Remove.
+
+*Not done / not decided:* the orchestrator's transcript does not say its helpers were removed (no new event
+kind). A cleared helper's own page is gone; a tab open on one shows the empty agent screen. An ordinary
+job's agents (not helpers) are never removed this way.
+
+*Verified:* `session/verify.ts` §17c (the block "Amendment 167" at `:3076`), against the real supervisor and
+the fake SDK, after the orchestrator with two ended, reported helpers (one failed) is done: a `synthetic`
+message keeps them; a human message while one has a scheduled message waiting keeps them; with it gone, a
+human message removes both, keeps the orchestrator and the job's other agent, and every subscribed browser
+gets `resync`; `start_helper` named `API` then succeeds as `builder-api` where the cap had refused a third;
+and with that helper not yet ended, another message keeps it. `make test` green.
+
 ### Amendment 166 — post-merge, applied. **A `hand_off` short of its closing headings is saved, and the agent is told which.**
 
 Shared (`headings.ts`, `wire.ts`, `index.ts`), daemon (`session/store.ts`, `session/supervisor.ts`,

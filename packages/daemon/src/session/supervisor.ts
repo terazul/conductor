@@ -149,7 +149,7 @@ import {
 } from './store.js';
 import { reportedWindow } from './windows.js';
 import { finishJob, type Finish } from './finish.js';
-import { broadcastScheduled, deleteScheduled, failScheduled, nextWhenDone } from './schedule.js';
+import { broadcastScheduled, deleteScheduled, failScheduled, listScheduled, nextWhenDone } from './schedule.js';
 
 const exec = promisify(execFile);
 
@@ -1927,6 +1927,33 @@ export class Supervisor implements AgentControl {
     );
   }
 
+  /**
+   * A new task to an orchestrator whose helpers have all finished: they are removed, as Remove
+   * removes one (Amendment 167). Its report already carried each one's whole conversation, so
+   * nothing it needs goes with them, and its helper cap and send-backs count from nothing again.
+   *
+   * All or none. Kept, every one, while any is still going or unreported, has a message of yours
+   * waiting to be sent, or has a shell of yours still running. The job's budget counts only the
+   * agents it still has, as after any Remove; the project's spend keeps theirs.
+   */
+  #clearFinishedHelpers(orch: Agent): void {
+    if (!orch.helperCap) return;
+    const helpers = helpersOf(this.#db, orch.id);
+    if (helpers.length === 0 || unreportedHelpers(this.#db, orch.id).length > 0) return;
+    const waiting = new Set(listScheduled(this.#db).filter((m) => m.error === null).map((m) => m.agentId));
+    const keep = (h: Agent) =>
+      !ENDED.includes(h.status) ||
+      waiting.has(h.id) ||
+      terminals().list({ kind: 'agent', agentId: h.id }).some((t) => !t.exited);
+    if (helpers.some(keep)) return;
+
+    for (const h of helpers) {
+      for (const r of rewireOnRemoval(agentsForJob(this.#db, orch.jobId), h.id)) setAgentDependsOn(this.#db, r.agentId, r.dependsOn);
+      this.#dropAgentRow(h.id);
+    }
+    hub().broadcast({ type: 'resync' });
+  }
+
   /** A job is done when none of its agents can still make progress. */
   #rollUpJob(jobId: string): void {
     const agents = agentsForJob(this.#db, jobId);
@@ -2063,6 +2090,8 @@ export class Supervisor implements AgentControl {
     if (job && !existsSync(job.worktreePath)) {
       throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
     }
+    // Yours, not ours: a new task, so the helpers of the last one go (Amendment 167).
+    if (!synthetic) this.#clearFinishedHelpers(agent);
 
     /*
      * No `user_text` emission here. This used to emit one and then hand the same text
@@ -2656,9 +2685,7 @@ export class Supervisor implements AgentControl {
     for (const r of rewired) setAgentDependsOn(this.#db, r.agentId, r.dependsOn);
 
     await this.terminateAgent(agentId);
-    this.#resumeWanted.delete(agentId);
-    terminals().closeAgent(agentId); // its shells go with it (Amendment 112)
-    deleteAgent(this.#db, agentId);
+    this.#dropAgentRow(agentId);
 
     // Paused only because this one was stopped: removing it is the say-so to go on.
     let requeued = false;
@@ -2690,6 +2717,13 @@ export class Supervisor implements AgentControl {
     hub().broadcast({ type: 'resync' });
     this.pump();
     return rewired;
+  }
+
+  /** The row and what hangs off it, for an agent already ended. No resync: the caller sends one. */
+  #dropAgentRow(agentId: string): void {
+    this.#resumeWanted.delete(agentId);
+    terminals().closeAgent(agentId); // its shells go with it (Amendment 112)
+    deleteAgent(this.#db, agentId);
   }
 
   /** The same for a job: its agents cascade, and the job row goes too. */
