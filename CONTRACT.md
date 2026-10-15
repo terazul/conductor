@@ -202,7 +202,7 @@ old numbers.*
 
 ### Amendment 160 — post-merge, applied. **An orchestrator's auto turns start folded, so its page opens to its own replies; one you open stays open, and fold all reaches them.**
 
-Web only (`agent/folds.ts`, `agent/transcript.tsx`, `agent/agent.tsx`, `agent/verify.ts`), and
+Web only (`agent/folds.ts`, `agent/transcript.tsx`, `agent/agent.tsx`, `agent/verify.ts`, `settings/route.tsx`), and
 `docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change; the daemon's hand-off and report
 text is as it was. The user, 14 Oct 2026, on wave 11's items O2 and O3: *"O2 is accepted as it is. The
 orchestrator keeps its tools, and there's no lane for it."*, leaving O3 (wave-11.md §3 G): fold the
@@ -233,10 +233,11 @@ folds like a reply, and *Amendment 51*, whose helper reports arrive as those aut
   nothing to migrate; a non-orchestrator's folds use `folds` alone, which is Amendment 18 as it was.
 - **A `start_helper` line shows its task** (`transcript.tsx:289`). `inputSummary` picks `task` after
   `prompt`, so `mcp__conductor__start_helper` reads as the task given, not the input's JSON.
+- **Settings' reset returns every turn to how it starts** (`settings/route.tsx:950-953`). "unfold
+  every reply" clears `conductor.agentUnfolds` as well as `conductor.agentFolds`, so an
+  orchestrator's auto turns fold again after it; it now says "Every turn is back to how it starts."
 
-*Not done / not decided:* not looked at in a browser. Settings' "unfold every reply" clears
-`conductor.agentFolds` only, so an auto turn you opened in an orchestrator stays open after it; not
-changed here. Every auto turn in an orchestrator starts folded, not only its helpers' reports (a
+*Not done / not decided:* not looked at in a browser. Every auto turn in an orchestrator starts folded, not only its helpers' reports (a
 continue or a hand-off note too): they are the same turn on the page, and the spec asks for "auto
 turns". The tool row's name is still the raw MCP name; only its subject changed.
 
