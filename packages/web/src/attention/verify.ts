@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -443,6 +443,12 @@ console.log('\n6 · an agent that stopped without handing off (Amendment 104)');
   check('nor one over the limit, which is named', /20,000/.test(handOffProblem('x'.repeat(HANDOFF_SUMMARY_MAX + 1)) ?? '') && handOffProblem('x'.repeat(HANDOFF_SUMMARY_MAX)) === null);
   check('anything else can', handOffProblem('Use JWT.') === null && handOffProblem(' Use JWT. ') === null);
 
+  // A summary short of the agent’s closing headings can still be sent; the card says which.
+  const arch = { closingHeadings: ['Context', 'Plan'] };
+  check('a draft with no heading for one says which', handOffMissing('**Context**\nThe tokens expire.', arch) === 'missing: Plan', String(handOffMissing('**Context**\nThe tokens expire.', arch)));
+  check('and names every one, in order', handOffMissing('Use JWT.', arch) === 'missing: Context, Plan');
+  check('one with them all, an empty one, or an agent with no headings says nothing', handOffMissing('## Context\nx\n## Plan\ny', arch) === null && handOffMissing('  ', arch) === null && handOffMissing('Use JWT.', {}) === null);
+
   // The wiring: the button opens the edit box, the box sends exactly what is in it, and the
   // reply box is beside it. These are source checks: the card is not rendered in Node.
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
@@ -454,6 +460,7 @@ console.log('\n6 · an agent that stopped without handing off (Amendment 104)');
   check('the hand off button toggles the edit box; the box is the card’s HandOffPanel', /case 'hand_off':\s*setHandingOff\(\(open\) => !open\)/.test(card) && /<HandOffPanel agent=\{first\} editing=\{handingOff\}/.test(card));
   check('hand off is the fix, so it is the primary button', /a\.id === 'hand_off'/.test(card.slice(card.indexOf('function isFix'))));
   check('the box starts as the last reply and shows what was typed over it', /const summary = edited \?\? suggested;/.test(box) && /handOffDraft\(events\)/.test(box) && /onChange=\{\(e\) => setEdited\(e\.target\.value\)\}/.test(box));
+  check('the box shows what is missing, only when it can be sent, and missing it does not stop the send', /const missing = handOffMissing\(summary, agent\);/.test(box) && /problem === null && missing !== null && <span className="atn-handoff-missing">\{missing\}<\/span>/.test(box) && !/disabled=\{[^}]*missing/.test(box) && /\.atn-handoff-missing \{[^}]*var\(--need\)/.test(css));
   check('it cannot send what the daemon would refuse', /disabled=\{busy \|\| problem !== null\}/.test(box) && /if \(problem !== null\) return;/.test(box));
   check('it sends the text in the box, trimmed, to the hand-off call', /handOff\(agent, summary\)/.test(box) && /summary: summary\.trim\(\)/.test(api) && /agentPath\(agentId, 'hand-off'\)/.test(ep));
   check('the reply box sends an ordinary message to the agent', /sendMessage\(agent\.id, \{ text \}\)/.test(box) && /placeholder="It works again/.test(box));

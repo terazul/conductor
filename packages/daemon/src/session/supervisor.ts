@@ -53,6 +53,7 @@ import {
   helperSlug,
   isStuck,
   listedRole,
+  missingHeadings,
   readOnlyRefusal,
   rerunPlan,
   rewireOnRemoval,
@@ -1714,9 +1715,11 @@ export class Supervisor implements AgentControl {
   /**
    * The `hand_off` tool (routes/helpers.ts): the agent's summary for the agents after it.
    * It is kept, and what the next agents are told first is this; they start when the turn
-   * ends, not now. Returns their roles. Throws a sentence the agent reads.
+   * ends, not now. Returns their roles, and the closing headings its persona asks for that the
+   * summary has none of: it is kept all the same, and the reply asks the agent
+   * to call again with them. Throws a sentence the agent reads.
    */
-  handOff(agentId: string, summary: string): string[] {
+  handOff(agentId: string, summary: string): { waiting: string[]; missing: string[] } {
     const agent = getAgent(this.#db, agentId);
     if (!agent) throw new Error('no such agent');
     const waiters = this.#waiters(agent);
@@ -1732,13 +1735,15 @@ export class Supervisor implements AgentControl {
       );
     }
     setHandoff(this.#db, agentId, { summary: text, held: false });
-    return waiters.map((w) => w.role);
+    return { waiting: waiters.map((w) => w.role), missing: missingHeadings(text, agent.closingHeadings ?? []) };
   }
 
   /**
    * The person's hand-off for an agent that was held (Amendment 104): the summary they
    * edited, sent from Needs You. It releases the agents after it, which `pump` starts.
-   * Refused, with a sentence and no change, when the agent is not held.
+   * Refused, with a sentence and no change, when the agent is not held. A summary without the
+   * closing headings is taken: the card has said which are missing, and there is
+   * no agent to ask.
    */
   handOffByUser(agentId: string, summary: string): Agent {
     const agent = getAgent(this.#db, agentId);

@@ -177,7 +177,15 @@ export function callTool(agentId: string, name: string, args: Record<string, unk
     }
     if (name === HAND_OFF) {
       const summary = typeof args['summary'] === 'string' ? args['summary'] : '';
-      const waiting = supervisor().handOff(agentId, summary);
+      const { waiting, missing } = supervisor().handOff(agentId, summary);
+      // Kept either way; a summary short of its closing headings is told so at once.
+      if (missing.length > 0) {
+        return text(
+          `Handed off, but your summary has no heading for ${missing.join(', ')}. It is saved, and ${waiting.join(' and ')} ` +
+            'will be told it first once your turn ends. Call hand_off again with the whole summary, those headings ' +
+            'included: the new one replaces this one.',
+        );
+      }
       return text(
         `Handed off. ${waiting.join(' and ')} will start once your turn ends, and will be told your summary first. ` +
           'End your turn now if you have nothing else to do.',

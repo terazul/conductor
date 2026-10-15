@@ -130,7 +130,7 @@ import {
   retryNote,
   type Clock,
 } from './retry.js';
-import { BUDGET_CEILING_KEY, BUDGET_RESUME_KEY, RETRY_DELAYS_KEY, budgetCeiling } from '@conductor/shared';
+import { BUDGET_CEILING_KEY, BUDGET_RESUME_KEY, RETRY_DELAYS_KEY, budgetCeiling, closingHeadingsOf, missingHeadings } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
 import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
@@ -5106,6 +5106,82 @@ async function main(): Promise<void> {
 
     // Nothing that is not a restart resume is asked: an ordinary turn that ends without it is held at once
     // (the first check in this section), and a person's reply to a held agent works it again as before.
+
+    // ── Amendment 162: a hand_off short of its closing headings is kept, and the agent is told at once ──
+    check(
+      'the headings are the bold names on the prompt’s "End with:" line, in order, once, without a colon',
+      JSON.stringify(closingHeadingsOf('You plan.\n- **Not this**\nEnd with: **Context**, **Options** (a table), **Plan:**, **context**. If you have the `hand_off` tool, that is its `summary`.')) === '["Context","Options","Plan"]',
+    );
+    check(
+      'none without a prompt, without the line, or with nothing bold on it',
+      closingHeadingsOf(null).length === 0 && closingHeadingsOf('Be brief. **Context** first.').length === 0 && closingHeadingsOf('End with: a summary.').length === 0,
+    );
+    check('the last such line is the one read', closingHeadingsOf('End with: **A**\nEnd with: **B**').join() === 'B');
+    const H = ['Context', 'How I checked', 'Plan'];
+    check(
+      'every form of heading counts: Markdown, bold, bold with a colon, a list item, plain with a colon, alone on a line, any case',
+      missingHeadings('## context\nx', H).join() === 'How I checked,Plan' &&
+        missingHeadings('**Context**\n- **How I checked:** make test\nPlan:\n1. do it', H).length === 0 &&
+        missingHeadings('> ### CONTEXT and goals\n__How I checked__ (commands)\nplan', H).length === 0,
+      JSON.stringify(missingHeadings('**Context**\n- **How I checked:** make test\nPlan:\n1. do it', H)),
+    );
+    check(
+      'the word opening a sentence, inside one, or going on is not a heading',
+      missingHeadings('Context is thin.\nWe checked how I checked it.\n## Planning\n**Plans**', H).join() === 'Context,How I checked,Plan',
+      missingHeadings('Context is thin.\nWe checked how I checked it.\n## Planning\n**Plans**', H).join(),
+    );
+    check('no headings, nothing missing', missingHeadings('anything', []).length === 0 && missingHeadings('', []).length === 0);
+
+    const hdJob = 'job_headings';
+    hjobRow(hdJob);
+    const ARCH_HD = 'You design.\n\nEnd with: **Context**, **Plan** (numbered steps). If you have the `hand_off` tool, that is its `summary`.';
+    const DEV_HD = 'You build.\n\nEnd with: **Changed**, **Left undone**.';
+    const hfixP = (id: string, a: Partial<Agent>, systemPrompt?: string): void => {
+      insertAgent(db, {
+        id, jobId: hdJob, projectId: hpid, role: 'builder', model: 'opus', sdkSessionId: null, status: 'queued', blockMode: null,
+        costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY, ...a,
+        ...(systemPrompt ? { systemPrompt } : {}),
+      });
+    };
+    hfixP('hd_arch', { role: 'architect' }, ARCH_HD);
+    hfixP('hd_dev', { role: 'developer', dependsOn: ['hd_arch'] }, DEV_HD);
+    hfixP('hd_val', { role: 'validator', dependsOn: ['hd_dev'] });
+    hfixP('hd_scr', { role: 'scribe', dependsOn: ['hd_val'] });
+    check(
+      'the wire carries the headings its prompt closes with, and nothing for an agent with none',
+      JSON.stringify(getAgent(db, 'hd_arch')?.closingHeadings) === '["Context","Plan"]' && !('closingHeadings' in (getAgent(db, 'hd_val') ?? {})),
+      JSON.stringify(getAgent(db, 'hd_arch')),
+    );
+    const atHd = runs.length;
+    sup.pump();
+    check('the architect starts', await until(() => runs.length === atHd + 1) && getAgent(db, 'hd_arch')?.status === 'working');
+    const shortHd = await handOffOver('hd_arch', '**Context**\nThe tokens expire.');
+    check(
+      'one heading missing: taken, not refused, and the reply names it and asks for hand_off again',
+      !shortHd.isError && /^Handed off, but your summary has no heading for Plan\. It is saved/.test(shortHd.text) && /Call hand_off again/.test(shortHd.text),
+      shortHd.text,
+    );
+    check('the summary is saved as it was sent', getHandoff(db, 'hd_arch').summary === '**Context**\nThe tokens expire.');
+    const fullHd = await handOffOver('hd_arch', '## Context\nThe tokens expire.\n\n## Plan\n1. Refresh them.');
+    check(
+      'every heading there: a plain OK, as before',
+      !fullHd.isError && /^Handed off\. developer will start once your turn ends/.test(fullHd.text) && !/no heading/.test(fullHd.text),
+      fullHd.text,
+    );
+    check('and the new summary replaces the first', getHandoff(db, 'hd_arch').summary === '## Context\nThe tokens expire.\n\n## Plan\n1. Refresh them.');
+    runs[atHd]?.finish({ cost: 0, reason: 'completed' });
+    check('the developer starts', await until(() => runs.length === atHd + 2) && getAgent(db, 'hd_dev')?.status === 'working');
+    runs[atHd + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('it ends without hand_off: held', await until(() => getHandoff(db, 'hd_dev').held));
+    const byYouHd = await handOffRoute('hd_dev', { summary: 'Changed: src/auth.ts' });
+    check(
+      'a person’s summary short of a heading is only warned of, on the card: the daemon takes it',
+      byYouHd.status === 200 && getHandoff(db, 'hd_dev').summary === 'Changed: src/auth.ts' && !getHandoff(db, 'hd_dev').held,
+      JSON.stringify(byYouHd.body),
+    );
+    check('the validator starts', await until(() => runs.length === atHd + 3) && getAgent(db, 'hd_val')?.status === 'working');
+    const noneHd = await handOffOver('hd_val', 'All green.');
+    check('no headings configured: no check, a plain OK', !noneHd.isError && /^Handed off\. scribe will start/.test(noneHd.text), noneHd.text);
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);

@@ -200,6 +200,63 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 162 — post-merge, applied. **A `hand_off` short of its closing headings is saved, and the agent is told which.**
+
+Shared (`headings.ts`, `wire.ts`, `index.ts`), daemon (`session/store.ts`, `session/supervisor.ts`,
+`routes/helpers.ts`, `session/verify.ts`), web (`attention/alerts.ts`, `attention/HandOff.tsx`,
+`attention/attention.css`, `attention/verify.ts`, `spawn/verify.ts`), `docs/MANUAL.md` and `TODO.md`. The
+user, 15 Oct 2026: "Run track 2 of `docs/plans/wave-11-tracks.md`"; this is the plan's lane L2 (wave-11.md §4,
+"H3: check that a hand_off has its closing headings"), with *Decided (14 Oct): warn*, and §6: "Warn: save the
+summary and tell the agent." *Decided (15 Oct): the role rules 'tests only' and 'docs only' are left as words,
+as O2 was: no enforcement, no lane.* *Amends Amendments 104 and 126*: 104's `hand_off` took any summary that
+was not empty; 126 gave each built-in role the headings it closes with, and nothing read them.
+
+- **The headings are read from the prompt, not sent.** `closingHeadingsOf(systemPrompt)`
+  (`shared/src/headings.ts:24`, pure): the bold names on the last line that starts "End with:" (any case), in
+  order, each once, trailing colon dropped, at most 20 of at most 80 characters. The row already keeps the
+  system prompt it was launched with (Amendment 68, `system_prompt`), so there is no `AgentSpec.closingHeadings`
+  and no migration: what is checked is what the agent was told, a persona edited later changes nothing, and a
+  restart keeps it. `Agent.closingHeadings?` (`wire.ts:147`) carries them, present only when there are some
+  (`closingHeadingsField`, `store.ts:410`, used by `toAgent` `:443` and `insertAgent` `:706`); the prompt
+  stays off the wire.
+- **What counts as the heading.** `missingHeadings(summary, headings)` (`headings.ts:52`, pure, in shared so
+  the daemon and the card read it the same way): a heading is there when a line starts with it as a word, case
+  and spacing aside, as a Markdown heading (`## Plan`, `### Plan and steps`), in bold or italic (`**Plan**`,
+  `**Plan:**`, `_Plan_`), or plain with a colon or alone on its line (`Plan:`, `Plan`). A list marker or quote in
+  front is skipped (`- **Plan** (the steps)`). The word opening a sentence ("Plan to refresh"), inside one, or
+  going on ("**Planning**") does not count. No headings, nothing missing.
+- **`hand_off` keeps it and says so.** `handOff` (`supervisor.ts:1722`) saves the summary as before and now
+  returns `missing` too (`:1738`). The tool's reply (`routes/helpers.ts:184`), with any missing: *Handed off,
+  but your summary has no heading for Plan. It is saved, and developer will be told it first once your turn
+  ends. Call hand_off again with the whole summary, those headings included: the new one replaces this one.*
+  Otherwise it is the reply it was. Nothing is refused and nothing waits on a second call.
+- **The card warns; a person is not stopped.** `handOffMissing(summary, agent)` (`alerts.ts:299`) is
+  `missing: Plan, Risks` or null (all there, empty, or none asked for). The Needs You hand-off box shows it
+  under the summary, only when it can be sent (`HandOff.tsx:84`, `.atn-handoff-missing`, `attention.css:372`,
+  `--need`), and **hand off with this** is not disabled by it. `handOffByUser` (`supervisor.ts:1748`) takes it
+  unchanged.
+
+*Not done / not decided:* a heading under another name (**Departures** for **Departures from the plan**)
+counts as missing. Helpers have no `hand_off`, so nothing checks theirs; nor an agent's last reply when nobody
+waits for it. The check runs once per call: an agent that ignores the reply is not asked again, and the
+agents after it start with what it saved. The card's warning is only while the box is open; the alert itself
+does not name what is missing. The role rules "tests only" and "docs only" stay words (decided above).
+
+*Verified:* `session/verify.ts` §20 (`:4811`, the block "Amendment 162" at `:5067`): pure checks of
+`closingHeadingsOf` (bold names on the "End with:" line, none without a prompt, line or bold, the last such line
+read) and of `missingHeadings` (every heading form counts; a sentence opening, inside or "Planning"/"Plans" does
+not; no headings, nothing missing); then, against the real supervisor and the fake SDK, architect (Context,
+Plan) → developer (Changed, Left undone) → validator (none) → scribe: the wire carries the headings and none for
+the validator; the architect's `**Context**` only is taken, the reply names Plan and asks for `hand_off` again,
+and the summary is saved; the full one gets the plain reply and replaces it; the held developer handed off by
+you with `Changed:` only is taken (200), saved and released; the validator's "All green." gets the plain reply.
+Web: `attention/verify.ts:448` (`handOffMissing`: one, every one in order, none for all there, empty or no
+headings; the box shows it only when sendable and never disables the send) and `spawn/verify.ts:1169` (each
+built-in's prompt yields exactly its headings; each spec `toAgentSpecs` launches carries them; an edited prompt
+brings its own, one with no "End with:" line none). With `missingHeadings` returning nothing the card checks
+fail; with `closingHeadingsField` returning nothing the wire and the reply checks fail. `pnpm -r typecheck`
+clean; `make test` green.
+
 ### Amendment 165 — post-merge, applied. **Files moves an entry by drag or Move to…, and the navigator renames and deletes.**
 
 Web (`files/moving.ts` new, `files/naming.ts`, `files/NewFileForm.tsx`, `files/FileTree.tsx`,

@@ -268,6 +268,10 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
     tokenizer.
   - Nothing checks that a model actually puts the closing headings in its `hand_off` summary, and "tests
     only" and "docs only" in the role prompts are words, not rules.
+    *Done 15 Oct: Amendment 162. A `hand_off` short of a heading is saved and the agent is told which; the
+    Needs You card says "missing: …". Decided (14 Oct): warn. Decided (15 Oct): the role rules 'tests only'
+    and 'docs only' are left as words, as O2 was: no enforcement, no lane. The two bullets above are wave 11’s
+    H1 (track 5) and H2 (next in track 2).*
 
 - [x] **Label backdrops (127).** Needs You's `project / role` header stays on `--here`, so it no *Done 13 Oct: Amendment 135, for the request in focus.*
   longer matches the Agent screen it came from. Making it match is one class, `is-agent`, on
