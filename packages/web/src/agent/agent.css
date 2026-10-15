@@ -1845,6 +1845,13 @@ a.ag-files-p:focus-visible {
   border-color: var(--ink3);
 }
 
+/* "⏲ when done" with nothing typed, or for an agent with no turn left (Amendment 157). */
+.ag-later-btn:disabled {
+  color: var(--ink3);
+  border-color: var(--line2);
+  cursor: default;
+}
+
 .ag-later {
   display: flex;
   align-items: center;

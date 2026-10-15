@@ -200,6 +200,72 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 157 — post-merge, applied. **A message can wait for the agent instead of a time: it goes when the agent's turn ends `done`, one per turn.**
+
+Daemon (`db/migrations/250_scheduled_trigger.sql` new, `session/schedule.ts`, `routes/schedule.ts`,
+`session/supervisor.ts`, `session/verify-schedule.ts`), shared (`wire.ts`), web (`agent/endpoints.ts`,
+`agent/scheduled.tsx`, `agent/composer.tsx`, `agent/agent.css`, `lib/verify-schedule.ts`), docs
+(`docs/MANUAL.md`, `TODO.md`). The user, 14 Oct 2026, in TODO's "Queue work for an agent until it is
+done": "Beside **⏲ later**'s date and time, a **queue** choice: the message waits until the agent's turn
+ends … then goes as if you had pressed send. Several queued messages go one per turn, in order". This is
+docs/plans/wave-11.md S2 (lane R3), with *Decided (14 Oct): it's sent when the agent's turn ends as `done`.
+A pending question doesn't count. On `failed` or `paused` it keeps waiting and shows that. One message
+per turn.* *Amends Amendment 111*, whose clock sent "each row with no error and `at` ≤ now" and whose
+`ScheduleMessageRequest` was `{ at, text }`: the clock now reads only rows whose trigger is `'at'`, and
+the request's `at` is optional.
+
+- **The trigger** (`250_scheduled_trigger.sql:13`). `scheduled_messages.trigger TEXT NOT NULL DEFAULT
+  'at'`, checked to `'at' | 'done' | 'slot'`, so every row already there stays a timed one. `'slot'` is
+  reserved for wave 11's A2 and nothing writes it. A row that isn't `'at'` has `at` = `created_at`
+  (`insertScheduled`, `schedule.ts:104-115`), and `due()` (`:137`) reads only `'at'` rows.
+- **Wire** (`wire.ts:836-856`). `ScheduleTrigger`; `ScheduledMessage.trigger`; `ScheduleMessageRequest
+  { at?, trigger?, text }`.
+- **The route** (`routes/schedule.ts:52-63`). `{ trigger: 'done', text }` → 201, with no time to check.
+  It is refused (400, "send the message now") for an agent that is already `done` or was `stopped`,
+  since no turn of its would end to send it. `'slot'` and anything else → 400 "trigger is 'at' or 'done'".
+- **Sending** (`supervisor.ts:1466-1467`, `#sendWhenDone` `:1488`). At the end of `#settle`, only on
+  the branch that writes `done`, the agent's oldest `'done'` row with no error (`nextWhenDone`,
+  `schedule.ts:142`, by `created_at`, then id) goes through `sendMessage`, as Amendment 111's do, and is
+  deleted. It goes before `#rollUpJob`, so the job of an agent about to go again isn't finished and
+  merged under it. One per turn falls out of this: the message starts the next turn, and the next row
+  waits for that one to settle `done`. A question (`blocked`, which doesn't settle), `failed` and
+  `paused` never reach it, so the row waits through them. A refusal other than "cannot receive messages
+  yet" (a budget, a folder gone) sets `error`, as for a timed one. It does nothing when a relaunch is
+  already wanted (`#resumeWanted`) or the job is being stopped, which would make a second run.
+- **A paused fleet** (`#owedWhenDone`, `supervisor.ts:1476`; `release`, `:2440-2444`). While
+  everything is paused, `sendMessage` still launches (Amendment 111), so a turn that ends `done` then
+  is remembered instead, and `release` sends its message if the agent is still `done`. Agents the
+  pause paused send theirs at the done that follows their resume.
+- **A restart.** The rows are in the database; nothing reads them at start or on a tick, so none
+  goes until the agent's next turn settles `done`. The owed set is in memory: a restart during a
+  paused fleet leaves that row for the next done turn.
+- **Web.** `queueWhenDone` (`endpoints.ts:187`) posts `{ trigger: 'done', text }`. The composer has
+  **⏲ when done** beside **⏲ later** (`composer.tsx:301-302`, `:591`), which queues what is typed and
+  clears it, and is disabled with the route's reason as its title for a `done` or `stopped` agent
+  (`whenDoneRefusal`, `scheduled.tsx:33`). `ScheduledList` shows such a row as **⏲ when done** with what
+  it waits on (`whenDoneWaits`, `:44`): *when this turn ends*, *after its next turn*, *waiting: it asked
+  you something*, *waiting: it failed, and goes after a turn that ends done*, *waiting: it is paused*,
+  or *after the one before it* for all but the first. ✕ cancels it as before. `.ag-later-btn:disabled`
+  (`agent.css:1849`) is tokens only.
+
+*Not done / not decided:* `'slot'` (a message waiting for a free slot) is only a value in the CHECK;
+A2 builds it. "Done" is the turn, not the job, as decided: nothing waits for a job to finish. A row
+that failed (`error`) is skipped by `nextWhenDone` and stays until you clear it, like a timed one. The
+list's order is still Amendment 111's (by `at`, which for these is when they were queued). The owed
+set doesn't survive a restart.
+
+*Verified:* daemon `session/verify-schedule.ts` §8 (`:342`), 35 new checks on the fake SDK, with a fake
+turn that ends `failed`. Nothing is sent while the agent is working, and a tick doesn't read it as due.
+The oldest is sent once on `done`, resuming its own session, with only its text, and the job stays
+`working`. The refusals (done, stopped, `'slot'`, an unknown trigger) make no row. A question doesn't
+send it. Two queued messages take two turns. On `failed` it waits and goes after a later done. ✕
+cancels it. The row is in the database file as `'done'`, a paused agent and a fresh `Scheduler` don't
+send it, and the next done does. A row inserted without a trigger reads as `'at'`. A paused fleet
+holds it, a turn of yours that ends done during the pause holds it too, and the pause ending sends it.
+With the `#settle` call taken out, 19 of them fail. Web `lib/verify-schedule.ts` §5 (`:115`), 10
+checks: `whenDoneRefusal` and `whenDoneWaits`, and the composer, endpoint and list wiring.
+`pnpm -r typecheck` clean; `make test` green.
+
 ### Amendment 156 — post-merge, applied. **Branches can pull and rebase a branch; a pushed branch rebased is refused at push, since it needs a force Conductor never does.**
 
 Daemon (`workspace/branches.ts`, `routes/branches.ts`, `workspace/verify-branches.ts`), shared

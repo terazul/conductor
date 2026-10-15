@@ -39,8 +39,8 @@ import {
   useProviders,
 } from '../lib/providers.js';
 import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } from '../spawn/autonomy.js';
-import { scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
-import { LaterRow, ScheduledList } from './scheduled.js';
+import { queueWhenDone, scheduleMessage, sendMessage, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { LaterRow, ScheduledList, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
 import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
@@ -295,6 +295,19 @@ export function Composer({ agent }: { agent: Agent }) {
       setText('');
       setLater(false);
     }
+  };
+
+  // Send it when the agent is done (Amendment 157): the same text, once its turn ends as `done`.
+  const doneRefused = whenDoneRefusal(agent.status);
+  const whenDone = async () => {
+    const body = text.trim();
+    if (body.length === 0) return;
+    const ok = await send.run(
+      'Queueing a message',
+      () => queueWhenDone(agent.id, body),
+      () => 'Queued: it goes when this turn ends done.',
+    );
+    if (ok) setText('');
   };
 
   const togglePill = async (pill: PillDef) => {
@@ -567,6 +580,15 @@ export function Composer({ agent }: { agent: Agent }) {
               title="Send this message at a time you choose"
             >
               ⏲ later
+            </button>
+            <button
+              type="button"
+              className="ag-later-btn"
+              onClick={() => void whenDone()}
+              disabled={send.busy || text.trim().length === 0 || doneRefused !== null}
+              title={doneRefused ?? 'Send this message when its turn ends done: one per turn, in order'}
+            >
+              ⏲ when done
             </button>
             <button
               type="button"

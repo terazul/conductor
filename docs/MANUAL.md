@@ -1459,6 +1459,18 @@ yet gets it once it has. One that can't take it (it has reached its budget's cei
 **couldn't send** with the reason, in red, until you clear it; it isn't tried again.
 Removing the agent removes its scheduled messages.
 
+**Sending a message when it is done.** **⏲ later** waits for a time; **⏲ when done**, beside
+it, waits for the agent. Type the message and press it while the agent is working: the
+message goes, as if you had pressed send, when this turn ends **done**. Done means its turn,
+not its whole job. A question it stops to ask you doesn't count, and it keeps waiting through a
+turn that **failed** or a pause, yours or everything's, until a later turn ends done. Queue
+several and they go one per turn, in order, each once the agent is done with the one before. They
+wait in the same list above the message box as **⏲ when done**, with what each is waiting on
+(*when this turn ends*, *waiting: it failed…*, *after the one before it*) and ✕ to cancel. They
+survive a restart, and go at the agent's next turn that ends done. The button is off for an agent
+that is already done or was stopped, since no turn of its would end: send the message now
+instead.
+
 A terminated agent reads **stopped** — not "finished", which would claim it had. Its
 transcript and spend stay, and nothing on disk is touched: the worktree, the branch and
 every file it wrote are exactly where they were. To stop a whole job at once, use

@@ -10,6 +10,12 @@
  *     the agent exactly as if you had pressed send then (`Supervisor.sendMessage`): into a
  *     live run, or resuming a finished one. Sent, the row is deleted: the transcript has it.
  *     While everything is paused, a message that comes due waits for the pause to end.
+ *   - **Send a message when the agent is done** (Amendment 157). The same row, with
+ *     `trigger = 'done'` and no time of its own (`at` is when it was made). The clock never
+ *     reads it: `Supervisor.#settle` sends the oldest one when the agent's turn ends as `done`
+ *     (`nextWhenDone`), so several go one per turn, in order. A question it stops on, a
+ *     failure or a pause aren't `done`, so it keeps waiting through them; while everything is
+ *     paused it waits for the pause to end. It survives a restart, and goes at the next `done`.
  *
  * TIME. Instants are ISO, compared as numbers. The browser turns the local date and time
  * you picked into one; nothing here reads or sets a time zone.
@@ -21,7 +27,7 @@
  * goes out then.
  */
 
-import type { ScheduledMessage } from '@conductor/shared';
+import type { ScheduledMessage, ScheduleTrigger } from '@conductor/shared';
 import { PAUSE_UNTIL_KEY } from '@conductor/shared';
 import { rows, type Db } from '../db/index.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
@@ -73,6 +79,7 @@ interface Row {
   id: string;
   agent_id: string;
   at: string;
+  trigger: ScheduleTrigger;
   text: string;
   created_at: string;
   error: string | null;
@@ -82,6 +89,7 @@ const toMessage = (r: Row): ScheduledMessage => ({
   id: r.id,
   agentId: r.agent_id,
   at: r.at,
+  trigger: r.trigger,
   text: r.text,
   createdAt: r.created_at,
   error: r.error,
@@ -92,18 +100,27 @@ export function listScheduled(db: Db): ScheduledMessage[] {
   return rows<Row>(db.prepare('SELECT * FROM scheduled_messages ORDER BY at, created_at').all()).map(toMessage);
 }
 
-export function insertScheduled(db: Db, agentId: string, at: string, text: string): ScheduledMessage {
+/** `at` is read only for an `at` row; any other has its creation time there (Amendment 157). */
+export function insertScheduled(
+  db: Db,
+  agentId: string,
+  at: string | null,
+  text: string,
+  trigger: ScheduleTrigger = 'at',
+): ScheduledMessage {
+  const created = new Date().toISOString();
   const r: Row = {
     id: newId('sch'),
     agent_id: agentId,
-    at: new Date(Date.parse(at)).toISOString(),
+    at: trigger === 'at' && at !== null ? new Date(Date.parse(at)).toISOString() : created,
+    trigger,
     text,
-    created_at: new Date().toISOString(),
+    created_at: created,
     error: null,
   };
   db.prepare(
-    'INSERT INTO scheduled_messages (id, agent_id, at, text, created_at, error) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(r.id, r.agent_id, r.at, r.text, r.created_at, r.error);
+    'INSERT INTO scheduled_messages (id, agent_id, at, trigger, text, created_at, error) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(r.id, r.agent_id, r.at, r.trigger, r.text, r.created_at, r.error);
   return toMessage(r);
 }
 
@@ -112,13 +129,32 @@ export function deleteScheduled(db: Db, id: string): boolean {
   return Number(db.prepare('DELETE FROM scheduled_messages WHERE id = ?').run(id).changes) > 0;
 }
 
-function failScheduled(db: Db, id: string, error: string): void {
+export function failScheduled(db: Db, id: string, error: string): void {
   db.prepare('UPDATE scheduled_messages SET error = ? WHERE id = ?').run(error.slice(0, 400), id);
 }
 
-/** Waiting and due: no error yet, and `at` no later than now. Soonest first. */
+/** Waiting and due: an `at` row with no error yet, and `at` no later than now. Soonest first. */
 function due(db: Db, now: number): ScheduledMessage[] {
-  return listScheduled(db).filter((m) => m.error === null && Date.parse(m.at) <= now);
+  return listScheduled(db).filter((m) => m.trigger === 'at' && m.error === null && Date.parse(m.at) <= now);
+}
+
+/** The oldest message waiting for this agent's turn to end as `done`, or null (Amendment 157). */
+export function nextWhenDone(db: Db, agentId: string): ScheduledMessage | null {
+  const r = db
+    .prepare(
+      "SELECT * FROM scheduled_messages WHERE agent_id = ? AND trigger = 'done' AND error IS NULL ORDER BY created_at, id LIMIT 1",
+    )
+    .get(agentId) as Row | undefined;
+  return r ? toMessage(r) : null;
+}
+
+/** Every open page is told the whole list: from the clock, a route, or the supervisor (Amendment 157). */
+export function broadcastScheduled(db: Db): void {
+  try {
+    hub().broadcast({ type: 'scheduled', scheduled: listScheduled(db) });
+  } catch {
+    // No hub outside the daemon. Not fatal.
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,11 +262,7 @@ export class Scheduler {
 
   /** Every open page is told the whole list. */
   broadcast(): void {
-    try {
-      hub().broadcast({ type: 'scheduled', scheduled: listScheduled(this.#db) });
-    } catch {
-      // No hub outside the daemon. Not fatal.
-    }
+    broadcastScheduled(this.#db);
   }
 }
 
