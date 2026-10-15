@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -25,7 +25,8 @@ import type {
 } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
-import { DEFAULT_AUTONOMY, getJob, getProject, insertAgent, insertJob, insertProject, setAgentStatus } from '../session/store.js';
+import { DEFAULT_AUTONOMY, addProjectDir, getJob, getProject, insertAgent, insertJob, insertProject, setAgentStatus } from '../session/store.js';
+import { projectRepo } from './project-repo.js';
 import type { AgentStatus, Isolation } from '@conductor/shared';
 import { readFileSync } from 'node:fs';
 import { EventLog } from '../eventlog.js';
@@ -100,6 +101,17 @@ const REPO4 = join(ROOT, 'repo4');
 const ORIGIN4 = join(ROOT, 'origin4.git');
 const OTHER4 = join(ROOT, 'other4');
 const wt4 = (name: string): string => join(ROOT, `wt4-${name.replace(/\//g, '-')}`);
+// N4's project: a repo with a clone nested in it (and one nested in that), an extra
+// directory that is a repo, one that isn't but has a repo in it, and one inside the repo.
+const REPO5 = join(ROOT, 'repo5');
+const ORIGIN5 = join(ROOT, 'origin5.git');
+const NESTED5 = join(REPO5, 'inner');
+const DEEPER5 = join(NESTED5, 'deeper');
+const ORIGIN5N = join(ROOT, 'origin5n.git');
+const WT5N = join(ROOT, 'wt5n-same');
+const EXTRA5 = join(ROOT, 'extra5');
+const EXTRA5_PLAIN = join(ROOT, 'extra5-plain');
+const EXTRA5_DEEP = join(EXTRA5_PLAIN, 'deep');
 
 /** Commits get one minute apart, so "oldest tip first" never ties on a second. */
 let clock = Date.parse('2026-01-01T09:00:00Z');
@@ -296,6 +308,53 @@ function makeRepo4(): void {
   sh(OTHER4, 'config', 'user.email', 'other@example.invalid');
 }
 
+function makeRepo5(): void {
+  const init = (dir: string): void => {
+    sh(ROOT, 'init', '-q', '-b', 'main', dir);
+    sh(dir, 'config', 'user.name', 'Verify');
+    sh(dir, 'config', 'user.email', 'verify@example.invalid');
+  };
+  // The project's own repo: `same` pushed, then one commit behind what origin has of it.
+  sh(ROOT, 'init', '-q', '--bare', ORIGIN5);
+  init(REPO5);
+  mkdirSync(join(REPO5, 'sub'));
+  commitFile(REPO5, 'sub/s.txt', 'sub\n', 'outer start');
+  sh(REPO5, 'remote', 'add', 'origin', ORIGIN5);
+  sh(REPO5, 'push', '-q', '-u', 'origin', 'main');
+  sh(REPO5, 'checkout', '-q', '-b', 'same');
+  commitFile(REPO5, 'o.txt', 'outer same\n', 'outer same');
+  commitFile(REPO5, 'o.txt', 'outer same, more\n', 'outer same more');
+  sh(REPO5, 'push', '-q', '-u', 'origin', 'same');
+  sh(REPO5, 'checkout', '-q', 'main');
+  sh(REPO5, 'branch', '-q', '-f', 'same', 'same~1');
+  sh(REPO5, 'branch', '-q', 'outer/only');
+  symlinkSync(REPO, join(REPO5, 'link'));
+
+  // The nested clone, untracked by the outer one, with an origin of its own.
+  sh(ROOT, 'init', '-q', '--bare', ORIGIN5N);
+  init(NESTED5);
+  commitFile(NESTED5, 'n.txt', 'inner\n', 'inner start');
+  sh(NESTED5, 'remote', 'add', 'origin', ORIGIN5N);
+  sh(NESTED5, 'push', '-q', '-u', 'origin', 'main');
+  sh(NESTED5, 'checkout', '-q', '-b', 'same');
+  commitFile(NESTED5, 'same.txt', 'inner same\n', 'inner same');
+  sh(NESTED5, 'push', '-q', '-u', 'origin', 'same');
+  sh(NESTED5, 'checkout', '-q', '-b', 'feat/n', 'main');
+  commitFile(NESTED5, 'feat.txt', 'feat\n', 'inner feat');
+  sh(NESTED5, 'checkout', '-q', 'main');
+  sh(NESTED5, 'worktree', 'add', '-q', WT5N, 'same');
+  init(DEEPER5);
+  commitFile(DEEPER5, 'd.txt', 'deeper\n', 'deeper start');
+
+  init(EXTRA5);
+  commitFile(EXTRA5, 'x.txt', 'extra\n', 'extra start');
+  sh(EXTRA5, 'branch', '-q', 'x/one');
+  mkdirSync(EXTRA5_PLAIN);
+  writeFileSync(join(EXTRA5_PLAIN, 'loose.txt'), 'not in a repo\n');
+  init(EXTRA5_DEEP);
+  commitFile(EXTRA5_DEEP, 'deep.txt', 'deep\n', 'deep start');
+}
+
 function byName(r: BranchesResponse, name: string): BranchInfo | undefined {
   return r.branches.find((b) => b.name === name);
 }
@@ -340,6 +399,7 @@ async function main(): Promise<void> {
   makeRepo2();
   makeRepo3();
   makeRepo4();
+  makeRepo5();
 
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
@@ -1024,13 +1084,146 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n15 · every repo Files shows, on Branches (N4)");
+  {
+    const project5 = insertProject(db, { path: REPO5, name: 'repos-verify', defaultBranch: 'main' });
+    for (const dir of [EXTRA5, EXTRA5_PLAIN, join(REPO5, 'sub')]) addProjectDir(db, project5.id, dir);
+    const URL5 = `/api/projects/${project5.id}/branches`;
+    const q = (repo: string): string => `?repo=${encodeURIComponent(repo)}`;
+    const in5 = (repo: string, body: unknown) => post<BranchActionResult & Err>(`${URL5}${q(repo)}`, body);
+    const show = (r: Reply<unknown>): string => `${r.status} ${JSON.stringify(r.body).slice(0, 300)}`;
+    const tipIn = (dir: string, name: string): string => sh(dir, 'rev-parse', `refs/heads/${name}`);
+    const refs = (dir: string): string => sh(dir, 'for-each-ref', '--format=%(refname) %(objectname)');
+
+    const own = await get<BranchesResponse>(URL5);
+    const paths = (own.body.repos ?? []).map((r) => r.path);
+    check('the listing names its repo, and lists every repo: own, nested, nested in that, extra, nested in an extra', own.status === 200 && own.body.repo === REPO5 && paths.join() === [REPO5, NESTED5, DEEPER5, EXTRA5, EXTRA5_DEEP].join(), show(own));
+    check('  only the own folder is main, and each is named by folder and path', (own.body.repos ?? []).map((r) => `${r.name}${r.main ? '*' : ''}`).join() === 'repo5*,repo5/inner,repo5/inner/deeper,extra5,extra5-plain/deep', JSON.stringify(own.body.repos));
+    check("  an extra directory inside the project's repo is that repo, not another", !paths.includes(join(REPO5, 'sub')));
+    check('  without ?repo it is the own folder, as before', !!byName(own.body, 'outer/only') && !byName(own.body, 'feat/n'));
+    const explicit = await get<BranchesResponse>(`${URL5}${q(REPO5)}`);
+    check('?repo= the own folder is the same listing', explicit.status === 200 && explicit.body.branches.map((b) => b.name).join() === own.body.branches.map((b) => b.name).join());
+
+    const nested = await get<BranchesResponse>(`${URL5}${q(NESTED5)}`);
+    check('the nested repo lists its own branches, none of the outer ones', nested.status === 200 && nested.body.repo === NESTED5 && !!byName(nested.body, 'feat/n') && !byName(nested.body, 'outer/only') && nested.body.target === 'main', show(nested));
+    check('  and carries the same choices', (nested.body.repos ?? []).map((r) => r.path).join() === paths.join());
+    check('  its jobs are none: no branch has a jobId', nested.body.branches.every((b) => b.jobId === null && !b.live));
+    check("  same-named branches stay each repo's own", byName(nested.body, 'same')?.head === tipIn(NESTED5, 'same') && byName(own.body, 'same')?.head === tipIn(REPO5, 'same') && tipIn(NESTED5, 'same') !== tipIn(REPO5, 'same'));
+    const extra = await get<BranchesResponse>(`${URL5}${q(EXTRA5)}`);
+    check('the extra directory lists its branches', extra.status === 200 && !!byName(extra.body, 'x/one') && !byName(extra.body, 'feat/n'), show(extra));
+    const deep = await get<BranchesResponse>(`${URL5}${q(DEEPER5)}`);
+    const plainDeep = await get<BranchesResponse>(`${URL5}${q(EXTRA5_DEEP)}`);
+    check('the repo nested in the nested one, and the one in a plain extra directory, list too', deep.status === 200 && deep.body.branches.length === 1 && plainDeep.status === 200 && plainDeep.body.branches.length === 1, `${show(deep)} | ${show(plainDeep)}`);
+
+    const outside = [REPO, join(REPO5, 'link'), join(NESTED5, '..', '..', 'repo'), join(REPO5, 'sub'), EXTRA5_PLAIN, join(ROOT, 'no-such'), 'repo5'];
+    const refusedAll = await Promise.all(outside.map((r) => get<Err>(`${URL5}${q(r)}`)));
+    check('a repo outside the set → 400: another project, a symlink to it, a .. path, a plain folder, a missing one, a relative path', refusedAll.every((r) => r.status === 400 && /not one of repos-verify's repos/.test(r.body.error)), refusedAll.map(show).join(' | '));
+    const before = refs(REPO);
+    const postOut = await in5(REPO, { action: 'merge', branch: 'feature/two' });
+    const previewOut = await get<Err>(`${URL5}/preview?branch=feature/two&into=main&repo=${encodeURIComponent(REPO)}`);
+    check('  POST and the preview too, and the other repo is untouched', postOut.status === 400 && previewOut.status === 400 && refs(REPO) === before, `${show(postOut)} | ${show(previewOut)}`);
+    const emptyRepo = await get<BranchesResponse>(`${URL5}?repo=`);
+    check('  an empty ?repo= is the own folder', emptyRepo.status === 200 && emptyRepo.body.repo === REPO5);
+
+    const outerRefs = refs(REPO5);
+    const extraRefs = refs(EXTRA5);
+    const prev = await get<BranchMergePreview>(`${URL5}/preview?branch=feat/n&into=main&repo=${encodeURIComponent(NESTED5)}`);
+    check("the preview reads the nested repo's branches", prev.status === 200 && prev.body.ahead === 1 && prev.body.reason === null, show(prev));
+    const merged = await in5(NESTED5, { action: 'merge', branch: 'feat/n' });
+    check('merging in the nested repo → 200, into its own main', merged.status === 200 && merged.body.ok === true && merged.body.branches.repo === NESTED5 && (merged.body.branches.repos ?? []).length === paths.length, show(merged));
+    check('  its main has the commit; the outer repo and the extra one are untouched', sh(NESTED5, 'merge-base', '--is-ancestor', 'refs/heads/feat/n', 'refs/heads/main') === '' && refs(REPO5) === outerRefs && refs(EXTRA5) === extraRefs);
+    const originOuter = refs(ORIGIN5);
+    const pushed = await in5(NESTED5, { action: 'push', branch: 'feat/n' });
+    check("pushing in the nested repo → 200, to the nested repo's origin only", pushed.status === 200 && tipIn(ORIGIN5N, 'feat/n') === tipIn(NESTED5, 'feat/n') && refs(ORIGIN5) === originOuter && refs(REPO5) === outerRefs, show(pushed));
+
+    const rebased = await in5(NESTED5, { action: 'rebase', branch: 'same' });
+    check("rebasing the nested repo's pushed `same` marks it rebased there", rebased.status === 200 && rebased.body.ok === true && byName(rebased.body.branches, 'same')?.rebased === true, show(rebased));
+    const ownAfter = await get<BranchesResponse>(URL5);
+    check("  and not the outer repo's `same`, behind its own upstream", byName(ownAfter.body, 'same')?.upstream?.behind === 1 && byName(ownAfter.body, 'same')?.rebased === undefined, JSON.stringify(byName(ownAfter.body, 'same')));
+    const outerPush = await post<BranchActionResult & Err>(URL5, { action: 'push', branch: 'same' });
+    check("  so the outer `same` isn't refused for the nested one's rebase", !/rebased after it was pushed/.test(`${outerPush.body.error ?? ''}`), show(outerPush));
+
+    const setDef = await in5(NESTED5, { action: 'set_default', branch: 'feat/n' });
+    check("set_default in the nested repo → 400: only the project's own folder has a default", setDef.status === 400 && /only the project's own folder has a default branch/.test(setDef.body.error) && getProject(db, project5.id)?.defaultBranch === 'main', show(setDef));
+
+    const viaFinish = await projectRepo(db, project5.id, async () => {});
+    check("projectRepo (the finished-job merge's) still opens the project's own folder", viaFinish?.root === REPO5 && viaFinish.path === REPO5);
+
+    // An agent working in place reaches the nested repo: what it has checked out is live.
+    insertJob(db, { id: 'job_inplace5', projectId: project5.id, prompt: 'in place', isolation: 'in_place', worktreePath: REPO5, branch: 'main', status: 'working', budgetUsd: null });
+    insertAgent(db, {
+      id: 'agt_inplace5',
+      jobId: 'job_inplace5',
+      projectId: project5.id,
+      role: 'builder',
+      model: 'claude-sonnet-5',
+      sdkSessionId: null,
+      status: 'working',
+      blockMode: null,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      dependsOn: [],
+      autonomy: DEFAULT_AUTONOMY,
+    });
+    sh(NESTED5, 'checkout', '-q', '-b', 'feat/m');
+    commitFile(NESTED5, 'm.txt', 'm\n', 'inner m');
+    sh(NESTED5, 'checkout', '-q', 'main');
+    const busy = await get<BranchesResponse>(`${URL5}${q(NESTED5)}`);
+    const intoLive = await in5(NESTED5, { action: 'merge', branch: 'feat/m' });
+    check('while an in_place agent works, the nested repo\'s checked-out branch is live, and a merge into it → 409', byName(busy.body, 'main')?.live === true && byName(busy.body, 'feat/m')?.live === false && intoLive.status === 409, show(intoLive));
+
+    // Every agent is given the extra directories, a worktree job's too: in a repo there (or
+    // one nested in a plain one) what is checked out is live while it works. A repo nested
+    // only in the project's folder isn't in its worktree, nor given to it.
+    setAgentStatus(db, 'agt_inplace5', 'done');
+    insertJob(db, { id: 'job_wt5', projectId: project5.id, prompt: 'in a worktree', isolation: 'worktree', worktreePath: join(ROOT, 'wt5-job'), branch: 'conductor/job_wt5', status: 'working', budgetUsd: null });
+    insertAgent(db, {
+      id: 'agt_wt5',
+      jobId: 'job_wt5',
+      projectId: project5.id,
+      role: 'builder',
+      model: 'claude-sonnet-5',
+      sdkSessionId: null,
+      status: 'working',
+      blockMode: null,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      dependsOn: [],
+      autonomy: DEFAULT_AUTONOMY,
+    });
+    sh(EXTRA5, 'checkout', '-q', 'x/one');
+    commitFile(EXTRA5, 'one.txt', 'one\n', 'extra one');
+    sh(EXTRA5, 'checkout', '-q', 'main');
+    const extraRefs2 = refs(EXTRA5);
+    const extraBusy = await get<BranchesResponse>(`${URL5}${q(EXTRA5)}`);
+    const deepBusy = await get<BranchesResponse>(`${URL5}${q(EXTRA5_DEEP)}`);
+    check("while a worktree job's agent works, the extra directory's checked-out branch is live, and only it", byName(extraBusy.body, 'main')?.live === true && byName(extraBusy.body, 'x/one')?.live === false && extraBusy.body.rootLive === true, show(extraBusy));
+    check('  and the one nested in a plain extra directory', byName(deepBusy.body, 'main')?.live === true, show(deepBusy));
+    const busyReplies = await Promise.all([
+      in5(EXTRA5, { action: 'pull', branch: 'main' }),
+      in5(EXTRA5, { action: 'rebase', branch: 'main', onto: 'x/one' }),
+      in5(EXTRA5, { action: 'merge', branch: 'x/one' }),
+      in5(EXTRA5_DEEP, { action: 'pull', branch: 'main' }),
+    ]);
+    check('  pull, rebase and merge into it → 409, as on a job\'s live branch, and nothing moves', busyReplies.every((r) => r.status === 409 && /an agent is working on this branch/.test(r.body.error)) && refs(EXTRA5) === extraRefs2, busyReplies.map(show).join(' | '));
+    const nestedFree = await get<BranchesResponse>(`${URL5}${q(NESTED5)}`);
+    const intoFree = await in5(NESTED5, { action: 'merge', branch: 'feat/m' });
+    check("  the repo nested only in the project's folder isn't live for it: a merge into its main → 200", byName(nestedFree.body, 'main')?.live === false && nestedFree.body.rootLive === false && intoFree.status === 200 && intoFree.body.ok === true, show(intoFree));
+    setAgentStatus(db, 'agt_wt5', 'done');
+    const extraFree = await get<BranchesResponse>(`${URL5}${q(EXTRA5)}`);
+    check('  once it has finished, the extra directory\'s branch is free again', byName(extraFree.body, 'main')?.live === false && extraFree.body.rootLive === false, show(extraFree));
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   ws.close();
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117), deleting merged branches (Amendment 143), pull and rebase (N3).\n`
+      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117), deleting merged branches (Amendment 143), pull and rebase (N3), every repo Files shows (N4).\n`
       : `\nAmendment 109 branches: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

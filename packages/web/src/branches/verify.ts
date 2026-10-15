@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import type { BranchInfo, BranchMergePreview, BranchesResponse } from '@conductor/shared';
+import type { BranchInfo, BranchMergePreview, BranchRepoChoice, BranchesResponse } from '@conductor/shared';
 import { G, badges, layout } from './graph.js';
 import { onBranchesChanged, receiveBranches } from './live.js';
 import {
@@ -23,8 +23,12 @@ import {
   commitReason,
   deleteConfirm,
   deleteReason,
+  ownRepo,
   ownedReason,
+  ownersIn,
   ownersOf,
+  repoChoices,
+  repoParam,
   removedText,
   defaultInto,
   defaultMessage,
@@ -267,7 +271,7 @@ console.log('\n7 · merge into any branch (Amendment 110)');
   check('the confirm names where it goes and the count it was given', /into conductor\/job_a/.test(mergeConfirm(resp, long, 'conductor/job_a', 7).ask) && /\(7 commits\)/.test(mergeConfirm(resp, long, 'conductor/job_a', 7).ask));
 
   const route = src('./route.tsx');
-  check('the bar has a "merge into" picker and asks for a preview', /<select\s+id="br-into"/.test(route) && /previewMerge\(projectId, branch, into\)/.test(route));
+  check('the bar has a "merge into" picker and asks for a preview', /<select\s+id="br-into"/.test(route) && /previewMerge\(projectId, branch, into(, repo)?\)/.test(route));
   check('into the target sends no into, so it is the merge it always was', /intoBranch\?\.isTarget \? \{ action: 'merge', branch: b\.name \} : \{ action: 'merge', branch: b\.name, into \}/.test(route));
   check('the outcome says where it went', /const target = res\.into \?\? fallback;/.test(route));
   check('the graph marks the branch it would go into', /into=\{branch && into \? into : null\}/.test(route) && /merges here/.test(src('./graph.tsx')));
@@ -438,6 +442,34 @@ console.log('\n11 · pull and rebase, never forced (N3)');
   check("a rebase's conflict says the rebase was undone", /the rebase was undone/.test(route));
 }
 
+console.log('\n12 · every repo Files shows, picked in the header (N4)');
+{
+  const choices: BranchRepoChoice[] = [
+    { path: '/r', name: 'r', main: true },
+    { path: '/r/inner', name: 'r/inner', main: false },
+    { path: '/extra', name: 'extra', main: false },
+  ];
+  const ownR: BranchesResponse = { ...resp, repo: '/r', repos: choices };
+  const inner: BranchesResponse = { ...resp, repo: '/r/inner', repos: choices };
+  check('the own folder is its own repo, listed or not', ownRepo(ownR) && ownRepo(resp));
+  check('a nested repo is not', !ownRepo(inner));
+  check('the picker shows only when there is more than one repo', repoChoices(choices).length === 3 && repoChoices(choices.slice(0, 1)).length === 0 && repoChoices(undefined).length === 0);
+  check('picking the own folder sends no ?repo=, another sends its path', repoParam(choices[0]) === null && repoParam(choices[1]) === '/r/inner' && repoParam(undefined) === null);
+  const jobs = [{ id: 'job_a', branch: 'conductor/job_a', projectId: 'p1' }];
+  check("jobs own branches only in the project's own folder", ownersIn(ownR, job, jobs, 'p1').join() === 'job_a' && ownersIn(inner, job, jobs, 'p1').length === 0);
+
+  const route = src('./route.tsx');
+  const ends = src('./endpoints.ts');
+  check('every request takes the repo as ?repo=', /getBranches\(projectId: string, repo: string \| null = null\)/.test(ends) && /branchAction\(projectId: string, action: BranchAction, repo: string \| null = null\)/.test(ends) && /previewMerge\(projectId: string, branch: string, into: string, repo: string \| null = null\)/.test(ends) && /new URLSearchParams\(\{ repo \}\)/.test(ends));
+  check('the screen sends the repo picked with each', /getBranches\(projectId, repo\)/.test(route) && /previewMerge\(projectId, branch, into, repo\)/.test(route) && /branchAction\(project\.id, action, repo\)/.test(route));
+  check('the picker sits in the header, over repoChoices, setting the repo via repoParam', /<RepoPicker choices=\{repoChoices\(choices\)\} repo=\{repo\} onPick=\{setRepo\} \/>/.test(route) && /onPick\(repoParam\(choices\.find/.test(route));
+  check("it defaults to the project's own folder, and another project starts there again", /useState<\{ projectId: string \| null; repo: string \| null \}>\(\{ projectId: null, repo: null \}\)/.test(route) && /setPicked\(\{ projectId, repo: next \}\), \[projectId\]\)/.test(route));
+  check("  in the same render: the repo read is keyed by the project, so a switch never asks for the old project's repo", /const repo = picked\.projectId === projectId \? picked\.repo : null;/.test(route) && /const choices = listed\.projectId === projectId \? listed\.repos : \[\];/.test(route) && !/setRepo\(null\)/.test(route) && /useBranches\(project \? project\.id : null, repo\)/.test(route));
+  check('the choices outlive an error in the repo picked', /if \(resp\?\.repos\) setListed\(\{ projectId: resp\.projectId, repos: resp\.repos \}\)/.test(route));
+  check('another repo: no chosen target, no root line, no Make default', /\{resp && own && <CompareWith/.test(route) && /\{resp && own && <RootLine/.test(route) && /\{own && \(\s*<>\s*<Act\s+label=\{busy === 'set_default'/.test(route) && /own && confirming === 'checkout'/.test(route));
+  check('owners come from ownersIn', /ownersIn\(resp, b, jobs, project\.id\)/.test(route));
+}
+
 console.log('\n6 · the status bar and nav.ts');
 {
   // 1–7 when Branches was the last screen; Metrics (8, Amendment 122) made it 1–8.
@@ -449,7 +481,7 @@ console.log('\n6 · the status bar and nav.ts');
 
 console.log(
   failures === 0
-    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117); merged branches are deleted only with their reasons met, and a job\'s only when you forget it too (143); pull and rebase say why not, confirm first, and warn that a pushed branch\'s rebase needs a force Conductor never does (N3).'
+    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117); merged branches are deleted only with their reasons met, and a job\'s only when you forget it too (143); pull and rebase say why not, confirm first, and warn that a pushed branch\'s rebase needs a force Conductor never does (N3); every repo Files shows is picked in the header, the own folder by default (N4).'
     : `\nAmendment 109 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

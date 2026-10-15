@@ -19,10 +19,15 @@
  *
  * WHAT IT REFUSES. Everything the daemon refuses, said beforehand: see rules.ts. The
  * daemon's 409 still has the last word, and its sentence is shown as it is.
+ *
+ * WHICH REPO (N4). The project's own folder, unless you pick another of its repos in the
+ * header: an extra directory that is a repo, or one nested in either, as Files shows them.
+ * Kept while you stay on the project; another project starts from its own folder. Another
+ * repo has no default branch or chosen target, and no jobs.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BranchAction, BranchActionResult, BranchInfo, BranchMergePreview, BranchesResponse } from '@conductor/shared';
+import type { BranchAction, BranchActionResult, BranchInfo, BranchMergePreview, BranchRepoChoice, BranchesResponse } from '@conductor/shared';
 import { branchTargetKey } from '@conductor/shared';
 import { useSetting, writeSetting } from '../lib/settings.js';
 import { targetFromWords } from './rules.js';
@@ -53,7 +58,8 @@ import {
   mergeAllState,
   mergeConfirm,
   mergeable,
-  ownersOf,
+  ownRepo,
+  ownersIn,
   pullConfirm,
   pullReason,
   pushConfirm,
@@ -62,6 +68,8 @@ import {
   rebaseConfirm,
   rebaseReason,
   removedText,
+  repoChoices,
+  repoParam,
   rootLine,
   showCommit,
   showPull,
@@ -84,8 +92,8 @@ function useProjectId(): string | null {
   return routed ?? recall().projectId ?? null;
 }
 
-/** The branches of one project, re-read whenever something says they may have changed. */
-function useBranches(projectId: string | null) {
+/** The branches of one project's repo, re-read whenever something says they may have changed. */
+function useBranches(projectId: string | null, repo: string | null) {
   const [resp, setResp] = useState<BranchesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,7 +105,7 @@ function useBranches(projectId: string | null) {
     const mine = ++seq.current;
     setLoading(true);
     try {
-      const next = await getBranches(projectId);
+      const next = await getBranches(projectId, repo);
       if (mine !== seq.current) return;
       setResp(next);
       setError(null);
@@ -107,7 +115,7 @@ function useBranches(projectId: string | null) {
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, repo]);
 
   /** An action's answer carries the state after it: take it, and drop any older read in flight. */
   const accept = useCallback((next: BranchesResponse) => {
@@ -161,6 +169,7 @@ function useBranches(projectId: string | null) {
  */
 function usePreview(
   projectId: string | null,
+  repo: string | null,
   branch: string | null,
   into: string,
   resp: BranchesResponse | null,
@@ -172,10 +181,10 @@ function usePreview(
     const mine = ++seq.current;
     setPreview(null);
     if (!projectId || !branch || !into || branch === into) return;
-    previewMerge(projectId, branch, into)
+    previewMerge(projectId, branch, into, repo)
       .then((p) => mine === seq.current && setPreview(p))
       .catch(() => mine === seq.current && setPreview(null));
-  }, [projectId, branch, into, heads]);
+  }, [projectId, repo, branch, into, heads]);
   return preview;
 }
 
@@ -184,7 +193,19 @@ function Branches() {
   const jobs = useJobs();
   const projectId = useProjectId();
   const project = projects.find((p) => p.id === projectId) ?? null;
-  const { resp, error, loading, load, accept } = useBranches(project ? project.id : null);
+  // Which of the project's repos (N4): null is its own folder. Both are kept with the project
+  // they're for, so another project starts from its own folder on its very first read, never
+  // asking for this one's repo. The choices are the last listing's, so the picker stays even
+  // when the repo picked can't be read.
+  const [picked, setPicked] = useState<{ projectId: string | null; repo: string | null }>({ projectId: null, repo: null });
+  const repo = picked.projectId === projectId ? picked.repo : null;
+  const setRepo = useCallback((next: string | null) => setPicked({ projectId, repo: next }), [projectId]);
+  const [listed, setListed] = useState<{ projectId: string | null; repos: BranchRepoChoice[] }>({ projectId: null, repos: [] });
+  const choices = listed.projectId === projectId ? listed.repos : [];
+  const { resp, error, loading, load, accept } = useBranches(project ? project.id : null, repo);
+  useEffect(() => {
+    if (resp?.repos) setListed({ projectId: resp.projectId, repos: resp.repos });
+  }, [resp?.projectId, resp?.repos]);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Confirming>(null);
@@ -202,12 +223,12 @@ function Branches() {
     if (project) highlight(project.id);
   }, [project?.id]);
 
-  // A different project starts from nothing selected and nothing said.
+  // Another repo or project starts from nothing selected and nothing said.
   useEffect(() => {
     setSelected(null);
     setConfirming(null);
     setOutcome(null);
-  }, [projectId]);
+  }, [projectId, repo]);
 
   const branch: BranchInfo | null = resp?.branches.find((b) => b.name === selected) ?? null;
 
@@ -219,7 +240,7 @@ function Branches() {
     setInto(branch && resp ? defaultInto(resp, branch) : '');
   }, [selected]);
 
-  const preview = usePreview(project?.id ?? null, branch?.name ?? null, into, resp);
+  const preview = usePreview(project?.id ?? null, repo, branch?.name ?? null, into, resp);
 
   const run = useCallback(
     async (action: BranchAction, label: string) => {
@@ -227,7 +248,7 @@ function Branches() {
       setBusy(action.action);
       setOutcome(null);
       try {
-        const res = await branchAction(project.id, action);
+        const res = await branchAction(project.id, action, repo);
         accept(res.branches);
         setOutcome({ kind: 'done', action: action.action, branch: 'branch' in action ? action.branch : null, res });
       } catch (err) {
@@ -238,7 +259,7 @@ function Branches() {
         setConfirming(null);
       }
     },
-    [project, accept],
+    [project, repo, accept],
   );
 
   if (!project) return <NoProject projectId={projectId} projects={projects} />;
@@ -246,7 +267,8 @@ function Branches() {
   const all = resp ? mergeAllState(resp) : null;
   const target = resp?.target ?? 'main';
   // Who owns each branch, from the store's jobs (Amendment 143): a job keeps its folder.
-  const owners = (b: BranchInfo): string[] => ownersOf(b, jobs, project.id);
+  const owners = (b: BranchInfo): string[] => (resp ? ownersIn(resp, b, jobs, project.id) : []);
+  const own = resp ? ownRepo(resp) : repo === null;
   const clean = resp ? cleanState(resp, owners, forgetAll) : null;
   // Enabled when something would go with the checkbox ticked; the count is for it as it is.
   const cleanable = resp ? cleanState(resp, owners, true).go.length : 0;
@@ -258,8 +280,15 @@ function Branches() {
         <span className="ui-crumb">
           {project.name} <i>/</i> <b>branches</b>
         </span>
-        {resp && <CompareWith projectId={project.id} resp={resp} />}
-        {resp && <RootLine defaultBranch={project.defaultBranch} rootBranch={resp.rootBranch} />}
+        <RepoPicker choices={repoChoices(choices)} repo={repo} onPick={setRepo} />
+        {resp && own && <CompareWith projectId={project.id} resp={resp} />}
+        {resp && !own && (
+          <span className="br-quiet" title="another repo has no chosen target: it is drawn against origin's default, else main">
+            compared with {resp.target}
+            {resp.targetFrom ? ` · ${targetFromWords(resp.targetFrom)}` : ''}
+          </span>
+        )}
+        {resp && own && <RootLine defaultBranch={project.defaultBranch} rootBranch={resp.rootBranch} />}
         {resp && (
           <span className="br-remote" title={resp.remote ? `the remote pushes go to` : 'this repo has no remote called origin'}>
             {resp.remote ? `⇅ ${resp.remote}` : 'no origin'}
@@ -368,7 +397,7 @@ function Branches() {
 
       <div className="br-body">
         {error && !resp && <div className="br-note fail">Couldn't read the branches — {error}</div>}
-        {!error && !resp && <div className="br-note">Reading {project.name}'s branches…</div>}
+        {!error && !resp && <div className="br-note">Reading {repo ? (choices.find((c) => c.path === repo)?.name ?? repo) : project.name}'s branches…</div>}
         {error && resp && <div className="br-note fail">Couldn't refresh — {error}. Showing the last read.</div>}
         {resp && (
           <div className="br-scroll">
@@ -393,6 +422,7 @@ function Branches() {
           branch={branch}
           defaultBranch={project.defaultBranch}
           path={project.path}
+          own={own}
           busy={busy}
           confirming={confirming}
           setConfirming={setConfirming}
@@ -412,6 +442,36 @@ function Branches() {
         <div className="br-hint">Choose a branch to merge it into another, commit or push it. {loading ? '' : <button type="button" className="br-link" onClick={() => void load()}>re-read</button>}</div>
       )}
     </div>
+  );
+}
+
+/**
+ * Which of the project's repos the screen shows (N4): its own folder first, then its extra
+ * directories that are repos and the repos nested in either, as Files shows them. Absent
+ * when the project has only the one.
+ */
+function RepoPicker({ choices, repo, onPick }: { choices: BranchRepoChoice[]; repo: string | null; onPick: (repo: string | null) => void }) {
+  if (choices.length === 0) return null;
+  const current = repo ?? choices.find((c) => c.main)?.path ?? '';
+  return (
+    <span className="br-compare">
+      <label className="br-quiet" htmlFor="br-repo">
+        repo
+      </label>
+      <select
+        id="br-repo"
+        className="br-select"
+        value={current}
+        onChange={(e) => onPick(repoParam(choices.find((c) => c.path === e.target.value)))}
+        title={current}
+      >
+        {choices.map((c) => (
+          <option key={c.path} value={c.path} title={c.path}>
+            {c.main ? `${c.name} — the project's folder` : c.name}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }
 
@@ -488,6 +548,7 @@ function ActionBar({
   branch: b,
   defaultBranch,
   path,
+  own,
   busy,
   confirming,
   setConfirming,
@@ -506,6 +567,7 @@ function ActionBar({
   branch: BranchInfo;
   defaultBranch: string;
   path: string;
+  own: boolean;
   busy: BranchAction['action'] | null;
   confirming: Confirming;
   setConfirming: (c: Confirming) => void;
@@ -637,18 +699,23 @@ function ActionBar({
           <Act label={busy === 'rebase' ? 'Rebasing…' : `Rebase onto ${resp.target}`} reason={rebase} busy={working} onClick={() => setConfirming('rebase')} />
         )}
 
-        <Act
-          label={busy === 'set_default' ? 'Making default…' : 'Make default'}
-          reason={makeDefault}
-          busy={working}
-          onClick={() => run({ action: 'set_default', branch: b.name, checkout: false }, 'Make default')}
-        />
-        <Act
-          label={busy === 'set_default' ? 'Making default…' : 'Make default and check out'}
-          reason={checkout}
-          busy={working}
-          onClick={() => setConfirming('checkout')}
-        />
+        {/* Only the project's own folder has a default branch (N4). */}
+        {own && (
+          <>
+            <Act
+              label={busy === 'set_default' ? 'Making default…' : 'Make default'}
+              reason={makeDefault}
+              busy={working}
+              onClick={() => run({ action: 'set_default', branch: b.name, checkout: false }, 'Make default')}
+            />
+            <Act
+              label={busy === 'set_default' ? 'Making default…' : 'Make default and check out'}
+              reason={checkout}
+              busy={working}
+              onClick={() => setConfirming('checkout')}
+            />
+          </>
+        )}
 
         <Act label={busy === 'delete' ? 'Deleting…' : 'Delete'} reason={del} busy={working} onClick={() => setConfirming('delete')} />
         {owners.length > 0 && !b.isTarget && (
@@ -731,7 +798,7 @@ function ActionBar({
         </div>
       )}
 
-      {confirming === 'checkout' && checkout === null && (
+      {own && confirming === 'checkout' && checkout === null && (
         <div className="br-confirm" role="alertdialog" aria-label={`confirm making ${b.name} the default and checking it out`}>
           <span>{checkoutConfirm(path, b.name)}</span>
           <button
