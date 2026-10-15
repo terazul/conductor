@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 162 — post-merge, applied. **A `hand_off` short of its closing headings is saved, and the agent is told which.**
+### Amendment 166 — post-merge, applied. **A `hand_off` short of its closing headings is saved, and the agent is told which.**
 
 Shared (`headings.ts`, `wire.ts`, `index.ts`), daemon (`session/store.ts`, `session/supervisor.ts`,
 `routes/helpers.ts`, `session/verify.ts`), web (`attention/alerts.ts`, `attention/HandOff.tsx`,
@@ -242,7 +242,7 @@ waits for it. The check runs once per call: an agent that ignores the reply is n
 agents after it start with what it saved. The card's warning is only while the box is open; the alert itself
 does not name what is missing. The role rules "tests only" and "docs only" stay words (decided above).
 
-*Verified:* `session/verify.ts` §20 (`:4811`, the block "Amendment 162" at `:5067`): pure checks of
+*Verified:* `session/verify.ts` §20 (`:4854`, the block "Amendment 166" at `:5110`): pure checks of
 `closingHeadingsOf` (bold names on the "End with:" line, none without a prompt, line or bold, the last such line
 read) and of `missingHeadings` (every heading form counts; a sentence opening, inside or "Planning"/"Plans" does
 not; no headings, nothing missing); then, against the real supervisor and the fake SDK, architect (Context,

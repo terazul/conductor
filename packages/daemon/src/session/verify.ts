@@ -5107,7 +5107,7 @@ async function main(): Promise<void> {
     // Nothing that is not a restart resume is asked: an ordinary turn that ends without it is held at once
     // (the first check in this section), and a person's reply to a held agent works it again as before.
 
-    // ── Amendment 162: a hand_off short of its closing headings is kept, and the agent is told at once ──
+    // ── Amendment 166: a hand_off short of its closing headings is kept, and the agent is told at once ──
     check(
       'the headings are the bold names on the prompt’s "End with:" line, in order, once, without a colon',
       JSON.stringify(closingHeadingsOf('You plan.\n- **Not this**\nEnd with: **Context**, **Options** (a table), **Plan:**, **context**. If you have the `hand_off` tool, that is its `summary`.')) === '["Context","Options","Plan"]',

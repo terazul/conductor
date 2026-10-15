@@ -139,7 +139,7 @@ export interface Agent {
    */
   pipelineRoles?: string[];
   /**
-   * Amendment 162. The headings its hand-off closes with, read from the system prompt it was
+   * Amendment 166. The headings its hand-off closes with, read from the system prompt it was
    * launched with (`closingHeadingsOf`): what `hand_off` checks its summary for, and what the
    * hand-off card in Needs You checks a person's draft for. Present only when there are some,
    * so every other agent's shape is what it was. The prompt itself stays off the wire.

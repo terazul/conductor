@@ -1,5 +1,5 @@
 /**
- * The headings a hand-off closes with (Amendment 162). Pure, and here so the daemon, which
+ * The headings a hand-off closes with (Amendment 166). Pure, and here so the daemon, which
  * checks an agent's `hand_off`, and the browser, whose hand-off card checks a person's draft,
  * read them the same way.
  *
