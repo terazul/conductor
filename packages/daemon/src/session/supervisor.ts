@@ -147,6 +147,7 @@ import {
 } from './store.js';
 import { reportedWindow } from './windows.js';
 import { finishJob, type Finish } from './finish.js';
+import { broadcastScheduled, deleteScheduled, failScheduled, nextWhenDone } from './schedule.js';
 
 const exec = promisify(execFile);
 
@@ -1462,9 +1463,45 @@ export class Supervisor implements AgentControl {
         { projectId: agent.projectId, jobId: agent.jobId, agentId },
         { kind: 'status', status: 'done', ...(held ? { error: HANDOFF_HELD_NOTE } : {}) },
       );
+      // Before the roll-up, so a job whose agent is about to go again isn't finished (Amendment 155).
+      this.#sendWhenDone(agent);
     }
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.#rollUpJob(agent.jobId);
+  }
+
+  // ── a message queued for when the agent is done (Amendment 155) ───────────
+
+  /** Agents whose turn ended `done` while everything was paused: `release` sends theirs. */
+  #owedWhenDone = new Set<string>();
+
+  /**
+   * The agent's turn just ended `done`: the oldest message queued for then goes, as if you had
+   * pressed send now, which starts its next turn. One per turn: the next waits for that turn
+   * to end `done` too. Only `done` sends one: a question, a failure or a pause leave it
+   * waiting. While everything is paused it waits for the pause to end (`release`).
+   *
+   * Refused as `sendMessage` refuses (its budget, its folder gone): the row keeps the reason,
+   * like a timed one, and is not tried again. Not where the run is about to be relaunched
+   * (`#resumeWanted`) or its job is being stopped, which would be a second run.
+   */
+  #sendWhenDone(agent: Agent): void {
+    if (this.#resumeWanted.has(agent.id) || this.#halting.has(agent.jobId)) return;
+    const m = nextWhenDone(this.#db, agent.id);
+    if (!m) return;
+    if (this.#hold) {
+      this.#owedWhenDone.add(agent.id);
+      return;
+    }
+    try {
+      this.sendMessage(agent.id, m.text);
+      deleteScheduled(this.#db, m.id);
+    } catch (err) {
+      // No session to take it: it waits for the next `done`, as a timed one waits for a session.
+      if (!(err instanceof BudgetReachedError) && /cannot receive messages yet/.test(thrown(err))) return;
+      failScheduled(this.#db, m.id, thrown(err));
+    }
+    broadcastScheduled(this.#db);
   }
 
   // ── trying again when the model can't be reached (Amendment 123) ──────────
@@ -2398,6 +2435,12 @@ export class Supervisor implements AgentControl {
         if (!(err instanceof BudgetReachedError)) throw err;
         this.#pause(a.id, budgetNote(a));
       }
+    }
+    // A turn that ended `done` during the pause: its queued message goes now (Amendment 155).
+    for (const id of [...this.#owedWhenDone]) {
+      this.#owedWhenDone.delete(id);
+      const a = getAgent(this.#db, id);
+      if (a?.status === 'done') this.#sendWhenDone(a);
     }
     this.pump();
     return woke;

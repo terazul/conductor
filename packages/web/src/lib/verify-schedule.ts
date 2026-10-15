@@ -12,6 +12,7 @@ import { PAUSE_UNTIL_KEY } from '@conductor/shared';
 import { store } from './store.js';
 import { fmtIn, fmtWhen, fromLocalInput, nextHour, toLocalInput, tomorrowMorning, whenProblem } from './when.js';
 import { activePause } from '../shell/pauseall.js';
+import { whenDoneRefusal, whenDoneWaits } from '../agent/scheduled.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -69,7 +70,7 @@ console.log('\n2 · the pause setting');
 console.log('\n3 · the store keeps the scheduled messages');
 {
   const msg = (id: string, agentId: string): ScheduledMessage => ({
-    id, agentId, at: '2026-10-10T09:00:00.000Z', text: `hello ${id}`, createdAt: '2026-10-09T12:00:00.000Z', error: null,
+    id, agentId, at: '2026-10-10T09:00:00.000Z', trigger: 'at', text: `hello ${id}`, createdAt: '2026-10-09T12:00:00.000Z', error: null,
   });
   const snap: Snapshot = {
     projects: [], jobs: [], agents: [], pending: [], servers: [], alerts: [], seq: 0,
@@ -111,9 +112,26 @@ console.log('\n4 · wired where it should be');
   check('--need is not used for it: a pause is not you being needed', !/--need/.test(ours.replace(/\/\*[\s\S]*?\*\//g, '')));
 }
 
+console.log('\n5 · a message queued until the agent is done (Amendment 155)');
+{
+  check('offered while a turn can still end: working, queued, blocked, failed, paused', (['working', 'queued', 'blocked', 'failed', 'paused'] as const).every((s) => whenDoneRefusal(s) === null));
+  check('not for one already done, or stopped: send it now', /send the message now/.test(whenDoneRefusal('done') ?? '') && /stopped/.test(whenDoneRefusal('stopped') ?? ''));
+  check('the first waits for this turn', whenDoneWaits('working', true) === 'when this turn ends');
+  check('it shows that it is waiting on a failure, a pause or a question', /failed/.test(whenDoneWaits('failed', true)) && /paused/.test(whenDoneWaits('paused', true)) && /asked you/.test(whenDoneWaits('blocked', true)));
+  check('the ones behind it wait their turn, one per turn', whenDoneWaits('working', false) === 'after the one before it');
+  const comp = src('../agent/composer.tsx');
+  check('the composer has "when done" beside "later"', /⏲ later[\s\S]*⏲ when done/.test(comp));
+  check('it queues what is typed', /queueWhenDone\(agent\.id, body\)/.test(comp));
+  check('and is off when no turn of its would end', /disabled=\{[^}]*doneRefused !== null\}/.test(comp));
+  const ends = src('../agent/endpoints.ts');
+  check("it posts trigger 'done', no time", /\{ trigger: 'done', text \}/.test(ends));
+  const list = src('../agent/scheduled.tsx');
+  check('the list shows it as "when done", with what it waits on', /m\.trigger === 'done' \? '⏲ when done'/.test(list) && /whenDoneWaits\(status, m\.id === firstDone\)/.test(list));
+}
+
 console.log(
   failures === 0
-    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer.'
+    ? '\nAmendment 111 web verify: PASS — local times in and out, the pause setting, the store keeping scheduled messages, and the controls in the status bar and the composer; and (Amendment 155) "⏲ when done".'
     : `\nAmendment 111 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

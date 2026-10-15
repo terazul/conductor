@@ -1,0 +1,13 @@
+-- 250_scheduled_trigger — Track A. A scheduled message waits for a time, or for its agent's turn (Amendment 155).
+--
+-- APPEND-ONLY. Once applied, never edited (db/index.ts records it by name).
+--
+-- What sends a row in `scheduled_messages` (140):
+--   • 'at'   — its time, `at`, as before. Every row already here is one.
+--   • 'done' — its agent's turn ending as `done` (session/supervisor.ts `#settle`): the oldest such
+--              row goes, one per turn. A question it stops on, a failure or a pause don't count; it
+--              keeps waiting through them.
+--   • 'slot' — reserved for a message that waits for a free slot (wave 11, A2). Nothing writes it yet.
+-- A row that isn't 'at' has `at` = `created_at`, and the clock (session/schedule.ts `due()`) reads
+-- only 'at' rows.
+ALTER TABLE scheduled_messages ADD COLUMN trigger TEXT NOT NULL DEFAULT 'at' CHECK (trigger IN ('at', 'done', 'slot'));

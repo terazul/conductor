@@ -68,13 +68,17 @@ the last of it on 12 Oct).
   - While its agents wait, does a job show as running or as waiting?
   - Are new launches on a provider that's down held, or allowed to try?
 
-- [ ] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
+- [x] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
   time, a **queue** choice: the message waits until the agent's turn ends (it is `done`, or stops to
   wait on you after finishing what it was doing), then goes as if you had pressed send. Several
   queued messages go one per turn, in order, each when the agent is done with the one before. They
   show in the same list above the message box (Amendment 111's scheduled messages), as **⏲ when
   done**, cancellable. Settle: whether a queued message also waits for a question it asked you, and
   whether "done" means its turn or its whole job.
+  *Decided (14 Oct): sent when the turn ends as `done`; a question doesn't count; it waits through
+  `failed`/`paused`; one per turn; "done" means the turn, not the job.*
+  *Done 15 Oct: Amendment 155 (a `trigger` on scheduled messages, migration 250; the supervisor sends
+  the oldest `done` one as a turn settles done; **⏲ when done** in the composer and the list).*
 
 - [ ] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
   work assigned to orchestrator is done, why does it leave the individual agents it started on the

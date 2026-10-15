@@ -183,6 +183,12 @@ export function scheduleMessage(agentId: string, at: string, text: string): Prom
   return api(agentPath(agentId, 'scheduled'), { method: 'POST', body });
 }
 
+/** Send `text` once the agent's turn next ends as done (Amendment 155). */
+export function queueWhenDone(agentId: string, text: string): Promise<{ message: ScheduledMessage }> {
+  const body: ScheduleMessageRequest = { trigger: 'done', text };
+  return api(agentPath(agentId, 'scheduled'), { method: 'POST', body });
+}
+
 /** Cancel a scheduled message, or clear one that failed. */
 export function cancelScheduled(id: string): Promise<unknown> {
   return api(`/api/scheduled/${encodeURIComponent(id)}`, { method: 'DELETE' });

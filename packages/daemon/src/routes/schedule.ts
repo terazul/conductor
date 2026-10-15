@@ -1,16 +1,20 @@
 /**
- * Messages sent to an agent at a time you choose (Amendment 111).
+ * Messages sent to an agent at a time you choose (Amendment 111), or when it is done (Amendment 155).
  *
  *   GET    /api/scheduled                    → { scheduled: ScheduledMessage[] }
- *   POST   /api/agents/:agentId/scheduled    ← { at, text } → 201 { message }
+ *   POST   /api/agents/:agentId/scheduled    ← { at, text } | { trigger: 'done', text } → 201 { message }
  *   DELETE /api/scheduled/:id                → { removed }
  *
  * Pausing everything until a time is the `conductor.pauseUntil` setting, through
  * PATCH /api/settings like any other; session/schedule.ts watches it.
  *
+ * `trigger: 'done'` (Amendment 155) waits for the agent's turn to end as `done` instead of a
+ * time, and is sent by the supervisor then. Refused for an agent that is already done or was
+ * stopped, since no turn of its would end to send it: send it now instead.
+ *
  * Auto-registered by index.ts like every file here, which is before session.ts has made
  * the scheduler: so it is only looked up inside a handler. Every change is broadcast as a
- * `scheduled` frame. Errors are `{ error, detail? }`: 400 for a bad time or text, 404 for
+ * `scheduled` frame. Errors are `{ error, detail? }`: 400 for a bad time, trigger or text, 404 for
  * no such agent or message.
  */
 
@@ -39,14 +43,24 @@ export default async function scheduleRoutes(app: FastifyInstance): Promise<void
   app.post<{ Params: { agentId: string }; Body: ScheduleMessageRequest }>(
     '/api/agents/:agentId/scheduled',
     async (req, reply) => {
-      if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+      const agent = getAgent(db, req.params.agentId);
+      if (!agent) return fail(reply, 404, 'no such agent');
       const body = (req.body ?? {}) as Partial<ScheduleMessageRequest>;
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       if (!text) return fail(reply, 400, 'text is required');
       if (text.length > SCHEDULED_TEXT_MAX) return fail(reply, 400, `text is longer than ${SCHEDULED_TEXT_MAX} characters`);
-      const why = timeProblem(body.at);
-      if (why) return fail(reply, 400, why);
-      const message = insertScheduled(db, req.params.agentId, body.at as string, text);
+      const trigger = body.trigger ?? 'at';
+      if (trigger === 'done') {
+        if (agent.status === 'done') return fail(reply, 400, 'it has already finished its turn: send the message now');
+        if (agent.status === 'stopped') return fail(reply, 400, 'it was stopped, so no turn of its will end: send the message now');
+      } else if (trigger !== 'at') {
+        // 'slot' is the next lane's (wave 11, A2): nothing sends one yet, so none is made.
+        return fail(reply, 400, `trigger is 'at' or 'done'`);
+      } else {
+        const why = timeProblem(body.at);
+        if (why) return fail(reply, 400, why);
+      }
+      const message = insertScheduled(db, agent.id, trigger === 'at' ? (body.at as string) : null, text, trigger);
       scheduler().broadcast();
       // A time a moment ago goes out now rather than on the next look.
       void scheduler().tick();
