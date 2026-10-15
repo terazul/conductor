@@ -264,7 +264,7 @@ export function parseSetups(raw: string | null): SavedSetup[] {
 }
 
 /**
- * A saved list of roles (Amendment 142): each a role name with a tier, once, and no more than
+ * A saved list of roles (Amendment 142): each a role name with a tier, and an exact id if it has one, once, and no more than
  * the daemon takes (`PIPELINE_ROLES_MAX`). Anything else is left out, as a malformed setup is.
  */
 function parseListed(raw: unknown[]): ListedRole[] {
@@ -273,7 +273,9 @@ function parseListed(raw: unknown[]): ListedRole[] {
     const l = x as Partial<ListedRole> | null;
     if (typeof l?.id !== 'string' || !ROLE.test(l.id) || typeof l.tier !== 'string' || !TIERS.includes(l.tier)) continue;
     if (out.some((o) => o.id === l.id) || out.length >= PIPELINE_ROLES_MAX) continue;
-    out.push({ id: l.id, tier: l.tier as ModelTier });
+    // And the exact id its persona named, when it named one (Amendment 155).
+    const model = typeof l.model === 'string' && l.model.trim() && !TIERS.includes(l.model.trim()) ? l.model.trim() : undefined;
+    out.push({ id: l.id, tier: l.tier as ModelTier, ...(model ? { model } : {}) });
   }
   return out;
 }

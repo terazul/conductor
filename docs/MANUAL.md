@@ -428,7 +428,11 @@ whose steps you already know.
   them: developer, validator, reviewer and scribe, each on the tier its persona asks for
   (opus, sonnet, sonnet and sonnet). Change a role's **tier** with its picker, remove one
   with **×**, or add another (architect, debugger, analyst or a persona of your own) with
-  **+ add a role…**. It can start those roles and no others. The list is for this launch only;
+  **+ add a role…**. A persona whose model is an exact id rather than a tier (set in
+  Settings → Personas) is listed on that id: the picker shows it above the tiers, and its helpers
+  run on it. Pick a tier to change that for this launch; pick the id to go back to it. The tier
+  under an exact id is sonnet, which only sets how far down the orchestrator may ask. Off Claude
+  every role still runs on the launch's one model. It can start those roles and no others. The list is for this launch only;
   choosing the preset again puts the default back. A Custom setup's row can orchestrate too
   (tick **orchestrates**): the same list goes under that row, and a saved setup keeps it.
 - **How it works.** It plans the steps, then starts one role at a time with `start_helper`,

@@ -200,6 +200,72 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 155 — post-merge, applied. **A role an orchestrated stack lists runs on its persona's model when that is an exact id, not on sonnet.**
+
+Web only (`spawn/orchestrated.ts`, `spawn/presets.ts`, `spawn/custom.ts`, `spawn/Pipeline.tsx`,
+`spawn/verify.ts`); the daemon and `shared` are unchanged. The user, 14 Oct 2026: "Execute wave 1 of
+docs/plans/wave-11.md … following §0", and 15 Oct, "Run track 5 of `docs/plans/wave-11-tracks.md`"; this
+is the plan's item O1 (lane D2, §3 "an exact persona model falls back to sonnet"). *Amends Amendment 128*,
+whose listed role held only a tier, and *Amendment 148*, which said "a role added there … whose persona
+names no tier, is still sonnet": a persona that names an exact id is now listed on it. A persona on a
+tier, or with no model, is listed exactly as before. `docs/MANUAL.md` § Choose who works on it, "An
+orchestrated pipeline", says what the picker shows.
+
+- **What was wrong.** `tierOf` (`orchestrated.ts:36`) turns any model that is not a tier into
+  `sonnet`, and `ListedRole` held only that tier, so `helperRolesFor` sent `tiers.sonnet` as the role's
+  `HelperRole.model`. A developer persona set to `us.anthropic.claude-opus-4-1-…` ran its helpers on
+  Sonnet, though a Custom row with the same persona ran on the id (`personaPicks`, `custom.ts:196`).
+- **`ListedRole.model?`** (`orchestrated.ts:31`): the persona's exact id, from `exactOf` (`:43`), which
+  is the persona's model when it is neither a tier nor empty. `defaultListed` (`:59`) and `withRole`
+  (`:80`) build each role with `listedAs` (`:49`): its tier as before (`tierOf`, so `sonnet` under an
+  exact id), plus `model` when the persona names one. `withTier` (`:65`) drops `model`, since a tier
+  picked is a choice over the persona's id; `withModel` (`:70`) puts an exact id back, keeping the tier.
+- **`helperRolesFor`** (`presets.ts:341`) passes each listed `model` to `toAgentSpecs` as that role's
+  pick (`:356`), the same `RoleModels` a Custom row's persona fills, so `modelFor` gives the exact id and
+  `HelperRole.model` (`:362`) carries it. `tier` and `tiers` are sent as before, so `helperModel`
+  (`shared/src/stack.ts:318`) still works off `tier`: with no `tier` asked it returns `role.model`, the
+  exact id (`:323`); `haiku` gives `tiers.haiku`; anything dearer than the listed `sonnet` is refused.
+- **`unresolvedListed`** (`orchestrated.ts:129`) skips a role with an exact id: it has an id to send,
+  so Spawn doesn't wait on its tier.
+- **Saved setups** (`parseListed`, `custom.ts:270`) keep a listed role's `model` when it is a string
+  that is not a tier; a setup saved before this has none, and lists its roles on their tiers.
+- **The role select** (`Pipeline.tsx:110`) shows the exact id, its own or its persona's, as the first
+  option above the tiers (`:129`), selected while the role runs on it (`value={l.model ?? l.tier}`);
+  picking a tier calls `withTier`, picking the id calls `withModel`. Its title names the id. The row
+  note (`rowOverrides`, `:97`) is unchanged: it reads the role as its tier, which is what the read-only
+  pin goes by. Off Claude the row still shows the launch's one model.
+- **The daemon already ran it.** Nothing there sets a model per role; it keeps what Spawn sent:
+  `parseHelperRoles` takes `model` as given (`routes/session.ts:207-212`; on Claude, `refusal`,
+  `:210`, refuses a nickname, and an id the gateway doesn't list when it said what it serves,
+  `session/models.ts:316`, as for any row; elsewhere `checkProviderModels` checks it against the
+  engine's list, `:352`); it is stored on the orchestrator (`store.ts:728`) and read back by
+  `getHelperRoles` (`store.ts:485`); `startHelper` (`session/supervisor.ts:1736`) takes the role's
+  model from `helperModel` (`:1755-1757`), writes it on the helper's row (`:1782`), and the run starts
+  its backend with `model: agent.model` (`:1255`).
+
+*Not done / not decided:* off Claude every role still runs on the launch's one model, exact id or not
+(`specsOn`, `engine.ts:67`, Amendment 80). A helper has no engine of its own: an OpenRouter id on a
+Claude launch is sent to Claude, refused at launch only where the gateway lists what it serves and
+otherwise failing when the helper runs, as a Custom row with that persona does today. The tier under an exact Claude id
+is `sonnet`, not read from the id, so an orchestrator under an exact Opus id may ask for sonnet or haiku
+but not opus. A persona changed in Settings after the list was edited, or a saved setup's list, is not
+re-read from the persona; choosing the preset again does that.
+
+*Verified:* `web/src/spawn/verify.ts` §21, after the tier checks: "a persona with an exact Claude id is
+listed with it, and its tier is the fallback sonnet"; "and one with an exact non-Claude id too"
+(`anthropic/claude-sonnet-4.5`); "both reach the launch request as the role's model, its tier kept
+beside it"; "the roles on a tier are as they were"; "tier personas are listed with no exact id, and send
+what they always sent" (the default list's specs are byte-for-byte the same JSON); "the daemon runs a
+helper on the exact id, and a cheaper tier is still the tier's" (`helperModel`); "a role added with an
+exact id keeps it"; "a tier picked for it drops the exact id, and the exact id can be picked back"; "a
+role with an exact id does not wait for a tier"; "a saved setup keeps the exact id, and a tier written as
+one is not an exact id"; "off Claude every role still runs on the launch's one model (Amendment 80)";
+and from `Pipeline.tsx`'s source, "the role select shows the exact id it runs on" and "its row note still
+reads the role as its tier, as Amendment 147 has it". With `helperRolesFor` passing `{}` as on `main`, 2
+fail, the request carrying `us.anthropic.claude-sonnet-5` for both exact roles. §25 (Amendment 147)
+passes unchanged. `pnpm -r typecheck` clean; every `make test` suite PASS ("Track A spawn: PASS"), the last nine
+run again on their own after another job's verify held ports 7802 and 7811.
+
 ### Amendment 154 — post-merge, applied. **The docs link only to files in git, and `make test` checks that they do.**
 
 Docs (`README.md`, `TODO.md`, `docs/MANUAL.md`, `docs/adr/0001-preset-stacks.md`,

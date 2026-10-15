@@ -333,8 +333,10 @@ export function orchestratedFor(preset: Preset, listed: readonly ListedRole[]): 
  * each with its persona's brief, system prompt and skills, its rope pinned the way the same
  * role is pinned in any stack (a reading role is read-only whatever the pills say), and the
  * model its tier means now. Built by `toAgentSpecs` itself, so a role is launched here exactly
- * as it would be in a fixed stack. A tier the catalog has no model for is sent as the tier, and
- * Spawn blocks the launch before that (`unresolvedListed`).
+ * as it would be in a fixed stack. A role whose persona names an exact id runs on that id, as a
+ * Custom row's does (`personaPicks`), its tier kept for `start_helper`'s cheaper ones (Amendment 155).
+ * A tier the catalog has no model for is sent as the tier, and Spawn blocks the launch before
+ * that (`unresolvedListed`).
  */
 export function helperRolesFor(
   listed: readonly ListedRole[],
@@ -351,7 +353,8 @@ export function helperRolesFor(
     does: '',
     brief: personaOf({ role: l.id, model: l.tier, does: '', brief: '' }, personas)?.brief.trim() ?? '',
   }));
-  const specs = toAgentSpecs({ id: 'pipeline', label: 'pipeline', roles: rows }, pills, budgetPerAgent, effort, {}, tiers, {}, mode, personas);
+  const picks: RoleModels = Object.fromEntries(listed.flatMap((l) => (l.model ? [[l.id, l.model]] : [])));
+  const specs = toAgentSpecs({ id: 'pipeline', label: 'pipeline', roles: rows }, pills, budgetPerAgent, effort, picks, tiers, {}, mode, personas);
   const meant = Object.fromEntries((['opus', 'sonnet', 'haiku'] as const).flatMap((t) => (tiers[t] ? [[t, tiers[t]]] : []))) as HelperRole['tiers'];
   return specs.map((s, i) => ({
     id: listed[i]!.id,
