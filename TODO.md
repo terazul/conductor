@@ -92,6 +92,8 @@ the last of it on 12 Oct).
 
 - [x] **A 4th developer is refused as a send-back, even on new work.** Found (14 Oct) by the user: send-backs were counted per role, not per piece of work. *Done 14 Oct: Amendment 150 (counted per lane, a role and a name; helpers in all a launch choice, up to 48).*
 
+- [x] **`/api/workspaces` takes any input (wave 11, A4).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 151 (gated: a known project, one of its folders, git's ref rules; DELETE 404, 409 and a strict `force`).*
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
