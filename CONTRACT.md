@@ -212,13 +212,14 @@ the wire changes: a `Change` is the same shape, at a longer path.
 
 - **Each dirty nested repo is scanned as its own.** `scanChanges` (`changes.ts:63`) now runs
   `scanRepo` (`:94`) on the worktree, which runs `status` and `numstat` on one repo. An entry whose
-  path is a folder holding `.git` (`isNestedRepo`, `:199`, the same boundary test as the tree's) is a
+  path is a folder holding `.git` (`isNestedRepo`, `:205`, the same boundary test as the tree's) is a
   nested clone's `?? loose/` or a gitlink's ` M inner`: it is dropped, and `scanRepo` runs again in
   that folder with the folder as the prefix of every path it finds, down to `MAX_NESTED_DEPTH` (4,
   `:88`, as the tree's). A nested repo the outer status doesn't name is clean and costs nothing. A
   nested repo git can't read gives no changes; the root failing still throws, as before.
-- **Each diff comes from the repo that owns its path.** `ownerOf` (`changes.ts:189`) gives the deepest
-  nested repo folder above a path, or `''`. `diff` (`git.ts:321`) takes that folder as a prefix
+- **Each diff comes from the repo that owns its path.** `ownerOf` (`changes.ts:191`) gives the deepest
+  nested repo folder above a path, or `''`, counting no more than `MAX_NESTED_DEPTH` of them, as
+  `scanChanges` does. `diff` (`git.ts:321`) takes that folder as a prefix
   (`--src-prefix=a/inner/`, so the patch names the path the worktree knows) and passes
   `--ignore-submodules=all`, which leaves out the gitlink's "Subproject commit" entry. One file's diff
   (`#diffForPath`, `service.ts:839`) asks the owner's `status` and `diff`; the whole diff
@@ -236,8 +237,9 @@ the wire changes: a `Change` is the same shape, at a longer path.
 projection alone, nested repos or not. A nested repo whose HEAD moved (a commit made inside it)
 no longer shows as a changed gitlink, since its files are clean against its own HEAD. A
 submodule set to `ignore = all` in `.gitmodules` hides its dirt from the outer status, so it isn't
-scanned. `ownerOf` follows any depth of nested repo; past four levels the path is owned by a repo
-that wasn't scanned and gets no diff.
+scanned. Past four levels a path is owned by the fourth repo down, which sees only an opaque folder,
+so the file gets no badge, no diff from its own route or the whole diff, and no live edit: the
+tree lists the fifth repo's folder, marked, with nothing in it.
 
 *Verified.* `workspace/verify.ts` §15 (`:1494`) makes a nested clone dirty (a changed `inner/app.js`,
 a new `inner/fresh.txt`, a removed `inner/README.md`), an untracked clone with a change and a clean
@@ -246,8 +248,12 @@ with inner's counts; `scanChanges` lists them at full paths with no `?? loose-cl
 entry, and nothing for the clean clone or `vendor-lib/`; the tree badges them inside `inner/`, keeps
 the deleted file, rolls `inner/` up and counts them in its totals; an inner file's diff, from the
 route and the file pane, is `git -C inner diff` of it with the `inner/` prefix; the deleted file
-opens as inner's copy; the whole diff holds every patch and no "Subproject commit"; put back, it is
-all clean again. `make test` green.
+opens as inner's copy; the whole diff holds every patch and no "Subproject commit". A chain of
+repos each nested in the last, one past `MAX_NESTED_DEPTH`: the second's change is listed at its
+full path with its own counts, badged and rolled up, and its diff, alone and in the whole diff, is
+that repo's own; the fourth is still scanned; the fifth is not, leaves no opaque entry and gets no
+diff. One watcher batch with an outer-ignored file and an edit inside `inner/` reports the edit and
+not the ignored file. Put back, it is all clean again. `make test` green.
 
 ### Amendment 157 — post-merge, applied. **A message can wait for the agent instead of a time: it goes when the agent's turn ends `done`, one per turn.**
 

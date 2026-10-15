@@ -85,7 +85,7 @@ export async function scanChanges(
 }
 
 /** How many nested-repo boundaries deep changes are scanned: the tree's own limit. */
-const MAX_NESTED_DEPTH = 4;
+export const MAX_NESTED_DEPTH = 4;
 
 /**
  * One repo's changes, `prefix` (`''` at the worktree root, else `inner/`) put in
@@ -183,15 +183,21 @@ async function scanRepo(
 /**
  * The nested repo that owns `relPath`, as its worktree-relative folder with a
  * trailing slash, or `''` when the worktree's own repo does (Amendment 155). The
- * deepest boundary on the way down wins. The boundary test is the tree's
- * (`tree.ts` `hasDotGit`, Amendment 90): a non-symlink folder with a `.git` in it.
+ * deepest boundary on the way down wins, up to `MAX_NESTED_DEPTH` of them: a path
+ * past that is the deepest scanned repo's, which sees only an opaque folder, so no
+ * route gives it a badge or a diff. The boundary test is the tree's (`tree.ts`
+ * `hasDotGit`, Amendment 90): a non-symlink folder with a `.git` in it.
  */
 export function ownerOf(worktree: string, relPath: string): string {
   const segments = relPath.split('/').filter((s) => s.length > 0);
   let owner = '';
-  for (let i = 1; i < segments.length; i += 1) {
+  let depth = 0;
+  for (let i = 1; i < segments.length && depth < MAX_NESTED_DEPTH; i += 1) {
     const dir = segments.slice(0, i).join('/');
-    if (isNestedRepo(join(worktree, dir))) owner = `${dir}/`;
+    if (isNestedRepo(join(worktree, dir))) {
+      owner = `${dir}/`;
+      depth += 1;
+    }
   }
   return owner;
 }
