@@ -12,6 +12,10 @@
  * time, and is sent by the supervisor then. Refused for an agent that is already done or was
  * stopped, since no turn of its would end to send it: send it now instead.
  *
+ * `trigger: 'slot'` (Amendment 168) is never made here: the supervisor writes one for a message
+ * sent while every slot is taken. Deleting one is cancelling it, and an agent queued only for it
+ * goes back to what it was (`Supervisor.slotMessageCancelled`).
+ *
  * Auto-registered by index.ts like every file here, which is before session.ts has made
  * the scheduler: so it is only looked up inside a handler. Every change is broadcast as a
  * `scheduled` frame. Errors are `{ error, detail? }`: 400 for a bad time, trigger or text, 404 for
@@ -22,9 +26,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { ScheduleMessageRequest } from '@conductor/shared';
 import { openDb } from '../db/index.js';
 import { getAgent } from '../session/store.js';
+import { supervisor } from '../session/supervisor.js';
 import {
   SCHEDULED_TEXT_MAX,
   deleteScheduled,
+  getScheduled,
   insertScheduled,
   listScheduled,
   scheduler,
@@ -54,7 +60,7 @@ export default async function scheduleRoutes(app: FastifyInstance): Promise<void
         if (agent.status === 'done') return fail(reply, 400, 'it has already finished its turn: send the message now');
         if (agent.status === 'stopped') return fail(reply, 400, 'it was stopped, so no turn of its will end: send the message now');
       } else if (trigger !== 'at') {
-        // 'slot' is the next lane's (wave 11, A2): nothing sends one yet, so none is made.
+        // 'slot' is the supervisor's, for a message sent with every slot taken (Amendment 168).
         return fail(reply, 400, `trigger is 'at' or 'done'`);
       } else {
         const why = timeProblem(body.at);
@@ -69,7 +75,9 @@ export default async function scheduleRoutes(app: FastifyInstance): Promise<void
   );
 
   app.delete<{ Params: { id: string } }>('/api/scheduled/:id', async (req, reply) => {
+    const row = getScheduled(db, req.params.id);
     if (!deleteScheduled(db, req.params.id)) return fail(reply, 404, 'no such scheduled message');
+    if (row?.trigger === 'slot') supervisor().slotMessageCancelled(row.agentId);
     scheduler().broadcast();
     return reply.send({ removed: req.params.id });
   });

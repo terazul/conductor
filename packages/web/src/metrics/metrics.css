@@ -306,3 +306,57 @@
   color: var(--ink);
   border-color: var(--ink3);
 }
+
+/*
+ * The cost-per-day chart (Amendment 170): ink only. The bars and the base line are
+ * currentColor, so a day's bar is --ink3 and the one under the pointer --ink; it is a
+ * quantity, not a status, and --fail stays the failures'.
+ */
+.mt-chart {
+  margin: 0 0 14px;
+  max-width: 900px;
+  color: var(--ink3);
+}
+
+.mt-chart-top {
+  font-size: var(--fs-xs);
+  color: var(--ink3);
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-chart-svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+
+.mt-chart-hit {
+  fill: transparent;
+}
+
+.mt-chart-bar {
+  fill: currentColor;
+}
+
+.mt-chart-day:hover {
+  color: var(--ink);
+}
+
+.mt-chart-base {
+  stroke: currentColor;
+  stroke-width: 1;
+}
+
+.mt-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  color: var(--ink3);
+}
+
+.mt-chart figcaption {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+}

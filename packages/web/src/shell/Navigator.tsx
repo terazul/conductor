@@ -11,6 +11,8 @@
  *    count, its unhappiest agent's dot and what waits on you, opening and closing on its
  *    own and open to start with. Under it, one row per agent with its status dot, and a
  *    count when something waits on it. A click opens the agent; the panel stays.
+ *    Once an orchestrator has ended, its ended helpers are one row after it (Amendment
+ *    166), "↳ 12 helpers · all done", closed to start with, opening to their rows.
  *  - NEEDS YOU, this project's waiting requests and alerts, one row each. Its heading is
  *    amber, with a count, whenever any wait. A click opens that one in Needs you.
  *  - FILES, the project's folders, main first, each opening into its directories as a
@@ -53,12 +55,14 @@ import { SCREEN, openAgent, openProject, recall } from './nav.js';
 import {
   NAV_TREE_KEY,
   currentProject,
+  foldOf,
   isOpen,
   jobShown,
   meterTitle,
   navDirId,
   navDrop,
   navFileLink,
+  navFoldId,
   navId,
   navJobId,
   navProjects,
@@ -67,6 +71,7 @@ import {
   serializeOpen,
   toggleOpen,
   type NavAgent,
+  type NavFold,
   type NavFolder,
   type NavJob,
   type NavPart,
@@ -167,6 +172,48 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
   );
 }
 
+/**
+ * An ended orchestrator's ended helpers, folded into one row (Amendment 169): closed until
+ * you open it, its dot the worst inside. Open, their rows are under it as they were.
+ */
+function FoldRow({
+  project,
+  fold,
+  open,
+  agentId,
+}: {
+  project: NavProject;
+  fold: NavFold;
+  open: ReadonlySet<string>;
+  agentId: string | undefined;
+}) {
+  const id = navFoldId(project.id, fold.orchestratorId);
+  const shown = isOpen(open, id);
+  return (
+    <div className="sh-nav-fold">
+      <button
+        type="button"
+        className="sh-nav-row sh-nav-fhead"
+        aria-expanded={shown}
+        onClick={() => toggle(id)}
+        title={`${shown ? 'Close' : 'Open'} ${fold.label.replace(/^↳ /, '')}: ${fold.helpers.map((h) => h.label).join(', ')}`}
+      >
+        <Chevron open={shown} />
+        <Dot status={fold.status} />
+        <span className="sh-nav-label">{fold.label}</span>
+        {fold.finished && <span className={`sh-nav-tag is-${fold.status === 'failed' ? 'fail' : 'done'}`}>finished</span>}
+      </button>
+      {shown && (
+        <div className="sh-nav-items">
+          {fold.helpers.map((a) => (
+            <AgentRow key={a.id} agent={a} projectId={project.id} selected={a.id === agentId} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One job's agents under a project's Agents (Amendment 86). Open until you close it. */
 function JobGroup({
   project,
@@ -205,9 +252,13 @@ function JobGroup({
       </button>
       {shown && (
         <div className="sh-nav-items">
-          {job.agents.map((a) => (
-            <AgentRow key={a.id} agent={a} projectId={project.id} selected={a.id === agentId} />
-          ))}
+          {job.rows.map((r) =>
+            r.kind === 'agent' ? (
+              <AgentRow key={r.agent.id} agent={r.agent} projectId={project.id} selected={r.agent.id === agentId} />
+            ) : (
+              <FoldRow key={`fold:${r.fold.orchestratorId}`} project={project} fold={r.fold} open={open} agentId={agentId} />
+            ),
+          )}
         </div>
       )}
     </div>
@@ -720,6 +771,13 @@ export function Navigator() {
   };
   const selected = currentProject(route, agents, recall().projectId);
   const agentId = route.id === SCREEN.agent ? route.params['agentId'] : undefined;
+
+  // Arriving on a helper inside a closed fold opens it (Amendment 169). Only on arriving: the
+  // fold's id and the agent are the deps, so closing it again after is left alone.
+  const holder = foldOf(tree, agentId);
+  useEffect(() => {
+    if (holder && !isOpen(parseOpen(readSetting(NAV_TREE_KEY)), holder)) toggle(holder);
+  }, [holder, agentId]);
 
   return (
     <>

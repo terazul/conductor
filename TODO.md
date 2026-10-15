@@ -80,7 +80,7 @@ the last of it on 12 Oct).
   *Done 15 Oct: Amendment 157 (a `trigger` on scheduled messages, migration 250; the supervisor sends
   the oldest `done` one as a turn settles done; **⏲ when done** in the composer and the list).*
 
-- [ ] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
+- [x] **Fold an orchestrator's helpers once it is done.** Asked for (15 Oct) by the user: "when the
   work assigned to orchestrator is done, why does it leave the individual agents it started on the
   list?" Today every helper is its own row in its job, flat, for as long as the job exists
   (Amendment 86, CONTRACT.md:4056): the navigator (`web/src/shell/navtree.ts:151-238`) sorts by
@@ -94,6 +94,25 @@ the last of it on 12 Oct).
   - Display only: no helper is removed, and its transcript, last reply and cost stay. The Project
     screen's lanes can use the same fold.
   Starts at: `navtree.ts` (reuse `nestHelpers`), `shell/verify.ts` for the checks.
+  *Done 15 Oct: Amendment 169 (an ended orchestrator's ended helpers, two or more, fold into one
+  row after it in the navigator, closed to start with under `p:<id>:fold:<agentId>`; a running or
+  waiting one keeps its row; arriving on a folded helper opens its fold; the Project screen is not
+  folded).*
+
+- [ ] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct).
+  Today the agent screen's **›_ terminal** tab (`web/src/agent/agent.tsx:824-834`) starts its shell in
+  the job's folder (`routes/term.ts:84-88`, and `routes/terminal.ts:30-34` for the old command
+  runner): `jobs.worktree_path`. For a job in its own worktree, that is
+  `<project>/.conductor/wt/<jobId>`, so the shell opens there. An example is
+  `conductor/.conductor/wt/job_86f7263f-898`. Only the Terminal dock opens at the project root
+  (`project.path`, `routes/term.ts:89-92`).
+  Starts at: `agentAt` in `routes/term.ts:84`, and the Terminal tab's title and links
+  (`web/src/agent/TermPanel.tsx`), which should say which folder the shell is in.
+  **Decide:**
+  - The root folder (the main checkout) has a different branch checked out from the agent's
+    worktree. A shell there shows `main`, not the agent's changes. Should every terminal open at the
+    root, or only a project's? Or should the agent's tab open at the root of its checkout (the worktree
+    top, never a folder inside it) with a one-click "go to the project root"?
 
 - [x] **Push `main`.** Amendments 99-129 are only on this machine. `git push origin main` is a *Done 13 Oct: pushed.*
   fast-forward. The database was copied to `~/.conductor/backups/` before the new migrations (160, 170
@@ -107,6 +126,10 @@ the last of it on 12 Oct).
   in `docs/MANUAL.md` too.
 
 - [x] **A throw before a run begins keeps its slot (wave 11, A1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 149.*
+
+- [x] **A sent message ignores the slot limit (wave 11, A2).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): the message waits for a slot and survives a restart.* *Done 15 Oct: Amendment 168 (a `'slot'` row in `scheduled_messages`, the agent `queued`; pump sends it in the first free slot, held or not; the ask to hand off and a relaunch wait the same way).*
+
+- [ ] **A decision that lands while a messaged run is finishing is lost.** Found (15 Oct) in wave 11's A2 (Amendment 168). The relaunch a decision asks for (`#resumeWanted`, `supervisor.ts`) only follows runs started by `#launch`; a run started by `#launchWithPrompt` (your message, a waiting `'slot'` message, the ask to hand off) ends `done` and nothing runs again. It was so before Amendment 168. Starts at: `#launchWithPrompt`'s settle in `supervisor.ts`, beside `#launch`'s `#resumeWanted` check; a check in `session/verify.ts` §15 next to the unwinding-relaunch one.
 
 - [x] **The arbiter matches the wrong request (wave 11, A3).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 150.*
 
@@ -132,6 +155,8 @@ the last of it on 12 Oct).
 
 - [x] **An orchestrator's page opens to its helpers' reports, not its own replies (wave 11, O3).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): O2 accepted as is; the orchestrator's auto turns start folded.* *Done 15 Oct: Amendment 164 (auto turns fold under `u${seq}`; in an agent that can start helpers they start folded, and one you open stays open in `conductor.agentUnfolds`; fold all reaches them; a `start_helper` line shows its task).*
 - [x] **Drag to move in Files, and rename/delete in the Navigator (wave 11, N6).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 165 (a drag onto a folder or Move to… is a rename into it, with tabs following; into itself, or anything under it, refused; a taken name shows the daemon's reason; ✎ and ⌫ on the navigator's file and folder rows reuse the Files tree's box and confirm).*
+
+- [x] **A cost-per-day chart on Metrics (wave 11, M1).** Found (14 Oct) for docs/plans/wave-11.md; it is the chart TODO's Metrics (122) left out. *Decided (14 Oct): cost per day.* *Done 15 Oct: Amendment 170 (a bar per day from `from` to `to` above the day table, empty days at no height, scaled to the highest day, in ink, with a caption in words; none for a single day).*
 
 ## Housekeeping
 
@@ -222,7 +247,7 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   separate items if wanted. A name that differs from an existing one only in case is refused only on a
   case-insensitive filesystem, such as macOS.
 
-- [ ] **Metrics (122).** *13 Oct, Amendment 136: the Errors rate, time per turn, the speed average, the stale `lib/verify.ts` comment and a per-project filter are done; a chart beyond the day table is not.*
+- [x] **Metrics (122).** *13 Oct, Amendment 136: the Errors rate, time per turn, the speed average, the stale `lib/verify.ts` comment and a per-project filter are done; a chart beyond the day table is not.* *Decided (14 Oct): cost per day.* *Done 15 Oct: Amendment 170 (the cost-per-day chart; the Errors tile's whole is Claude's calls and the filter and comment are done, checked; time per turn's hover says it runs high with parallel subagents, a known limit; tokens per second stays as Amendment 136 left it).*
   - The Errors tile divides retried calls by every engine's calls, though only Claude reports retries.
     The per-model rows are exact.
   - Claude's model-call time includes subagents, but `calls` counts main-loop turns, so time per call

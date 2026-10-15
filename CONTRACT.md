@@ -200,6 +200,213 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 170 — post-merge, applied. **Metrics draws each day's cost as a bar above the day table, empty days included, and says why time per turn runs high.**
+
+Web only (`metrics/rules.ts`, `metrics/chart.tsx` new, `metrics/route.tsx`, `metrics/metrics.css`,
+`metrics/verify.ts`), and `docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change. Planned on 14
+Oct as wave 11 lane M1 (`docs/plans/wave-11.md` §3 K, "a cost-per-day chart on Metrics"), with the
+user's decision of 14 Oct: *"M1: Cost per day"* (wave-11.md §6). On 15 Oct the user wrote "Run track 6 of
+`docs/plans/wave-11-tracks.md`", whose §2 adds TODO's **Metrics (122)** entry to this lane. *Amends
+Amendment 122*, whose screen had only tables, and *Amendment 136*, whose time-per-turn hovers said a
+turn's subagents are in its time but not that the turns counted are the main agent's alone.
+
+- **One bar per day, empty days included** (`chartBars`, `rules.ts:381`). The daemon's `days` lists only
+  days with something in them, newest first. The chart walks every day from the response's `from` to its
+  `to`, oldest on the left, and takes each day's cost from `days`; a day not there is a bar of no height.
+  The step is `addDays` (`rules.ts:367`), the daemon's own (`session/metrics.ts:542`): local calendar days
+  built with `new Date(y, m - 1, d + n)`, so a clock change or a month's end moves one day. For `all`,
+  `from` is the first day anything was recorded, as the daemon sends it.
+- **Heights scale to the highest day** (`rules.ts:392-393`): a day's cost over the range's highest, so the
+  busiest day is full height. A day whose runs report no dollars (Copilot or OpenRouter only) has no height
+  and says so on hover; with no day reporting dollars there is no chart, since every bar would be empty.
+- **The same rule as the day table.** `chartBars` reads `showDays` (`rules.ts:349`, unchanged) and draws
+  only when it has more than one day, the table's own test (`route.tsx:237`). So `today`, or a range with
+  one day in it, has neither. The chart sits inside the **By day** section, under its heading and above
+  the table (`route.tsx:240`).
+- **Hand-drawn SVG, text inks only** (`chart.tsx`, `metrics.css:315`). No chart library. The bars and the
+  base line are `currentColor`; `.mt-chart` sets `color: var(--ink3)` and a day under the pointer
+  `var(--ink)`. The chart's file sets no colour, token or `fill` of its own. **No colour limit changed**:
+  `metrics/verify.ts` §7 still finds no hex or rgb, text in inks or `--fail` only, `var(--fail)` exactly
+  three times, and no status colour.
+- **The text alternative.** The SVG is `role="img"`, labelled by the caption under it (`chartSummary`,
+  `rules.ts:404`): "Cost per day, Sun 4 Oct to Sat 10 Oct: $7.00 in all. The highest was Thu 8 Oct, $4.00.
+  4 days of 7 had no cost reported." Each day has a `<title>` hover (`barTitle`, `rules.ts:398`): its
+  cost, "no dollars reported", or "nothing ran". The first and last day sit under the bars and the highest
+  cost above them, both `aria-hidden`, since the caption says them.
+- **Why time per turn runs high: a known limit** (`RUNS_HIGH`, `rules.ts:169`). A Claude result's model
+  time includes its subagents' calls, but `num_turns`, the turns it is divided by, are the main agent's.
+  The Time tile's hover (`rules.ts:205`) and the **Per turn** column's (`rules.ts:248`) now add: "The model
+  time includes the subagents' time, but the turns counted are only the main agent's, so when subagents
+  run in parallel this figure runs high." Amendment 136's words before it are unchanged. The result gives
+  no per-subagent split, so the figure itself is not corrected.
+- **The rest of TODO's Metrics (122), checked.** The Errors tile's retry rate is out of Claude's calls
+  (`derive`, `rules.ts:125`; `retryLine`, `rules.ts:173-177`), the per-project filter is there (the picker
+  and `projectId`, `route.tsx:61-82`), and `lib/verify.ts:917`'s made-up screen uses `'x'`, not `'8'`: all
+  from Amendment 136. Its other half of that bullet, that tokens per second pairs a run's model time with
+  all of its output tokens, stands as Amendment 136's *Not done* (3) left it.
+
+*Not done / not decided:* not looked at in a browser, in either theme; the stylesheet checks hold the
+colours. A long `all` range draws one bar per day across the chart's width, so after a few hundred days
+the bars are a pixel or less; there is no grouping by week. The chart is cost only: tokens or runs per day
+are still the table's. Bars are not keyboard-focusable; the caption and the table carry the same numbers.
+
+*Verified:* `metrics/verify.ts` §5b "the cost-per-day chart" (18 checks) and §5c "why time per turn runs
+high" (3). Seven days with three empty give 7 bars, oldest first; heights `0,0.5,0,0,1,0,0.25` for $2,
+$4 and $1 on a $4 top; an `all` range runs from its first day; the day step crosses a month, a year and
+Europe's two 2026 clock-change days; `today`, one day, no dollars and a bad span give none. Rendered with
+`renderToStaticMarkup`, the 7 bars are 0, 30, 0, 0, 60, 0 and 15 of 60 units, left to right by age, in an
+`img` labelled by its caption, with 7 hovers; a single day renders nothing. `chart.tsx` has no hex, rgb,
+token or fill; the chart's CSS fills are `currentColor` and its colours inks; route.tsx draws it inside
+**By day**, above the table. The tooltip text is in both hovers. §7's colour limits pass unchanged. Also
+passes under `TZ` America/Sao_Paulo, Pacific/Auckland, America/Santiago and Asia/Beirut. **Revert check:**
+with the empty days not filled in, 3 checks fail (and the hover check throws); with heights over a fixed
+$4 instead of the top, the `all` check fails; with the tooltip's words changed, §5c fails. Restored, all
+pass. `pnpm -r typecheck` is clean, and `make test` is green: 28 PASS.
+
+### Amendment 169 — post-merge, applied. **Once an orchestrator has ended, the navigator folds its ended helpers into one row under it.**
+
+Web only (`shell/navtree.ts`, `shell/Navigator.tsx`, `shell/shell.css`, `shell/verify.ts`), and
+`docs/MANUAL.md`, `TODO.md`. No daemon, wire or migration change. The user, 15 Oct 2026: *"when the
+work assigned to orchestrator is done, why does it leave the individual agents it started on the
+list?"*; decided the same day (docs/plans/wave-11-tracks.md §3): *"FH — Fold, display only, nothing
+removed."* Run as lane FH of track 4. *Amends Amendment 86*, whose "Helpers (Amendment 51) are listed
+in their job, not under the agent that made them" still holds while the orchestrator runs, and for
+any helper still going or waiting on you.
+
+- **The fold** (`foldHelpers`, `shell/navtree.ts:288`). Whose helper is whose is the Project screen's
+  `nestHelpers` (`fleet/nest.ts:18`), over the job's agents in the rows' order: a top-level agent's
+  helpers, and theirs, follow it. When that agent's own status is `done`, `failed` or `stopped`
+  (`ENDED`, `:278`, as `shared/rerun.ts:65` counts it), its helpers that have ended and have nothing
+  waiting on them (`needs === 0`, the Agent tab's count of requests and alerts) become one `NavFold`
+  (`:90`), placed right after it. The rest keep their rows and places, so a fold row is never amber
+  and never blocked. A fold needs two helpers or more: one would be a row for a row. The orchestrator
+  is any agent with helpers, not only `marksOrchestrator`'s, so Amendment 51's orchestrator without
+  pipeline roles folds too.
+- **What it says.** `foldLabel` (`:333`): "↳ 12 helpers · all done" (or "all failed", "all
+  stopped"), else each ending with its count, done, failed, stopped in that order: "↳ 5 helpers · 4
+  done, 1 failed". Its dot is the worst inside by the Fleet's `SORT_RANK`, as a job's heading's is;
+  it says **finished** when a helper in it finished and you haven't opened it (Amendment 105).
+- **Where it is.** `NavJob` gains `rows: NavRow[]` (`:113`), the agent rows with the folds in;
+  `groupByJob` gives the plain rows (`:272`) and `navTree` folds them (`:233`). The job's `agents`,
+  count, dot, needs and budget are over every agent, folded or not. `JobGroup` draws `rows`
+  (`shell/Navigator.tsx:255`), and a fold is `FoldRow` (`:179`): chevron, dot, label, opening to the
+  helpers' own `AgentRow`s; its style is the job heading's, quiet (`.sh-nav-fhead`,
+  `shell/shell.css:604`).
+- **Open and closed.** A fold is `p:<projectId>:fold:<orchestratorId>` (`navFoldId`, `:407`) in the
+  same `conductor.navTree` set, beside `p:<id>:job:<jobId>` and `p:<id>:files:…`, which it can't
+  match. It **starts closed**: its id in the set means open, as a project's and a submenu's do (not
+  the job group's inverted rule).
+- **The agent you are on is never hidden.** Arriving on a helper inside a closed fold (its Agent
+  tab, a link, Needs you) opens that fold: `foldOf` (`:416`) names the fold that holds the agent,
+  and an effect keyed on it and the agent (`Navigator.tsx:777`) opens it once. Close it after and
+  it stays closed. The selected helper was not kept out of the fold instead, because a click on a
+  row inside an open fold would then move that row out of it under the pointer.
+- **Display only.** No helper is removed or changed: each is still in its job's and its project's
+  `agents`, and its transcript, last reply and cost are untouched.
+
+*Not done / not decided.* The Project screen's lanes don't fold: its lanes have no open state of
+their own, so a fold there needs a new setting and its own row, not a small reuse. A fold doesn't
+show its helpers' summed budget meter. Not looked at in a browser in either theme.
+
+*Verified.* `shell/verify.ts` §14 (`:577`, 27 checks): a working or queued orchestrator folds
+nothing; a done one with 12 done helpers is two rows, the fold saying "↳ 12 helpers · all done";
+failed and stopped orchestrators fold too; a working helper and one with a pending request keep
+their rows and places, and the rest read "↳ 4 helpers · 2 done, 1 failed, 1 stopped" with a failed
+dot; a failed helper whose alert waits stays out; one ended helper isn't folded; a helper's helper
+folds with the rest; an agent of the job that is no one's helper keeps its row; every helper is
+still in `agents` and the input is unchanged; the fold's id differs from every other node's, starts
+closed, toggles alone and survives the setting; `foldOf` finds a folded helper's fold only; the
+panel draws `rows`, opens a fold by `isOpen` on `navFoldId` and opens it on arrival. With the
+needs test, the orchestrator's ended test or the two-or-more rule taken out, 5, 2 and 1 checks
+fail; restored, they pass. `tsc --noEmit` in `packages/web` is clean.
+
+### Amendment 168 — post-merge, applied. **A message sent with every slot taken waits for a slot, in the database, and goes in the first one that frees.**
+
+Daemon (`db/migrations/255_scheduled_synthetic.sql` new, `session/schedule.ts`, `session/supervisor.ts`,
+`routes/schedule.ts`, `session/verify.ts`, `session/verify-schedule.ts`), shared (`wire.ts`), web
+(`agent/endpoints.ts`, `agent/composer.tsx`, `attention/HandOff.tsx`, `agent/scheduled.tsx`,
+`lib/verify-schedule.ts`), docs (`docs/MANUAL.md`, `TODO.md`). The user, 14 Oct 2026, in
+docs/plans/wave-11.md §6 A2 ("a sent message ignores the slot limit"), *Decided (14 Oct): the message
+waits for a slot and survives a restart.* *Amends Amendment 47*, whose open question was that a message
+to an idle agent "starts it at once, whether or not a slot is free"; *Amendment 111*, under which a
+message you send still goes through a hold (it still does, but waits for a slot first); and *Amendment
+157*, which reserved `'slot'` with nothing writing it. Amendment 132's brief overshoot (an answered
+question counts again at once) is unchanged.
+
+- **The row** (`255_scheduled_synthetic.sql`). `scheduled_messages.synthetic INTEGER NOT NULL DEFAULT 0`,
+  so the ask to hand off and the web's "continue" stay *auto* in the transcript when they wait. It isn't
+  on the wire. `insertScheduled(…, trigger, synthetic)` (`schedule.ts:110-131`), `getScheduled`
+  (`:160`), and `nextForSlot` (`:170`), the agent's oldest `'slot'` row with no error, by
+  `created_at`, then rowid.
+- **Sending a message** (`supervisor.ts:2109-2114`). After the budget and folder refusals, which are
+  unchanged, a message waits as a `'slot'` row when every slot is taken, when one of yours already
+  waits (it goes first), or when the agent's last run is still unwinding. That last case used to start
+  a second run beside the first. The agent is set `queued` with `SLOT_WAIT_NOTE` (`:230`, `#waitForSlot`
+  `:2135`). `sendMessage` returns `'queued'`, and the route answers `{ ok, delivery: 'queued' }`
+  (`SendMessageResponse`, `wire.ts:358`). Queueing doesn't reopen the job; the launch does.
+- **pump** (`supervisor.ts:970-978`). For a queued agent with a `'slot'` row, the row goes as soon as a
+  slot is free (`#sendForSlot`, `:2149`): the row is deleted and the agent resumes its own session with
+  the text, word for word. It goes past what `sendMessage` goes past with a free slot: the job's pause or
+  failure, its dependencies, the wait for the model (Amendment 123), and a hold (Amendment 111). The
+  exception is the ask to hand off, which is Conductor's and waits for a hold to end. A refusal found
+  then (a budget, a folder gone, no session) sets the row's `error` and pauses the agent or reports the
+  folder, as a timed one does.
+- **One per turn** (`supervisor.ts:1507-1518`). At the end of `#settle`, an agent that ends `done` or
+  `failed` with another `'slot'` row is queued again before `#rollUpJob`, so its job isn't finished
+  under it. `#sendWhenDone` (`:1541`) waits while a `'slot'` row is pending, so yours go first.
+- **The ask to hand off** (`#askToHandOff`, `supervisor.ts:1741-1746`). With every slot taken it
+  waits as a synthetic `'slot'` row instead of launching.
+- **A relaunch wanted while a run unwound** (`#resumeWanted`, `supervisor.ts:1323-1335`). If the slot
+  was taken meanwhile, the agent is queued with its job reopened, as `resumeParked` does, and pump
+  resumes it when a slot frees. It used to launch over the limit. It says why on a `queued` status
+  event, `SLOT_RESUME_NOTE` (`:237`), which `resumeParked`'s own no-slot branch does not. That note is
+  not `SLOT_WAIT_NOTE`, so cancelling a message you send it afterwards doesn't undo the queue.
+  Both waits arise only when the limit came down while agents ran, because the ending run gives its
+  own slot back before either is decided.
+- **A message due at its time** (the Scheduler's `#once`). It goes through `sendMessage`, so with
+  every slot taken it becomes a `'slot'` row and the timed row is deleted.
+- **Cancelling** (`routes/schedule.ts:78-80`, `slotMessageCancelled` `supervisor.ts:2176`). ✕ on a
+  `'slot'` row, once none is left, puts a queued agent back to its status before it was queued (from
+  its status events), so pump doesn't start it unasked. A cancelled ask to hand off leaves the agent
+  `done`, held for you as it would have been. `POST /api/agents/:id/scheduled` still refuses
+  `trigger: 'slot'` (400): only the supervisor writes one.
+- **Web.** `sendMessage` returns the answer (`endpoints.ts:38`). `sentText` (`:46`) turns `'queued'`
+  into *Waiting for a slot: it goes when one frees.* (`SLOT_WAIT_TEXT`, `:43`), which the composer
+  (`composer.tsx:278`) and the reply in Needs you (`HandOff.tsx:52`) show. `ScheduledList` shows the
+  row as **⏲ waiting for a slot** (`scheduled.tsx:119`) with what it waits on (`slotWaits`, `:69`):
+  *goes when one frees*, *after this turn*, *waiting: it asked you something*, *waiting: it is paused*,
+  or *after the one before it*.
+
+*Not done / not decided:* across agents, pump still goes in `listAgents` order, and a `'slot'` row
+gets no priority over other queued agents. A cancelled row's "status before" comes from the agent's
+status events, so an agent with none (never run here) stays queued. A row that failed (`error`) is
+skipped and stays until you clear it, like a timed one. A relaunch is wanted only for a run `#launch`
+started: a decision that lands while a run `#launchWithPrompt` started (your message, a slot row, the
+ask) is unwinding is not relaunched at all, slots or not, as before this amendment.
+
+*Verified:* daemon `session/verify.ts` §15 (`:2229`), 22 new checks on the fake SDK. With every slot
+taken, messages to an idle agent start nothing, the live count stays at the limit, and the route
+answers `'queued'`. They wait as `'slot'` rows in order, with the agent queued and saying why, and a
+second connection to the file finds both. Pumping while full starts nothing. A freed slot resumes the
+agent's own session with the first text, word for word, the second goes at the next turn, and the
+agent ends `done`. All of that happens while the fleet is held. Cancelling puts the agent back to
+`done`, and a freed slot then doesn't start it. A second Supervisor on a fresh connection sends a
+waiting message in its first free slot, held. Daemon `session/verify-schedule.ts` §9 (`:486`), 6
+checks: a message due at its time with the one slot taken starts nothing, becomes a `'slot'` row with
+its text, queues the agent with the note, and goes in its own session when the slot frees. Web
+`lib/verify-schedule.ts` §6 (`:133`), 7 checks. With the queue branch in `sendMessage` disabled, 14
+of §15's checks and 4 of §9's fail ("8 of 7" running, `delivery: 'resumed'`). Send-back 1 adds two
+more. §15 (`:2364`), 5 checks: a decision that lands while a run unwinds, with the limit lowered under
+it, starts no second run, leaves the live count at the limit, and queues the agent with
+`SLOT_RESUME_NOTE` and no row; a freed slot relaunches its own session once, with `WAKE_NUDGE`. §20
+(`:5075`), 9 checks: a restarted analyst that ends its turn without `hand_off` with the limit lowered
+under it starts nothing and stays at the limit. The ask waits as one synthetic `'slot'` row with
+`HANDOFF_ASK`, and the agent is queued with `SLOT_WAIT_NOTE`, not held, while the developer waits. A
+hold that frees the slot doesn't send it. Released, it goes in the agent's own session, shown as auto,
+once, within the limit; ending that turn without `hand_off` too holds it, and it isn't asked again. With
+`#askToHandOff`'s slot check disabled, 6 of the 9 fail ("1 new run(s), 2 of 1"); with `#resumeWanted`'s
+disabled, 2 of the 5 do. `make test` green.
+
 ### Amendment 167 — post-merge, applied. **A new task to an orchestrator removes the helpers of its last one, once they have all finished.**
 
 Daemon (`session/supervisor.ts`, `session/verify.ts`) and `docs/MANUAL.md`. The user, 15 Oct 2026: "when an

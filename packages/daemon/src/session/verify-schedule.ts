@@ -1,6 +1,7 @@
 /**
  * Validator checks for Amendment 111: pause everything until a time, and send a message
  * to an agent at a time. §8 is Amendment 157's: a message queued until the agent is done.
+ * §9 is Amendment 168's: a message due with every slot taken waits for one.
  *
  * No agent reaches the real SDK: `sdk.query` is swapped for a fake for the whole run, as
  * in session/verify.ts, so a launch is a count in `runs`. Jobs and agents are inserted
@@ -39,7 +40,7 @@ import {
   openRequestsForAgent,
   setAgentStatus,
 } from './store.js';
-import { HOLD_NOTE, supervisor } from './supervisor.js';
+import { HOLD_NOTE, SLOTS_KEY, SLOT_WAIT_NOTE, slotLimit, supervisor } from './supervisor.js';
 
 modelSources.gateway = () => Promise.reject(new Error('verify asked the real model API'));
 modelSources.claudeCode = () => Promise.reject(new Error('verify started a real Claude Code'));
@@ -482,6 +483,40 @@ async function main(): Promise<void> {
   check('the pause ends: it goes', await until(() => said(runs.at(-1), 'after the pause')) && queuedFor('agt_q').length === 0, JSON.stringify(runs.at(-1)?.prompts));
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n9 · a message due with every slot taken waits for one (Amendment 168)');
+  for (const r of runs) r.finish();
+  await until(() => sup.slots.used === 0);
+  const limitWas = slotLimit();
+  await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '1' } });
+  agent('agt_full', { status: 'done', sdkSessionId: 'sess_full' });
+  await send('POST', '/api/agents/agt_full/message', { text: 'take the only slot' });
+  check('one slot, and it is taken', await until(() => sup.slots.used === 1 && slotLimit() === 1), `${sup.slots.used} of ${slotLimit()}`);
+  agent('agt_due', { status: 'done', sdkSessionId: 'sess_due' });
+  const due = await send<{ message: ScheduledMessage }>('POST', '/api/agents/agt_due/scheduled', {
+    at: new Date(Date.now() - 1_000).toISOString(),
+    text: 'the time has come: the release notes',
+  });
+  const beforeDue = runs.length;
+  await scheduler().tick();
+  await settle(100);
+  check('its time comes: nothing starts, and no more than the limit run', runs.length === beforeDue && sup.slots.used === 1, `${runs.length - beforeDue} new run(s), ${sup.slots.used} running`);
+  const dueRows = listScheduled(db).filter((m) => m.agentId === 'agt_due');
+  check(
+    "it waits as a 'slot' message, word for word, in place of the timed one",
+    dueRows.length === 1 && dueRows[0]?.trigger === 'slot' && dueRows[0]?.text === 'the time has come: the release notes' && dueRows[0]?.id !== due.body.message.id,
+    JSON.stringify(dueRows),
+  );
+  check('the agent is queued, saying why', status('agt_due') === 'queued' && lastStatusNote(db, 'agt_due') === SLOT_WAIT_NOTE, `${status('agt_due')}: ${lastStatusNote(db, 'agt_due')}`);
+  runs.at(-1)?.finish();
+  check('a freed slot goes to it, in its own session', await until(() => runs.length === beforeDue + 1 && runs.at(-1)?.options.resume === 'sess_due'), `${runs.length - beforeDue} new run(s)`);
+  check(
+    'with the message, and none is left',
+    (await until(() => said(runs.at(-1), 'the time has come: the release notes'))) && listScheduled(db).every((m) => m.agentId !== 'agt_due'),
+    JSON.stringify(runs.at(-1)?.prompts),
+  );
+  await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: String(limitWas) } });
+
+  // ───────────────────────────────────────────────────────────────────────────
   for (const r of runs) r.finish();
   await until(() => sup.slots.used === 0);
   setAgentStatus(db, 'agt_worker', 'done');
@@ -491,8 +526,8 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 157) messages queued until the agent is done, one per done turn.\n`
-      : `\nAmendment 111/157 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
+      ? `\nAmendment 111 schedule: PASS — ${checks} checks: pause everything until a time, wake only what it paused, end by itself; messages at a time, held by a pause, refused or kept as they should; and (Amendment 157) messages queued until the agent is done, one per done turn; and (Amendment 168) a message due with every slot taken waits for one.\n`
+      : `\nAmendment 111/157/167 schedule: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -1,7 +1,7 @@
 /**
  * Screen 8 — Metrics (Amendment 122). What the models were used for: tokens, calls, time
  * and errors, in total and per model, over today, 7 days or all of it, for every project or
- * one (Amendment 136).
+ * one (Amendment 136), with each day's cost drawn above the day table (Amendment 170).
  *
  *   order 80 · hotkey 8. Registered by main.tsx's `./＊/route.tsx` glob, like every screen.
  *
@@ -27,6 +27,7 @@ import type { ScreenDef } from '../lib/screens.js';
 import { errorText } from '../lib/errors.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useProjects, useStatusBar } from '../lib/store.js';
+import { CostChart } from './chart.js';
 import { getMetrics } from './endpoints.js';
 import {
   BEFORE_NOTE,
@@ -236,6 +237,7 @@ export function Report({ resp }: { resp: MetricsResponse }) {
           {days.length > 1 && (
             <section aria-label="by day">
               <h2 className="mt-h">By day</h2>
+              <CostChart resp={resp} />
               <table className="mt-table mt-days">
                 <thead>
                   <tr>
