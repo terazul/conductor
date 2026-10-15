@@ -1,7 +1,12 @@
 # Plan: wave 11 (Amendments 148-169)
 
 **Status:** planned 14 Oct 2026, nothing built yet. Written against `main` at `06ab549`.
-Decisions are in §6. Changed since the plan was first drafted:
+Decisions are in §6.
+
+**15 Oct: waves 2 and 3 now run as six parallel tracks; see [wave-11-tracks.md](wave-11-tracks.md).**
+The lane specifications below still hold; §1's order and numbers don't.
+
+Changed since the plan was first drafted:
 
 - **R1 is done.** It is Amendment 147 (`be6a0fc`): what you click on Spawn is what runs, and a
   reading row says what its pin changed (`rowOverrides`, `spawn/presets.ts:454`). The lane is
