@@ -200,6 +200,59 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 155 — post-merge, applied. **Each stage of a pipeline hears every earlier stage's summary, not only the one before it.**
+
+Shared (`stack.ts`), daemon (`session/handoff.ts`, `session/supervisor.ts`, `session/verify.ts`) and
+`docs/MANUAL.md`. The user, 15 Oct 2026: "Run track 2 of `docs/plans/wave-11-tracks.md`"; this is the
+plan's lane L1 (wave-11.md §4, "N9: each stage sees every earlier stage's summary"), with *Decided (14 Oct):
+ancestors appear as their summaries*, and §6: "Ancestors appear as summaries, 'via <role>', within the cap."
+*Amends Amendments 101, 104 and 120*: 101 had a chain A, B, C hand C A's part only inside B's launch prompt,
+which is the oldest text and the first the cap drops; 104 printed every summary whole, outside the cap, and
+only for the agents waited on directly; 120 found a chain had nothing to drop. An agent sees more in its first
+prompt and its re-run note; nothing on a screen changes.
+
+- **`ancestorsOf(agents, agentId)`** (`shared/src/stack.ts:122`, pure, beside `createsCycle`, and walked the
+  same way). Everything the agent waits on, directly or however far up, each once, in topological order: one
+  comes after every one it waits on, so the furthest is first. Each is an `Ancestor` (`:110`) with `via`, the
+  agent's own dependency that leads to it (the first in `dependsOn` that does; itself for a direct one). An
+  agent's own helpers are not walked (they report to it, not to the stage after it, Amendment 51), an id no
+  agent has is left out, and a loop ends.
+- **Further up, by the summary alone.** `Upstream.via` (`handoff.ts:246`): an upstream that is not one the
+  reader waited for. It has no turns (`turnsOf`), its heading is `[role, via <role>]` (`head`, `:374`), and its
+  body is its summary only (`viaBody`, `:385`), never "(It finished without a written reply.)".
+- **Within the cap.** Its need is its summary as set down (`viaCost`, `:382`), shared out with the
+  conversations by `shareCap` (`:426`). Over its share it keeps the beginning and says `… (the last N
+  characters of its summary are left out to fit)`, or `(Its summary, N characters, is left out to fit.)` with
+  no room at all. The summaries of the agents waited on directly are still whole and outside the cap
+  (Amendment 104).
+- **Said once.** In its own voice the ancestor says its summary, so `dropRepeats` (Amendment 120) takes the
+  copy quoted in the next stage's launch prompt out and leaves the marker; in a diamond both quotes go and
+  the one part stays. When any upstream is further up, the opening adds: *The agents further up, marked "via"
+  the agent that waited for them, are given only by their summaries.* (`:430`); "the agent" / "the agents" counts
+  only the direct ones.
+- **The supervisor.** `#furtherUp(agent)` (`supervisor.ts:1617`) turns `ancestorsOf` into those upstreams, each
+  with its role, its summary from `getHandoff` and `via` the role it came through, leaving out the direct ones
+  and any that never handed off. `#promptFor` puts them first, oldest first, then the direct ones as before,
+  then the ones it was started without (Amendment 88), not twice (`:1182-1185`). `#takeRerunNote` puts them
+  before its direct ones the same way (`:2163`), so a re-run note says what a first prompt would.
+
+*Not done / not decided:* an ancestor that never handed off (a person released it, or it predates
+Amendment 104) is left out rather than given by its last reply. An agent it was started without is not walked
+further up: removing one rewires its waiters to what it waited on (Amendment 88), so those are direct. An
+orchestrator's helper report is unchanged. `docs/adr/0001-preset-stacks.md` still says what it says about
+transitive handoff; track 6's lane D4 corrects that ADR.
+
+*Verified:* `session/verify.ts` §17 (`:2765`, the block "each stage hears every earlier stage's summary"),
+against the real supervisor and the fake SDK: in architect → developer → scribe, the developer hears the
+architect as before and nothing "via"; the scribe holds the architect's summary once, under `[architect, via
+developer]`, before the developer's part, with the developer's quote of it left out; re-run from the
+developer, the scribe's re-run note holds it once the same way. Pure: a diamond gives the shared ancestor's
+summary once and both quotes go; four sharing 3,000 characters take 750 each and three ancestors' summaries
+are cut with the line, the direct summary whole; with room every one is whole; with none it says so; `rerunNote`
+carries the same section. `ancestorsOf` in §17p (`:4217`): a chain, a diamond (`a<b b<b c<c`), a direct one
+also further up another, helpers and a missing id, a loop. With `#furtherUp` returning nothing the chain and
+re-run checks fail. `pnpm -r typecheck` clean; `make test` green.
+
 ### Amendment 160 — post-merge, applied. **Copilot and OpenRouter keep the effort chosen, and Spawn shows plan mode as "ask me" before launch: nothing is lost, so the open question is closed.**
 
 Docs only (`CONTRACT.md`, `TODO.md`, `docs/plans/wave-11.md`). No code changed in `web`, `daemon` or `shared`,

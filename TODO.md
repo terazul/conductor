@@ -246,6 +246,12 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
   - Claude's spend is known only when a turn ends, so its over-budget warning arrives with the turn that
     crossed the budget; the ceiling still stops it mid-turn through the SDK.
 
+- [x] **Each stage sees every earlier stage's summary (N9).** In a chain A → B → C, C heard A only inside
+  B's launch prompt, the first text the cap drops. *Done 15 Oct: Amendment 155, `ancestorsOf`
+  (`shared/src/stack.ts`); a first prompt and a re-run note give each agent further up by its summary,
+  once, under `[role, via <role>]`.* *Decided (14 Oct): ancestors appear as their summaries, "via <role>",
+  within the cap.*
+
 - [ ] **Hand-off, windows and roles (120, 126).**
   - The model-window registry is in memory (`session/windows.ts`). After a restart a resumed stack uses
     the floor table until a model list is asked for. Claude's result carries

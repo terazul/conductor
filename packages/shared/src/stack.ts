@@ -106,6 +106,34 @@ export function createsCycle(agents: readonly Pick<StackNode, 'id' | 'dependsOn'
   return feeds.some((f) => upstream.has(f));
 }
 
+/** One agent upstream of another, and which of that one's own dependencies it is reached through. */
+export interface Ancestor {
+  id: string;
+  /** The dependency of the agent asked about that leads to it, the first in `dependsOn` that does; itself for a direct one. */
+  via: string;
+}
+
+/**
+ * Everything `agentId` waits on, directly or however far up, each once, in topological order:
+ * an agent comes after every one it waits on (Amendment 155). So in A→B→C, C's are A then B, and
+ * in a diamond the shared one is there once. An agent's own helpers are not walked (they report
+ * to it, not to the stage after it), and an id no agent has is left out.
+ */
+export function ancestorsOf(agents: readonly Pick<StackNode, 'id' | 'dependsOn' | 'parentId'>[], agentId: string): Ancestor[] {
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const direct = new Set(byId.get(agentId)?.dependsOn ?? []);
+  const seen = new Set<string>([agentId]);
+  const out: Ancestor[] = [];
+  const walk = (id: string, via: string): void => {
+    if (seen.has(id) || !byId.has(id)) return;
+    seen.add(id);
+    for (const d of byId.get(id)!.dependsOn) if (byId.get(d)?.parentId !== id) walk(d, via);
+    out.push({ id, via: direct.has(id) ? id : via });
+  };
+  for (const id of direct) if (byId.get(id)?.parentId !== agentId) walk(id, id);
+  return out;
+}
+
 /**
  * Roles whose entire job is to read (Amendment 41), here since Amendment 89 so the daemon
  * checks an added agent against the same list Spawn pins.
