@@ -22,9 +22,14 @@
  * rebase", unrelated histories — and a push of a pushed branch Conductor rebased, which
  * would need a force; 504 push or fetch timed out;
  * 500 git failed (its stderr in detail).
+ *
+ * N4: each takes `?repo=<absolute path>`, one of the project's repos as Files shows them
+ * (`projectRepos`); without it, the project's own folder, as before. A path outside that
+ * set is a 400. A listing, and an action's answer, carry `repo` and `repos`.
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { BranchesResponse } from '@conductor/shared';
 import { branchTargetKey } from '@conductor/shared';
 import { onSettingsChanged } from '../settings.js';
 import { openDb } from '../db/index.js';
@@ -32,7 +37,7 @@ import { hub } from '../hub.js';
 import { supervisor } from '../session/supervisor.js';
 import { GitError } from '../workspace/git.js';
 import { BranchError, branchAction, listBranches, parseBranchAction, previewMerge } from '../workspace/branches.js';
-import { projectRepo } from '../workspace/project-repo.js';
+import { projectRepoOf } from '../workspace/project-repo.js';
 
 function fail(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof BranchError) {
@@ -49,7 +54,14 @@ export default async function branchesRoutes(app: FastifyInstance): Promise<void
 
   // The repo is built from the store as the finished-job merge builds it (project-repo.ts);
   // a job forgotten for `delete` goes exactly as DELETE /api/jobs/:jobId removes it.
-  const repoFor = (projectId: string) => projectRepo(db, projectId, (jobId) => supervisor().deleteJob(jobId));
+  const repoFor = (projectId: string, repo: string | undefined, list = false) =>
+    projectRepoOf(db, projectId, (jobId) => supervisor().deleteJob(jobId), repo || undefined, list);
+  // Which repo a listing is of, and the others the screen could open (N4).
+  const stamped = (resp: BranchesResponse, opened: { path: string; choices: BranchesResponse['repos'] | null }): BranchesResponse => ({
+    ...resp,
+    repo: opened.path,
+    ...(opened.choices ? { repos: opened.choices } : {}),
+  });
 
   // Choosing what to compare with is a setting (Amendment 113): every open page re-reads.
   const PREFIX = branchTargetKey('');
@@ -60,37 +72,38 @@ export default async function branchesRoutes(app: FastifyInstance): Promise<void
   });
   app.addHook('onClose', async () => off());
 
-  app.get<{ Params: { projectId: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
+  app.get<{ Params: { projectId: string }; Querystring: { repo?: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
     try {
-      const repo = await repoFor(req.params.projectId);
-      if (!repo) return reply.code(404).send({ error: 'no such project' });
-      return await listBranches(repo);
+      const opened = await repoFor(req.params.projectId, req.query.repo, true);
+      if (!opened) return reply.code(404).send({ error: 'no such project' });
+      return stamped(await listBranches(opened.repo), opened);
     } catch (err) {
       return fail(reply, err);
     }
   });
 
-  app.get<{ Params: { projectId: string }; Querystring: { branch?: string; into?: string } }>(
+  app.get<{ Params: { projectId: string }; Querystring: { branch?: string; into?: string; repo?: string } }>(
     '/api/projects/:projectId/branches/preview',
     async (req, reply) => {
       try {
-        const repo = await repoFor(req.params.projectId);
-        if (!repo) return reply.code(404).send({ error: 'no such project' });
-        return await previewMerge(repo, req.query.branch ?? '', req.query.into || undefined);
+        const opened = await repoFor(req.params.projectId, req.query.repo);
+        if (!opened) return reply.code(404).send({ error: 'no such project' });
+        return await previewMerge(opened.repo, req.query.branch ?? '', req.query.into || undefined);
       } catch (err) {
         return fail(reply, err);
       }
     },
   );
 
-  app.post<{ Params: { projectId: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
+  app.post<{ Params: { projectId: string }; Querystring: { repo?: string } }>('/api/projects/:projectId/branches', async (req, reply) => {
     const { projectId } = req.params;
     try {
-      const repo = await repoFor(projectId);
-      if (!repo) return reply.code(404).send({ error: 'no such project' });
+      const opened = await repoFor(projectId, req.query.repo, true);
+      if (!opened) return reply.code(404).send({ error: 'no such project' });
       const action = parseBranchAction(req.body);
       try {
-        return await branchAction(repo, action);
+        const res = await branchAction(opened.repo, action);
+        return { ...res, branches: stamped(res.branches, opened) };
       } finally {
         // A refused or failed action can still have changed something (a fetch that half
         // ran); a redraw costs one GET.

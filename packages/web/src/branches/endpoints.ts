@@ -14,18 +14,21 @@ import { api } from '../lib/feed.js';
 
 const path = (projectId: string): string => `/api/projects/${encodeURIComponent(projectId)}/branches`;
 
-/** A project's local branches, each against its default branch. */
-export function getBranches(projectId: string): Promise<BranchesResponse> {
-  return api<BranchesResponse>(path(projectId));
+/** `?repo=` (N4): one of the project's other repos; none for its own folder. */
+const inRepo = (repo: string | null): string => (repo ? `?${new URLSearchParams({ repo }).toString()}` : '');
+
+/** A project's local branches, each against its default branch; with `repo`, another of its repos' (N4). */
+export function getBranches(projectId: string, repo: string | null = null): Promise<BranchesResponse> {
+  return api<BranchesResponse>(`${path(projectId)}${inRepo(repo)}`);
 }
 
 /** Merge, merge all, commit, push, fetch, set the default, delete or clean up merged (Amendment 143). The answer carries the branches as they are after. */
-export function branchAction(projectId: string, action: BranchAction): Promise<BranchActionResult> {
-  return api<BranchActionResult>(path(projectId), { method: 'POST', body: action });
+export function branchAction(projectId: string, action: BranchAction, repo: string | null = null): Promise<BranchActionResult> {
+  return api<BranchActionResult>(`${path(projectId)}${inRepo(repo)}`, { method: 'POST', body: action });
 }
 
 /** What merging `branch` into `into` would do: commits, conflicts, and why not (Amendment 110). Reads only. */
-export function previewMerge(projectId: string, branch: string, into: string): Promise<BranchMergePreview> {
-  const q = new URLSearchParams({ branch, into });
+export function previewMerge(projectId: string, branch: string, into: string, repo: string | null = null): Promise<BranchMergePreview> {
+  const q = new URLSearchParams({ branch, into, ...(repo ? { repo } : {}) });
   return api<BranchMergePreview>(`${path(projectId)}/preview?${q.toString()}`);
 }

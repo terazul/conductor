@@ -948,6 +948,27 @@ export interface BranchesResponse {
    * as "on origin": a named launch on one tracks it. Absent from a daemon from before.
    */
   remoteOnly?: string[];
+  /**
+   * The repo this listing is of (N4): absolute, as `?repo=` takes it. Absent from a daemon
+   * from before, which only ever listed the project's own folder.
+   */
+  repo?: string;
+  /**
+   * Every repo of the project the screen can open (N4), the project's own folder first:
+   * that folder, the extra directories that are repos, and the repos nested in either up to
+   * four deep — the repos Files shows. Absent from a daemon from before.
+   */
+  repos?: BranchRepoChoice[];
+}
+
+/** One repo the Branches screen can open (N4). */
+export interface BranchRepoChoice {
+  /** Absolute: what `?repo=` takes. */
+  path: string;
+  /** How the picker names it: the folder's name, then the path inside it for a nested repo. */
+  name: string;
+  /** The project's own folder: the only one with a default branch and a chosen target. */
+  main: boolean;
 }
 
 export type BranchAction =

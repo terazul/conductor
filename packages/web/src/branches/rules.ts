@@ -7,7 +7,7 @@
  * failing after.
  */
 
-import type { BranchInfo, BranchMergePreview, BranchTargetSource, BranchesResponse, Job } from '@conductor/shared';
+import type { BranchInfo, BranchMergePreview, BranchRepoChoice, BranchTargetSource, BranchesResponse, Job } from '@conductor/shared';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -355,4 +355,31 @@ export function removedText(removed: string[], forgot: string[]): string {
   if (removed.length === 0) return 'Nothing was removed.';
   const jobs = forgot.length > 0 ? ` Forgot ${forgot.length === 1 ? `job ${forgot[0]}` : `jobs ${forgot.join(', ')}`}; the transcripts stay.` : '';
   return `Removed ${removed.join(', ')}, with ${removed.length === 1 ? 'its folder' : 'their folders'}.${jobs}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which repo (N4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether `resp` is of the project's own folder: the one with a default branch, a chosen
+ * target and jobs. A daemon from before N4 only ever lists that one.
+ */
+export function ownRepo(resp: BranchesResponse): boolean {
+  return !(resp.repos ?? []).some((r) => r.path === resp.repo && !r.main);
+}
+
+/** The picker's choices: none when the project has only the one repo, so there is no picker. */
+export function repoChoices(repos: BranchRepoChoice[] | undefined): BranchRepoChoice[] {
+  return repos && repos.length > 1 ? repos : [];
+}
+
+/** What `?repo=` a choice sends: none for the project's own folder, which opens exactly as before. */
+export function repoParam(choice: BranchRepoChoice | null | undefined): string | null {
+  return choice && !choice.main ? choice.path : null;
+}
+
+/** The jobs that own `b` (`ownersOf`), in the project's own folder only: jobs never branch in another. */
+export function ownersIn(resp: BranchesResponse, b: BranchInfo, jobs: Pick<Job, 'id' | 'branch' | 'projectId'>[], projectId: string): string[] {
+  return ownRepo(resp) ? ownersOf(b, jobs, projectId) : [];
 }
