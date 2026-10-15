@@ -160,8 +160,8 @@ import { rerunNote, rerunStatusNote } from './rerun.js';
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
-import { listScheduled } from './schedule.js';
-import { SLOT_WAIT_NOTE } from './supervisor.js';
+import { listScheduled, nextForSlot } from './schedule.js';
+import { SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
 
 /*
@@ -2363,6 +2363,49 @@ async function main(): Promise<void> {
   await setSlots('3');
   check('raising it starts what was waiting, at once', await until(() => runs.length === limitRuns + 3 && sup.slots.used === 2), `${sup.slots.used} running`);
   check('and the snapshot reports the limit', (await get<{ slots: { total: number } }>('/api/snapshot')).body.slots.total === 3);
+  for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === 0);
+
+  /*
+   * A decision that lands while the agent's run is still unwinding is relaunched when the run
+   * lets go (`#resumeWanted`). The run gives its own slot back first, so every slot is taken
+   * then only when the limit came down while it ran: it waits, queued, and goes once a slot
+   * frees, rather than starting one over (Amendment 158).
+   */
+  await setSlots('2');
+  job('job_unwind', null);
+  // Through the queue: a run a message of yours started (`#launchWithPrompt`) is not relaunched this way.
+  fixture('agt_unwind', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_unwind', autonomy: DEFAULT_AUTONOMY });
+  fixture('agt_ubusy', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_ubusy', autonomy: DEFAULT_AUTONOMY });
+  const unwindAt = runs.length;
+  sup.pump();
+  await until(() => sup.slots.used === 2 && runs.length === unwindAt + 2);
+  const unwound = runs.slice(unwindAt).find((r) => r.options.resume === 'sess_unwind');
+  const ubusy = runs.slice(unwindAt).find((r) => r.options.resume === 'sess_ubusy');
+  sup.resumeParked('agt_unwind'); // still running: remembered for when its run lets go
+  await setSlots('1');
+  unwound?.finish({ cost: 0, reason: 'completed' });
+  await settle(150);
+  check(
+    'a decision that landed while its run unwound, every slot taken by then: no second run, and the live count does not rise (Amendment 158)',
+    runs.length === unwindAt + 2 && sup.slots.used === 1,
+    `${runs.length - unwindAt - 2} new run(s), ${sup.slots.used} of ${slotLimit()}`,
+  );
+  check(
+    'it is queued, saying why, with no message of yours waiting',
+    getAgent(db, 'agt_unwind')?.status === 'queued' && lastStatusNote(db, 'agt_unwind') === SLOT_RESUME_NOTE && listScheduled(db).every((m) => m.agentId !== 'agt_unwind'),
+    `${getAgent(db, 'agt_unwind')?.status}: ${lastStatusNote(db, 'agt_unwind')}`,
+  );
+  ubusy?.finish({ cost: 0, reason: 'completed' });
+  check('a freed slot relaunches it, in its own session', (await until(() => runs.length === unwindAt + 3)) && runs[unwindAt + 2]?.options.resume === 'sess_unwind', `${runs.length - unwindAt - 2} new run(s)`);
+  await until(() => (runs[unwindAt + 2]?.prompts.length ?? 0) > 0);
+  check('told what a free slot would have told it', runs[unwindAt + 2]?.prompts[0] === WAKE_NUDGE, JSON.stringify(runs[unwindAt + 2]?.prompts));
+  await settle(150);
+  check(
+    'once: one relaunch, and no more than the limit run',
+    runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length === 2 && sup.slots.used === 1 && getAgent(db, 'agt_unwind')?.status === 'working',
+    `${runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length} run(s), ${sup.slots.used} of ${slotLimit()}`,
+  );
   for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
   await until(() => sup.slots.used === 0);
   await setSlots(null);
@@ -5290,6 +5333,69 @@ async function main(): Promise<void> {
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
+
+    /*
+     * Asked with every slot taken (Amendment 158). Its own run gives its slot back first, so that is
+     * when the limit came down while it ran: the ask waits for a slot, as your message would, and
+     * goes in its session, as auto, once. A pause of everything holds it, being ours.
+     */
+    await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '2' } });
+    hjobRow('job_handoff158');
+    hjobRow('job_handoff158_busy');
+    hfix('hs_a', 'job_handoff158', { role: 'analyst', status: 'working', sdkSessionId: 'sess_hs_a', autonomy: DEFAULT_AUTONOMY });
+    hfix('hs_b', 'job_handoff158', { role: 'developer', status: 'queued', dependsOn: ['hs_a'], autonomy: DEFAULT_AUTONOMY });
+    hfix('hs_busy', 'job_handoff158_busy', { role: 'builder', sdkSessionId: 'sess_hs_busy', autonomy: DEFAULT_AUTONOMY });
+    const at158 = runs.length;
+    sup.reconcile();
+    sup.pump();
+    await until(() => runs.slice(at158).some((r) => r.options.resume === 'sess_hs_a'));
+    const hs1 = runs.slice(at158).find((r) => r.options.resume === 'sess_hs_a')!;
+    await send('POST', '/api/agents/hs_busy/message', { text: 'keep busy' });
+    await until(() => sup.slots.used === 2);
+    await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: '1' } });
+    const before158 = runs.length;
+    hs1.finish({ cost: 0, reason: 'completed' });
+    await settle(150);
+    check(
+      'the restarted agent ends its turn without hand_off with every slot taken: the ask starts nothing, and the live count does not rise (Amendment 158)',
+      runs.length === before158 && sup.slots.used === 1,
+      `${runs.length - before158} new run(s), ${sup.slots.used} of ${slotLimit()}`,
+    );
+    const askRows = () => listScheduled(db).filter((m) => m.agentId === 'hs_a');
+    const askRow = nextForSlot(db, 'hs_a');
+    check(
+      "it waits as a 'slot' message of Conductor's, the ask word for word",
+      askRows().length === 1 && askRow?.trigger === 'slot' && askRow.synthetic && askRow.text === HANDOFF_ASK,
+      JSON.stringify(askRow),
+    );
+    check(
+      'the agent is queued, saying why; it is not held, and the developer waits',
+      getAgent(db, 'hs_a')?.status === 'queued' && lastStatusNote(db, 'hs_a') === SLOT_WAIT_NOTE && !getHandoff(db, 'hs_a').held && getAgent(db, 'hs_b')?.status === 'queued',
+      `${getAgent(db, 'hs_a')?.status}: ${lastStatusNote(db, 'hs_a')}`,
+    );
+    // The pause of everything pauses the busy one, which frees its slot: the ask, being ours, waits on.
+    await sup.hold();
+    await settle(150);
+    check(
+      'with everything paused, a freed slot does not send it',
+      sup.slots.used === 0 && !runs.slice(before158).some((r) => r.options.resume === 'sess_hs_a') && askRows().length === 1 && getAgent(db, 'hs_a')?.status === 'queued',
+      `${sup.slots.used} running, ${getAgent(db, 'hs_a')?.status}`,
+    );
+    setAgentStatus(db, 'hs_busy', 'done'); // so the release wakes only the ask, not the busy one too
+    sup.release();
+    check('the pause over, it goes, in its own session', await until(() => runs.slice(before158).some((r) => r.options.resume === 'sess_hs_a')));
+    const hs2 = runs.slice(before158).find((r) => r.options.resume === 'sess_hs_a')!;
+    await until(() => hs2.prompts.length > 0);
+    const hsSaid = userTexts('hs_a').filter((p) => p.text === HANDOFF_ASK);
+    check('told to hand off, shown as auto, once', hs2.prompts[0] === HANDOFF_ASK && hsSaid.length === 1 && hsSaid[0]?.synthetic === true && askRows().length === 0, JSON.stringify(hsSaid));
+    check('and no more than the limit run', sup.slots.used === 1, `${sup.slots.used} of ${slotLimit()}`);
+    hs2.finish({ cost: 0, reason: 'completed' });
+    check('ending that turn without it as well: it is held, as before', await until(() => getAgent(db, 'hs_a')?.status === 'done' && getHandoff(db, 'hs_a').held));
+    await settle(150);
+    check('asked once: no third run of it', runs.slice(at158).filter((r) => r.options.resume === 'sess_hs_a').length === 2, `${runs.slice(at158).filter((r) => r.options.resume === 'sess_hs_a').length} run(s)`);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    await send('PATCH', '/api/settings', { settings: { [SLOTS_KEY]: null } });
     sdk.query = realQuery;
   }
 

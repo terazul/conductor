@@ -218,30 +218,34 @@ question counts again at once) is unchanged.
   on the wire. `insertScheduled(…, trigger, synthetic)` (`schedule.ts:110-131`), `getScheduled`
   (`:160`), and `nextForSlot` (`:170`), the agent's oldest `'slot'` row with no error, by
   `created_at`, then rowid.
-- **Sending a message** (`supervisor.ts:2098-2103`). After the budget and folder refusals, which are
+- **Sending a message** (`supervisor.ts:2109-2114`). After the budget and folder refusals, which are
   unchanged, a message waits as a `'slot'` row when every slot is taken, when one of yours already
   waits (it goes first), or when the agent's last run is still unwinding. That last case used to start
   a second run beside the first. The agent is set `queued` with `SLOT_WAIT_NOTE` (`:230`, `#waitForSlot`
-  `:2124`). `sendMessage` returns `'queued'`, and the route answers `{ ok, delivery: 'queued' }`
+  `:2135`). `sendMessage` returns `'queued'`, and the route answers `{ ok, delivery: 'queued' }`
   (`SendMessageResponse`, `wire.ts:358`). Queueing doesn't reopen the job; the launch does.
-- **pump** (`supervisor.ts:963-971`). For a queued agent with a `'slot'` row, the row goes as soon as a
-  slot is free (`#sendForSlot`, `:2138`): the row is deleted and the agent resumes its own session with
+- **pump** (`supervisor.ts:970-978`). For a queued agent with a `'slot'` row, the row goes as soon as a
+  slot is free (`#sendForSlot`, `:2149`): the row is deleted and the agent resumes its own session with
   the text, word for word. It goes past what `sendMessage` goes past with a free slot: the job's pause or
   failure, its dependencies, the wait for the model (Amendment 123), and a hold (Amendment 111). The
   exception is the ask to hand off, which is Conductor's and waits for a hold to end. A refusal found
   then (a budget, a folder gone, no session) sets the row's `error` and pauses the agent or reports the
   folder, as a timed one does.
-- **One per turn** (`supervisor.ts:1497-1507`). At the end of `#settle`, an agent that ends `done` or
+- **One per turn** (`supervisor.ts:1507-1518`). At the end of `#settle`, an agent that ends `done` or
   `failed` with another `'slot'` row is queued again before `#rollUpJob`, so its job isn't finished
-  under it. `#sendWhenDone` (`:1530`) waits while a `'slot'` row is pending, so yours go first.
-- **The ask to hand off** (`#askToHandOff`, `supervisor.ts:1730-1735`). With every slot taken it
+  under it. `#sendWhenDone` (`:1541`) waits while a `'slot'` row is pending, so yours go first.
+- **The ask to hand off** (`#askToHandOff`, `supervisor.ts:1741-1746`). With every slot taken it
   waits as a synthetic `'slot'` row instead of launching.
-- **A relaunch wanted while a run unwound** (`#resumeWanted`, `supervisor.ts:1316-1323`). If the slot
+- **A relaunch wanted while a run unwound** (`#resumeWanted`, `supervisor.ts:1323-1335`). If the slot
   was taken meanwhile, the agent is queued with its job reopened, as `resumeParked` does, and pump
-  resumes it when a slot frees. It used to launch over the limit.
+  resumes it when a slot frees. It used to launch over the limit. It says why on a `queued` status
+  event, `SLOT_RESUME_NOTE` (`:237`), which `resumeParked`'s own no-slot branch does not. That note is
+  not `SLOT_WAIT_NOTE`, so cancelling a message you send it afterwards doesn't undo the queue.
+  Both waits arise only when the limit came down while agents ran, because the ending run gives its
+  own slot back before either is decided.
 - **A message due at its time** (the Scheduler's `#once`). It goes through `sendMessage`, so with
   every slot taken it becomes a `'slot'` row and the timed row is deleted.
-- **Cancelling** (`routes/schedule.ts:78-80`, `slotMessageCancelled` `supervisor.ts:2165`). ✕ on a
+- **Cancelling** (`routes/schedule.ts:78-80`, `slotMessageCancelled` `supervisor.ts:2176`). ✕ on a
   `'slot'` row, once none is left, puts a queued agent back to its status before it was queued (from
   its status events), so pump doesn't start it unasked. A cancelled ask to hand off leaves the agent
   `done`, held for you as it would have been. `POST /api/agents/:id/scheduled` still refuses
@@ -256,8 +260,9 @@ question counts again at once) is unchanged.
 *Not done / not decided:* across agents, pump still goes in `listAgents` order, and a `'slot'` row
 gets no priority over other queued agents. A cancelled row's "status before" comes from the agent's
 status events, so an agent with none (never run here) stays queued. A row that failed (`error`) is
-skipped and stays until you clear it, like a timed one. No verify drives the ask to hand off, or the
-unwinding relaunch, with every slot taken.
+skipped and stays until you clear it, like a timed one. A relaunch is wanted only for a run `#launch`
+started: a decision that lands while a run `#launchWithPrompt` started (your message, a slot row, the
+ask) is unwinding is not relaunched at all, slots or not, as before this amendment.
 
 *Verified:* daemon `session/verify.ts` §15 (`:2229`), 22 new checks on the fake SDK. With every slot
 taken, messages to an idle agent start nothing, the live count stays at the limit, and the route
@@ -270,7 +275,17 @@ waiting message in its first free slot, held. Daemon `session/verify-schedule.ts
 checks: a message due at its time with the one slot taken starts nothing, becomes a `'slot'` row with
 its text, queues the agent with the note, and goes in its own session when the slot frees. Web
 `lib/verify-schedule.ts` §6 (`:133`), 7 checks. With the queue branch in `sendMessage` disabled, 14
-of §15's checks and 4 of §9's fail ("8 of 7" running, `delivery: 'resumed'`). `make test` green.
+of §15's checks and 4 of §9's fail ("8 of 7" running, `delivery: 'resumed'`). Send-back 1 adds two
+more. §15 (`:2364`), 5 checks: a decision that lands while a run unwinds, with the limit lowered under
+it, starts no second run, leaves the live count at the limit, and queues the agent with
+`SLOT_RESUME_NOTE` and no row; a freed slot relaunches its own session once, with `WAKE_NUDGE`. §20
+(`:5075`), 9 checks: a restarted analyst that ends its turn without `hand_off` with the limit lowered
+under it starts nothing and stays at the limit. The ask waits as one synthetic `'slot'` row with
+`HANDOFF_ASK`, and the agent is queued with `SLOT_WAIT_NOTE`, not held, while the developer waits. A
+hold that frees the slot doesn't send it. Released, it goes in the agent's own session, shown as auto,
+once, within the limit; ending that turn without `hand_off` too holds it, and it isn't asked again. With
+`#askToHandOff`'s slot check disabled, 6 of the 9 fail ("1 new run(s), 2 of 1"); with `#resumeWanted`'s
+disabled, 2 of the 5 do. `make test` green.
 
 ### Amendment 166 — post-merge, applied. **A `hand_off` short of its closing headings is saved, and the agent is told which.**
 

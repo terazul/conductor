@@ -232,6 +232,13 @@ export const HOLD_NOTE = 'paused with everything until the scheduled time — it
 export const SLOT_WAIT_NOTE = 'waiting for a slot — your message goes when one frees';
 
 /**
+ * Why an agent is queued when the decision that landed while its run unwound found every slot
+ * taken (Amendment 158). Not SLOT_WAIT_NOTE: there is no message of yours to cancel, and
+ * cancelling one sent after it must not undo this.
+ */
+export const SLOT_RESUME_NOTE = 'waiting for a slot — it carries on when one frees';
+
+/**
  * Why an agent can't run: the folder its job works in is gone (Amendment 114). Removed by
  * hand, by `git worktree remove`, or a disk unmounted. Starting Claude Code there fails with
  * "native binary … failed to launch (ENOENT)", which reads as a broken install, so it is
@@ -1325,6 +1332,10 @@ export class Supervisor implements AgentControl {
         // one with no slot, and pump() resumes it — with the same prompt — when one frees.
         this.#reopenJob(fresh.jobId);
         setAgentStatus(this.#db, agentId, 'queued');
+        eventLog().emit(
+          { projectId: fresh.projectId, jobId: fresh.jobId, agentId },
+          { kind: 'status', status: 'queued', error: SLOT_RESUME_NOTE },
+        );
         this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
       } else if (fresh?.sdkSessionId) {
         void this.#launch(agentId, fresh.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
