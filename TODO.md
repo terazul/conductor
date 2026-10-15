@@ -124,7 +124,7 @@ the last of it on 12 Oct).
 
 - [x] **A listed role whose persona names an exact model runs on sonnet (wave 11, O1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 155 (`ListedRole.model`, kept from the persona and sent as the role's `HelperRole.model`; the role select shows it).*
 - [x] **Changes and diffs miss nested repos (wave 11, N5).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 158 (each dirty nested repo scanned as its own, four deep; each diff from the repo that owns the path).*
-- [x] **Do non-Claude engines drop effort or plan mode? (wave 11, X1).** Found (14 Oct) for docs/plans/wave-11.md §8. *Done 15 Oct: Amendment 156 (traced on Spawn, "+ agent" and `start_helper`; nothing is lost: the effort is sent as `reasoningEffort`, and plan first is sent as "ask me" and shown so before launch; no code changed).*
+- [x] **Do non-Claude engines drop effort or plan mode? (wave 11, X1).** Found (14 Oct) for docs/plans/wave-11.md §8. *Done 15 Oct: Amendment 160 (traced on Spawn, "+ agent" and `start_helper`; nothing is lost: the effort is sent as `reasoningEffort`, and plan first is sent as "ask me" and shown so before launch; no code changed).*
 - [ ] **An effort the model doesn't take.** Spawn (`route.tsx:1127`) and the composer offer all five efforts for any model, on every engine. Copilot's model list says which each model takes (`efforts`, `copilot.ts:231`); OpenRouter's says nothing. The SDK looks likely to refuse an unsupported one at the run (not tried live). Found (15 Oct) by Amendment 156.
 
 ## Housekeeping

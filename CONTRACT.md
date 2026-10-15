@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 156 — post-merge, applied. **Copilot and OpenRouter keep the effort chosen, and Spawn shows plan mode as "ask me" before launch: nothing is lost, so the open question is closed.**
+### Amendment 160 — post-merge, applied. **Copilot and OpenRouter keep the effort chosen, and Spawn shows plan mode as "ask me" before launch: nothing is lost, so the open question is closed.**
 
 Docs only (`CONTRACT.md`, `TODO.md`, `docs/plans/wave-11.md`). No code changed in `web`, `daemon` or `shared`,
 and `docs/MANUAL.md` is unchanged because nothing visible changed: § Copilot and OpenRouter already says
@@ -240,21 +240,21 @@ trace to the other engines. Both engines run on one `CopilotBackend` (`session/b
 - **The daemon keeps them.** `parseAutonomy` keeps a known mode (`routes/session.ts:97-99`) and a known effort
   (`:108-112`), for an agent, a listed role (`parseHelperRoles`, `:223`) and an added agent (`parseAgentSpec`,
   `:289`). `autonomyFor` (`:132-138`) checks only the budget's unit, never the mode or the effort. The
-  supervisor stores what was sent (`supervisor.ts:185`) and starts the agent's own engine with it
-  (`createBackend`, `:1246`; `autonomy`, `:1256`).
+  supervisor stores what was sent (`supervisor.ts:186`) and starts the agent's own engine with it
+  (`createBackend`, `:1247`; `autonomy`, `:1257`).
 - **"+ agent".** `addAgentSpec` (`spawn/stack.ts:185`) copies a sibling's autonomy (`addedAutonomy`, `:117`).
   That autonomy was already converted at launch, so it has no plan on Copilot and keeps the effort. It sends
   the job's engine (`:199`). With no sibling, it uses Spawn's defaults (`:125`), the same as on Claude. A
   reading role keeps plan only if its sibling had it (`:130`), which on Copilot it didn't.
 - **A helper an orchestrator starts.** `start_helper` (`routes/helpers.ts:164`) calls `startHelper`
-  (`supervisor.ts:1729`). The helper takes the orchestrator's autonomy (`:1753`) or the listed role's
-  (`:1758`), both converted by `specsOn` at launch, checked by `readOnlyRefusal` (`:1760`;
+  (`supervisor.ts:1766`). The helper takes the orchestrator's autonomy (`:1790`) or the listed role's
+  (`:1795`), both converted by `specsOn` at launch, checked by `readOnlyRefusal` (`:1797`;
   `shared/src/stack.ts:181-189`, which accepts `plan` or `default`). It runs on the orchestrator's engine
-  (`:1800`).
+  (`:1837`).
 - **After launch.** The agent screen's composer offers plan only where the engine has it, or where the agent is
-  already in it (`offersMode`, `lib/providers.ts:64-65`; `agent/composer.tsx:599`). It shows effort where
-  `has.effort` (`:622`). A change goes through `POST /api/agents/:agentId/autonomy` (`routes/session.ts:889`)
-  and applies from the agent's next run (`supervisor.ts:2225-2232`), and that run's resume carries the new
+  already in it (`offersMode`, `lib/providers.ts:64-65`; `agent/composer.tsx:621`). It shows effort where
+  `has.effort` (`:644`). A change goes through `POST /api/agents/:agentId/autonomy` (`routes/session.ts:889`)
+  and applies from the agent's next run (`supervisor.ts:2262-2269`), and that run's resume carries the new
   effort (`copilot.ts:401`).
 - **What the daemon doesn't strip.** A request made outside Spawn can still send `plan` to Copilot. It is
   kept, and the gate holds it to reads (`copilot.ts:301`): stricter than asked, never looser.
@@ -272,7 +272,7 @@ This happens on every engine, as it does today.
 unchanged. In `web/src/spawn/verify.ts` §15: 'plan mode, which it lacks, is sent as "ask me"' (`:739`),
 "effort and helpers, which it has, are kept" (`:740`), "an engine that can do nothing: no effort, no
 helpers…" (`:745`), and the listed roles off Claude (`:1320-1321`). In `daemon/src/session/verify.ts`: the
-capabilities are the findings (`:3754`), and the gate's modes, where plan only reads (`:3345`). No check
+capabilities are the findings (`:3754`), and the gate's modes, where plan only reads (`:3352`). No check
 was added, because no code changed. `make test` exit 0 in one run, every suite PASS ("Track A spawn: PASS", "Track B agent: PASS", "docs links: PASS — 33 links in 47 files").
 
 ### Amendment 159 — post-merge, applied. **The three label backdrops carry more chroma, sit 1.06:1 apart in lightness and 60° apart in hue, in both themes.**
