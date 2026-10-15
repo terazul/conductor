@@ -196,8 +196,7 @@ Types only; no behaviour change. Typecheck.
 ## Step 8 — Docs
 
 - CONTRACT.md: one amendment per step, as above.
-- README: Prerequisites gain "optional: Copilot login; `OPENROUTER_API_KEY`". Replace the
-  broken link to `docs/ARCHITECTURE.md` (the file does not exist) or create the file.
+- README: Prerequisites gain "optional: Copilot login; `OPENROUTER_API_KEY`".
 - docs/MANUAL.md: a Providers section, with what each can and cannot do, and the cost
   caveat.
 - Tick the item in TODO.md.

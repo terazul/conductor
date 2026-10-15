@@ -2,8 +2,8 @@
 
 How to run several Claude Code agents across several projects without losing track of them.
 
-§0 covers installing, starting and stopping it. The rest is about *using* it. How the code
-works, for anyone changing it: [ARCHITECTURE.md](ARCHITECTURE.md).
+§0 covers installing, starting and stopping it. The rest is about *using* it. Why the code
+is built the way it is, for anyone changing it: the decision records in [adr/](adr/).
 
 ---
 
@@ -369,8 +369,8 @@ plan and an ADR in `docs/adr/` without changing source code. It runs on opus, ma
 shell and write its documents, and never pushes. In a Custom setup, put a developer after
 it (waiting for it), and the developer starts from its plan. Presets use the persona of
 the same role for its system prompt and skills, and keep their own brief and model. A
-persona with **write: off** reads only, and a reading role (reviewer, debugger, analyst)
-never writes, whatever its persona says. When a persona or a reading role pins a row read-
+persona with **write: off** reads only, and a reading role (reviewer, debugger, analyst,
+auditor) never writes, whatever its persona says. When a persona or a reading role pins a row read-
 only, the plan says so underneath: "reads only (reviewer): no file edits, asks before
 shell, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
 get. A running or sleeping agent keeps what it launched with.
@@ -441,7 +441,7 @@ whose steps you already know.
 - **Each helper runs as its role.** It has that persona's system prompt (what the built-in roles
   are told, above), skills, tools and model, and its lane is named for the role and the work's
   name (`developer-api`, `reviewer`, …), under the orchestrator's. A reading role (reviewer,
-  debugger, analyst) stays read-only: the write tools are denied outright, whatever the pills
+  debugger, analyst, auditor) stays read-only: the write tools are denied outright, whatever the pills
   say. The orchestrator may
   ask for a **cheaper tier** than the one listed for a step that is easy (`tier` on
   `start_helper`); a dearer one than you chose is refused.

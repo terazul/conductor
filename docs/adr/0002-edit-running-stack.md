@@ -113,6 +113,6 @@ Commit 1 already needs the rewire to fix `deleteAgent`, so `rewireOnRemoval` lan
 
 ## Risks and open questions
 
-- **`docs/ARCHITECTURE.md` isn't in this repository.** README links it, and Amendment 81 says it lives outside git. So this ADR and the amendments carry what it would have said. Whoever keeps that file should add §1–3.
+- **There is no architecture guide in this repository** (the links to one were dropped on 14 Oct 2026, Amendment 153). So this ADR, the others in `docs/adr/` and the amendments carry what it would have said.
 - **Feeding an agent mid-pipeline changes its handoff.** The fed agent hears the new agent as well as what it already waited on. That is the point, but it makes the fed agent's first prompt longer (up to 8k characters more per upstream agent).
 - **Not covered:** editing an existing agent's dependencies in place, or reordering. Remove and add again does the same job.

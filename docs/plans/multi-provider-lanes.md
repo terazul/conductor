@@ -11,7 +11,7 @@ done (Amendments 72–75), and the answers are in
 | A — engine | 4 | 76 | `session/backends/copilot*.ts`, `session/secrets.ts`, `session/translate.ts`, `arbiter/index.ts`, `backends/index.ts`, `routes/providers.ts` (new), `index.ts` (shutdown only) | now |
 | B — budgets and models | 5, 6 | 77, 78 | `session/budget.ts`, `routes/session.ts`, `shared/src/wire.ts`, `session/models.ts` | now |
 | C — screens | 7 | 79 | `packages/web/**`, `fixtures/**` | when B is merged, because it needs B's wire fields |
-| Docs (me) | 8 | 80 | README, `docs/MANUAL.md`, `docs/ARCHITECTURE.md`, TODO.md | last |
+| Docs (me) | 8 | 80 | README, `docs/MANUAL.md`, TODO.md | last |
 
 Each lane works in its own worktree (`../conductor-lane-a`, and so on) on its own branch.
 I merge each lane by cherry-picking onto `cleanup`. Both A and B add sections at the end
