@@ -782,5 +782,8 @@ Same project only. It launches straight away.*
 
 - Whether the arbiter stores enough tool input for A3's fallback.
 - Whether non-Claude engines drop effort or plan (`engine.ts:37-51`, suspected; Amendment 147
-  traced Claude only).
+  traced Claude only). *Answered 15 Oct by Amendment 160: nothing is lost. Copilot and OpenRouter
+  keep the effort (`reasoningEffort`, `copilot.ts:401`), and plan first, which they lack, is sent as
+  "ask me" and shown pressed as **ask me** before launch, on Spawn, "+ agent" and a helper an
+  orchestrator starts. Left open: an effort the model doesn't take (TODO).*
 - How the agent page and the hand-off card would host N13's **Pass to…**: not read.

@@ -200,6 +200,81 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 160 — post-merge, applied. **Copilot and OpenRouter keep the effort chosen, and Spawn shows plan mode as "ask me" before launch: nothing is lost, so the open question is closed.**
+
+Docs only (`CONTRACT.md`, `TODO.md`, `docs/plans/wave-11.md`). No code changed in `web`, `daemon` or `shared`,
+and `docs/MANUAL.md` is unchanged because nothing visible changed: § Copilot and OpenRouter already says
+"**No plan mode.** **plan first** is hidden, and a preset that plans first asks you instead", and its effort
+paragraph holds. The user, 14 Oct 2026, wrote wave-11.md §8's open question "Whether non-Claude engines drop
+effort or plan (`engine.ts:37-51`, suspected; Amendment 147 traced Claude only)". On 15 Oct they wrote "Run
+track 5 of `docs/plans/wave-11-tracks.md`". This is lane X1. *Amends nothing*: it confirms Amendment 80
+(an engine shows only what it can do, and a plan it lacks is sent as "ask me") and extends Amendment 147's
+trace to the other engines. Both engines run on one `CopilotBackend` (`session/backends/index.ts:48`,
+`:56`), so one trace covers both.
+
+- **What the engines say.** `GET /api/providers` sends each engine's `capabilities`
+  (`routes/session.ts:914`). For Copilot and OpenRouter that is `COPILOT_CAPABILITIES`
+  (`backends/index.ts:41`): `effort: true`, `planMode: false`. Both flags match what the backend does.
+- **`effort: true` is true.** `#config`, which is given when a session is created and on every resume, passes
+  `reasoningEffort: autonomy.effort` when one is set (`backends/copilot.ts:401`). `setModel` passes it again
+  (`:706-707`). The SDK's `ReasoningEffort` uses our five words, `low` to `max` (`@github/copilot-sdk` 1.0.16
+  `types.d.ts:1609`; ours is `shared/src/wire.ts:160`), so nothing is mapped and nothing is rounded.
+- **`planMode: false` is true.** Claude's **plan first** reads, writes a plan, and then waits for your
+  approval. The Copilot gate has nothing to approve: its `plan` only reads, for the whole run
+  (`gateCall`, `copilot.ts:301`). The SDK's own plan mode (`session.rpc.mode.set`,
+  `onExitPlanModeRequest`) is a different mechanism and is not wired (`docs/plans/multi-provider-findings.md:31-37`).
+  Claiming plan mode would promise an approval step that never comes.
+- **Spawn, what is sent.** `specsOn` (`spawn/engine.ts:56`) passes every spec through `autonomyOn` (`:62`),
+  and every listed role of an orchestrated stack too (`:66-68`). `autonomyOn` keeps the effort where the
+  engine has it (`:51`) and sends a mode the engine lacks as `default` (`modeOn`, `:37-39`; `:47`). A reading
+  role that plans on Claude (`rowAutonomy`, `presets.ts:459`) asks on Copilot. Spawn won't launch on another
+  engine until it knows that engine's capabilities (`engineReady`, `route.tsx:452-453`), so an unknown
+  engine's `NONE` (`lib/providers.ts:29`, `:48-56`) is never what launches.
+- **Spawn, what is shown.** Spawn offers **plan first** only where the engine has it
+  (`MODES.filter(offersMode)`, `route.tsx:1042`). The pill pressed is `shownMode = modeOn(mode, caps)`
+  (`:259`), so after switching to Copilot from a Claude plan, **ask me** is the pill pressed. The resolved
+  panel shows the `permissionMode` and the effort that will be sent (`:1160-1162`). The effort row is shown
+  where `has.effort` (`:1124-1127`), which is both engines. The row note (`rowOverrides`, `presets.ts:489`)
+  names a mode only when a role's mode differs from the one pressed. Together, the pressed pill and the row
+  note describe what runs, before launch.
+- **The daemon keeps them.** `parseAutonomy` keeps a known mode (`routes/session.ts:97-99`) and a known effort
+  (`:108-112`), for an agent, a listed role (`parseHelperRoles`, `:223`) and an added agent (`parseAgentSpec`,
+  `:289`). `autonomyFor` (`:132-138`) checks only the budget's unit, never the mode or the effort. The
+  supervisor stores what was sent (`supervisor.ts:186`) and starts the agent's own engine with it
+  (`createBackend`, `:1247`; `autonomy`, `:1257`).
+- **"+ agent".** `addAgentSpec` (`spawn/stack.ts:185`) copies a sibling's autonomy (`addedAutonomy`, `:117`).
+  That autonomy was already converted at launch, so it has no plan on Copilot and keeps the effort. It sends
+  the job's engine (`:199`). With no sibling, it uses Spawn's defaults (`:125`), the same as on Claude. A
+  reading role keeps plan only if its sibling had it (`:130`), which on Copilot it didn't.
+- **A helper an orchestrator starts.** `start_helper` (`routes/helpers.ts:164`) calls `startHelper`
+  (`supervisor.ts:1766`). The helper takes the orchestrator's autonomy (`:1790`) or the listed role's
+  (`:1795`), both converted by `specsOn` at launch, checked by `readOnlyRefusal` (`:1797`;
+  `shared/src/stack.ts:181-189`, which accepts `plan` or `default`). It runs on the orchestrator's engine
+  (`:1837`).
+- **After launch.** The agent screen's composer offers plan only where the engine has it, or where the agent is
+  already in it (`offersMode`, `lib/providers.ts:64-65`; `agent/composer.tsx:621`). It shows effort where
+  `has.effort` (`:644`). A change goes through `POST /api/agents/:agentId/autonomy` (`routes/session.ts:889`)
+  and applies from the agent's next run (`supervisor.ts:2262-2269`), and that run's resume carries the new
+  effort (`copilot.ts:401`).
+- **What the daemon doesn't strip.** A request made outside Spawn can still send `plan` to Copilot. It is
+  kept, and the gate holds it to reads (`copilot.ts:301`): stricter than asked, never looser.
+
+*Not done / not decided:* Spawn and the composer offer all five efforts for any model, on every engine,
+Claude included. Copilot's model list says which efforts each model takes (`efforts`, `copilot.ts:231`) and
+OpenRouter's says nothing. An effort a model doesn't take is a problem with that model, not with the engine.
+The SDK's runtime has messages that refuse it ("Reasoning effort '…' is not supported for model '…'"), so it
+should fail at the run rather than run at another effort. That was not tried live, which needs a Copilot
+login. It is an open TODO entry and is not fixed here. When an agent has no effort set (one added to a job
+with no sibling), the composer presses **high** (`DEFAULT_EFFORT`), though the SDK applies its own default.
+This happens on every engine, as it does today.
+
+*Verified:* by reading the code at `ac31a29`, path by path, as above. The checks that already pin this pass
+unchanged. In `web/src/spawn/verify.ts` §15: 'plan mode, which it lacks, is sent as "ask me"' (`:739`),
+"effort and helpers, which it has, are kept" (`:740`), "an engine that can do nothing: no effort, no
+helpers…" (`:745`), and the listed roles off Claude (`:1320-1321`). In `daemon/src/session/verify.ts`: the
+capabilities are the findings (`:3754`), and the gate's modes, where plan only reads (`:3352`). No check
+was added, because no code changed. `make test` exit 0 in one run, every suite PASS ("Track A spawn: PASS", "Track B agent: PASS", "docs links: PASS — 33 links in 47 files").
+
 ### Amendment 159 — post-merge, applied. **The three label backdrops carry more chroma, sit 1.06:1 apart in lightness and 60° apart in hue, in both themes.**
 
 Shared (`tokens.css`) and web (`lib/verify.ts`), and `docs/MANUAL.md`, `TODO.md`. No behaviour, wire
