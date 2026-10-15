@@ -196,6 +196,53 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 
 ## 9. Amendment log
 
+### Amendment 152 — post-merge, applied. **An empty folder .gitignore excludes is not listed in Files, inside an untracked folder or under an ignored one.**
+
+Daemon only (`workspace/tree.ts`, `workspace/verify-files-verbs.ts`). The user, 14 Oct 2026: "Execute
+wave 1 of docs/plans/wave-11.md … following §0"; this is the plan's item N7 (lane E1, §2 "an ignored
+empty folder inside an untracked folder is listed"). *Amends Amendment 138*, whose *Not done* said "An
+empty folder that git ignores is listed if it sits inside an untracked folder (`emptyUnder` reads the
+disk there)": it no longer is. `docs/MANUAL.md` § Files tabs says which empty folders show.
+
+- **What was wrong.** `untrackedDirs` names only folders git calls untracked, but `emptyUnder` then
+  read the disk under each and never asked git again. In an untracked `scratch/` with
+  `scratch/.gitignore` saying `ign/` and `*.tmp`, the empty `scratch/ign`, `scratch/x.tmp`,
+  `scratch/deep/ign` and `scratch/ign/kid` were all in the tree, though
+  `git ls-files -o -i --directory` (what `git status --ignored` reads) names the first three ignored.
+- **One level at a time** (`emptyUnder`, `tree.ts:163`): every untracked folder starts the first
+  level together (`:361`); each folder opened adds its subfolders to the next, and that whole list
+  goes to the existing `checkIgnore` in one `git check-ignore --stdin` (`:183`). What git calls
+  ignored is dropped before it is opened, so nothing under it is read or listed. That is at most 13
+  `git` processes a tree read, one per depth, where a call per folder could have been 2,000.
+- **`MAX_EMPTY_PROBES`** (`:150`) still counts folders opened, 2,000 a tree read, and the 12-deep
+  bound and the stop at a `.git` (Amendment 90) are as they were. The budget is spent breadth first
+  now, not depth first, so past it what is missed is the deepest folders, not the last untracked one.
+- **No git, or a nested repo.** With no git there are no untracked folders and `emptyUnder` is not
+  called; `walkFiles` lists every empty folder, as before. A folder holding a `.git` is not opened, so
+  no path asked about lies past a nested repo's boundary; the nested repo's own folder is asked about
+  by the outer repo's rules, which is how `git status` reads it. `checkIgnore` never throws: a failed
+  `git` (128, no repo) reads as nothing ignored, which lists that level as before.
+
+*Not done / not decided:* a folder holding only ignored files is still not empty, so not listed, as
+before: it is not what N7 named. An empty folder that git ignores inside a tracked folder never was
+listed (`classifyLevel` reads only what `ls-files` gives), so nothing changed there.
+
+*Verified:* `workspace/verify-files-verbs.ts`, the job's "new folder" section, beside Amendment 138's
+own empty-folder checks (`:173`):
+- "git calls these ignored" (`scratch/ign/`, `scratch/x.tmp/`, `scratch/deep/ign/`, from real
+  `git ls-files -o -i --directory --exclude-standard`);
+- "an ignored empty folder under an untracked one is hidden, by name and by glob";
+- "and so are an ignored folder's own empty folders" (`scratch/ign/kid`, the prune);
+- "a plain empty folder under an untracked one is shown, at any depth";
+- "Files lists nothing git calls ignored" (no listed folder is at or under one git names);
+- "a nested repo in the untracked folder still reads: 200, and its folder is there";
+- and for the project folder with no git (`:195`), "a folder with no git lists every empty folder,
+  .gitignore or not".
+
+With `tree.ts` put back as on `main`, 3 of the 7 fail (the two "hidden" checks and "Files lists
+nothing git calls ignored", naming `scratch/deep/ign,scratch/ign,scratch/ign/kid,scratch/x.tmp`).
+`pnpm -r typecheck` clean; `make test`: 27 PASS, "Amendment 138 files: PASS — 108 checks".
+
 ### Amendment 151 — post-merge, applied. **The bootstrap `/api/workspaces` routes open and remove a workspace only in a project that exists, in one of its own folders.**
 
 Daemon only (`routes/workspace.ts`, `workspace/worktree.ts`, `workspace/service.ts`,

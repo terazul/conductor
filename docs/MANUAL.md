@@ -1033,6 +1033,9 @@ is read again for you, since Conductor doesn't watch those.
 **+/**, beside the **+**, makes a folder the same way: the box starts at `new-folder` in the
 folder you asked from, a name ending in `/` is fine, and folders above it are made too. A name
 that is taken is refused. The new folder opens in the tree, empty, ready for a **+**.
+An empty folder shows in the tree when git would call it untracked; one your `.gitignore`
+excludes, and anything under it, does not, as `git status --ignored` has it. In a folder with no git,
+every empty folder shows.
 
 ### Renaming and deleting
 

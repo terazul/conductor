@@ -94,6 +94,8 @@ the last of it on 12 Oct).
 
 - [x] **`/api/workspaces` takes any input (wave 11, A4).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 151 (gated: a known project, one of its folders, git's ref rules; DELETE 404, 409 and a strict `force`).*
 
+- [x] **An ignored empty folder inside an untracked folder is listed (wave 11, N7).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 152 (`emptyUnder` asks `checkIgnore` once per level and skips what it ignores).*
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is
