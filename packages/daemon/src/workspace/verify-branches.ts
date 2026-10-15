@@ -30,7 +30,7 @@ import type { AgentStatus, Isolation } from '@conductor/shared';
 import { readFileSync } from 'node:fs';
 import { EventLog } from '../eventlog.js';
 import { GitError, git } from './git.js';
-import { resolveTarget } from './branches.js';
+import { FORCE_SENTENCE, resolveTarget } from './branches.js';
 import { patchSettings } from '../settings.js';
 import { branchTargetKey } from '@conductor/shared';
 
@@ -94,6 +94,12 @@ const WT3_LIVE = join(ROOT, 'wt3-live');
 const WT3_DONE = join(ROOT, 'wt3-done');
 const WT3_C2 = join(ROOT, 'wt3-c2');
 const WT3_C3 = join(ROOT, 'wt3-c3');
+// N3's repo: main in the project folder, each branch in a worktree of its own, an origin,
+// and a second clone of that origin that moves origin's branches on.
+const REPO4 = join(ROOT, 'repo4');
+const ORIGIN4 = join(ROOT, 'origin4.git');
+const OTHER4 = join(ROOT, 'other4');
+const wt4 = (name: string): string => join(ROOT, `wt4-${name.replace(/\//g, '-')}`);
 
 /** Commits get one minute apart, so "oldest tip first" never ties on a second. */
 let clock = Date.parse('2026-01-01T09:00:00Z');
@@ -259,6 +265,37 @@ function makeRepo3(): void {
   writeFileSync(join(WT3_C3, 'c-three.txt'), 'edited, not committed\n');
 }
 
+/**
+ * N3's repo. `pull/*` and `rb/pushed` are on origin and track it; `rb/plain`, `rb/clash`,
+ * `rb/live` and `side` are local only. Every branch but `side` has its own worktree, and
+ * each `rb/*` has a commit of its own. Then main moves on, changing c.txt, which `rb/clash`
+ * changes too.
+ */
+function makeRepo4(): void {
+  sh(ROOT, 'init', '-q', '--bare', ORIGIN4);
+  sh(ROOT, 'init', '-q', '-b', 'main', REPO4);
+  sh(REPO4, 'config', 'user.name', 'Verify');
+  sh(REPO4, 'config', 'user.email', 'verify@example.invalid');
+  commitFile(REPO4, 'c.txt', 'base\n', 'start');
+  sh(REPO4, 'remote', 'add', 'origin', ORIGIN4);
+  sh(REPO4, 'push', '-q', '-u', 'origin', 'main');
+  for (const name of ['pull/ff', 'pull/div', 'pull/dirty', 'rb/pushed', 'rb/plain', 'rb/clash', 'rb/live', 'side']) {
+    sh(REPO4, 'branch', name, 'main');
+  }
+  for (const name of ['pull/ff', 'pull/div', 'pull/dirty', 'rb/plain', 'rb/clash', 'rb/live', 'rb/pushed']) {
+    sh(REPO4, 'worktree', 'add', '-q', wt4(name), name);
+  }
+  commitFile(wt4('rb/pushed'), 'pushed.txt', 'p\n', 'pushed work');
+  for (const name of ['pull/ff', 'pull/div', 'pull/dirty', 'rb/pushed']) sh(REPO4, 'push', '-q', '-u', 'origin', name);
+  commitFile(wt4('rb/plain'), 'plain.txt', 'p\n', 'plain work');
+  commitFile(wt4('rb/clash'), 'c.txt', 'from clash\n', 'clash work');
+  commitFile(wt4('rb/live'), 'live.txt', 'l\n', 'live work');
+  commitFile(REPO4, 'c.txt', 'from main\n', 'main moves on');
+  sh(ROOT, 'clone', '-q', ORIGIN4, OTHER4);
+  sh(OTHER4, 'config', 'user.name', 'Other');
+  sh(OTHER4, 'config', 'user.email', 'other@example.invalid');
+}
+
 function byName(r: BranchesResponse, name: string): BranchInfo | undefined {
   return r.branches.find((b) => b.name === name);
 }
@@ -302,6 +339,7 @@ async function main(): Promise<void> {
   const fx = makeRepos();
   makeRepo2();
   makeRepo3();
+  makeRepo4();
 
   const app = await build();
   await app.listen({ host: '127.0.0.1', port: PORT });
@@ -434,7 +472,7 @@ async function main(): Promise<void> {
   check('an unknown branch → 400', unknown.status === 400 && unknown.body.error === 'no such branch', JSON.stringify(unknown.body));
   const emptyMsg = await act({ action: 'commit', branch: 'feature/one', message: '   ' });
   check('an empty commit message → 400', emptyMsg.status === 400, String(emptyMsg.status));
-  const badAction = await act({ action: 'rebase', branch: 'feature/one' });
+  const badAction = await act({ action: 'squash', branch: 'feature/one' });
   check('an unknown action → 400', badAction.status === 400, String(badAction.status));
   const self = await act({ action: 'merge', branch: 'main' });
   check('merging the target into itself → 400', self.status === 400, String(self.status));
@@ -880,13 +918,119 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n14 · pull and rebase, never forced (N3)');
+  {
+    const project4 = insertProject(db, { path: REPO4, name: 'pull-rebase-verify', defaultBranch: 'main' });
+    const URL4 = `/api/projects/${project4.id}/branches`;
+    const act4 = (body: unknown) => post<BranchActionResult & Err>(URL4, body);
+    insertJob(db, { id: 'job_live4', projectId: project4.id, prompt: 'keep busy', isolation: 'worktree', worktreePath: wt4('rb/live'), branch: 'rb/live', status: 'working', budgetUsd: null });
+    insertAgent(db, {
+      id: 'agt_live4',
+      jobId: 'job_live4',
+      projectId: project4.id,
+      role: 'builder',
+      model: 'claude-sonnet-5',
+      sdkSessionId: null,
+      status: 'working',
+      blockMode: null,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      dependsOn: [],
+      autonomy: DEFAULT_AUTONOMY,
+    });
+    const tip = (name: string): string => sh(REPO4, 'rev-parse', `refs/heads/${name}`);
+    const originTip = (name: string): string => sh(ORIGIN4, 'rev-parse', `refs/heads/${name}`);
+    const refusedWith = (r: Reply<BranchActionResult & Err>, status: number, pattern: RegExp): boolean =>
+      r.status === status && pattern.test(`${r.body.error} — ${r.body.detail ?? ''}`);
+    const show = (r: Reply<BranchActionResult & Err>): string => `${r.status} ${JSON.stringify(r.body).slice(0, 300)}`;
+
+    // Origin moves on: one commit on pull/ff, one on pull/div (and one of ours there too).
+    sh(OTHER4, 'checkout', '-q', 'pull/ff');
+    const theirsFf = commitFile(OTHER4, 'ff.txt', 'theirs\n', 'theirs on ff');
+    sh(OTHER4, 'push', '-q', 'origin', 'pull/ff');
+    sh(OTHER4, 'checkout', '-q', 'pull/div');
+    const theirsDiv = commitFile(OTHER4, 'div.txt', 'theirs\n', 'theirs on div');
+    sh(OTHER4, 'push', '-q', 'origin', 'pull/div');
+    const oursDiv = commitFile(wt4('pull/div'), 'div-ours.txt', 'ours\n', 'ours on div');
+
+    const ff = await act4({ action: 'pull', branch: 'pull/ff' });
+    check('a pull that fast-forwards → 200, ok', ff.status === 200 && ff.body.ok === true, show(ff));
+    check('  pull/ff is at what origin has, with no merge commit', tip('pull/ff') === theirsFf && ff.body.sha === theirsFf, `${tip('pull/ff')} ${theirsFf}`);
+    check('  its checkout has the file', existsSync(join(wt4('pull/ff'), 'ff.txt')));
+    check('  and the listing has it level with origin', (() => {
+      const up = byName(ff.body.branches, 'pull/ff')?.upstream;
+      return up?.ahead === 0 && up.behind === 0;
+    })(), JSON.stringify(byName(ff.body.branches, 'pull/ff')?.upstream));
+    const again = await act4({ action: 'pull', branch: 'pull/ff' });
+    check('pulling it again → 409 nothing to pull', refusedWith(again, 409, /^nothing to pull — pull\/ff already has every commit on origin\/pull\/ff/), show(again));
+
+    const div = await act4({ action: 'pull', branch: 'pull/div' });
+    check('a diverged pull → 409 "diverged — merge or rebase"', refusedWith(div, 409, /^diverged — merge or rebase — pull\/div has 1 commit origin\/pull\/div doesn't, and origin\/pull\/div has 1 commit it doesn't/), show(div));
+    check('  pull/div is where it was, and origin too', tip('pull/div') === oursDiv && originTip('pull/div') === theirsDiv);
+
+    const noUp = await act4({ action: 'pull', branch: 'rb/plain' });
+    check('a pull with no upstream → 409', refusedWith(noUp, 409, /^rb\/plain has no upstream/), show(noUp));
+    const nowhere = await act4({ action: 'pull', branch: 'side' });
+    check("a pull of a branch that isn't checked out → 409", refusedWith(nowhere, 409, /^side isn't checked out/), show(nowhere));
+    writeFileSync(join(wt4('pull/dirty'), 'c.txt'), 'edited, not committed\n');
+    const dirty = await act4({ action: 'pull', branch: 'pull/dirty' });
+    check('a pull with tracked changes → 409', refusedWith(dirty, 409, /^pull\/dirty's checkout has changes/), show(dirty));
+    check('  and the change is still there', readFileSync(join(wt4('pull/dirty'), 'c.txt'), 'utf8').startsWith('edited'));
+    const dirtyRb = await act4({ action: 'rebase', branch: 'pull/dirty' });
+    check('a rebase with tracked changes → 409', refusedWith(dirtyRb, 409, /^pull\/dirty's checkout has changes/), show(dirtyRb));
+
+    const livePull = await act4({ action: 'pull', branch: 'rb/live' });
+    const liveRb = await act4({ action: 'rebase', branch: 'rb/live' });
+    const liveTip = tip('rb/live');
+    check('a live agent → 409, for pull and for rebase', refusedWith(livePull, 409, /an agent is working on this branch/) && refusedWith(liveRb, 409, /an agent is working on this branch/), `${show(livePull)} | ${show(liveRb)}`);
+    check('  and rb/live did not move', tip('rb/live') === liveTip);
+
+    const plainBefore = tip('rb/plain');
+    const rb = await act4({ action: 'rebase', branch: 'rb/plain' });
+    check('a rebase onto main (the default) → 200, ok', rb.status === 200 && rb.body.ok === true && rb.body.into === 'main', show(rb));
+    check('  rb/plain now sits on main, one commit on top, rewritten', sh(REPO4, 'rev-parse', `${tip('rb/plain')}^`) === tip('main') && tip('rb/plain') !== plainBefore && rb.body.sha === tip('rb/plain'));
+    check('  its checkout is clean and on rb/plain', sh(wt4('rb/plain'), 'status', '--porcelain') === '' && sh(wt4('rb/plain'), 'symbolic-ref', '--short', 'HEAD') === 'rb/plain');
+    check('  and nothing has it marked rebased (it was never pushed)', !byName(rb.body.branches, 'rb/plain')?.rebased);
+    const rbAgain = await act4({ action: 'rebase', branch: 'rb/plain' });
+    check('rebasing it again → 409 nothing to rebase', refusedWith(rbAgain, 409, /^nothing to rebase — rb\/plain already has every commit on main/), show(rbAgain));
+    const onSide = await act4({ action: 'rebase', branch: 'rb/plain', onto: 'side' });
+    check('onto another branch it already has → 409 nothing to rebase', refusedWith(onSide, 409, /already has every commit on side/), show(onSide));
+    const self = await act4({ action: 'rebase', branch: 'rb/plain', onto: 'rb/plain' });
+    check('onto itself → 400', self.status === 400, show(self));
+    const dash = await act4({ action: 'rebase', branch: 'rb/plain', onto: '--onto' });
+    check("onto a name starting with '-' → 400", dash.status === 400, show(dash));
+
+    const clashBefore = tip('rb/clash');
+    const clash = await act4({ action: 'rebase', branch: 'rb/clash' });
+    check('a rebase that conflicts → 200, ok: false, with the files', clash.status === 200 && clash.body.ok === false && clash.body.conflict?.branch === 'rb/clash' && clash.body.conflict.files.join() === 'c.txt', show(clash));
+    const rebaseDir = sh(wt4('rb/clash'), 'rev-parse', '--path-format=absolute', '--git-path', 'rebase-merge');
+    check('  the tree is clean, no rebase is in progress, and rb/clash is where it was', sh(wt4('rb/clash'), 'status', '--porcelain') === '' && !existsSync(rebaseDir) && tip('rb/clash') === clashBefore && sh(wt4('rb/clash'), 'symbolic-ref', '--short', 'HEAD') === 'rb/clash');
+    check('  and its file is its own again', readFileSync(join(wt4('rb/clash'), 'c.txt'), 'utf8') === 'from clash\n');
+
+    const pushedOrigin = originTip('rb/pushed');
+    const before = await get<BranchesResponse>(URL4);
+    check('a pushed branch is not marked rebased before it is', before.status === 200 && byName(before.body, 'rb/pushed')?.rebased === undefined && byName(before.body, 'rb/pushed')?.upstream !== null);
+    const rbPushed = await act4({ action: 'rebase', branch: 'rb/pushed' });
+    check('a pushed branch rebases → 200, ok', rbPushed.status === 200 && rbPushed.body.ok === true && sh(REPO4, 'rev-parse', `${tip('rb/pushed')}^`) === tip('main'), show(rbPushed));
+    const marked = byName(rbPushed.body.branches, 'rb/pushed');
+    check('  the listing marks it rebased, diverged from its upstream', marked?.rebased === true && marked.upstream?.ahead === 2 && marked.upstream.behind === 1, JSON.stringify(marked));
+    const forced = await act4({ action: 'push', branch: 'rb/pushed' });
+    check('  and its next push → 409, saying it needs a force Conductor never does', refusedWith(forced, 409, /^rb\/pushed was rebased after it was pushed/) && forced.body.detail === FORCE_SENTENCE, show(forced));
+    check('  origin was not touched', originTip('rb/pushed') === pushedOrigin);
+
+    const code = readFileSync(new globalThis.URL('./branches.ts', import.meta.url), 'utf8');
+    check("the code never forces: no '--force', '--force-with-lease', '-f' or '+' refspec", !/'--force/.test(code) && !/'-f'/.test(code) && !/`\+\$\{/.test(code));
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   ws.close();
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117), deleting merged branches (Amendment 143).\n`
+      ? `\nAmendment 109 branches: PASS — ${checks} checks: listing, merge, merge_all, conflicts, commit, push, fetch, refusals, merge into any branch, preview, default branch (Amendment 117), deleting merged branches (Amendment 143), pull and rebase (N3).\n`
       : `\nAmendment 109 branches: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

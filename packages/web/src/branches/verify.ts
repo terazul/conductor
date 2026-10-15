@@ -13,6 +13,7 @@ import type { BranchInfo, BranchMergePreview, BranchesResponse } from '@conducto
 import { G, badges, layout } from './graph.js';
 import { onBranchesChanged, receiveBranches } from './live.js';
 import {
+  FORCE_SENTENCE,
   FORGET_LABEL,
   checkoutConfirm,
   checkoutReason,
@@ -38,8 +39,14 @@ import {
   rootLine,
   targetFromWords,
   pushReason,
+  pullConfirm,
+  pullReason,
+  rebaseConfirm,
+  rebaseReason,
   showCommit,
+  showPull,
   showPush,
+  showRebase,
   targetReason,
 } from './rules.js';
 
@@ -383,6 +390,54 @@ console.log('\n10 · deleting merged branches, and cleaning them all up (Amendme
   check('the result lists what stayed, with why', /res\.kept\.map/.test(route) && /stayed — \{k\.why\}/.test(route));
 }
 
+console.log('\n11 · pull and rebase, never forced (N3)');
+{
+  const wt = { path: '/r/.conductor/wt/x', uncommitted: 0 };
+  const behindUp = br('feature/behind', { ahead: 1, behind: 2, worktree: wt, upstream: { ref: 'origin/feature/behind', ahead: 0, behind: 3 } });
+  const diverged = br('feature/div', { ahead: 1, behind: 2, worktree: wt, upstream: { ref: 'origin/feature/div', ahead: 1, behind: 1 } });
+  const nowhere = br('feature/nowhere', { ahead: 1, behind: 2, upstream: { ref: 'origin/feature/nowhere', ahead: 0, behind: 1 } });
+  const local = br('feature/local', { ahead: 2, behind: 3, worktree: wt });
+  const level = br('feature/level', { ahead: 2, behind: 0, worktree: wt });
+  const rebased = br('feature/rebased', { ahead: 3, behind: 0, worktree: wt, upstream: { ref: 'origin/feature/rebased', ahead: 3, behind: 1 }, rebased: true });
+  const busyUp = br('conductor/job_c', { ahead: 1, behind: 2, live: true, worktree: wt, upstream: { ref: 'origin/conductor/job_c', ahead: 0, behind: 1 } });
+  const r: BranchesResponse = { ...resp, branches: [main, behindUp, diverged, nowhere, local, level, rebased, busyUp, orphan] };
+
+  check('the force sentence is the one the brief gives', FORCE_SENTENCE === "this branch is pushed; after rebasing, the next push needs a force, which Conductor never does — you'd do it yourself");
+
+  check('pull: offered only with an upstream', showPull(behindUp) && showPull(main) && !showPull(local));
+  check('pull: fine for a branch behind its upstream', pullReason(behindUp) === null);
+  check('pull: fine when it looks level too, since it fetches first', pullReason({ ...behindUp, upstream: { ref: 'origin/feature/behind', ahead: 0, behind: 0 } }) === null);
+  check('pull: diverged — merge or rebase', pullReason(diverged) === 'diverged — merge or rebase');
+  check('pull: refused while live', /working on it/.test(pullReason(busyUp) ?? ''));
+  check("pull: refused when it isn't checked out", /isn't checked out/.test(pullReason(nowhere) ?? ''));
+  check('pull: refused with no upstream', /no upstream/.test(pullReason(local) ?? ''));
+  check('the pull confirm names where from, says it fetches, and only fast-forwards', /^Pull origin\/feature\/behind into feature\/behind\?/.test(pullConfirm(r, behindUp)) && /fetches first/.test(pullConfirm(r, behindUp)) && /only fast-forwards/.test(pullConfirm(r, behindUp)) && /never forced/.test(pullConfirm(r, behindUp)), pullConfirm(r, behindUp));
+
+  check('rebase: offered for every branch but the target', showRebase(local) && showRebase(behindUp) && !showRebase(main));
+  check('rebase: fine for a branch behind the target', rebaseReason(r, local) === null && rebaseReason(r, behindUp) === null);
+  check('rebase: not the target onto itself', rebaseReason(r, main) === 'this is main');
+  check('rebase: refused while live', /working on it/.test(rebaseReason(r, busyUp) ?? ''));
+  check("rebase: refused when it isn't checked out", /isn't checked out/.test(rebaseReason(r, nowhere) ?? ''));
+  check('rebase: refused with no history in common', /no history/.test(rebaseReason(r, { ...orphan, worktree: wt }) ?? ''));
+  check('rebase: nothing to rebase when level with the target', rebaseReason(r, level) === 'nothing to rebase — it already has every commit on main');
+  const plain = rebaseConfirm(r, local);
+  check('the rebase confirm names the branch, its commits and main, and says a conflict is undone', /^Rebase feature\/local \(2 commits\) onto main\?/.test(plain.ask) && /3 new commits/.test(plain.ask) && /undone/.test(plain.ask), plain.ask);
+  check('and does not warn for a branch that was never pushed', plain.warn === null);
+  const pushed = rebaseConfirm(r, behindUp);
+  check('a pushed branch: the confirm warns that the next push needs a force Conductor never does', pushed.warn === `Careful: ${FORCE_SENTENCE}.`, pushed.warn ?? '');
+
+  check('push: offered after a rebase, since it is ahead of origin', showPush(r, rebased));
+  check("push: refused after a pushed branch's rebase, with the same sentence", pushReason(r, rebased) === FORCE_SENTENCE);
+  check('live outranks it', /working on it/.test(pushReason(r, { ...rebased, live: true }) ?? ''));
+
+  const route = src('./route.tsx');
+  check('Pull and Rebase sit beside Push, each with its reason from rules.ts', /\{showPush\(resp, b\) && \([\s\S]{0,300}\{showPull\(b\) && <Act label=\{busy === 'pull' \? 'Pulling…' : 'Pull'\} reason=\{pull\}/.test(route) && /reason=\{rebase\}/.test(route) && /Rebase onto \$\{resp\.target\}/.test(route));
+  check('each confirms first, like push', /setConfirming\('pull'\)/.test(route) && /pullConfirm\(resp, b\)/.test(route) && /setConfirming\('rebase'\)/.test(route) && /confirmRebase\.warn && <span className="br-warn">/.test(route));
+  check('the actions sent are pull and rebase, onto the target', /\{ action: 'pull', branch: b\.name \}/.test(route) && /\{ action: 'rebase', branch: b\.name \}/.test(route));
+  check('the result says what pull and rebase did, and warns after a pushed branch is rebased', /text = `Pulled\$\{sha\}\.`/.test(route) && /Rebased onto \$\{target\}\$\{sha\}/.test(route) && /Careful: \$\{FORCE_SENTENCE\}/.test(route));
+  check("a rebase's conflict says the rebase was undone", /the rebase was undone/.test(route));
+}
+
 console.log('\n6 · the status bar and nav.ts');
 {
   // 1–7 when Branches was the last screen; Metrics (8, Amendment 122) made it 1–8.
@@ -394,7 +449,7 @@ console.log('\n6 · the status bar and nav.ts');
 
 console.log(
   failures === 0
-    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117); merged branches are deleted only with their reasons met, and a job\'s only when you forget it too (143).'
+    ? '\nAmendment 109 web verify: PASS — the graph lays out from a response alone, with fork points, dots, a dimmed merged row and an unrelated branch; every disabled action says why; a branches frame reaches the screen; 7 is Branches and nothing else; the status bar says 1–8; nav.ts opens it; merging into any branch works (110); what everything is drawn against is explained (113); a project\'s default branch can be set and checked out, with its own reasons and header line (117); merged branches are deleted only with their reasons met, and a job\'s only when you forget it too (143); pull and rebase say why not, confirm first, and warn that a pushed branch\'s rebase needs a force Conductor never does (N3).'
     : `\nAmendment 109 web verify: FAIL — ${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);

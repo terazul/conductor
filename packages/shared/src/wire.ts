@@ -884,6 +884,11 @@ export interface BranchInfo {
   live: boolean;
   /** Its upstream, and how far it is ahead of and behind it. Null when it has none. */
   upstream: { ref: string; ahead: number; behind: number } | null;
+  /**
+   * Set when Conductor rebased it while it had an upstream, and it has diverged from that
+   * upstream since (N3): its next push needs a force, which Conductor never does.
+   */
+  rebased?: true;
 }
 
 /**
@@ -942,6 +947,18 @@ export type BranchAction =
   | { action: 'push'; branch: string }
   | { action: 'fetch' }
   /**
+   * Bring a branch up to its upstream (N3): fetch its remote, then `merge --ff-only` in its
+   * worktree. Refused while an agent is on it, it isn't checked out, it has tracked changes,
+   * it has no upstream, it isn't behind, or it has diverged ("merge or rebase").
+   */
+  | { action: 'pull'; branch: string }
+  /**
+   * Rebase a branch onto `onto` (N3), the target when absent, in its worktree. On a conflict
+   * the rebase is aborted and the files are reported. A branch with an upstream may be
+   * rebased; its next push then needs a force, which Conductor never does (`rebased`).
+   */
+  | { action: 'rebase'; branch: string; onto?: string }
+  /**
    * Make `branch` the project's default (Amendment 117), and with `checkout`, switch the
    * project's own folder to it. Refused while the folder has tracked changes or anything
    * works in it.
@@ -962,13 +979,13 @@ export interface BranchActionResult {
   ok: boolean;
   /** In order, for merge and merge_all. */
   merged: string[];
-  /** The branch a merge went into, for merge: the target unless `into` named another. */
+  /** The branch a merge went into, for merge: the target unless `into` named another. For rebase, what it went onto. */
   into?: string;
-  /** The merge stopped here and was aborted cleanly. */
+  /** The merge (or rebase) stopped here and was aborted cleanly. */
   conflict?: { branch: string; files: string[] };
-  /** The new commit, for commit and merge. */
+  /** The new commit, for commit and merge; the branch's new tip, for pull and rebase. */
   sha?: string;
-  /** Git's own words, trimmed, for push and fetch. */
+  /** Git's own words, trimmed, for push, fetch, pull and rebase. */
   output?: string;
   /** The branches removed, in order, for delete and clean_merged (Amendment 143). */
   removed?: string[];

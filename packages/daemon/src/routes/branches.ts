@@ -17,7 +17,10 @@
  * `set_default` checkout refused because the project folder is dirty, something is working
  * in it, or the branch is checked out elsewhere; (Amendment 143) a `delete` refused, with its
  * sentence — the target, the folder's own branch, not merged, uncommitted files, a live
- * agent, or a job that owns it without `forgetJob`; 504 push or fetch timed out;
+ * agent, or a job that owns it without `forgetJob`; (N3) a `pull` or `rebase` refused — not
+ * checked out, tracked changes, no upstream, nothing to pull or rebase, "diverged — merge or
+ * rebase", unrelated histories — and a push of a pushed branch Conductor rebased, which
+ * would need a force; 504 push or fetch timed out;
  * 500 git failed (its stderr in detail).
  */
 

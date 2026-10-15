@@ -123,6 +123,7 @@ export function showPush(resp: BranchesResponse, b: BranchInfo): boolean {
 export function pushReason(resp: BranchesResponse, b: BranchInfo): string | null {
   if (resp.remote === null) return 'this repo has no origin';
   if (b.live) return 'an agent is working on it — wait for it to finish';
+  if (b.rebased) return FORCE_SENTENCE;
   if (b.upstream && b.upstream.ahead === 0) return `nothing to push — ${resp.remote} has all of it`;
   return null;
 }
@@ -148,6 +149,59 @@ export function pushConfirm(resp: BranchesResponse, b: BranchInfo): string {
   const remote = resp.remote ?? 'origin';
   if (!b.upstream) return `Push ${b.name} to ${remote}? It isn't there yet; this creates it and tracks it.`;
   return `Push ${plural(b.upstream.ahead, 'commit')} on ${b.name} to ${remote}? Never forced.`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pull and rebase (N3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The daemon's sentence for a pushed branch that is rebased (`FORCE_SENTENCE`, daemon workspace/branches.ts). */
+export const FORCE_SENTENCE =
+  "this branch is pushed; after rebasing, the next push needs a force, which Conductor never does — you'd do it yourself";
+
+/** Whether "Pull" is offered: the branch has an upstream to pull from. */
+export function showPull(b: BranchInfo): boolean {
+  return b.upstream !== null;
+}
+
+/**
+ * Why it can't be pulled, or null. Pull fetches first, so a branch that looks level may still
+ * have something to pull; only what is already known to refuse is said beforehand. Tracked
+ * changes aren't in the listing (its count includes untracked files); the daemon's 409 says so.
+ */
+export function pullReason(b: BranchInfo): string | null {
+  if (!b.upstream) return 'it has no upstream — push it first';
+  if (b.live) return 'an agent is working on it — wait for it to finish';
+  if (!b.worktree) return "it isn't checked out anywhere — a pull runs in its checkout";
+  if (b.upstream.ahead > 0 && b.upstream.behind > 0) return 'diverged — merge or rebase';
+  return null;
+}
+
+/** The confirm before a pull: it fetches, and only fast-forwards. */
+export function pullConfirm(resp: BranchesResponse, b: BranchInfo): string {
+  const from = b.upstream?.ref ?? `${resp.remote ?? 'origin'}/${b.name}`;
+  return `Pull ${from} into ${b.name}? This fetches first, then only fast-forwards — never a merge commit, never forced.`;
+}
+
+/** Whether "Rebase onto main" is offered: every branch but the target. */
+export function showRebase(b: BranchInfo): boolean {
+  return !b.isTarget;
+}
+
+/** Why `b` can't be rebased onto the target, or null. */
+export function rebaseReason(resp: BranchesResponse, b: BranchInfo): string | null {
+  if (b.isTarget) return `this is ${resp.target}`;
+  if (b.live) return 'an agent is working on it — wait for it to finish';
+  if (!b.worktree) return "it isn't checked out anywhere — a rebase runs in its checkout";
+  if (b.forkedAt === null) return `it shares no history with ${resp.target}`;
+  if (b.behind === 0) return `nothing to rebase — it already has every commit on ${resp.target}`;
+  return null;
+}
+
+/** The confirm before a rebase, warning when the branch is pushed: its next push needs a force. */
+export function rebaseConfirm(resp: BranchesResponse, b: BranchInfo): { ask: string; warn: string | null } {
+  const ask = `Rebase ${b.name} (${plural(b.ahead, 'commit')}) onto ${resp.target}? Its commits are replayed on top of ${resp.target}'s ${plural(b.behind, 'new commit')}; on a conflict the rebase is undone.`;
+  return { ask, warn: b.upstream ? `Careful: ${FORCE_SENTENCE}.` : null };
 }
 
 /** The commit message to start from: the first line of the job's prompt, when it's a job's branch. */
