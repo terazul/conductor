@@ -193,14 +193,19 @@ function Branches() {
   const jobs = useJobs();
   const projectId = useProjectId();
   const project = projects.find((p) => p.id === projectId) ?? null;
-  // Which of the project's repos (N4): null is its own folder. The choices are the last
-  // listing's, so the picker stays even when the repo picked can't be read.
-  const [repo, setRepo] = useState<string | null>(null);
-  const [choices, setChoices] = useState<BranchRepoChoice[]>([]);
+  // Which of the project's repos (N4): null is its own folder. Both are kept with the project
+  // they're for, so another project starts from its own folder on its very first read, never
+  // asking for this one's repo. The choices are the last listing's, so the picker stays even
+  // when the repo picked can't be read.
+  const [picked, setPicked] = useState<{ projectId: string | null; repo: string | null }>({ projectId: null, repo: null });
+  const repo = picked.projectId === projectId ? picked.repo : null;
+  const setRepo = useCallback((next: string | null) => setPicked({ projectId, repo: next }), [projectId]);
+  const [listed, setListed] = useState<{ projectId: string | null; repos: BranchRepoChoice[] }>({ projectId: null, repos: [] });
+  const choices = listed.projectId === projectId ? listed.repos : [];
   const { resp, error, loading, load, accept } = useBranches(project ? project.id : null, repo);
   useEffect(() => {
-    if (resp?.repos) setChoices(resp.repos);
-  }, [resp?.repos]);
+    if (resp?.repos) setListed({ projectId: resp.projectId, repos: resp.repos });
+  }, [resp?.projectId, resp?.repos]);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Confirming>(null);
@@ -218,12 +223,7 @@ function Branches() {
     if (project) highlight(project.id);
   }, [project?.id]);
 
-  // A different project starts from its own folder; another repo or project, from nothing
-  // selected and nothing said.
-  useEffect(() => {
-    setRepo(null);
-    setChoices([]);
-  }, [projectId]);
+  // Another repo or project starts from nothing selected and nothing said.
   useEffect(() => {
     setSelected(null);
     setConfirming(null);

@@ -14,7 +14,7 @@
  */
 
 import { realpathSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import type { AgentStatus, BranchRepoChoice, FileNode, Project } from '@conductor/shared';
 import { branchTargetKey } from '@conductor/shared';
 import type { Db } from '../db/index.js';
@@ -62,13 +62,28 @@ function lookupFor(db: Db, project: Project): { lookup: BranchLookup; forget: ()
   return { lookup, forget: () => (byBranch = null) };
 }
 
-/** Whether an `in_place` or `branch` job of the project has a live agent (Amendment 117). */
-function rootLiveOf(db: Db, project: Project): boolean {
+/** Whether an `in_place` or `branch` job of the project has a live agent (Amendment 117); with `any`, a job of any isolation. */
+function rootLiveOf(db: Db, project: Project, any = false): boolean {
   return jobsForProject(db, project.id).some(
     (job) =>
-      (job.isolation === 'in_place' || job.isolation === 'branch') &&
+      (any || job.isolation === 'in_place' || job.isolation === 'branch') &&
       agentsForJob(db, job.id).some((a) => LIVE.has(a.status)),
   );
+}
+
+/** Whether `a` is `b` or inside it, both real paths. */
+const within = (a: string, b: string): boolean => a === b || a.startsWith(b.endsWith(sep) ? b : `${b}${sep}`);
+
+/**
+ * Whether the repo at real path `top` shares any folder with one of the project's extra
+ * directories: is one, is in one, or has one in it. Every agent of the project is given
+ * those, whatever its job's isolation (`Supervisor.#reachable`), so any of them can write there.
+ */
+function reachedByAll(project: Project, top: string): boolean {
+  return (project.extraDirs ?? []).some((dir) => {
+    const real = realOf(dir);
+    return real !== null && (within(top, real) || within(real, top));
+  });
 }
 
 /** The repo of `projectId`, or null for no such project. A path that isn't a repo is openRepo's 400. */
@@ -106,12 +121,16 @@ async function openOwn(db: Db, project: Project, forgetJob: (jobId: string) => P
 /**
  * One of the project's other repos (N4). Jobs branch from the project's own folder, so none
  * is matched here, and there is no default branch to keep or target to choose: it is drawn
- * against origin's default, else main or master, else what it has checked out. Agents of an
- * `in_place` or `branch` job work in the project's folder and can reach its other ones, so
- * while one is live the branch this repo has checked out counts as live, as a job's would.
+ * against origin's default, else what it has checked out, else main or master. While an
+ * agent that can reach this repo is live, the branch it has checked out counts as live, as a
+ * job's would. Every agent is given the project's extra directories, so in or around one of
+ * those any live agent counts. A repo nested only in the project's folder is reached by
+ * `in_place` and `branch` jobs, which work in that folder; a `worktree` job's checkout has
+ * no nested repo in it (they're untracked) and it isn't given the project's folder.
  */
 async function openOther(db: Db, project: Project, path: string): Promise<BranchRepo> {
-  const rootLive = rootLiveOf(db, project);
+  const top = realOf(await repoRoot(path).catch(() => path)) ?? path;
+  const rootLive = rootLiveOf(db, project, reachedByAll(project, top));
   const own = (await git(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
   const lookup: BranchLookup = (branch) => ({ jobId: null, live: rootLive && own !== '' && branch === own });
   const setDefault = () => {

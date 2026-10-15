@@ -92,7 +92,8 @@ export interface BranchRepo {
   /**
    * Whether an `in_place` or `branch` job of this project has a live agent right now
    * (Amendment 117): `set_default`'s checkout is refused while this is true, since both
-   * isolations work directly in `path`.
+   * isolations work directly in `path`. In another of the project's repos (N4), whether
+   * an agent that can reach it is (`project-repo.ts`).
    */
   rootLive: boolean;
   /** Store `branch` as the project's default, and mark it chosen (Amendment 117). */

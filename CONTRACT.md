@@ -212,27 +212,36 @@ docs/plans/wave-11.md … following §0"; this is the plan's lane I2, item N4
 `rebasedSincePush` was already keyed by the repo's root (`branches.ts:120`, `:443`), so a rebase in
 one repo never marks a same-named branch in another.
 
-- **The choices** (`projectRepos`, `project-repo.ts:146`): `project.path` first, then each extra
+- **The choices** (`projectRepos`, `project-repo.ts:165`): `project.path` first, then each extra
   directory that is a repo, then the repos nested in either, from Files' own `buildTree`
   (`tree.ts`, unedited; nested up to four deep), named `<dir>/<rel>`. A repo is listed once, by
   the real path of its top level, so an extra directory inside the project's repo is that repo.
   `BranchesResponse` gains `repo?` and `repos?: BranchRepoChoice[]` (`wire.ts:944`, `:950`, `:954`).
 - **`?repo=`** on GET, POST and the preview (`routes/branches.ts:75`, `:85`, `:98`), resolved by
-  `projectRepoOf` (`project-repo.ts:179`). Absent, empty or the project's own folder opens it as
+  `projectRepoOf` (`project-repo.ts:198`). Absent, empty or the project's own folder opens it as
   before (`openOwn`). Anything else must match a choice by real path, so a symlink, `..`, a plain
   sub-folder, another project's repo, a missing or a relative path are a 400, "not one of
-  <project>'s repos" (`:192`), and nothing runs. GET and POST answers name the repo and list the
+  <project>'s repos" (`:211`), and nothing runs. GET and POST answers name the repo and list the
   choices (`stamped`).
-- **Another repo** (`openOther`, `project-repo.ts:113`) has no jobs, no chosen target and no
-  default branch: it is drawn against origin's default, else main or master, else what it has
-  checked out, and `set_default` is a 400 (`:118`). Its checked-out branch is live while an
-  `in_place` or `branch` job of the project has a live agent, since that agent can reach it. Every
-  action locks and runs in that repo's root, against its own remote; nothing else changes.
+- **Another repo** (`openOther`, `project-repo.ts:131`) has no jobs, no chosen target and no
+  default branch: it is drawn against origin's default, else what it has checked out, else main or
+  master (`resolveTarget` with the checked-out branch as the recorded one), and `set_default` is a
+  400 (`:137`). Its checked-out branch is live while an agent that can reach the repo is live, so
+  pull, rebase, merge into it, delete and the rest refuse it with the same 409 as a job's branch
+  (`refuseLive`, `branches.ts:503`). Which agents reach it (`reachedByAll`, `project-repo.ts:82`):
+  every agent is given the project's extra directories whatever its job's isolation
+  (`Supervisor.#reachable`, `supervisor.ts:690`), so for a repo that is, is in, or holds an extra
+  directory, any live agent of the project counts; for a repo nested only in `project.path`, a live
+  agent of an `in_place` or `branch` job, which works in that folder. A `worktree` job's agent is
+  given its worktree and the extra directories, not `project.path`, and its checkout holds no nested
+  repo (they're untracked), so it doesn't count there. Every action locks and runs in that repo's
+  root, against its own remote; nothing else changes.
 - **Web.** `endpoints.ts` adds `?repo=` to all three requests. `rules.ts:361-385` adds `ownRepo`,
   `repoChoices` (none for one repo), `repoParam` (none for the own folder) and `ownersIn` (no jobs
   outside the own folder). `route.tsx:283` puts a **repo** picker (`RepoPicker`, `:453`) first in
   the header; the repo picked is kept while you stay on the project, and another project starts from
-  its own folder (`:198`). The choices are the last listing's, so the picker stays when a repo can't
+  its own folder on its first read: the repo and the choices are kept with the project they were
+  picked in (`:197-202`), so a switch never asks for the old project's repo. The choices are the last listing's, so the picker stays when a repo can't
   be read. In another repo, **compared with** is a plain line, the root line is hidden, and **Make
   default** and its check-out are gone (`:285`, `:703`).
 - **Docs.** `docs/MANUAL.md` gains "Branches in another repo" after "Pull and rebase a branch", and a
@@ -240,8 +249,9 @@ one repo never marks a same-named branch in another.
 
 *Not done / not decided:* compared with and Make default are for the own folder only, as is the
 setting `branchTargetKey`; nothing new is persisted. A project whose own folder isn't a repo still
-gets its 400 with no listing, so the picker can't reach the repos inside it. Liveness in another repo
-is approximate: a worktree job's agent can reach an extra directory too, and isn't counted. Every
+gets its 400 with no listing, so the picker can't reach the repos inside it. In the own folder,
+nothing changes: an extra directory inside the project's repo is that repo, and a worktree job's
+agent writing there doesn't make its checked-out branch live, as before. Every
 listing (GET, and the one POST returns) now walks each project directory with `buildTree`, as Files
 does; a large tree costs that on every redraw.
 
@@ -253,10 +263,14 @@ project's repo, a symlink, `..`, a sub-folder, a plain folder, a missing and a r
 on GET, POST and the preview, touching nothing; an empty `?repo=` is the own folder; a merge in the
 nested repo moves only its branch, and its push reaches only its origin; its rebase marks only its
 branch rebased; `set_default` there is a 400; `projectRepo` still opens the own folder; and a live
-in-place agent makes the nested repo's checked-out branch live (merge into it, 409). Daemon: 238 checks
+in-place agent makes the nested repo's checked-out branch live (merge into it, 409); a live agent of
+a `worktree` job makes the extra-directory repo's and the one nested in a plain extra directory's
+checked-out branch live (pull, rebase and merge there, 409), and not the repo nested only in the
+project's folder. Daemon: 243 checks
 PASS. Web `branches/verify.ts` section 12 (`:445`): the rules, the three requests' `?repo=`, the
-picker, its default and reset, and what another repo hides; section 7's preview check accepts the new
-argument. `pnpm -r typecheck` clean; `make test`: 28 PASS (rerun once: port 3143 was taken).
+picker, its default and reset (kept with the project, so a switch reads the new project's own
+folder first), and what another repo hides; section 7's preview check accepts the new
+argument. `pnpm -r typecheck` clean; `make test`: 28 PASS (rerun once: port 3143 was taken). Review follow-up: `make test` 28 PASS (rerun once: Track C's watcher author check timed out, then passed alone twice).
 
 ### Amendment 161 — post-merge, applied. **Each stage of a pipeline hears every earlier stage's summary, not only the one before it.**
 

@@ -1248,10 +1248,13 @@ are, such as `myapp/vendor/lib`.
 Picking one shows that repo's branches, and every action (merge, commit, push, pull, rebase,
 fetch, delete, clean up) runs in that repo only, against its own origin. Two repos can have a
 branch of the same name; they are separate. Another repo is always drawn against its origin's
-default branch, else `main`: **compared with** and **Make default** are only for the project's
-own folder. Jobs are only in the project's own folder, so no branch in another repo belongs to
-a job. The branch it has checked out is **live** while an agent works in the project's own
-folder (in place or on a branch of its own), since that agent can reach it.
+default branch, else the branch it has checked out, else `main` or `master`: **compared with**
+and **Make default** are only for the project's own folder. Jobs are only in the project's own
+folder, so no branch in another repo belongs to a job. The branch it has checked out is **live**
+while an agent that can reach the repo is working, and nothing runs on it then. Every agent can
+reach the project's extra directories, so for a repo in one of those any working agent counts;
+for a repo nested in the project's own folder, an agent working in that folder (in place or on a
+branch of its own) does, and one in a worktree of its own doesn't.
 
 ---
 

@@ -1172,6 +1172,48 @@ async function main(): Promise<void> {
     const busy = await get<BranchesResponse>(`${URL5}${q(NESTED5)}`);
     const intoLive = await in5(NESTED5, { action: 'merge', branch: 'feat/m' });
     check('while an in_place agent works, the nested repo\'s checked-out branch is live, and a merge into it → 409', byName(busy.body, 'main')?.live === true && byName(busy.body, 'feat/m')?.live === false && intoLive.status === 409, show(intoLive));
+
+    // Every agent is given the extra directories, a worktree job's too: in a repo there (or
+    // one nested in a plain one) what is checked out is live while it works. A repo nested
+    // only in the project's folder isn't in its worktree, nor given to it.
+    setAgentStatus(db, 'agt_inplace5', 'done');
+    insertJob(db, { id: 'job_wt5', projectId: project5.id, prompt: 'in a worktree', isolation: 'worktree', worktreePath: join(ROOT, 'wt5-job'), branch: 'conductor/job_wt5', status: 'working', budgetUsd: null });
+    insertAgent(db, {
+      id: 'agt_wt5',
+      jobId: 'job_wt5',
+      projectId: project5.id,
+      role: 'builder',
+      model: 'claude-sonnet-5',
+      sdkSessionId: null,
+      status: 'working',
+      blockMode: null,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      dependsOn: [],
+      autonomy: DEFAULT_AUTONOMY,
+    });
+    sh(EXTRA5, 'checkout', '-q', 'x/one');
+    commitFile(EXTRA5, 'one.txt', 'one\n', 'extra one');
+    sh(EXTRA5, 'checkout', '-q', 'main');
+    const extraRefs2 = refs(EXTRA5);
+    const extraBusy = await get<BranchesResponse>(`${URL5}${q(EXTRA5)}`);
+    const deepBusy = await get<BranchesResponse>(`${URL5}${q(EXTRA5_DEEP)}`);
+    check("while a worktree job's agent works, the extra directory's checked-out branch is live, and only it", byName(extraBusy.body, 'main')?.live === true && byName(extraBusy.body, 'x/one')?.live === false && extraBusy.body.rootLive === true, show(extraBusy));
+    check('  and the one nested in a plain extra directory', byName(deepBusy.body, 'main')?.live === true, show(deepBusy));
+    const busyReplies = await Promise.all([
+      in5(EXTRA5, { action: 'pull', branch: 'main' }),
+      in5(EXTRA5, { action: 'rebase', branch: 'main', onto: 'x/one' }),
+      in5(EXTRA5, { action: 'merge', branch: 'x/one' }),
+      in5(EXTRA5_DEEP, { action: 'pull', branch: 'main' }),
+    ]);
+    check('  pull, rebase and merge into it → 409, as on a job\'s live branch, and nothing moves', busyReplies.every((r) => r.status === 409 && /an agent is working on this branch/.test(r.body.error)) && refs(EXTRA5) === extraRefs2, busyReplies.map(show).join(' | '));
+    const nestedFree = await get<BranchesResponse>(`${URL5}${q(NESTED5)}`);
+    const intoFree = await in5(NESTED5, { action: 'merge', branch: 'feat/m' });
+    check("  the repo nested only in the project's folder isn't live for it: a merge into its main → 200", byName(nestedFree.body, 'main')?.live === false && nestedFree.body.rootLive === false && intoFree.status === 200 && intoFree.body.ok === true, show(intoFree));
+    setAgentStatus(db, 'agt_wt5', 'done');
+    const extraFree = await get<BranchesResponse>(`${URL5}${q(EXTRA5)}`);
+    check('  once it has finished, the extra directory\'s branch is free again', byName(extraFree.body, 'main')?.live === false && extraFree.body.rootLive === false, show(extraFree));
   }
 
   // ───────────────────────────────────────────────────────────────────────────
