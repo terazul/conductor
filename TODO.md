@@ -123,6 +123,7 @@ the last of it on 12 Oct).
 - [x] **Docs: D1, D2, D3, the test plan and ADR 0001 (wave 11, F).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): D2 drops the links.* *Done 15 Oct: Amendment 154 (no links to the missing architecture guide; `scripts/verify-docs-links.mjs` in `make test`).*
 
 - [x] **A listed role whose persona names an exact model runs on sonnet (wave 11, O1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 155 (`ListedRole.model`, kept from the persona and sent as the role's `HelperRole.model`; the role select shows it).*
+- [x] **Changes and diffs miss nested repos (wave 11, N5).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 158 (each dirty nested repo scanned as its own, four deep; each diff from the repo that owns the path).*
 
 ## Housekeeping
 

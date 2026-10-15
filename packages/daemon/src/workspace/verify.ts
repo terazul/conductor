@@ -63,7 +63,7 @@ import { type CompleteResult } from './browse.js';
 import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
 import { KeyedLock } from './lock.js';
 import { buildTree } from './tree.js';
-import { scanChanges } from './changes.js';
+import { MAX_NESTED_DEPTH, scanChanges } from './changes.js';
 import type { WorkspaceRecord } from './store.js';
 
 const PORT = 7801;
@@ -1416,7 +1416,7 @@ async function main(): Promise<void> {
   rmSync(BROWSE, { recursive: true, force: true });
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n15 · nested repos browse all the way down (Amendment 90)');
+  console.log('\n15 · nested repos browse all the way down (Amendment 90), changes and all (Amendment 158)');
 
   /*
    * `uncapped` (section 12) is already a full tree of the fixture, which
@@ -1489,6 +1489,273 @@ async function main(): Promise<void> {
     "the nested repos' folders still show, branch and all, even with their files capped out",
     cappedFlat.find((n) => n.path === 'inner')?.repo?.branch === 'feature/nested' &&
       cappedFlat.find((n) => n.path === 'vendor-lib')?.repo?.branch === 'main',
+  );
+
+  // Amendment 158: a nested repo's changes are its own. Dirt is made here, not in the
+  // fixture, so every count above stays the same, and put back below. `inner/` is a
+  // committed nested clone (` M inner` to the outer repo); `loose-clone/` is a clone
+  // nothing tracks (`?? loose-clone/`); `quiet-clone/` and `vendor-lib/` are clean.
+  const INNER = join(SCRATCH, 'inner');
+  const LOOSE = join(SCRATCH, 'loose-clone');
+  const QUIET = join(SCRATCH, 'quiet-clone');
+  const gitIn = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' });
+  const innerApp0 = readFileSync(join(INNER, 'app.js'), 'utf8');
+  const innerReadme0 = readFileSync(join(INNER, 'README.md'), 'utf8');
+  const readmeLines = innerReadme0.split('\n').length - 1;
+  const seq158 = eventsFor('job_inplace', 'file_edit').at(-1)?.seq ?? 0;
+  for (const clone of [LOOSE, QUIET]) {
+    rmSync(clone, { recursive: true, force: true });
+    mkdirSync(clone);
+    gitIn(clone, ['init', '-q']);
+    writeFileSync(join(clone, 'a.txt'), 'a\n');
+    gitIn(clone, ['add', '-A']);
+    gitIn(clone, ['-c', 'user.email=conductor@example.invalid', '-c', 'user.name=Conductor Fixture', 'commit', '-qm', 'clone']);
+  }
+  writeFileSync(join(LOOSE, 'a.txt'), 'a\nb\n');
+  writeFileSync(join(INNER, 'app.js'), `${innerApp0}console.log('changed inside inner');\n`);
+  writeFileSync(join(INNER, 'fresh.txt'), 'one\ntwo\n');
+  rmSync(join(INNER, 'README.md'));
+  check(
+    'the outer repo sees each nested repo as one opaque entry',
+    /^ M inner$/m.test(gitIn(SCRATCH, ['status', '--porcelain'])) &&
+      /^\?\? loose-clone\/$/m.test(gitIn(SCRATCH, ['status', '--porcelain'])),
+    gitIn(SCRATCH, ['status', '--porcelain']),
+  );
+
+  const nestedEdits = await waitForEdits(
+    'job_inplace',
+    ['inner/app.js', 'inner/fresh.txt', 'loose-clone/a.txt'],
+    { afterSeq: seq158 },
+  );
+  const innerEdit = nestedEdits.get('inner/app.js')?.payload;
+  check(
+    "the watcher reports a nested repo's edit, counted by that repo's git",
+    innerEdit?.kind === 'file_edit' && innerEdit.added === 1 && innerEdit.removed === 0,
+    JSON.stringify(innerEdit),
+  );
+  const freshEdit = nestedEdits.get('inner/fresh.txt')?.payload;
+  check(
+    'and a new file in it as created',
+    freshEdit?.kind === 'file_edit' && freshEdit.created === true && freshEdit.added === 2,
+    JSON.stringify(freshEdit),
+  );
+
+  const nestedScan = await scanChanges(ws.path, workspace().store.changes('job_inplace'));
+  const nc = (p: string) => nestedScan.byPath.get(p);
+  check(
+    "a nested file's change is listed at its full path, with inner's counts",
+    nc('inner/app.js')?.added === 1 && nc('inner/app.js')?.removed === 0,
+    JSON.stringify(nc('inner/app.js')),
+  );
+  check(
+    'a new file in it is created, a removed one deleted',
+    nc('inner/fresh.txt')?.created === true &&
+      nc('inner/fresh.txt')?.added === 2 &&
+      nc('inner/README.md')?.deleted === true &&
+      nc('inner/README.md')?.removed === readmeLines,
+    `${JSON.stringify(nc('inner/fresh.txt'))} ${JSON.stringify(nc('inner/README.md'))}`,
+  );
+  check(
+    "an untracked clone's change is its own too",
+    nc('loose-clone/a.txt')?.added === 1,
+    JSON.stringify(nc('loose-clone/a.txt')),
+  );
+  const opaqueKeys = ['inner', 'inner/', 'loose-clone', 'loose-clone/', 'quiet-clone', 'quiet-clone/', 'vendor-lib', 'vendor-lib/'];
+  check(
+    'NO OPAQUE ENTRY — there is no `?? loose-clone/` and no `inner` gitlink',
+    opaqueKeys.every((k) => !nestedScan.byPath.has(k)),
+    [...nestedScan.byPath.keys()].join(' '),
+  );
+  check(
+    'a clean nested repo shows nothing',
+    [...nestedScan.byPath.keys()].every((k) => !k.startsWith('quiet-clone/') && !k.startsWith('vendor-lib/')),
+    [...nestedScan.byPath.keys()].join(' '),
+  );
+
+  const nested158 = (await get<FileTreeResponse>('/api/jobs/job_inplace/tree')).body;
+  const innerAppNode = find(nested158, 'inner/app.js');
+  check(
+    "the badge shows inside inner/ in the tree",
+    innerAppNode?.change?.added === 1 && innerAppNode.change.removed === 0,
+    JSON.stringify(innerAppNode?.change),
+  );
+  check(
+    "inner's deleted file stays in the tree, flagged",
+    find(nested158, 'inner/README.md')?.change?.deleted === true,
+    JSON.stringify(find(nested158, 'inner/README.md')),
+  );
+  const innerRoll = find(nested158, 'inner')?.change;
+  check(
+    "inner/'s folder rolls up its own files' change",
+    innerRoll?.added === 3 && innerRoll.removed === readmeLines,
+    JSON.stringify(innerRoll),
+  );
+  check(
+    'an untracked clone is a folder marked as a repo, its file badged',
+    find(nested158, 'loose-clone')?.type === 'dir' &&
+      find(nested158, 'loose-clone')?.repo !== undefined &&
+      find(nested158, 'loose-clone/a.txt')?.change?.added === 1,
+    JSON.stringify(find(nested158, 'loose-clone')),
+  );
+  check(
+    "clean nested repos' folders carry no badge",
+    find(nested158, 'quiet-clone')?.repo !== undefined &&
+      find(nested158, 'quiet-clone')?.change === undefined &&
+      find(nested158, 'vendor-lib')?.change === undefined,
+    `${JSON.stringify(find(nested158, 'quiet-clone'))} ${JSON.stringify(find(nested158, 'vendor-lib')?.change)}`,
+  );
+  check(
+    "the tree's totals count the nested files",
+    nested158.changedFiles === nestedScan.files && nested158.added === nestedScan.added,
+    `${nested158.changedFiles}/${nestedScan.files}`,
+  );
+
+  const innerOwn = gitIn(INNER, [
+    'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/inner/', '--dst-prefix=b/inner/', 'HEAD', '--', 'app.js',
+  ]);
+  const innerDiff = await get<DiffResponse>(`/api/jobs/job_inplace/diff?path=${encodeURIComponent('inner/app.js')}`);
+  check(
+    "an inner file's diff is inner's diff",
+    innerDiff.status === 200 && innerOwn.length > 0 && innerDiff.body.diff === innerOwn,
+    innerDiff.body.diff.slice(0, 160),
+  );
+  check(
+    'with its counts',
+    innerDiff.body.added === 1 && innerDiff.body.files === 1,
+    JSON.stringify({ ...innerDiff.body, diff: undefined }),
+  );
+  const innerFile = await get<FileContentResponse>(`/api/jobs/job_inplace/file?path=${encodeURIComponent('inner/app.js')}`);
+  check('and the file pane gets the same diff', innerFile.body.diff === innerOwn);
+  const innerGone = await get<FileContentResponse>(`/api/jobs/job_inplace/file?path=${encodeURIComponent('inner/README.md')}`);
+  check(
+    "inner's deleted file opens as inner's last copy",
+    innerGone.status === 200 && innerGone.body.deleted === true && innerGone.body.raw === innerReadme0,
+    `${innerGone.status} ${JSON.stringify(innerGone.body).slice(0, 120)}`,
+  );
+  const freshFile = await get<FileContentResponse>(`/api/jobs/job_inplace/file?path=${encodeURIComponent('inner/fresh.txt')}`);
+  check(
+    "inner's new file shows as added",
+    (freshFile.body.diff ?? '').includes('+++ b/inner/fresh.txt') && (freshFile.body.diff ?? '').includes('+two'),
+    freshFile.body.diff,
+  );
+  const allDiff = (await get<DiffResponse>('/api/jobs/job_inplace/diff')).body;
+  check(
+    'the whole diff holds each nested repo\'s patch, named from the worktree',
+    allDiff.diff.includes(innerOwn) &&
+      allDiff.diff.includes('+++ b/inner/fresh.txt') &&
+      allDiff.diff.includes('+++ b/loose-clone/a.txt') &&
+      allDiff.diff.includes('+++ b/src/token.js'),
+    allDiff.diff.split('\n').filter((l) => l.startsWith('diff --git')).join(' | '),
+  );
+  check(
+    'and no opaque "Subproject commit" entry',
+    !allDiff.diff.includes('Subproject commit') && !allDiff.diff.includes('diff --git a/inner b/inner'),
+  );
+
+  // A chain of repos, each nested in the last, one past `MAX_NESTED_DEPTH`: `deep-1/` in
+  // the worktree, `deep-1/deep-2/` in it, and so on. Each has a changed `a.txt`.
+  const DEEP = join(SCRATCH, 'deep-1');
+  const deepRel = (level: number): string =>
+    Array.from({ length: level }, (_, i) => `deep-${i + 1}`).join('/');
+  rmSync(DEEP, { recursive: true, force: true });
+  for (let level = 1; level <= MAX_NESTED_DEPTH + 1; level += 1) {
+    const repo = join(SCRATCH, deepRel(level));
+    mkdirSync(repo);
+    gitIn(repo, ['init', '-q']);
+    writeFileSync(join(repo, 'a.txt'), 'a\n');
+    gitIn(repo, ['add', 'a.txt']);
+    gitIn(repo, ['-c', 'user.email=conductor@example.invalid', '-c', 'user.name=Conductor Fixture', 'commit', '-qm', 'deep']);
+  }
+  for (let level = 1; level <= MAX_NESTED_DEPTH + 1; level += 1) {
+    writeFileSync(join(SCRATCH, deepRel(level), 'a.txt'), `a\nlevel ${level}\n`);
+  }
+  const deepScan = await scanChanges(ws.path, workspace().store.changes('job_inplace'));
+  const second = `${deepRel(2)}/a.txt`;
+  const atLimit = `${deepRel(MAX_NESTED_DEPTH)}/a.txt`;
+  const pastLimit = `${deepRel(MAX_NESTED_DEPTH + 1)}/a.txt`;
+  check(
+    "a repo nested in a nested repo lists its change at the full path, with its own counts",
+    deepScan.byPath.get(second)?.added === 1 && deepScan.byPath.get(second)?.removed === 0,
+    JSON.stringify(deepScan.byPath.get(second)),
+  );
+  check(
+    `a repo ${MAX_NESTED_DEPTH} levels down is still scanned`,
+    deepScan.byPath.get(atLimit)?.added === 1,
+    [...deepScan.byPath.keys()].filter((k) => k.startsWith('deep-1/')).join(' '),
+  );
+  check(
+    `one past ${MAX_NESTED_DEPTH} levels is not, and leaves no opaque entry`,
+    [...deepScan.byPath.keys()].every((k) => !k.startsWith(`${deepRel(MAX_NESTED_DEPTH + 1)}`)),
+    [...deepScan.byPath.keys()].filter((k) => k.startsWith('deep-1/')).join(' '),
+  );
+  const secondOwn = gitIn(join(SCRATCH, deepRel(2)), [
+    'diff', '--no-color', '--no-ext-diff', `--src-prefix=a/${deepRel(2)}/`, `--dst-prefix=b/${deepRel(2)}/`, 'HEAD', '--', 'a.txt',
+  ]);
+  const secondDiff = await get<DiffResponse>(`/api/jobs/job_inplace/diff?path=${encodeURIComponent(second)}`);
+  check(
+    "its diff is the innermost repo's own",
+    secondDiff.status === 200 && secondOwn.length > 0 && secondDiff.body.diff === secondOwn,
+    secondDiff.body.diff.slice(0, 160),
+  );
+  const pastDiff = await get<DiffResponse>(`/api/jobs/job_inplace/diff?path=${encodeURIComponent(pastLimit)}`);
+  check(
+    'past the limit a file gets no diff either, as it gets no badge',
+    pastDiff.status === 200 && pastDiff.body.diff === '' && pastDiff.body.files === 0,
+    `${pastDiff.status} ${JSON.stringify(pastDiff.body).slice(0, 160)}`,
+  );
+  const deepTree = (await get<FileTreeResponse>('/api/jobs/job_inplace/tree')).body;
+  check(
+    'the tree badges the deep change and rolls it up to deep-1/',
+    find(deepTree, second)?.change?.added === 1 &&
+      (find(deepTree, 'deep-1')?.change?.added ?? 0) === MAX_NESTED_DEPTH,
+    `${JSON.stringify(find(deepTree, second)?.change)} ${JSON.stringify(find(deepTree, 'deep-1')?.change)}`,
+  );
+  check(
+    'and the whole diff holds its patch',
+    (await get<DiffResponse>('/api/jobs/job_inplace/diff')).body.diff.includes(secondOwn),
+  );
+  rmSync(DEEP, { recursive: true, force: true });
+
+  // One flush holding a path the outer repo ignores and a path inside `inner/`. The
+  // outer repo's `check-ignore` refuses the whole batch for the inner path, so the
+  // watcher asks each repo for its own. (`git status` leaves an ignored file out
+  // too, so this guards the mixed batch end to end rather than that filter alone.)
+  const EXCLUDE = join(SCRATCH, '.git', 'info', 'exclude');
+  const exclude0 = readFileSync(EXCLUDE, 'utf8');
+  writeFileSync(EXCLUDE, `${exclude0}noise-158.log\n`);
+  const seqMixed = eventsFor('job_inplace', 'file_edit').at(-1)?.seq ?? 0;
+  writeFileSync(join(SCRATCH, 'noise-158.log'), 'noise\n');
+  writeFileSync(join(INNER, 'app.js'), `${innerApp0}console.log('changed inside inner');\nconsole.log('again');\n`);
+  const mixed = await waitForEdits('job_inplace', ['inner/app.js'], { afterSeq: seqMixed });
+  await settleAndFlush('job_inplace');
+  const mixedEdit = mixed.get('inner/app.js')?.payload;
+  check(
+    'in one batch with an ignored outer file, the nested edit is reported and the ignored one is not',
+    mixedEdit?.kind === 'file_edit' &&
+      mixedEdit.added === 2 &&
+      !eventsFor('job_inplace', 'file_edit').some(
+        (e) => e.seq > seqMixed && e.payload.kind === 'file_edit' && e.payload.path === 'noise-158.log',
+      ),
+    JSON.stringify(mixedEdit),
+  );
+  rmSync(join(SCRATCH, 'noise-158.log'), { force: true });
+  writeFileSync(EXCLUDE, exclude0);
+
+  writeFileSync(join(INNER, 'app.js'), innerApp0);
+  writeFileSync(join(INNER, 'README.md'), innerReadme0);
+  rmSync(join(INNER, 'fresh.txt'), { force: true });
+  rmSync(LOOSE, { recursive: true, force: true });
+  rmSync(QUIET, { recursive: true, force: true });
+  await settleAndFlush('job_inplace');
+  const cleanAgain = await scanChanges(ws.path, workspace().store.changes('job_inplace'));
+  check(
+    'put back, the nested repo shows nothing again',
+    gitIn(INNER, ['status', '--porcelain']) === '' &&
+      [...cleanAgain.byPath.keys()].every(
+        (k) => !k.startsWith('inner/') && !k.startsWith('loose-clone/') && !k.startsWith('deep-1/'),
+      ),
+    [...cleanAgain.byPath.keys()].join(' '),
   );
 
   // ───────────────────────────────────────────────────────────────────────────

@@ -19,9 +19,9 @@
  * daemon can observe.
  */
 
-import { readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkIgnore, isRepo, numstat, status, toPosix } from './git.js';
+import { checkIgnore, isRepo, numstat, status, toPosix, type NumStat, type StatusEntry } from './git.js';
 import type { FileChangeRecord } from './store.js';
 
 /** Past this a file is not something a human reads in a browser pane. */
@@ -51,6 +51,14 @@ export interface ChangeSet {
  * Scan the worktree. One `git status`, one `git diff --numstat`, and a read per
  * untracked file — which is bounded by how many files an agent has created, not
  * by the size of the repo.
+ *
+ * Nested repos (Amendment 158): the outer `git status` names a nested clone or a
+ * submodule only as one opaque entry for its whole folder (`?? inner/`, ` M inner`),
+ * never a path inside it. Each such entry is scanned again as its own repo, its
+ * paths prefixed with its folder, and the opaque entry itself is dropped, so the
+ * badges inside `inner/` are inner's own. Down to `MAX_NESTED_DEPTH`, as the tree
+ * lists them. A clean nested repo is not in the outer status at all, so it costs
+ * nothing and shows nothing.
  */
 export async function scanChanges(
   worktree: string,
@@ -63,59 +71,8 @@ export async function scanChanges(
   // "changed relative to a commit", because there is no commit.
   if (!(await isRepo(worktree))) return fromProjection(known);
 
-  const [entries, stats] = await Promise.all([status(worktree), numstat(worktree)]);
-  const statByPath = new Map(stats.map((s) => [s.path, s]));
-
   const byPath = new Map<string, Change>();
-
-  for (const entry of entries) {
-    const path = entry.path;
-    const stat = statByPath.get(path);
-    const record = known.get(path);
-
-    let added = stat?.added ?? 0;
-    let removed = stat?.removed ?? 0;
-    let binary = stat?.binary ?? false;
-
-    if (entry.untracked) {
-      const counted = countNewFile(join(worktree, path));
-      added = counted.lines;
-      removed = 0;
-      binary = counted.binary;
-    } else if (entry.deleted) {
-      // A deleted tracked file: numstat already reports every line as removed.
-      binary = stat?.binary ?? false;
-    }
-
-    byPath.set(path, {
-      path,
-      added,
-      removed,
-      // 'A ' is staged-new; both it and '??' are files that did not exist at HEAD.
-      created: entry.untracked || entry.code.startsWith('A') || (record?.created ?? false),
-      deleted: entry.deleted,
-      at: record?.at ?? mtimeIso(join(worktree, path)),
-      by: record?.byAgentId ?? null,
-      binary,
-    });
-  }
-
-  // numstat can name a path that `status` doesn't (staged-only changes with a
-  // clean worktree). Those are still changes the UI should badge.
-  for (const stat of stats) {
-    if (byPath.has(stat.path)) continue;
-    const record = known.get(stat.path);
-    byPath.set(stat.path, {
-      path: stat.path,
-      added: stat.added,
-      removed: stat.removed,
-      created: record?.created ?? false,
-      deleted: false,
-      at: record?.at ?? mtimeIso(join(worktree, stat.path)),
-      by: record?.byAgentId ?? null,
-      binary: stat.binary,
-    });
-  }
+  for (const c of await scanRepo(worktree, '', known, 0)) byPath.set(c.path, c);
 
   let added = 0;
   let removed = 0;
@@ -125,6 +82,134 @@ export async function scanChanges(
   }
 
   return { byPath, files: byPath.size, added, removed };
+}
+
+/** How many nested-repo boundaries deep changes are scanned: the tree's own limit. */
+export const MAX_NESTED_DEPTH = 4;
+
+/**
+ * One repo's changes, `prefix` (`''` at the worktree root, else `inner/`) put in
+ * front of every path. `depth` is how many nested boundaries `prefix` crossed.
+ */
+async function scanRepo(
+  worktree: string,
+  prefix: string,
+  known: Map<string, FileChangeRecord>,
+  depth: number,
+): Promise<Change[]> {
+  const repo = join(worktree, prefix);
+  let entries: StatusEntry[];
+  let stats: NumStat[];
+  try {
+    [entries, stats] = await Promise.all([status(repo), numstat(repo)]);
+  } catch (err) {
+    // A corrupt nested repo: its folder still shows in the tree, with no badges.
+    if (prefix.length === 0) throw err;
+    return [];
+  }
+
+  // The opaque entries: a folder in this repo's status that is a repo of its own.
+  const nested = new Set<string>();
+  for (const entry of entries) {
+    const path = entry.path.endsWith('/') ? entry.path.slice(0, -1) : entry.path;
+    if (path.length > 0 && isNestedRepo(join(repo, path))) nested.add(path);
+  }
+  const opaque = (path: string): boolean =>
+    nested.has(path.endsWith('/') ? path.slice(0, -1) : path);
+
+  const statByPath = new Map(stats.map((s) => [s.path, s]));
+  const out = new Map<string, Change>();
+
+  for (const entry of entries) {
+    if (opaque(entry.path)) continue;
+    const path = entry.path;
+    const stat = statByPath.get(path);
+    const record = known.get(prefix + path);
+
+    let added = stat?.added ?? 0;
+    let removed = stat?.removed ?? 0;
+    let binary = stat?.binary ?? false;
+
+    if (entry.untracked) {
+      const counted = countNewFile(join(repo, path));
+      added = counted.lines;
+      removed = 0;
+      binary = counted.binary;
+    } else if (entry.deleted) {
+      // A deleted tracked file: numstat already reports every line as removed.
+      binary = stat?.binary ?? false;
+    }
+
+    out.set(path, {
+      path: prefix + path,
+      added,
+      removed,
+      // 'A ' is staged-new; both it and '??' are files that did not exist at HEAD.
+      created: entry.untracked || entry.code.startsWith('A') || (record?.created ?? false),
+      deleted: entry.deleted,
+      at: record?.at ?? mtimeIso(join(repo, path)),
+      by: record?.byAgentId ?? null,
+      binary,
+    });
+  }
+
+  // numstat can name a path that `status` doesn't (staged-only changes with a
+  // clean worktree). Those are still changes the UI should badge.
+  for (const stat of stats) {
+    if (out.has(stat.path) || opaque(stat.path)) continue;
+    const record = known.get(prefix + stat.path);
+    out.set(stat.path, {
+      path: prefix + stat.path,
+      added: stat.added,
+      removed: stat.removed,
+      created: record?.created ?? false,
+      deleted: false,
+      at: record?.at ?? mtimeIso(join(repo, stat.path)),
+      by: record?.byAgentId ?? null,
+      binary: stat.binary,
+    });
+  }
+
+  const changes = [...out.values()];
+  if (depth < MAX_NESTED_DEPTH) {
+    const subs = await Promise.all(
+      [...nested].map((p) => scanRepo(worktree, `${prefix}${p}/`, known, depth + 1)),
+    );
+    for (const sub of subs) changes.push(...sub);
+  }
+  return changes;
+}
+
+/**
+ * The nested repo that owns `relPath`, as its worktree-relative folder with a
+ * trailing slash, or `''` when the worktree's own repo does (Amendment 158). The
+ * deepest boundary on the way down wins, up to `MAX_NESTED_DEPTH` of them: a path
+ * past that is the deepest scanned repo's, which sees only an opaque folder, so no
+ * route gives it a badge or a diff. The boundary test is the tree's (`tree.ts`
+ * `hasDotGit`, Amendment 90): a non-symlink folder with a `.git` in it.
+ */
+export function ownerOf(worktree: string, relPath: string): string {
+  const segments = relPath.split('/').filter((s) => s.length > 0);
+  let owner = '';
+  let depth = 0;
+  for (let i = 1; i < segments.length && depth < MAX_NESTED_DEPTH; i += 1) {
+    const dir = segments.slice(0, i).join('/');
+    if (isNestedRepo(join(worktree, dir))) {
+      owner = `${dir}/`;
+      depth += 1;
+    }
+  }
+  return owner;
+}
+
+function isNestedRepo(abs: string): boolean {
+  try {
+    if (!lstatSync(abs).isDirectory()) return false;
+    lstatSync(join(abs, '.git'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
