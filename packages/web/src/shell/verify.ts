@@ -540,7 +540,7 @@ console.log('\n12 · each agent row has its budget meter, and a job row the sum 
   check('the panel only sizes it: no colour of its own, so the tones are the Fleet\'s tokens', rule !== '' && !/#|rgb|hsl|background|color/.test(rule), rule);
 }
 
-console.log('\n13 · a file or folder in the navigator can be renamed and deleted (Amendment 159)');
+console.log('\n13 · a file or folder in the navigator can be renamed and deleted (Amendment 165)');
 {
   const nav = src('./Navigator.tsx');
   const css = src('./shell.css');

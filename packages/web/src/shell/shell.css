@@ -695,7 +695,7 @@
 }
 
 /*
- * Rename (✎) and delete (⌫) beside a file or folder (Amendment 159): a file's row is a
+ * Rename (✎) and delete (⌫) beside a file or folder (Amendment 165): a file's row is a
  * .sh-nav-dirrow too, so they show as the + does. Delete turns to --fail, as in Files.
  */
 .sh-nav-del:hover,

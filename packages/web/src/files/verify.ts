@@ -850,7 +850,7 @@ console.log('\nnew folder, rename and delete (Amendment 138)');
   check('its + shows on hover and focus, and always where there is no hover', /\.sh-nav-dirrow:hover \.sh-nav-add,\s*\.sh-nav-dirrow:focus-within \.sh-nav-add/.test(shellCss) && /@media \(hover: none\)\s*\{\s*\.sh-nav-add\s*\{\s*opacity: 1;/.test(shellCss));
 }
 
-console.log('\nmove by drag or Move to… (Amendment 159)');
+console.log('\nmove by drag or Move to… (Amendment 165)');
 {
   // ── where a move lands, as pure functions ──
   const { MOVE_MIME, canDrop, moveEntry, moveInto, parentOf } = await import('./moving.js');
@@ -977,13 +977,13 @@ console.log('\nmove by drag or Move to… (Amendment 159)');
   check("a refused drop shows the daemon's sentence under the folder", /move\(from, folder\)\.catch\(\(err: unknown\) => setMoveError\(\{ at: folder, text: errorText\(err\) \}\)\)/.test(route));
   check("the root's heading takes a drop for the top", /className=\{`c5-roothead\$\{dragMark\(verbs, ''\)\}`\} title=\{r\.where\} \{\.\.\.dropProps\(verbs, ''\)\}/.test(route));
   const css = readFileSync(new URL('./files.css', import.meta.url), 'utf8');
-  const ours = css.slice(css.indexOf('moving by drag and Move to… (Amendment 159)'));
+  const ours = css.slice(css.indexOf('moving by drag and Move to… (Amendment 165)'));
   check('the marks are drawn in existing tokens only', ours.length > 0 && /\.c5-dirrow\.is-drop/.test(ours) && /var\(--ink3\)/.test(ours) && !/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(ours));
 }
 
 console.log(
   failures === 0
-    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94); new folder, rename and delete, with tabs that follow a rename and close on a delete, a double confirm for a folder with files in it, and a + on the navigator\'s folders (Amendment 138); a drag onto a folder, or Move to…, moves an entry, refusing it into itself and saying why a taken name was refused, and its tabs follow (Amendment 159).\n'
+    ? '\nTrack C files verify: PASS — tabs open, close, follow links and survive a reload as they should; links in a rendered file go where the file meant, and it prints on its own; it opens on the project you came from, the route\'s own project winning over the remembered one (Amendment 91); a nested repo\'s branch shows beside its folder in the tree (Amendment 94); new folder, rename and delete, with tabs that follow a rename and close on a delete, a double confirm for a folder with files in it, and a + on the navigator\'s folders (Amendment 138); a drag onto a folder, or Move to…, moves an entry, refusing it into itself and saying why a taken name was refused, and its tabs follow (Amendment 165).\n'
     : `\nTrack C files verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

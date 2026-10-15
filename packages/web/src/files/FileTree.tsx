@@ -21,7 +21,7 @@
  * focus. On a focused row F2 renames, and Delete (or ⌘⌫) deletes. A rename opens the name box in
  * the row's place; a delete's confirm (the screen's, `confirm`) sits under its row.
  *
- * Moving (Amendment 159): a row on disk can be dragged onto a folder row, and has
+ * Moving (Amendment 165): a row on disk can be dragged onto a folder row, and has
  * **→/** (Move to…), which asks for the folder in the row's place. The rules are
  * moving.ts's; `dropProps` is shared with the section's heading, which takes a drop for
  * the top. A move the daemon refuses says why under the folder it was dropped on.

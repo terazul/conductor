@@ -396,7 +396,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, a move into a subfolder (Amendment 159), recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 153).\n`
+      ? `\nAmendment 138 files: PASS — ${checks} checks: new folder, rename and delete for a job and a project folder; 409s, 404s, the gate, the case-only rename, a move into a subfolder (Amendment 165), recursive delete, and the log; an empty folder .gitignore excludes is not listed (Amendment 153).\n`
       : `\nAmendment 138 files: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

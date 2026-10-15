@@ -591,7 +591,7 @@ function RootSection({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<FileNode | null>(null);
   /*
-   * Moving (Amendment 159): the drag is held here, per section, so a drag from another
+   * Moving (Amendment 165): the drag is held here, per section, so a drag from another
    * section (another root) or a project's drag in the navigator is no drop here. A move
    * is moving.ts's `moveEntry`, a rename and then `followRename`; the folder it lands in
    * is opened, as a new folder is.

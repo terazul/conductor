@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 159 — post-merge, applied. **Files moves an entry by drag or Move to…, and the navigator renames and deletes.**
+### Amendment 165 — post-merge, applied. **Files moves an entry by drag or Move to…, and the navigator renames and deletes.**
 
 Web (`files/moving.ts` new, `files/naming.ts`, `files/NewFileForm.tsx`, `files/FileTree.tsx`,
 `files/route.tsx`, `files/deleting.ts`, `files/files.css`, `files/verify.ts`, `shell/Navigator.tsx`,

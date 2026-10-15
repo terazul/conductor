@@ -263,7 +263,7 @@ function AddForm({ dir, add }: { dir: string; add: NavAdd }) {
 }
 
 /**
- * Rename and delete from the navigator (Amendment 159), as the Files tree has them: the
+ * Rename and delete from the navigator (Amendment 165), as the Files tree has them: the
  * rename is its name box in the row's place, and the open tabs follow the rename
  * (`renameEntry`, then `followRename`); the delete is its confirm under the row
  * (`DeleteConfirm`, which closes the tabs the delete took). One box at a time, with the +.
