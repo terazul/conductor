@@ -29,6 +29,7 @@ import type {
   Autonomy,
   BranchesResponse,
   CreateJobResponse,
+  CreateJobsResponse,
   EffortLevel,
   Job,
   Project,
@@ -96,7 +97,22 @@ import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { Pipeline } from './Pipeline.js';
 import { defaultListed, helperCapFor, helpersInAll, orchestrates, unresolvedListed, type ListedRole } from './orchestrated.js';
-import { METHODS, branchOptions, branchProblem, launchBody, methodReady, pickedNote, presetLabel, type Method } from './launch.js';
+import {
+  METHODS,
+  STACKS_KEY,
+  branchOptions,
+  branchProblem,
+  launchRequest,
+  methodReady,
+  pickedNote,
+  presetLabel,
+  stacksBudgetLine,
+  stacksFrom,
+  stacksNotes,
+  stacksPreview,
+  stacksRefusal,
+  type Method,
+} from './launch.js';
 import { getBranches } from '../branches/endpoints.js';
 import { useReorder } from './reorder.js';
 import { RoleRow, WaitsFor } from './RoleRow.js';
@@ -266,6 +282,14 @@ function Spawn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [launched, setLaunched] = useState<CreateJobResponse | null>(null);
+  /** The stacks a batch launch started, or each one's reason (Amendment 178); null after one stack. */
+  const [launchedStacks, setLaunchedStacks] = useState<CreateJobsResponse | null>(null);
+  /**
+   * How many stacks this launch starts from one plan (Amendment 178): state of this launch, as a
+   * preset's edits are (Amendment 99), and back to 1 after it and when you choose a preset.
+   */
+  const [stacksAsked, setStacks] = useState(1);
+  const stacksMax = stacksFrom(useSetting(STACKS_KEY));
   // Two hint slots, not one. A single slot put section 3's explanation underneath
   // section 5, two sections from the pill being hovered — so the sentence that
   // says which isolation needs git was never read by the person choosing one.
@@ -488,6 +512,7 @@ function Spawn() {
       setHelpers({});
       setListedEdit(null);
       setPipeHelpers(null);
+      setStacks(1);
       const next =
         id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : id === SINGLE_ID ? singlePreset(singlePick) : presetById(id);
       setPicks(every ? pickAll(next, every) : {});
@@ -509,9 +534,19 @@ function Spawn() {
     });
   }, [presetId, singlePick.role]);
 
+  /*
+   * Stacks (Amendment 178), offered where the roles are listed and something orchestrates: one
+   * otherwise, and never more than the setting lets the daemon take now.
+   */
+  const stacked = listsRoles && orchestrates(listed);
+  const stacks = stacked ? Math.min(stacksAsked, stacksMax) : 1;
+  const stacksWhy = stacksRefusal(prompt, method, branchName, stacks, stacksMax);
+  const jobBudget = jobBudgetUsd(budgetPerAgent, specs.length, caps);
+
   const free = Math.max(0, slots.total - slots.used);
-  const willQueue = Math.max(0, specs.length - free);
-  const canLaunch = prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && !singleBad && methodOk;
+  const willQueue = Math.max(0, specs.length * stacks - free);
+  const canLaunch =
+    prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && !singleBad && methodOk && stacksWhy === null;
   /** This launch's rows are not the preset's own, so its label says so (Amendment 115). */
   const changed = !isCustom && !sameStack(preset.roles, base.roles);
 
@@ -520,20 +555,27 @@ function Spawn() {
     setBusy(true);
     setError(null);
     setLaunched(null);
+    setLaunchedStacks(null);
     try {
-      const result = await api<CreateJobResponse>('/api/jobs', {
-        method: 'POST',
-        body: launchBody({
+      const request = launchRequest(
+        {
           projectId,
           prompt,
           method,
           branch: branchName,
           preset: presetLabel(preset.label, changed),
           agents: specs,
-          budgetUsd: jobBudgetUsd(budgetPerAgent, specs.length, caps),
-        }),
-      });
-      setLaunched(result);
+          budgetUsd: jobBudget,
+        },
+        stacks,
+      );
+      // One stack posts what a launch always posted; more go as one batch, 201 or 207 (Amendment 178).
+      if (request.path === '/api/jobs') {
+        setLaunched(await api<CreateJobResponse>(request.path, { method: 'POST', body: request.body }));
+      } else {
+        setLaunchedStacks(await api<CreateJobsResponse>(request.path, { method: 'POST', body: request.body }));
+      }
+      setStacks(1);
       setPrompt('');
       // The branch is taken now, by the job just launched: naming it again would be a 409.
       if (method === 'named') setBranchName('');
@@ -542,7 +584,7 @@ function Spawn() {
     } finally {
       setBusy(false);
     }
-  }, [canLaunch, projectId, prompt, method, branchName, preset.label, changed, specs, budgetPerAgent, caps]);
+  }, [canLaunch, projectId, prompt, method, branchName, preset.label, changed, specs, jobBudget, stacks]);
 
   // ⌘⏎ / ctrl+⏎ launches from anywhere on the screen, per the mockup.
   useEffect(() => {
@@ -571,6 +613,17 @@ function Spawn() {
           placeholder="Rotate refresh tokens on every exchange and revoke the ancestor chain on reuse. Tests first."
           spellCheck={false}
         />
+        {/* Each stack's first line, its number filled in (Amendment 178), and why it can't launch. */}
+        {stacks > 1 && (
+          <div className="sp-stack-lines" aria-label="Each stack's first line">
+            {stacksPreview(prompt, stacks).map((line, i) => (
+              <div key={i}>
+                {i + 1} · {line}
+              </div>
+            ))}
+          </div>
+        )}
+        {stacksWhy && <div className="sp-cf-note t-fail is-still">{stacksWhy}</div>}
       </div>
 
       {/* ── 2 ─────────────────────────────────────────────────────────────── */}
@@ -1084,6 +1137,9 @@ function Spawn() {
                     onChange={setListedEdit}
                     helpers={inAll}
                     onHelpers={setPipeHelpers}
+                    {...(stacked
+                      ? { stacks: { n: stacks, max: stacksMax, onChange: setStacks, notes: stacksNotes(stacks, free) } }
+                      : {})}
                     {...(isCustom
                       ? { alone: `No role listed, so ${r.role} launches as an ordinary agent and nothing orchestrates. Add a role to have it run a pipeline.` }
                       : {})}
@@ -1191,6 +1247,8 @@ function Spawn() {
           )}
         </div>
         {tokenWhy && <div className="sp-cf-note t-fail is-still">{tokenWhy}</div>}
+        {/* Each stack is a job with this budget of its own (Amendment 178). */}
+        {stacksBudgetLine(stacks, jobBudget) && <div className="sp-cf-note">{stacksBudgetLine(stacks, jobBudget)}</div>}
 
         {/*
          * Effort is not rope — it buys thinking, not permission — so it gets its own row
@@ -1265,7 +1323,9 @@ function Spawn() {
               ? 'reading models…'
               : !claude && launchOn.model === ''
                 ? 'pick a model'
-                : `launch ${specs.length} agent${specs.length === 1 ? '' : 's'}`}
+                : stacks > 1
+                  ? `launch ${stacks} stacks`
+                  : `launch ${specs.length} agent${specs.length === 1 ? '' : 's'}`}
           <span className="sp-kbd">⌘⏎</span>
         </button>
         {/* "plan first" was a button here; it is one of the modes now (Amendment 65). */}
@@ -1283,6 +1343,7 @@ function Spawn() {
       )}
 
       {launched && <Launched result={launched} />}
+      {launchedStacks && <LaunchedStacks result={launchedStacks} />}
     </div>
   );
 }
@@ -1316,6 +1377,47 @@ function Launched({ result }: { result: CreateJobResponse }) {
       <div className="sp-done-row">
         <span className="sp-when">{describeJob(job)}</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What a batch launch did (Amendment 178): every stack asked for, in order, the ones started
+ * with the way into their job and the one git refused with its reason. A 207 is read here, so
+ * a stack that failed after others started is said as that and not as "Launch failed".
+ */
+function LaunchedStacks({ result }: { result: CreateJobsResponse }) {
+  const made = new Map(result.jobs.map((r) => [r.job.id, r]));
+  const started = result.stacks.filter((s) => 'jobId' in s).length;
+  return (
+    <div className="sp-done">
+      <div className="sp-done-title">
+        {started === result.stacks.length
+          ? `${started} stacks launched`
+          : `${started} of ${result.stacks.length} stacks launched`}
+      </div>
+      {result.stacks.map((s) => {
+        const r = 'jobId' in s ? made.get(s.jobId) : undefined;
+        const first = r?.agents[0];
+        return (
+          <div className="sp-done-row" key={s.stack}>
+            <i className="sp-dot" />
+            <span className="sp-role">stack {s.stack}</span>
+            {'error' in s ? (
+              <span className="sp-does t-fail">not started: {s.error}</span>
+            ) : (
+              <>
+                <span className="sp-model">{r?.job.branch ?? s.jobId}</span>
+                {first && (
+                  <button className="sp-link" onClick={() => navigate('agent', { agentId: first.id })}>
+                    watch →
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

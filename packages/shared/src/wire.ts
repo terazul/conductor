@@ -309,6 +309,29 @@ export interface CreateJobResponse {
 }
 
 /**
+ * `POST /api/jobs/batch` (Amendment 178): several stacks from one Spawn launch, each its own
+ * job. Every request is checked first, and a refusal of any makes none (400, or 409 for two
+ * naming one branch). Then each is created in turn.
+ */
+export interface CreateJobsRequest {
+  jobs: CreateJobRequest[];
+}
+
+/** One stack of a batch, numbered from 1 in the order asked: started, with its job, or failed, with why. */
+export type StackLaunch = { stack: number; jobId: string } | { stack: number; error: string };
+
+/**
+ * 201 when every stack started; 207 when one failed after others had (a git error on stack
+ * 2's branch), which are kept: a job that has started has already spent.
+ */
+export interface CreateJobsResponse {
+  /** The jobs made, in the order asked. */
+  jobs: CreateJobResponse[];
+  /** Every stack asked for, in order. */
+  stacks: StackLaunch[];
+}
+
+/**
  * `POST /api/jobs/:jobId/agents` (Amendment 89): one more agent in a job that is already
  * running, or finished (it reopens). The spec is checked as a launch's is, and
  * `dependsOnRoles` names roles already in the job. `feeds` names roles of agents in the job

@@ -164,6 +164,7 @@ import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
 import { deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone } from './schedule.js';
 import { FolderGoneError, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
+import { STACKS_KEY, stacksLimit } from '../slots.js';
 import { terminals } from '../terminal/service.js';
 import { stubPty } from '../terminal/pty.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection, wakeMessage } from './handoff.js';
@@ -7977,6 +7978,94 @@ async function main(): Promise<void> {
     old.close();
   }
 
+  console.log('\n31 · several stacks from one launch, one batch: checked first, then made in turn (Amendment 178)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // Nothing is known of what the gateway serves, so a model id is checked only against the nicknames.
+    forgetCatalog();
+
+    const spid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'stacks178' })).body.project.id;
+    const M = 'claude-opus-s178';
+    const stackBody = (n: number, over: Record<string, unknown> = {}) => ({
+      projectId: spid,
+      prompt: `Run track ${n} of the plan.`,
+      isolation: 'worktree',
+      branch: `s178/t${n}`,
+      preset: 'orchestrated',
+      agents: [{ role: 'orchestrator', model: M, autonomy: DEFAULT_AUTONOMY }],
+      budgetUsd: 500,
+      ...over,
+    });
+    type Batch = {
+      jobs?: Array<{ job: { id: string; branch: string; worktreePath: string; prompt: string; budgetUsd: number | null }; agents: Agent[] }>;
+      stacks?: Array<{ stack: number; jobId?: string; error?: string }>;
+      error?: string;
+      detail?: string;
+    };
+    const batch = (jobs: unknown[]) => send<Batch>('POST', '/api/jobs/batch', { jobs });
+    const jobsNow = (): number => count(db, 'SELECT COUNT(*) AS n FROM jobs');
+    const branches = (): string => git(['branch', '--list', 's178/*']);
+    const setStacks = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [STACKS_KEY]: v } });
+
+    // ── the setting ─────────────────────────────────────────────────────────────
+    check('the setting is a whole number from 1 to 6, nothing else → 400', (await setStacks('0')).status === 400 && (await setStacks('7')).status === 400 && (await setStacks('2.5')).status === 400 && /from 1 to 6/.test((await setStacks('x')).body.detail ?? ''));
+    check('with nothing set it is 3', stacksLimit() === 3 && STACKS_KEY === 'conductor.launch.stacks');
+
+    // ── three, made ─────────────────────────────────────────────────────────────
+    let before = jobsNow();
+    const three = await batch([1, 2, 3].map((n) => stackBody(n)));
+    const made = three.body.jobs ?? [];
+    check('a batch of three is 201, three jobs', three.status === 201 && made.length === 3 && jobsNow() === before + 3, `${three.status} ${JSON.stringify(three.body).slice(0, 300)}`);
+    check('each on its own branch, as named, in order', made.map((m) => m.job.branch).join() === 's178/t1,s178/t2,s178/t3' && branches().split('\n').length === 3, branches());
+    check('each in its own worktree, there on disk', new Set(made.map((m) => m.job.worktreePath)).size === 3 && made.every((m) => existsSync(m.job.worktreePath) && m.job.worktreePath.includes(join('.conductor', 'wt', m.job.id))));
+    check('each with its own prompt and the same budget', made.map((m) => m.job.prompt).join('|') === 'Run track 1 of the plan.|Run track 2 of the plan.|Run track 3 of the plan.' && made.every((m) => m.job.budgetUsd === 500));
+    check('and every stack is listed as started, with its job', JSON.stringify(three.body.stacks) === JSON.stringify(made.map((m, i) => ({ stack: i + 1, jobId: m.job.id }))));
+    const perLaunch = await batch([stackBody(1, { branch: undefined }), stackBody(2, { branch: undefined })]);
+    check('with no branch named, each gets conductor/<jobId> as one launch does', perLaunch.status === 201 && (perLaunch.body.jobs ?? []).every((m) => m.job.branch === `conductor/${m.job.id}`));
+
+    // ── refused before anything is made ─────────────────────────────────────────
+    before = jobsNow();
+    let branchesBefore = branches();
+    const four = await batch([4, 5, 6, 7].map((n) => stackBody(n)));
+    check('four, over the default 3 → 400, nothing made', four.status === 400 && jobsNow() === before && branches() === branchesBefore && /conductor\.launch\.stacks/.test(four.body.detail ?? ''), `${four.status} ${four.body.error} ${four.body.detail}`);
+    check('none, or not a list → 400', (await batch([])).status === 400 && (await send('POST', '/api/jobs/batch', { jobs: 'x' })).status === 400 && jobsNow() === before);
+    check('the setting at 2 refuses three', (await setStacks('2')).status === 200 && stacksLimit() === 2 && (await batch([4, 5, 6].map((n) => stackBody(n)))).status === 400 && jobsNow() === before);
+    check('the setting at 4 makes four', (await setStacks('4')).status === 200 && (await batch([4, 5, 6, 7].map((n) => stackBody(n)))).status === 201 && jobsNow() === before + 4);
+    check('the setting back to the default', (await setStacks(null)).status === 200 && stacksLimit() === 3);
+
+    before = jobsNow();
+    branchesBefore = branches();
+    const nick = await batch([stackBody(8), stackBody(9, { agents: [{ role: 'orchestrator', model: 'opus', autonomy: DEFAULT_AUTONOMY }] }), stackBody(10)]);
+    check('one stack with a bad model → 400 naming it, nothing made, the first stack included', nick.status === 400 && /^stack 2: invalid agents/.test(nick.body.error ?? '') && jobsNow() === before && branches() === branchesBefore, `${nick.status} ${nick.body.error}`);
+    const noPrompt = await batch([stackBody(8), stackBody(9, { prompt: ' ' })]);
+    check('one with no prompt, or a branch not on a worktree → 400, nothing made', noPrompt.status === 400 && /^stack 2: prompt is required/.test(noPrompt.body.error ?? '') && (await batch([stackBody(8), stackBody(9, { isolation: 'in_place' })])).status === 400 && jobsNow() === before);
+    check('one for a project not there → 400, nothing made', (await batch([stackBody(8), stackBody(9, { projectId: 'proj_none' })])).status === 400 && jobsNow() === before && branches() === branchesBefore);
+    const twice = await batch([stackBody(8), stackBody(9, { branch: 's178/t8' })]);
+    check('two stacks naming one branch → 409, nothing made', twice.status === 409 && /s178\/t8 is named twice/.test(twice.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${twice.status} ${twice.body.detail}`);
+
+    // ── git refuses one part-way: the others are kept ───────────────────────────
+    // `a..b` passes the route's shape check and is refused by git's check-ref-format in createJob.
+    const part = await batch([stackBody(11), stackBody(12, { branch: 's178/a..b' }), stackBody(13)]);
+    const kept = part.body.jobs ?? [];
+    check('git refusing stack 2 → 207', part.status === 207, `${part.status} ${JSON.stringify(part.body).slice(0, 300)}`);
+    check('stack 1 is kept, and stack 3 is still made', kept.map((m) => m.job.branch).join() === 's178/t11,s178/t13' && jobsNow() === before + 2 && kept.every((m) => existsSync(m.job.worktreePath)));
+    check("and stack 2's reason is said", part.body.stacks?.length === 3 && part.body.stacks[0]!.jobId === kept[0]?.job.id && /s178\/a\.\.b/.test(part.body.stacks[1]!.error ?? '') && part.body.stacks[1]!.jobId === undefined && part.body.stacks[2]!.jobId === kept[1]?.job.id, JSON.stringify(part.body.stacks));
+
+    // ── one launch is as it was ─────────────────────────────────────────────────
+    const one = await send<{ job?: { branch: string }; error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
+    check('POST /api/jobs still makes one, 201', one.status === 201 && one.body.job?.branch === 's178/t14');
+    const oneBad = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(15, { prompt: '' }));
+    check('and refuses as it did, word for word', oneBad.status === 400 && JSON.stringify(oneBad.body) === JSON.stringify({ error: 'prompt is required' }));
+    const oneTaken = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
+    check('a branch taken is still its 409', oneTaken.status === 409 && oneTaken.body.error === 'could not use that branch' && /already checked out/.test(oneTaken.body.detail ?? ''), `${oneTaken.status} ${oneTaken.body.detail}`);
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n30 · a changed setting takes effect on the next run, and a live run takes the mode and effort (Amendment 178)');
   {
@@ -8153,7 +8242,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

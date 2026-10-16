@@ -1003,6 +1003,26 @@
   color: var(--ink3);
 }
 
+/* The stacks control (Amendment 178), beside "helpers in all": small pills on the head line. */
+.sp-stacks {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.sp-pill.sp-stack {
+  padding: 1px 8px;
+  font-size: var(--fs-sm);
+}
+
+/* Each stack's first line, {track} filled, under the prompt. */
+.sp-stack-lines {
+  margin-top: 6px;
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  font-family: var(--mono);
+}
+
 .sp-pipe-row {
   display: flex;
   align-items: baseline;

@@ -15,7 +15,8 @@
  * accepts that isolation, so jobs that have it are unchanged.
  */
 
-import type { AgentSpec, BranchesResponse, CreateJobRequest, Isolation } from '@conductor/shared';
+import type { AgentSpec, BranchesResponse, CreateJobRequest, CreateJobsRequest, Isolation } from '@conductor/shared';
+import { DEFAULT_STACKS, STACKS_MAX } from '@conductor/shared';
 
 export type Method = 'in_place' | 'named' | 'worktree';
 
@@ -140,6 +141,101 @@ export function launchBody(i: LaunchInput): CreateJobRequest {
     agents: i.agents,
     budgetUsd: i.budgetUsd,
   };
+}
+
+/**
+ * Several stacks from one launch (Amendment 178). An orchestrated launch may start up to the
+ * setting's count of stacks from one plan, each its own job, worktree and branch, and each
+ * told its own work by `{track}`: the stack's number, 1 to N, put in the prompt and in a
+ * branch you name. Spawn doesn't read the plan file; the number is all a stack is told.
+ */
+export const TRACK = '{track}';
+
+/** The setting that caps the stacks control, as the daemon's `stacksLimit()` reads it. */
+export const STACKS_KEY = 'conductor.launch.stacks';
+
+/** The setting's value as a count: a whole number from 1 to `STACKS_MAX`, or the default. */
+export function stacksFrom(raw: string | null): number {
+  const n = Number(raw);
+  return raw !== null && raw.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= STACKS_MAX ? n : DEFAULT_STACKS;
+}
+
+/** `text` with every `{track}` made `n`. */
+export function withTrack(text: string, n: number): string {
+  return text.split(TRACK).join(String(n));
+}
+
+/**
+ * Why `n` stacks can't launch as asked, or null. One stack is today's launch and is never
+ * refused here. More need `{track}` in the prompt, so each has its own work, and in a branch
+ * you name, so each has its own branch; and each needs a checkout of its own, which (1) is not.
+ */
+export function stacksRefusal(
+  prompt: string,
+  method: Method,
+  branch: string,
+  n: number,
+  limit: number = STACKS_MAX,
+): string | null {
+  if (n <= 1) return null;
+  if (n > limit) return `At most ${limit} stacks from one launch (Settings → Agents).`;
+  if (!prompt.includes(TRACK)) return `Each stack needs its own work: put ${TRACK} where its number goes.`;
+  if (method === 'in_place') {
+    return 'Each stack needs a checkout of its own: choose a new branch, not the default branch in the folder.';
+  }
+  if (method === 'named' && !branch.includes(TRACK)) {
+    return `Each stack needs a branch of its own: put ${TRACK} in the branch's name.`;
+  }
+  return null;
+}
+
+/**
+ * The requests `n` stacks make, in order. One is `launchBody` exactly; more fill `{track}` with
+ * 1 to N in the prompt and in a named branch, and are otherwise the same launch.
+ */
+export function stacksBodies(input: LaunchInput, n: number): CreateJobRequest[] {
+  if (n <= 1) return [launchBody(input)];
+  return Array.from({ length: n }, (_, i) =>
+    launchBody({ ...input, prompt: withTrack(input.prompt, i + 1), branch: withTrack(input.branch, i + 1) }),
+  );
+}
+
+/** Where a launch posts and what: one stack to `/api/jobs` as always, more to the batch. */
+export function launchRequest(
+  input: LaunchInput,
+  n: number,
+): { path: '/api/jobs'; body: CreateJobRequest } | { path: '/api/jobs/batch'; body: CreateJobsRequest } {
+  const bodies = stacksBodies(input, n);
+  return n <= 1 ? { path: '/api/jobs', body: bodies[0]! } : { path: '/api/jobs/batch', body: { jobs: bodies } };
+}
+
+/** Each stack's first line, `{track}` filled, as shown under the prompt; none for one stack. */
+export function stacksPreview(prompt: string, n: number): string[] {
+  if (n <= 1) return [];
+  const first = prompt.trim().split('\n')[0] ?? '';
+  return Array.from({ length: n }, (_, i) => withTrack(first, i + 1));
+}
+
+const usd = (v: number): string =>
+  `$${v.toLocaleString('en-US', { maximumFractionDigits: Number.isInteger(v) ? 0 : 2 })}`;
+
+/** "3 stacks × $500 = $1,500", or null for one stack or no budget. */
+export function stacksBudgetLine(n: number, perStack: number | null): string | null {
+  if (n <= 1 || perStack === null) return null;
+  return `${n} stacks × ${usd(perStack)} = ${usd(n * perStack)}`;
+}
+
+/** What the control says under it: the slots they want at once, and how they merge. */
+export function stacksNotes(n: number, free: number): string[] {
+  if (n <= 1) return [];
+  const notes: string[] = [];
+  if (n > free) {
+    notes.push(
+      `${n} stacks want up to ${n} slots at once, one orchestrator each, and ${free} ${free === 1 ? 'is' : 'are'} free: the rest wait for one.`,
+    );
+  }
+  notes.push('Stacks that merge into one branch need the plan to say how (a merge lock, as wave-11-tracks.md §0).');
+  return notes;
 }
 
 /**

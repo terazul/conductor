@@ -98,6 +98,7 @@ the last of it on 12 Oct).
     Is 3 per launch, or for the whole fleet?
     *Decided (15 Oct): Spawn launches several stacks from one plan, up to 3 per launch. A design note comes first, for approval.*
     *Decided (16 Oct): design `docs/plans/p1-design.md` approved, option B: one `POST /api/jobs/batch`, no migration; the cap is a setting, `conductor.launch.stacks` (1 to 6, default 3); each stack's prompt and named branch fill in `{track}`; the Fleet card is left for later.*
+    *Done (16 Oct): Amendment 178. Spawn's orchestrated launch has a **stacks** control (1 to the setting, `conductor.launch.stacks`, default 3) and posts N stacks to `POST /api/jobs/batch`, each with `{track}` filled in its prompt and named branch; the daemon checks all before making any, and reports each stack it made or why not (201, or 207 with the rest kept). Left: the Fleet card still shows one job per project, and there is no daemon merge lock.*
 
 - [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
   this replaces "back off to every hour". Today an agent that can't reach the model retries on its

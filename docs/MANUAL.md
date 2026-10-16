@@ -502,6 +502,20 @@ whose steps you already know.
   row with every role taken off launches as the agent you made, plainly.
 - **On Copilot or OpenRouter** every role runs on the launch's one model, with no tiers to
   choose between; the rest is the same.
+- **Several stacks from one plan.** Beside the helpers, **stacks 1 2 3** launches that many
+  orchestrated stacks at once, each its own job, worktree and branch, as wave 11's six jobs were
+  launched by hand. Each is told its number by `{track}`: put it in the prompt ("Run track
+  **{track}** of `docs/plans/wave-11-tracks.md`") and, if you name the branch, in its name
+  (`w12/t{track}`). The launch waits until both are there, and won't run more than one stack on
+  the folder's own branch. Under the prompt is each stack's first line with its number filled
+  in; the budget line reads *3 stacks × $500 = $1,500*, and the button **launch 3 stacks**.
+  Each orchestrator takes a slot, so stacks beyond the free slots wait for one, and the
+  control says so. The daemon checks every stack before it makes any: a bad model, a missing
+  prompt or two stacks naming one branch start none. A stack git still refuses (its branch
+  checked out elsewhere) is listed as **not started** with git's reason, and the others run.
+  The most one launch may start is **stacks one orchestrated launch may start** on Settings →
+  Agents, 1 to 6, 3 by default. How the stacks' work comes back together is the plan's to say
+  (a merge lock, as `wave-11-tracks.md` §0): Spawn doesn't read the plan.
 
 Each row gets its model in the plan preview, like the presets. Each role can appear only
 once, and a role that only reads (`reviewer`, `analyst`, …) stays read-only here too. Name

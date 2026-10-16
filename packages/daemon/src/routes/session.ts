@@ -16,6 +16,8 @@ import type {
   AgentSpec,
   Autonomy,
   CreateJobRequest,
+  CreateJobResponse,
+  CreateJobsResponse,
   CreateProjectRequest,
   DecideRequest,
   Decision,
@@ -33,6 +35,7 @@ import type {
   SetAutonomyResponse,
   SetModelRequest,
   SetModelResponse,
+  StackLaunch,
   StopRetryingResponse,
 } from '@conductor/shared';
 import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
@@ -59,6 +62,7 @@ import {
 import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, updateNote } from '../session/store.js';
 import { describeRule } from '../session/rules.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
+import { STACKS_KEY, stacksLimit } from '../slots.js';
 import {
   FolderGoneError,
   HandOffRefusedError,
@@ -343,6 +347,60 @@ async function checkProviderModels(specs: AgentSpec[]): Promise<void> {
   }
 }
 
+/** A launch request as checked, or the refusal: its status, error and detail. */
+type ParsedJob = { ok: true; request: CreateJobRequest } | { ok: false; status: number; error: string; detail?: string };
+
+/**
+ * `POST /api/jobs`'s checks, in one place, so the batch (Amendment 178) checks each stack
+ * exactly as one launch is checked: the prompt, the agents and their models, and a branch's
+ * shape. Git's word on the branch comes later, in `createJob`.
+ */
+async function parseCreateJob(raw: unknown): Promise<ParsedJob> {
+  const body = asRecord(raw);
+  const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
+  const prompt = typeof body['prompt'] === 'string' ? body['prompt'] : '';
+  const isolation = ISOLATIONS.includes(body['isolation'] as Isolation)
+    ? (body['isolation'] as Isolation)
+    : 'in_place';
+
+  if (!projectId) return { ok: false, status: 400, error: 'projectId is required' };
+  if (!prompt.trim()) return { ok: false, status: 400, error: 'prompt is required' };
+
+  let agents: AgentSpec[];
+  try {
+    agents = parseAgentSpecs(body['agents']);
+    await checkProviderModels(agents);
+  } catch (err) {
+    return { ok: false, status: 400, error: 'invalid agents', detail: String(err) };
+  }
+
+  // A branch you name (Amendment 115): a worktree on it. Its name is checked by git in
+  // `createJob`; here only its shape, and that it goes with a worktree.
+  const named = body['branch'];
+  if (named !== undefined && named !== null) {
+    if (typeof named !== 'string' || named.length === 0) {
+      return { ok: false, status: 400, error: 'branch must be the name of a branch', detail: 'a non-empty string, or leave it out' };
+    }
+    if (isolation !== 'worktree') {
+      return { ok: false, status: 400, error: 'branch goes with isolation "worktree"', detail: 'only a worktree can be on a branch of its own' };
+    }
+  }
+
+  const budget = body['budgetUsd'];
+  return {
+    ok: true,
+    request: {
+      projectId,
+      prompt,
+      isolation,
+      agents,
+      ...(typeof body['preset'] === 'string' ? { preset: body['preset'] } : {}),
+      ...(typeof named === 'string' ? { branch: named } : {}),
+      budgetUsd: typeof budget === 'number' && budget > 0 ? budget : null,
+    },
+  };
+}
+
 /** Narrow the frozen Decision union coming off the wire. */
 function parseDecision(raw: unknown): Decision {
   const d = asRecord(raw);
@@ -614,55 +672,60 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   });
 
   app.post('/api/jobs', async (req, reply) => {
-    const body = asRecord(req.body);
-    const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
-    const prompt = typeof body['prompt'] === 'string' ? body['prompt'] : '';
-    const isolation = ISOLATIONS.includes(body['isolation'] as Isolation)
-      ? (body['isolation'] as Isolation)
-      : 'in_place';
-
-    if (!projectId) return fail(reply, 400, 'projectId is required');
-    if (!prompt.trim()) return fail(reply, 400, 'prompt is required');
-
-    let agents: AgentSpec[];
+    const parsed = await parseCreateJob(req.body);
+    if (!parsed.ok) return fail(reply, parsed.status, parsed.error, parsed.detail);
     try {
-      agents = parseAgentSpecs(body['agents']);
-      await checkProviderModels(agents);
-    } catch (err) {
-      return fail(reply, 400, 'invalid agents', String(err));
-    }
-
-    // A branch you name (Amendment 115): a worktree on it. Its name is checked by git in
-    // `createJob`; here only its shape, and that it goes with a worktree.
-    const named = body['branch'];
-    if (named !== undefined && named !== null) {
-      if (typeof named !== 'string' || named.length === 0) {
-        return fail(reply, 400, 'branch must be the name of a branch', 'a non-empty string, or leave it out');
-      }
-      if (isolation !== 'worktree') {
-        return fail(reply, 400, 'branch goes with isolation "worktree"', 'only a worktree can be on a branch of its own');
-      }
-    }
-
-    const budget = body['budgetUsd'];
-    const request: CreateJobRequest = {
-      projectId,
-      prompt,
-      isolation,
-      agents,
-      ...(typeof body['preset'] === 'string' ? { preset: body['preset'] } : {}),
-      ...(typeof named === 'string' ? { branch: named } : {}),
-      budgetUsd: typeof budget === 'number' && budget > 0 ? budget : null,
-    };
-
-    try {
-      return reply.code(201).send(await sup.createJob(request));
+      return reply.code(201).send(await sup.createJob(parsed.request));
     } catch (err) {
       // The name git rejects is 400 and a default branch or one checked out elsewhere is 409,
       // each with its sentence (Amendment 115).
       if (err instanceof LaunchBranchError) return fail(reply, err.status, 'could not use that branch', err.message);
       return fail(reply, 400, 'could not create job', String(err));
     }
+  });
+
+  /**
+   * Several stacks from one Spawn launch (Amendment 178), each its own job, worktree and
+   * branch. Every request is checked first, as `POST /api/jobs` checks one, and with them the
+   * count (1 to `stacksLimit()`), that each project is there, and that no two name one branch:
+   * any refusal makes nothing. Then each is created in turn. A stack whose worktree git refuses
+   * (a name it rejects, a branch checked out elsewhere) fails alone: the ones before it are
+   * kept, the ones after it are still tried, and the reply is 207 with every stack's outcome.
+   */
+  app.post('/api/jobs/batch', async (req, reply) => {
+    const raw = asRecord(req.body)['jobs'];
+    const limit = stacksLimit();
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > limit) {
+      return fail(reply, 400, 'jobs is a list of 1 to the stacks a launch may start', `from 1 to ${limit} (${STACKS_KEY})`);
+    }
+    const requests: CreateJobRequest[] = [];
+    for (const [i, body] of raw.entries()) {
+      const parsed = await parseCreateJob(body);
+      if (!parsed.ok) {
+        return fail(reply, parsed.status, `stack ${i + 1}: ${parsed.error}`, parsed.detail);
+      }
+      if (!getProject(db, parsed.request.projectId)) return fail(reply, 400, `stack ${i + 1}: no such project`);
+      requests.push(parsed.request);
+    }
+    const named = requests.map((r) => r.branch).filter((b): b is string => b !== undefined);
+    const twice = named.find((b, i) => named.indexOf(b) !== i);
+    if (twice !== undefined) {
+      return fail(reply, 409, 'two stacks name one branch', `${twice} is named twice. A branch can be checked out in one place at a time: put {track} in its name.`);
+    }
+
+    const jobs: CreateJobResponse[] = [];
+    const stacks: StackLaunch[] = [];
+    for (const [i, request] of requests.entries()) {
+      try {
+        const made = await sup.createJob(request);
+        jobs.push(made);
+        stacks.push({ stack: i + 1, jobId: made.job.id });
+      } catch (err) {
+        stacks.push({ stack: i + 1, error: err instanceof LaunchBranchError ? err.message : String(err) });
+      }
+    }
+    const body: CreateJobsResponse = { jobs, stacks };
+    return reply.code(jobs.length === requests.length ? 201 : 207).send(body);
   });
 
   /**
