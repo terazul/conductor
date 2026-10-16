@@ -42,6 +42,8 @@ export type PtyStatus = { available: true } | { available: false; reason: string
 let loaded: { mod: PtyModule } | { reason: string } | null = null;
 /** For verify: pretend the library will not load. */
 let forced: string | null = null;
+/** For verify: a stand-in for the library, so a suite can hold a shell without a real PTY. */
+let stubbed: PtyModule | null = null;
 
 /** The first line of what a failed load said, trimmed to something a banner can carry. */
 function firstLine(err: unknown): string {
@@ -90,6 +92,7 @@ function load(): { mod: PtyModule } | { reason: string } {
 /** Whether a full terminal can start here, and if not, the sentence that says why. */
 export function ptyStatus(platform: string = process.platform): PtyStatus {
   if (forced !== null) return { available: false, reason: forced };
+  if (stubbed) return { available: true };
   if (platform !== 'darwin' && platform !== 'linux') {
     return { available: false, reason: `A full terminal is built for macOS and Ubuntu, not ${platform}` };
   }
@@ -100,6 +103,7 @@ export function ptyStatus(platform: string = process.platform): PtyStatus {
 /** The library, or null when it will not load (or this is not macOS or Linux). */
 export function loadPty(): PtyModule | null {
   if (forced !== null) return null;
+  if (stubbed) return stubbed;
   if (process.platform !== 'darwin' && process.platform !== 'linux') return null;
   const l = load();
   return 'mod' in l ? l.mod : null;
@@ -108,4 +112,9 @@ export function loadPty(): PtyModule | null {
 /** For verify only: make the library read as not loading (a sentence), or put it back (null). */
 export function forcePtyUnavailable(reason: string | null): void {
   forced = reason;
+}
+
+/** For verify only: spawn shells from `mod` instead of the library, or put it back (null). */
+export function stubPty(mod: PtyModule | null): void {
+  stubbed = mod;
 }

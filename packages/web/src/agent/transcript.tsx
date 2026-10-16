@@ -200,6 +200,11 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
         break;
       }
 
+      case 'helpers_removed':
+        // Your new task cleared the last one's helpers (Amendment 177, of 167).
+        agentTurn(e.seq).blocks.push({ kind: 'note', key: `h${e.seq}`, text: helpersRemovedNote(p.count, p.names), tone: 'idle' });
+        break;
+
       // usage / todo drive the inspector; worktree, dev_server and console are
       // job-scoped and never reach an agent's stream.
       default:
@@ -209,6 +214,12 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
 
   // Drop an agent turn that ended up with nothing to show.
   return turns.filter((t) => t.who === 'you' || t.blocks.length > 0);
+}
+
+/** `2 finished helpers removed: developer-api, reviewer-api`. */
+export function helpersRemovedNote(count: number, names: readonly string[]): string {
+  const what = `${count} finished ${count === 1 ? 'helper' : 'helpers'} removed`;
+  return names.length > 0 ? `${what}: ${names.join(', ')}` : what;
 }
 
 function statusNote(

@@ -33,7 +33,7 @@
 
 import { TURN_END_LINE } from './background.js';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -161,7 +161,9 @@ import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIE
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
 import { deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone } from './schedule.js';
-import { SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
+import { BudgetReachedError, FolderGoneError, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
+import { terminals } from '../terminal/service.js';
+import { stubPty } from '../terminal/pty.js';
 import { pipelineHelperBrief, pipelineReportClosing, pipelineSection, wakeMessage } from './handoff.js';
 
 /*
@@ -3308,6 +3310,103 @@ async function main(): Promise<void> {
     await whenDone174('agt_orch174b', 'One more pass.');
     runs[t174]?.finish({ cost: 0, reason: 'completed' });
     check('an orchestrator that started no helpers still gets it when its turn ends done', await until(() => runs.length === t174 + 2) && (await until(() => runs[t174 + 1]?.prompts[0] === 'One more pass.')), JSON.stringify(runs[t174 + 1]?.prompts));
+
+    // ── Amendment 177: the orchestrator's transcript says its helpers were removed; what removes none ──
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const dir177 = mkdtempSync(join(tmpdir(), 'conductor-c177-'));
+    insertJob(db, { id: 'job_c177', projectId: pid, prompt: 'the job_c177 prompt', isolation: 'in_place', worktreePath: dir177, branch: 'main', status: 'done', budgetUsd: null });
+    fixture('agt_up177', 'job_c177', { role: 'planner', sdkSessionId: 'sess_up177' });
+    eventLog().emit({ projectId: pid, jobId: 'job_c177', agentId: 'agt_up177' }, { kind: 'text', text: 'The plan: an API and a UI.' });
+    fixture('agt_orch177', 'job_c177', { status: 'queued', helperCap: 2, dependsOn: ['agt_up177'], autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 5 } });
+    const s177 = runs.length;
+    sup.pump();
+    await until(() => runs.length === s177 + 1);
+    await until(() => (runs[s177]?.prompts.length ?? 0) > 0);
+    for (const name of ['API', 'UI']) await mcp('agt_orch177', 'tools/call', { name: 'start_helper', arguments: { task: `Build the ${name}.`, name } });
+    await until(() => runs.length === s177 + 3);
+    const helpers177 = helpersOf(db, 'agt_orch177');
+    runs[s177]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_orch177')?.status === 'queued');
+    runs[s177 + 1]?.finish({ cost: 0, reason: 'completed' });
+    runs[s177 + 2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => runs.length === s177 + 4);
+    await until(() => (runs[s177 + 3]?.prompts.length ?? 0) > 0);
+    runs[s177 + 3]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_orch177')?.status === 'done');
+    const kept177 = () => helpers177.every((h) => getAgent(db, h.id) !== undefined);
+    const told177 = () => eventLog().forAgent('agt_orch177').filter((e) => e.payload.kind === 'helpers_removed');
+    check('set up: an orchestrator done, with two ended, reported helpers', helpers177.length === 2 && helpers177.every((h) => getAgent(db, h.id)?.status === 'done') && unreportedHelpers(db, 'agt_orch177').length === 0 && told177().length === 0);
+
+    const refused177 = (text: string): unknown => {
+      try {
+        sup.sendMessage('agt_orch177', text, false);
+        return null;
+      } catch (err) {
+        return err;
+      }
+    };
+    const n177 = runs.length;
+    rmSync(dir177, { recursive: true, force: true });
+    const gone177 = refused177('the next task');
+    check('a message refused because its folder is gone removes no helper, and says nothing of it', gone177 instanceof FolderGoneError && kept177() && told177().length === 0 && runs.length === n177, String(gone177));
+    mkdirSync(dir177);
+    addSpendToday(db, 'agt_orch177', { usd: 50 });
+    const broke177 = refused177('the next task');
+    check('nor one refused because its budget is reached', broke177 instanceof BudgetReachedError && kept177() && told177().length === 0 && runs.length === n177, String(broke177));
+    setAgentAutonomy(db, 'agt_orch177', { ...DEFAULT_AUTONOMY, budgetUsd: 500 });
+
+    const rerun177 = await sup.rerunFrom('agt_up177');
+    check('re-run from here goes back to the orchestrator', rerun177.agents.some((a) => a.agentId === 'agt_orch177' && a.action === 'resume'), JSON.stringify(rerun177));
+    await until(() => runs.length === n177 + 1);
+    await until(() => (runs[n177]?.prompts.length ?? 0) > 0);
+    check('and is not a new task from you: it removes no helper, and says nothing of it (Amendment 102)', kept177() && told177().length === 0, runs[n177]?.prompts[0]);
+    runs[n177]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_orch177')?.status === 'done');
+
+    // A stand-in for the PTY library, so the rule holds whether or not this machine can open one.
+    let exit177: ((e: { exitCode: number }) => void) | null = null;
+    stubPty({
+      spawn: () => ({
+        pid: 0,
+        onData: () => undefined,
+        onExit: (cb) => void (exit177 = cb),
+        write: () => undefined,
+        resize: () => undefined,
+        kill: () => exit177?.({ exitCode: 129 }),
+        pause: () => undefined,
+        resume: () => undefined,
+      }),
+    });
+    const shell177 = terminals().create({ scope: { kind: 'agent', agentId: helpers177[0]!.id }, jobId: 'job_c177', cwd: dir177 });
+    const wake177 = async (text: string) => {
+      const n = runs.length;
+      sup.sendMessage('agt_orch177', text, false);
+      await until(() => runs.length === n + 1);
+      runs.at(-1)?.finish({ cost: 0, reason: 'completed' });
+      await until(() => getAgent(db, 'agt_orch177')?.status === 'done');
+    };
+    await wake177('the next task');
+    check('a helper with a shell still running keeps every helper, and nothing is said', kept177() && told177().length === 0 && terminals().get(shell177.id)?.exited === false);
+    exit177!({ exitCode: 0 });
+    check('its shell exits, and stays listed as exited', terminals().get(shell177.id)?.exited === true);
+    const eyes177 = await connect();
+    await settle();
+    await wake177('and the task after');
+    check('then a message of yours removes them all', helpers177.every((h) => getAgent(db, h.id) === undefined) && getAgent(db, 'agt_orch177') !== undefined);
+    const said177 = told177();
+    const p177 = said177[0]?.payload;
+    check(
+      'and the orchestrator is told, once: how many, and which',
+      said177.length === 1 && p177?.kind === 'helpers_removed' && p177.count === 2 && p177.names.join(',') === helpers177.map((h) => h.role).join(',') && p177.names.join(',') === 'builder-api,builder-ui',
+      JSON.stringify(said177.map((e) => e.payload)),
+    );
+    await settle();
+    check('every browser hears it as an event', eyes177.frames.some((f) => f.type === 'events' && f.events.some((e) => e.agentId === 'agt_orch177' && e.payload.kind === 'helpers_removed')));
+    check('and it is not a turn: a handoff built from the orchestrator leaves it out', turnsFromEvents(eventLog().forAgent('agt_orch177'), '').every((t) => !/removed/.test(t.text)));
+    eyes177.close();
+    stubPty(null);
+    rmSync(dir177, { recursive: true, force: true });
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     sdk.query = realQuery;
   }

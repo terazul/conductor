@@ -425,7 +425,9 @@ are held only at its ceiling, twice it unless Settings says otherwise (§6).
 as **Remove** removes one, so their lanes leave the job. That happens only when every one of them
 has ended and the orchestrator has already been told what each did: their whole conversations are
 in its own transcript. One still going, one with a message of yours waiting, or one with a shell
-of yours still running keeps them all. The orchestrator's helper count and send-backs start again
+of yours still running keeps them all. Its transcript says so, as one line at the end of its
+last turn: *2 finished helpers removed: developer-api, reviewer-api*. A message that is refused
+(its budget reached, its folder gone) and **re-run from here** remove none. The orchestrator's helper count and send-backs start again
 from nothing, so a new task can use its whole allowance and the lane names (`developer-api`) are
 free again. The project's spend keeps what they spent; the job's budget, as after any Remove,
 counts only the agents it still has.

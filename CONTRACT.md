@@ -200,6 +200,47 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 177 — post-merge, applied. **An orchestrator's transcript says when its finished helpers were removed; a refused message and re-run from here remove none.**
+
+Shared (`events.ts`), daemon (`session/supervisor.ts`, `terminal/pty.ts`, `session/verify.ts`), web
+(`agent/transcript.tsx`, `agent/verify.ts`) and `docs/MANUAL.md`. Wave 12's lane C1, Amendment 167's loose
+ends (`docs/plans/wave-12-tracks.md` §2; no TODO entry, nothing to decide). *Amends Amendment 167*: it closes
+its first *Not done*, "the orchestrator's transcript does not say its helpers were removed (no new event
+kind)", and checks two of its rules that had no check.
+
+- **A new event kind, `helpers_removed`** (`HelpersRemovedPayload`, `events.ts:276`): `count`, and `names`,
+  the removed helpers' roles oldest first (`developer-api`). A widening of the frozen union, as `api_retry`
+  was. The `events` table keeps `kind` as free text, so no migration.
+- **Written once per clearing, on the orchestrator.** `#clearFinishedHelpers` (`supervisor.ts:2027`) emits it
+  after the last `#dropAgentRow` and before the one `resync` (`:2043`). Nothing removed, nothing written: the
+  all-or-none rule returns before it.
+- **Shown as one line.** `buildTranscript` (`transcript.tsx:203`) makes it a note at the end of the
+  orchestrator's last turn, before your new message: *2 finished helpers removed: developer-api,
+  reviewer-api* (`helpersRemovedNote`, `transcript.tsx:220`), in the idle tone of *terminated by you*.
+- **Counted by nothing.** Not a turn (`turnsFromEvents` and `eventLog().conversation` read only the four
+  conversation kinds), not spend, not an alert, not the Fleet's activity line.
+- **A stand-in terminal for the suite.** `stubPty` (`pty.ts:118`), for verify only, gives the terminals a
+  stand-in for the PTY library, so the "shell still running" rule is checked on any machine. Nothing else
+  calls it.
+
+*Not done:* a cleared helper's own page is still gone, and a tab open on one still shows the empty agent
+screen (167's second *Not done*). The line says which helpers went, not what they did: that is in the
+report above it.
+
+*Verified:* `session/verify.ts` §17c (the block "Amendment 177" at `:3314`), against the real supervisor and
+the fake SDK, with an orchestrator done after two ended, reported helpers: a message refused because its
+folder is gone (`FolderGoneError`) and one refused because its budget is reached (`BudgetReachedError`)
+remove no helper, write no `helpers_removed` and start no run; **re-run from here** on the agent before it
+resumes the orchestrator and removes none; with a stand-in shell of one helper's still running, a message of
+yours removes none and says nothing; once that shell has exited, the same message removes both, writes one
+`helpers_removed` on the orchestrator with `count: 2` and `names` `builder-api, builder-ui`, and every
+subscribed browser gets it as an event; a handoff built from the orchestrator leaves it out. With the emit
+switched off, two of these fail (the event, and the browser hearing it). With the shell rule switched off,
+the shell check fails; with `#clearFinishedHelpers` moved above `sendMessage`'s refusals, the two refusal
+checks fail; with it called from `rerunFrom`, the re-run check fails. `agent/verify.ts` (the block
+"Amendment 177" at `:1171`) for the line: the count and names, where it falls, one helper in the singular,
+and the rendered transcript. `make test` green.
+
 ### Amendment 176 — post-merge, applied. **The database is backed up on every start and every 6 h, the last 10 kept, and `make restore` brings back the latest with the daemon stopped.**
 
 Daemon only (`db/backup.ts` and `db/backup-cli.ts` new, `index.ts`), the `Makefile`, and
@@ -692,7 +733,7 @@ none on the next.
   `jobCostToday` against `jobCap`, loses both their spend and their budgets, as after any Remove.
 
 *Not done / not decided:* the orchestrator's transcript does not say its helpers were removed (no new event
-kind). A cleared helper's own page is gone; a tab open on one shows the empty agent screen. An ordinary
+kind; see Amendment 177). A cleared helper's own page is gone; a tab open on one shows the empty agent screen. An ordinary
 job's agents (not helpers) are never removed this way.
 
 *Verified:* `session/verify.ts` §17c (the block "Amendment 167" at `:3076`), against the real supervisor and

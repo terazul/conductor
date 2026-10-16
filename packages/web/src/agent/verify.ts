@@ -45,7 +45,7 @@ import {
 } from './folds.js';
 import { lineCount, renderMarkdown, tableCells } from './markdown.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
-import { Transcript, buildTranscript, replyKeys, startFoldedKeys } from './transcript.js';
+import { Transcript, buildTranscript, helpersRemovedNote, replyKeys, startFoldedKeys } from './transcript.js';
 import { isMermaid, mermaidReason } from '../lib/mermaid.js';
 import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
@@ -1168,9 +1168,27 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
   check('and its fold all uses both sets', /foldEvery\(s, agent\.id, replies, startFolded\)/.test(screen) && /unfoldEvery\(s, agent\.id, startFolded\)/.test(screen));
 }
 
+console.log("\n· an orchestrator's transcript says its finished helpers were removed (Amendment 177)");
+{
+  const at = (seq: number, payload: unknown): Event =>
+    ({ seq, ts: '2026-10-16T00:00:00Z', projectId: 'p', jobId: 'j', agentId: 'o', payload }) as Event;
+  const run = buildTranscript([
+    at(1, { kind: 'text', text: 'Both lanes are merged.' }),
+    at(2, { kind: 'status', status: 'done' }),
+    at(3, { kind: 'helpers_removed', count: 2, names: ['developer-api', 'reviewer-api'] }),
+    at(4, { kind: 'user_text', text: 'now the next track' }),
+  ]);
+  const notes = run.flatMap((t) => t.blocks).filter((b) => b.kind === 'note').map((b) => (b.kind === 'note' ? `${b.tone}:${b.text}` : ''));
+  check('a helpers_removed event is one line: the count, then their names', notes.join(' | ') === 'done:finished | idle:2 finished helpers removed: developer-api, reviewer-api', notes.join(' | '));
+  check('at the end of the turn before your new task, which follows it', run.length === 2 && run[1]?.who === 'you' && run[1].text === 'now the next track');
+  check('one helper reads as one', helpersRemovedNote(1, ['builder-api']) === '1 finished helper removed: builder-api');
+  const drawn = renderToStaticMarkup(createElement(Transcript, { turns: run, agentId: 'agt_o', role: 'orchestrator', streaming: false, links: null, startFolded: [] }));
+  check('and the transcript renders it', drawn.includes('2 finished helpers removed: developer-api, reviewer-api'), drawn.slice(0, 400));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them.\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed.\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
