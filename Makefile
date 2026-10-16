@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help init install check-install dock undock start stop restart status browser logs fixture attention test clean manual zip
+.PHONY: help init install check-install dock undock start stop restart status browser logs fixture attention test clean backup restore manual zip
 
 # Conductor — process control.
 #
@@ -35,6 +35,8 @@ help:
 	@echo '  make logs       tail both logs'
 	@echo '  make test       every suite'
 	@echo '  make clean      stop, then delete the db and logs'
+	@echo '  make backup     back the db up now (the daemon does on start and every 6 h)'
+	@echo '  make restore    bring back the latest backup — with the daemon stopped'
 	@echo ''
 	@echo '  make zip        zip the project as committed, into dist/'
 	@echo '  make manual     open the user manual'
@@ -199,6 +201,7 @@ test:
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-background.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-answer.ts
 	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/session/verify-finish.ts
+	pnpm --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/db/verify-backup.ts
 
 # The database lives in ~/.conductor/ once you allowed it (Amendment 46); CONDUCTOR_DATA
 # moves it. Settings beside it are kept, and so is the database from before the move,
@@ -210,3 +213,13 @@ clean: stop
 	@if [ -e $(DB) ]; then rm -f $(DB) $(DB)-wal $(DB)-shm; echo "removed $(DB)"; else echo "no database at $(DB)"; fi
 	@rm -rf $(RUN)
 	@echo 'logs removed (settings.json, and worktrees under .conductor/wt, left alone)'
+
+# Backups (Amendment 176): the daemon makes one on start and every 6 h, into backups/ beside
+# the database, and keeps the last 10 (conductor-auto-*.db). Copies made by hand there are
+# never touched. restore refuses while a daemon runs; the database it replaces is kept as
+# backups/conductor-before-restore-*.db. The work is in packages/daemon/src/db/backup.ts.
+backup:
+	@pnpm --silent --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/db/backup-cli.ts backup
+
+restore:
+	@pnpm --silent --filter @conductor/daemon exec tsx --no-warnings=ExperimentalWarning src/db/backup-cli.ts restore

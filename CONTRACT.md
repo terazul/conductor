@@ -200,6 +200,67 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 176 — post-merge, applied. **The database is backed up on every start and every 6 h, the last 10 kept, and `make restore` brings back the latest with the daemon stopped.**
+
+Daemon only (`db/backup.ts` and `db/backup-cli.ts` new, `index.ts`), the `Makefile`, and
+`docs/MANUAL.md`. No wire, web or migration change. Asked for 15 Oct 2026 (TODO.md): *"a regular
+backup (SQLite's `VACUUM INTO` gives a consistent copy while the daemon runs), the last N kept, and
+a restore of the latest one, which has to happen with the daemon stopped."* Decided 15 Oct
+(docs/plans/wave-12-tracks.md §3): on daemon start and every 6 h, the last 10 kept, restore as a
+`make` target that refuses while the daemon runs. Run as lane K1 of track 3. *Amends* the 10 Oct
+practice of copying the database by hand before a migration; those copies are left as they are.
+
+- **A backup** (`backupNow`, `backup.ts:64`). `VACUUM INTO` from a connection of its own (`:77`),
+  so it is consistent while the daemon writes, has what the write-ahead log holds, and never changes
+  the database. Written to `.conductor-auto-<stamp>.db.partial` and renamed once whole (`:84`), so a
+  crash never leaves a half file under a backup's name; the next backup clears a stale one. None for
+  `:memory:`, or for a database not created yet.
+- **Where, and named how.** `backups/` beside the database (`backupsDir`, `:45`): `~/.conductor/backups/`,
+  or beside `CONDUCTOR_DB`, so a test's database in tmpdir never touches the real folder. Named
+  `conductor-auto-YYYYMMDD-HHMMSS.db` (`AUTO`, `:34`), the daemon's local time like its days, so the
+  latest is the last by name. **Only that shape is pruned or restored**: the hand-made copies there
+  (`conductor.db.20261010-221815`, `conductor.db-wal.…`) and a restore's set-aside never match it.
+- **When** (`startBackups`, `:103`; `index.ts:168`). One at once, in `main()` after storage is decided
+  and **before `build()` migrates**: when a start is about to run a migration, the backup is of the
+  database as it was, the one to want back if the migration goes wrong (a restored older schema
+  migrates again on the next start). Then every 6 h (`BACKUP_EVERY_MS`, `:31`) on an unref'd timer
+  (`:119`), so it never holds the process open; stopped on SIGINT/SIGTERM (`index.ts:184`). A failed
+  backup logs `[backup] failed: …` and the daemon carries on. Each one prunes to the last 10
+  (`pruneBackups`, `:90`). Restarts count: ten starts in a day leave ten backups from that day.
+- **Restore** (`restoreLatest`, `:158`; `make restore`). Refuses while the daemon runs
+  (`daemonRunning`, `:128`): anything answering `/api/health` on `CONDUCTOR_PORT` (7777), the setup
+  server included, or any process holding the database open (`lsof -t`, `:138`), which catches a
+  daemon from another checkout on another port. Refuses too when there is no backup, or when the
+  latest fails `PRAGMA integrity_check` (`:171`). Otherwise the current database is renamed aside
+  **with its `-wal` and `-shm`**, as `backups/conductor-before-restore-<stamp>.db` (`:179`), so it
+  opens whole, what its log held included; then the backup is copied in and renamed into place
+  (`:187`). Undo is copying that file back. It is never pruned.
+- **The targets** (`Makefile:221-225`). `make restore` and `make backup` (one now, safe while the
+  daemon runs) are one line each, running `db/backup-cli.ts`; the work is in `backup.ts`, where it is
+  tested. Both read the database's place as the daemon does (storage.ts), so `CONDUCTOR_DATA` and
+  `CONDUCTOR_DB` move them too.
+
+*Not done / not decided.* No Settings or Diagnostics view of the backups, and no way to restore one
+other than the latest except by hand. Restarting the daemon often rotates older backups out sooner;
+there is no one-a-day floor.
+
+*Verified.* `db/verify-backup.ts`, in `make test` (`Makefile:204`), 30 checks: three backups taken
+while another process writes rows open, pass `integrity_check`, hold more rows each, and one taken
+with a transaction open has what was committed only; names are `conductor-auto-20261016-090000.db`;
+no partial copy is left. Thirteen backups leave exactly the newest 10, and the hand-made copies, a
+set-aside and another file untouched; a stale partial is cleared. `:memory:` makes none and starts
+no schedule; a missing database makes none and no folder. The schedule makes one at once, one a
+period, none once stopped; a backup of a file that isn't a database is logged, not thrown, and
+leaves nothing. Restore refuses with "the daemon is running … make stop first" and changes nothing;
+then brings back the latest (not the one before), which passes `integrity_check`, removes the old
+`-wal`/`-shm`, and sets the old database aside with rows that were only in its log (written by a
+process killed with its connection open); a broken latest backup is refused; no backup and
+`:memory:` say why. **Revert check:** with the name rule loosened to `^conductor`, pruning deleted a
+hand-made copy (a ✗); with the set-aside replaced by a delete, the suite fails. By hand on a tmp
+`CONDUCTOR_DATA`: `make backup` made one; `make restore` refused with the live daemon on 7777, and
+with a process holding the file on a free port (lsof); on a free port it restored and named the
+set-aside. `pnpm -r typecheck` is clean, and `make test` is green: 29 PASS.
+
 ### Amendment 175 — post-merge, applied. **Every agent runs shell unattended by default, except a reading role, and `git push` stays denied.**
 
 Wave 12, B1. Asked for (15 Oct): "the current defaults ask for permission to do bash when running

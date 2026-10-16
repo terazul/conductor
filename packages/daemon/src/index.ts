@@ -24,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { WS_PATH, DEFAULT_PORT } from '@conductor/shared';
-import { openDb } from './db/index.js';
+import { dbPath, openDb } from './db/index.js';
+import { startBackups } from './db/backup.js';
 import { initEventLog } from './eventlog.js';
 import { initHub, hub } from './hub.js';
 import { initWindows } from './session/windows.js';
@@ -163,6 +164,8 @@ async function main(): Promise<void> {
   if (decideAtBoot() === 'undecided') await askFirst(HOST, PORT);
   const where = storageNow();
   console.log(where.saved ? `[storage] keeping data in ${where.dir}` : `[storage] ${where.mode}: nothing is saved`);
+  // Before build() migrates, so the start's backup is of the database as it was (Amendment 176).
+  const stopBackups = startBackups(dbPath());
   const app = await build();
   try {
     await app.listen({ host: HOST, port: PORT });
@@ -178,6 +181,7 @@ async function main(): Promise<void> {
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
       app.log.info(`${sig} — shutting down`);
+      stopBackups();
       void app.close().then(() => process.exit(0));
     });
   }
