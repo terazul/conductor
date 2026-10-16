@@ -32,7 +32,7 @@ the last of it on 12 Oct).
   - *Done (15 Oct): Amendment 174. A `'done'` row on an orchestrator goes with its helpers' report at
     its next wake, or at `done` if that comes first, once; a wake's message clears no helpers. The
     button and the row read **⏲ next wake** on an orchestrator.*
-- [ ] **TOP PRIORITY. Every agent has Bash by default.** Asked for (15 Oct): "the current defaults ask for
+- [x] **TOP PRIORITY. Every agent has Bash by default.** Asked for (15 Oct): "the current defaults ask for
   permission to do bash when running agents". Today Bash is left out of `allowedTools` unless the
   **allow Bash** pill is on, which routes each call to a permission prompt. The pill is off by default
   (`web/src/spawn/autonomy.ts:118`, used at `:170`), the presets pin it off (`spawn/presets.ts:457`), and the
@@ -43,6 +43,7 @@ the last of it on 12 Oct).
     with, unless "a changed setting takes effect on the next run" below changes that.
     *Decided (15 Oct): new launches and agents already launched; reading roles stay read-only and `git push` stays denied without **allow push**.*
     *Decided (16 Oct): existing agents get it by a one-time migration, 285; after it the row is the truth.*
+  *Done 16 Oct: Amendment 175 (the shell pill on by default; migration 285 gives Bash to every agent launched before, but a reading one).*
 - [ ] **A budget that's exceeded doesn't stop anything: it's only a warning.** Asked for (15 Oct), in those
   words. Today an agent that reaches its budget is `paused` (`budget_exhausted`, `#settle` in
   supervisor.ts), and a job past its budget only warns: queued agents are held at its ceiling, twice it

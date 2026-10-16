@@ -254,9 +254,15 @@ console.log('\n3 · the pills compose into what the screen claims');
 const defaults = toAutonomy(defaultPills(), DEFAULT_BUDGET_USD);
 check('defaults auto-accept edits', defaults.mode === 'acceptEdits', defaults.mode);
 check(
-  'and route bash to the attention queue by ABSENCE, never by allowing it',
-  !defaults.allowedTools.includes('Bash'),
+  'defaults run shell unattended: Bash is allowed outright, so no command waits for you (Amendment 175)',
+  defaults.allowedTools.includes('Bash') && toolPolicy(defaults, 'Bash') === 'allowed',
   JSON.stringify(defaults.allowedTools),
+);
+const shellAsks = toAutonomy({ ...defaultPills(), allowBash: false }, DEFAULT_BUDGET_USD);
+check(
+  'and with the pill off, bash goes to the attention queue by ABSENCE, never by allowing it',
+  !shellAsks.allowedTools.includes('Bash') && !shellAsks.allowedTools.some((t) => t.startsWith('Bash')),
+  JSON.stringify(shellAsks.allowedTools),
 );
 check(
   'never-push is a rule, not a bare tool name — it must not forbid git itself',
@@ -274,7 +280,7 @@ check(
 );
 check(
   'and the pills are all in the same direction — on grants, never withholds',
-  toAutonomy(defaultPills(), null).allowedTools.includes('Bash') === false &&
+  toAutonomy({ ...defaultPills(), allowBash: false }, null).allowedTools.includes('Bash') === false &&
     toAutonomy({ ...defaultPills(), allowPush: true }, null).disallowedTools.every(
       (t) => !t.includes('git push'),
     ),
@@ -473,9 +479,9 @@ console.log('\n6 · reading a policy back — what the inspector shows');
  *
  * `absent from allowedTools` means ASKS. Only a rule naming the tool itself means denied.
  */
-const withDefaults = toAutonomy(defaultPills(), null);
+const withDefaults = toAutonomy({ ...defaultPills(), allowBash: false }, null);
 check(
-  'bash ASKS under the defaults — a scoped git-push deny is not a bash deny',
+  'bash ASKS with the shell pill off — a scoped git-push deny is not a bash deny',
   toolPolicy(withDefaults, 'Bash') === 'asks',
   `${toolPolicy(withDefaults, 'Bash')} · ${JSON.stringify(withDefaults.disallowedTools)}`,
 );
@@ -487,6 +493,12 @@ check(
 check(
   'granting shell makes it allowed',
   toolPolicy(toAutonomy({ ...defaultPills(), allowBash: true }, null), 'Bash') === 'allowed',
+);
+check(
+  'and under the defaults bash is allowed while git push stays denied, the one scoped rule (Amendment 175)',
+  toolPolicy(toAutonomy(defaultPills(), null), 'Bash') === 'allowed' &&
+    JSON.stringify(scopedRules(toAutonomy(defaultPills(), null).disallowedTools, 'Bash')) === JSON.stringify(['Bash(git push:*)']),
+  JSON.stringify(toAutonomy(defaultPills(), null)),
 );
 check(
   'a rule naming the whole tool IS denied',
@@ -1523,10 +1535,10 @@ console.log('\n25 · what you click is what runs: a persona does not change the 
   check('a Custom row called architect takes the architect persona, as before', archRow.persona === 'architect');
   const push = toAgentSpecs(arch, { ...defaultPills(), allowPush: true }, 5, 'high', {}, {}, {}, 'auto', every)[0]!;
   check('allow git push clicked on: no deny on git push, whatever the persona says', !push.autonomy.disallowedTools.includes('Bash(git push:*)'), JSON.stringify(push.autonomy));
-  const quiet = toAgentSpecs(arch, defaultPills(), 5, 'high', {}, {}, {}, 'auto', every)[0]!;
+  const quiet = toAgentSpecs(arch, { ...defaultPills(), allowBash: false }, 5, 'high', {}, {}, {}, 'auto', every)[0]!;
   check('allow network off: no WebFetch or WebSearch allowed, and both denied', !quiet.autonomy.allowedTools.includes('WebFetch') && !quiet.autonomy.allowedTools.includes('WebSearch') && quiet.autonomy.disallowedTools.includes('WebFetch'), JSON.stringify(quiet.autonomy));
   check('run shell unattended off: no Bash allowed', !quiet.autonomy.allowedTools.includes('Bash'), JSON.stringify(quiet.autonomy));
-  check("so the row's autonomy is the launch's, exactly", JSON.stringify(quiet.autonomy) === JSON.stringify(toAutonomy(defaultPills(), 5, 'high', 'auto')));
+  check("so the row's autonomy is the launch's, exactly", JSON.stringify(quiet.autonomy) === JSON.stringify(toAutonomy({ ...defaultPills(), allowBash: false }, 5, 'high', 'auto')));
   const full = toAgentSpecs(presetById('full'), defaultPills(), 5, 'high', {}, {}, {}, 'auto', every);
   check("a preset's architect takes the pills too", JSON.stringify(full.find((x) => x.role === 'architect')!.autonomy) === JSON.stringify(toAutonomy(defaultPills(), 5, 'high', 'auto')));
 
@@ -1554,10 +1566,12 @@ console.log('\n25 · what you click is what runs: a persona does not change the 
   check('rowOverrides: nothing for a writing row, whatever is clicked', rowOverrides(devRow, PERMISSIVE, 'bypassPermissions', every) === null && rowOverrides(archRow, defaultPills(), 'auto', every) === null && rowOverrides(devRow, defaultPills(), undefined) === null);
   const said = rowOverrides(revRow, { ...PERMISSIVE, mcp: true }, 'auto', every);
   check('and for a reading one, why and each thing that changed', said === 'reads only (reviewer): no file edits, read-only shell only, no MCP, mode ask me', said ?? 'null');
-  check('only what changed: plan stays plan, and the shell that asked now runs its read-only commands unasked (Amendment 148)', rowOverrides(revRow, defaultPills(), 'plan', every) === 'reads only (reviewer): no file edits, read-only shell unattended', rowOverrides(revRow, defaultPills(), 'plan', every) ?? 'null');
+  const shellOff = { ...defaultPills(), allowBash: false };
+  check('only what changed: plan stays plan, and the shell that asked now runs its read-only commands unasked (Amendment 148)', rowOverrides(revRow, shellOff, 'plan', every) === 'reads only (reviewer): no file edits, read-only shell unattended', rowOverrides(revRow, shellOff, 'plan', every) ?? 'null');
+  check('under the defaults, the shell that runs unattended is read-only shell only for a reading row (Amendment 175)', rowOverrides(revRow, defaultPills(), 'plan', every) === 'reads only (reviewer): no file edits, read-only shell only', rowOverrides(revRow, defaultPills(), 'plan', every) ?? 'null');
   const reading = personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, tools: { write: false } }));
   const scribeRow = presetById('full').roles.find((r) => r.role === 'scribe')!;
-  check('a reading persona is named as the reason', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) === 'reads only (scribe persona): no file edits, read-only shell unattended, mode ask me', rowOverrides(scribeRow, defaultPills(), 'acceptEdits', reading) ?? 'null');
+  check('a reading persona is named as the reason', rowOverrides(scribeRow, shellOff, 'acceptEdits', reading) === 'reads only (scribe persona): no file edits, read-only shell unattended, mode ask me', rowOverrides(scribeRow, shellOff, 'acceptEdits', reading) ?? 'null');
 
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   const pipe = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
@@ -1656,7 +1670,7 @@ console.log('\n26 · the developer on opus, every other role but the architect o
 
   const inspector = readFileSync(new URL('../agent/inspector.tsx', import.meta.url), 'utf8');
   check("an agent's inspector counts the allowed shell rules beside \"asks\"", /p === 'asks' \? scopedRules\(autonomy\.allowedTools, tool\)/.test(inspector) && /allowed \{allowedSome\.length === 1 \? 'rule' : 'rules'\}/.test(inspector));
-  check('the summary says a reading role runs some shell unasked and asks before the rest', describeAutonomy(readerRope).includes('runs some shell commands unattended, asks before the rest') && describeAutonomy(writerRope).includes('runs shell unattended') && describeAutonomy(toAutonomy(defaultPills(), 5)).includes('asks before shell'));
+  check('the summary says a reading role runs some shell unasked and asks before the rest', describeAutonomy(readerRope).includes('runs some shell commands unattended, asks before the rest') && describeAutonomy(writerRope).includes('runs shell unattended') && describeAutonomy(toAutonomy({ ...defaultPills(), allowBash: false }, 5)).includes('asks before shell'));
 }
 
 console.log('\n27 · an orchestrated stack chooses its helpers in all, and sends work back per lane (Amendment 151)');
@@ -1684,8 +1698,36 @@ console.log('\n27 · an orchestrated stack chooses its helpers in all, and sends
   check('the plan\'s words say lanes: a role and a name, sent back at most twice each', /Each piece of work is a lane, a role and a name/.test(sendBackWords()) && /send a lane's work back/.test(sendBackWords()) && !/send a role's work back/.test(sendBackWords()));
 }
 
+console.log('\n28 · every agent runs shell unattended by default, except a reading role, and git push stays denied (Amendment 175)');
+{
+  const every = personasFrom(null);
+  const specs = toAgentSpecs(presetById('full'), defaultPills(), 5, 'high', {}, {}, {}, DEFAULT_MODE, every);
+  const writers = specs.filter((x) => !isReadOnlyRole(x.role));
+  const readers = specs.filter((x) => isReadOnlyRole(x.role));
+  check('the shell pill is on by default', defaultPills()['allowBash'] === true && BUILT_IN.pills['allowBash'] === true);
+  check('a default launch allows Bash outright for every writing role, so no command waits for you', writers.length > 0 && writers.every((x) => x.autonomy.allowedTools.includes('Bash') && toolPolicy(x.autonomy, 'Bash') === 'allowed'), JSON.stringify(writers.map((x) => x.autonomy.allowedTools)));
+  check('and its summary says so', writers.every((x) => describeAutonomy(x.autonomy).includes('runs shell unattended')));
+  check(
+    'a reading role still is not given it: no bare Bash, exactly the read-only commands, the write tools denied',
+    readers.length > 0 && readers.every((x) => !x.autonomy.allowedTools.includes('Bash') && JSON.stringify(x.autonomy.allowedTools.filter((t) => t.startsWith('Bash'))) === JSON.stringify(READ_ONLY_BASH) && READ_ONLY_BASH_DENIED.every((t) => x.autonomy.disallowedTools.includes(t)) && WRITE_TOOLS.every((t) => x.autonomy.disallowedTools.includes(t))),
+    JSON.stringify(readers.map((x) => x.autonomy)),
+  );
+  check('and the daemon takes it as read-only (readOnlyRefusal), while a writer\'s default rope it would refuse for a reader', readers.every((x) => readOnlyRefusal(x.role, x.autonomy) === null) && readOnlyRefusal('reviewer', toAutonomy(defaultPills(), 5, 'high', DEFAULT_MODE)) !== null);
+  check('a reading persona on a writing role is pinned the same', (() => {
+    const reading = personasFrom(withPersona(null, { ...personaFor(every, 'scribe')!, tools: { write: false } }));
+    const scribe = toAgentSpecs(presetById('full'), defaultPills(), 5, 'high', {}, {}, {}, DEFAULT_MODE, reading).find((x) => x.role === 'scribe')!;
+    return !scribe.autonomy.allowedTools.includes('Bash') && READ_ONLY_BASH.every((t) => scribe.autonomy.allowedTools.includes(t));
+  })());
+  check('git push stays denied without allow push, for every role', specs.every((x) => x.autonomy.disallowedTools.includes('Bash(git push:*)')), JSON.stringify(specs.map((x) => x.autonomy.disallowedTools)));
+  check('and only allow push lifts it', toAgentSpecs(presetById('full'), { ...defaultPills(), allowPush: true }, 5, 'high', {}, {}, {}, DEFAULT_MODE, every).every((x) => !x.autonomy.disallowedTools.includes('Bash(git push:*)')));
+  check('the pill turned off still means asking', !toAutonomy({ ...defaultPills(), allowBash: false }, 5).allowedTools.includes('Bash'));
+  const added = addedAutonomy([], 'tester', undefined, { usd: 3 });
+  const addedReader = addedAutonomy([], 'reviewer', undefined, { usd: 3 });
+  check('an agent added to a job with nobody takes Spawn\'s defaults: a writer has Bash, a reader the read-only list', added.allowedTools.includes('Bash') && added.disallowedTools.includes('Bash(git push:*)') && !addedReader.allowedTools.includes('Bash') && READ_ONLY_BASH.every((t) => addedReader.allowedTools.includes(t)), JSON.stringify({ added, addedReader }));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane; and every writing agent runs shell unattended by default, a reading one only its read-only commands, with git push denied unless allowed.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

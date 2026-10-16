@@ -398,7 +398,11 @@ interface AgentRow {
   spent_tokens?: number | null;
 }
 
-/** Used when a row predates a field, or carries unparseable JSON. */
+/**
+ * Used when a row predates a field, or carries unparseable JSON. No tools, Bash included, though
+ * Spawn's default allows it since Amendment 175: the row it stands in for may be a reading role's,
+ * and a broken row should ask, not run.
+ */
 export const DEFAULT_AUTONOMY: Autonomy = {
   mode: 'default',
   allowedTools: [],
