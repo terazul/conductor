@@ -192,7 +192,7 @@ function agentRow(
     ...(spec.helpers ? { helperCap: spec.helpers } : {}),
     // The roles an orchestrated stack's orchestrator may start, as resolved at launch (Amendment 128).
     ...(spec.helperRoles?.length ? { helperRoles: spec.helperRoles } : {}),
-    // The launch copy: each run reads the persona as it is now, and these only when it's gone (Amendment 176).
+    // The launch copy: each run reads the persona as it is now, and these only when it's gone (Amendment 178).
     ...(spec.persona ? { persona: spec.persona } : {}),
     ...(spec.systemPrompt ? { systemPrompt: spec.systemPrompt } : {}),
     ...(spec.skills?.length ? { skills: spec.skills } : {}),
@@ -201,7 +201,7 @@ function agentRow(
 }
 
 /**
- * A stored persona as it is now (Amendment 176): the prompt and skills of the persona with the
+ * A stored persona as it is now (Amendment 178): the prompt and skills of the persona with the
  * row's id in Settings — or its successor's, for a built-in that was renamed — built-ins
  * included, or the row's launch copy when there is none: it was deleted, or what Settings has
  * is over the limits a launch spec is held to (Amendment 68), which a direct PATCH of the
@@ -1307,7 +1307,7 @@ export class Supervisor implements AgentControl {
         model: agent.model,
         autonomy: this.#autonomyFor(agentId),
         spentUsd: agent.costUsd,
-        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 176).
+        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 178).
         ...personaScope(currentPersona(getAgentPersona(this.#db, agentId))),
       });
       this.#runners.set(agentId, runner);
@@ -2485,7 +2485,7 @@ export class Supervisor implements AgentControl {
         model: agent.model,
         autonomy: this.#autonomyFor(agentId),
         spentUsd: agent.costUsd,
-        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 176).
+        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 178).
         ...personaScope(currentPersona(getAgentPersona(this.#db, agentId))),
       });
       this.#runners.set(agentId, runner);
@@ -2513,7 +2513,7 @@ export class Supervisor implements AgentControl {
 
   /**
    * Write an agent's autonomy and tell every tab. Every run is built from it; a live run also
-   * takes its permission mode and effort now, where its engine can (Amendment 176). Its tools
+   * takes its permission mode and effort now, where its engine can (Amendment 178). Its tools
    * and budget are its next run's. 'now' only when the live run took everything this changed:
    * a change to the tools or the budget is the next run's, whatever else it carried.
    */

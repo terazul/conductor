@@ -882,7 +882,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     // Through the supervisor, which broadcasts it. Writing the row alone left every
     // other tab — and this tab's inspector — showing the old budget and pills.
     // A live run takes the mode and effort now where its engine can; the tool lists and the
-    // budget are options of a run's start, so they are its next run's (Amendment 176).
+    // budget are options of a run's start, so they are its next run's (Amendment 178).
     const appliesTo = await sup.setAutonomy(agent.id, next);
     return reply.send({ autonomy: next, appliesTo } satisfies SetAutonomyResponse);
   });

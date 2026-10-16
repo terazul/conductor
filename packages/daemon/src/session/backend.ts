@@ -148,7 +148,7 @@ export interface AgentBackend {
   /** Switch model for the next reply. False when the live run couldn't. */
   setModel(model: string): Promise<boolean>;
   /**
-   * Give a live run an autonomy's permission mode and effort (Amendment 176). False when the
+   * Give a live run an autonomy's permission mode and effort (Amendment 178). False when the
    * live run couldn't take both; the tools and the budget are its next run's either way, which
    * the supervisor answers for.
    */

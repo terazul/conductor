@@ -270,7 +270,7 @@ interface FakeRun {
   options: Options;
   prompts: string[];
   models: string[];
-  /** What `setPermissionMode` and `applyFlagSettings` were called with mid-run (Amendment 176). */
+  /** What `setPermissionMode` and `applyFlagSettings` were called with mid-run (Amendment 178). */
   modes: string[];
   flags: Record<string, unknown>[];
   /** Deliver one SDK message, as if the model or the SDK had just sent it. */
@@ -404,7 +404,7 @@ interface FakeCopilotSession {
   config: SessionConfig;
   prompts: { prompt: string; mode?: string }[];
   models: string[];
-  /** The `reasoningEffort` each `setModel` carried (Amendment 176). */
+  /** The `reasoningEffort` each `setModel` carried (Amendment 178). */
   efforts: (string | undefined)[];
   aborts: number;
   disconnected: boolean;
@@ -3640,7 +3640,7 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
     const start = runs.length;
     const PROMPT68 = 'You review for security first. Name the threat before the fix.';
-    // Personas Settings doesn't hold, so each run takes the row's launch copy (Amendment 176).
+    // Personas Settings doesn't hold, so each run takes the row's launch copy (Amendment 178).
     type Made = { agents?: Agent[]; error?: string; detail?: string };
     const made = await send<Made>('POST', '/api/jobs', {
       projectId: pid,
@@ -3710,7 +3710,7 @@ async function main(): Promise<void> {
       ? runs.find((r) => (r.prompts[0] ?? '').includes('Check the API.'))
       : undefined;
     // The builder was renamed the developer (Amendment 84), so each run takes the developer's
-    // prompt and skills from Settings, as it ships here, not the row's launch copy (Amendment 176).
+    // prompt and skills from Settings, as it ships here, not the row's launch copy (Amendment 178).
     const successor = BUILT_IN_PERSONAS.find((b) => b.id === 'developer')!;
     check(
       'and launches as the persona the builder is now, the developer',
@@ -7227,7 +7227,7 @@ async function main(): Promise<void> {
       { id: 'scribe', tier: 'haiku', model: O_HAIKU, brief: 'Write it down.', systemPrompt: 'SCRIBE PROMPT o128', autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds },
     ];
     // These are the built-ins as the user edited them in Settings, which each run reads its
-    // persona from (Amendment 176): with the spec's copy alone, a run would get the shipped prompt.
+    // persona from (Amendment 178): with the spec's copy alone, a run would get the shipped prompt.
     let edited128: string | null = null;
     for (const r of [{ id: 'architect', systemPrompt: 'ARCHITECT PROMPT o128', skills: [] as string[] }, ...ROLES]) {
       edited128 = withPersona(edited128, { ...BUILT_IN_PERSONAS.find((b) => b.id === r.id)!, systemPrompt: r.systemPrompt ?? '', skills: r.skills ?? [] });
@@ -8133,7 +8133,7 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n30 · a changed setting takes effect on the next run, and a live run takes the mode and effort (Amendment 176)');
+  console.log('\n30 · a changed setting takes effect on the next run, and a live run takes the mode and effort (Amendment 178)');
   {
     sdk.query = fakeQuery as typeof sdk.query;
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });

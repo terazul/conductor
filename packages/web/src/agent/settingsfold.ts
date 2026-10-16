@@ -72,7 +72,7 @@ export function overSays(spent: string, budget: string, ceiling: string, tokens 
 }
 
 /**
- * What the composer says when a working agent's tools, mode or effort change (Amendment 176).
+ * What the composer says when a working agent's tools, mode or effort change (Amendment 178).
  * Its run takes the mode and effort where its engine can, and the daemon answers whether it
  * did; the tool lists are options of a run's start, so they are always its next run's. Nothing
  * for an agent that isn't working: every run is built from what is set.
@@ -83,5 +83,5 @@ export function appliesSays(what: 'tools' | 'mode' | 'effort', working: boolean,
   return appliesTo === 'now' ? 'Now — this run goes on with it.' : "From the next run — this one couldn't take it.";
 }
 
-/** Under the mode row while an agent works: what its run takes from a change (Amendment 176). */
+/** Under the mode row while an agent works: what its run takes from a change (Amendment 178). */
 export const WORKING_SAYS = 'mode and effort now · tools and budget from the next run';

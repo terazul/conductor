@@ -1,6 +1,6 @@
 /**
  * Limits on a persona's prompt and skills (Amendment 68), wherever the daemon takes one: a
- * launch spec, the personas in Settings each run reads (Amendment 176), and a save of them.
+ * launch spec, the personas in Settings each run reads (Amendment 178), and a save of them.
  */
 
 import { PERSONAS_KEY } from '@conductor/shared';

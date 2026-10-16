@@ -1167,7 +1167,7 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
   check('the Agent screen calls an agent with helpers an orchestrator, and passes what starts folded', /const orchestrator = \(agent\?\.helperCap \?\? 0\) > 0;/.test(screen) && /startFoldedKeys\(turns, orchestrator\)/.test(screen) && /startFolded=\{startFolded\}/.test(screen));
   check('and its fold all uses both sets', /foldEvery\(s, agent\.id, replies, startFolded\)/.test(screen) && /unfoldEvery\(s, agent\.id, startFolded\)/.test(screen));
 }
-console.log('\n· a working agent says what its run took (Amendment 176)');
+console.log('\n· a working agent says what its run took (Amendment 178)');
 {
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('a tool changed on a working agent is its next run\'s', appliesSays('tools', true, 'now') === 'From the next run — this one keeps the tools it started with.');
@@ -1197,7 +1197,7 @@ console.log("\n· an orchestrator's transcript says its finished helpers were re
 
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed; a working agent is told which of its changes its run took (Amendment 176).\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed; a working agent is told which of its changes its run took (Amendment 178).\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

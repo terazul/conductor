@@ -77,7 +77,7 @@ the last of it on 12 Oct).
   - **Find first:** which setting was changed and didn't take effect, and whether the run after the change
     read the row or what the agent launched with.
     *Decided (16 Oct): persona edits reach launched agents and later helpers from their next run (prompt and skills, falling back to the launch copy); a working agent gets mode and effort live, tools and budget from its next run.*
-  *Done 16 Oct: Amendment 176.*
+  *Done 16 Oct: Amendment 178.*
 - [ ] **"one agent" lets you pick what kind of agent.** Asked for (15 Oct): choosing **one agent** always
   launches a developer. The preset is fixed to one `developer` row on opus with no brief
   (`web/src/spawn/presets.ts:242`), and the plan preview gives a preset's rows no role or persona to change.

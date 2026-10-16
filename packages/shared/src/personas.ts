@@ -11,7 +11,7 @@
  * own brief and model tier. Its tool rules no longer go over the pills, apart from
  * `write: false` (Amendment 147). A Custom row picks a persona by id and may override its
  * brief and model for one launch. The persona's fields are copied into its spec at launch, and
- * the daemon reads this same setting before every run (Amendment 176): an agent's prompt and
+ * the daemon reads this same setting before every run (Amendment 178): an agent's prompt and
  * skills are its persona's as they are now, the launch copy only when the persona is gone. So
  * this file is shared, not the web's: the daemon needs the built-ins to know what an edit is
  * made over, and what a reset goes back to.

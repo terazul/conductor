@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 176 — post-merge, applied. **A changed setting takes effect on the next run: a persona edit too, and a working run takes its mode and effort now.**
+### Amendment 178 — post-merge, applied. **A changed setting takes effect on the next run: a persona edit too, and a working run takes its mode and effort now.**
 
 Wave 12, S1. Asked for (15 Oct): "when I change a setting for an agent it should take effect
 immediately on the next invocation". Every run already built its backend from the agent row, so a

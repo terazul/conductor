@@ -315,7 +315,7 @@ export function Composer({ agent }: { agent: Agent }) {
     const nowOn = pill.on(autonomy);
     const patch = pill.flip(autonomy, !nowOn);
     setDraft({ ...autonomy, ...patch });
-    // Merging when done isn't a tool; the rest are the next run's (Amendment 176).
+    // Merging when done isn't a tool; the rest are the next run's (Amendment 178).
     const working = agent.status === 'working' && pill.id !== 'merge_when_done';
     const ok = await policy.run(
       `Changing "${pill.label}"`,
@@ -836,7 +836,7 @@ export function Composer({ agent }: { agent: Agent }) {
         {/*
          * The consequence, and when it starts. A working run takes a new mode and effort
          * live; its tools and budget are options of its start, so they wait for its next
-         * run (Amendment 176).
+         * run (Amendment 178).
          */}
         {current && (open || current.danger) && (
           <div className={`ag-modesays${current.danger ? ' is-danger' : ''}`}>

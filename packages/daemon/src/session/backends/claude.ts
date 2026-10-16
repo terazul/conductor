@@ -755,7 +755,7 @@ export class ClaudeBackend implements AgentBackend {
 
   /**
    * Give the rest of this run an autonomy's permission mode (`Query.setPermissionMode`) and
-   * effort (`applyFlagSettings`, where an unset effort is the model's default) (Amendment 176).
+   * effort (`applyFlagSettings`, where an unset effort is the model's default) (Amendment 178).
    * The tool lists and the budget have no live equivalent — they are options of the query's
    * start — so they wait for the next run. Neither can bypassing permissions on a run that
    * didn't start able to: the SDK only takes that flag at the start. False when there is no

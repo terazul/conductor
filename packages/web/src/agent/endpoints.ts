@@ -130,7 +130,7 @@ export function removeJob(jobId: string): Promise<{ removed: string }> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
 }
 
-/** A live run takes the mode and effort now where it can — `appliesTo` says whether it did (Amendment 176). */
+/** A live run takes the mode and effort now where it can — `appliesTo` says whether it did (Amendment 178). */
 export function setAutonomy(agentId: string, body: SetAutonomyRequest): Promise<SetAutonomyResponse> {
   return api(agentPath(agentId, 'autonomy'), { method: 'POST', body });
 }

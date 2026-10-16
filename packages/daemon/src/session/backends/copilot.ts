@@ -710,7 +710,7 @@ export class CopilotBackend implements AgentBackend {
   }
 
   /**
-   * Give the rest of this session an autonomy's mode and effort (Amendment 176). The mode is
+   * Give the rest of this session an autonomy's mode and effort (Amendment 178). The mode is
    * live as soon as the scope has it, since `gateCall` reads it on every call; an effort goes
    * with the model, for the next message. Copilot has no "back to the model's default", so a
    * cleared effort keeps the one the session has until the next run. The tool lists and the
