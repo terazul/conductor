@@ -146,6 +146,7 @@ makes a small one, with some uncommitted changes in it.
 | `make fixture` / `make attention` | Recorded replays, with no daemon and no cost. |
 | `make test` | Every test suite. |
 | `make clean` | Stops everything, then deletes the database in `~/.conductor/` and the logs. Your settings and worktrees stay. |
+| `make backup` / `make restore` | Back the database up now, or bring back the latest backup. `restore` refuses while the daemon runs: `make stop` first. |
 | `make zip` | Zips the project as committed into `dist/`. |
 | `make manual` | Opens this manual. |
 | `make dock` / `make undock` | The dock icon, on or off. |
@@ -157,6 +158,7 @@ makes a small one, with some uncommitted changes in it.
 | | |
 |---|---|
 | `~/.conductor/conductor.db` | Projects, jobs, agents, every transcript, open requests, your "allow always" rules and the day's spend. |
+| `~/.conductor/backups/` | Backups of the database, `conductor-auto-<date>-<time>.db`, the last 10. |
 | `~/.conductor/settings.json` | Settings, panel sizes, folds, open Files tabs and notification choices. They're the same in every browser. |
 | `<repo>/.conductor/wt/<jobId>` | Each job's git worktree. These are ordinary worktrees. |
 | `.conductor/run/` in the checkout | The daemon's and web app's logs and process ids. |
@@ -1674,6 +1676,17 @@ What cannot survive is a **running process**. So on startup:
 
 `make clean` deletes the database in `~/.conductor/`, which is the way to start from
 nothing. It leaves `settings.json`, and the worktrees under `.conductor/wt`.
+
+**The database is backed up on its own**, into `~/.conductor/backups/`: once each time the
+daemon starts, before it updates the database to a new version, and every 6 hours while it
+runs. The last 10 are kept, named `conductor-auto-<date>-<time>.db`. Copies you put in that
+folder yourself are never deleted. `make backup` makes one now. `make restore` brings the
+latest one back, but only with the daemon stopped (`make stop` first; it says so if not), and
+only when it can check that nothing else has the database open, with `lsof`; if it can't run
+`lsof` it refuses and says why. The database it replaces is kept in the same folder as
+`conductor-before-restore-<date>-<time>.db` (with `-2` added if two restores land in the same
+second). Copy that back over `conductor.db` to undo. If the restore fails partway, it puts the
+old database back; if it can't, it tells you where the old one is.
 
 Worktrees live at `<repo>/.conductor/wt/<jobId>` and are ordinary git worktrees —
 inspect them, `git log` them, or remove them by hand if you prefer.
