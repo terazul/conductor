@@ -161,6 +161,8 @@ export class ClaudeBackend implements AgentBackend {
   #query: Query | null = null;
   #sessionId: string | null = null;
   #live = false;
+  /** Whether this run's query was started able to bypass permissions, which only its start can say. */
+  #bypassable = false;
   #stopping = false;
   /** Set by stop(): this run is being ended, not just interrupted (Amendment 35). */
   #stopped = false;
@@ -512,7 +514,9 @@ export class ClaudeBackend implements AgentBackend {
     this.#live = true;
     this.#stopping = false;
 
-    const q = sdk.query({ prompt: this.#input, options: this.#buildOptions(opts.resume ?? null) });
+    const options = this.#buildOptions(opts.resume ?? null);
+    this.#bypassable = options.allowDangerouslySkipPermissions === true;
+    const q = sdk.query({ prompt: this.#input, options });
     this.#query = q;
 
     // A resumed run re-offers the parked call on its own — the spike measured
@@ -740,15 +744,40 @@ export class ClaudeBackend implements AgentBackend {
 
   /**
    * Change the model for the rest of this run. Streaming input is what makes this
-   * possible (`Query.setModel`, sdk.d.ts); permission mode and the tool lists have no
-   * equivalent, which is why those wait for the next run and this does not.
-   * False when there is no live run to change.
+   * possible (`Query.setModel`, sdk.d.ts). False when there is no live run to change.
    */
   async setModel(model: string): Promise<boolean> {
     if (!this.#live || !this.#query) return false;
     await this.#query.setModel(model);
     this.#scope = { ...this.#scope, model };
     return true;
+  }
+
+  /**
+   * Give the rest of this run an autonomy's permission mode (`Query.setPermissionMode`) and
+   * effort (`applyFlagSettings`, where an unset effort is the model's default) (Amendment 178).
+   * The tool lists and the budget have no live equivalent — they are options of the query's
+   * start — so they wait for the next run. Neither can bypassing permissions on a run that
+   * didn't start able to: the SDK only takes that flag at the start. False when there is no
+   * live run, or it couldn't take the mode.
+   */
+  async setAutonomy(autonomy: Autonomy): Promise<boolean> {
+    if (!this.#live || !this.#query) return false;
+    const was = this.#scope.autonomy;
+    let all = true;
+    let mode = was.mode;
+    if (autonomy.mode !== was.mode) {
+      if (autonomy.mode === 'bypassPermissions' && !this.#bypassable) all = false;
+      else {
+        await this.#query.setPermissionMode(autonomy.mode);
+        mode = autonomy.mode;
+      }
+    }
+    if (autonomy.effort !== was.effort) await this.#query.applyFlagSettings({ effortLevel: autonomy.effort ?? null });
+    // Only what reached the run: the tools and budget it started with stay its own.
+    const { effort: _, ...rest } = was;
+    this.#scope = { ...this.#scope, autonomy: { ...rest, mode, ...(autonomy.effort ? { effort: autonomy.effort } : {}) } };
+    return all;
   }
 
   async interrupt(): Promise<void> {

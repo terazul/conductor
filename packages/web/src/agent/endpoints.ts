@@ -28,6 +28,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SetAutonomyRequest,
+  SetAutonomyResponse,
   SetModelRequest,
   SetModelResponse,
 } from '@conductor/shared';
@@ -129,11 +130,12 @@ export function removeJob(jobId: string): Promise<{ removed: string }> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
 }
 
-export function setAutonomy(agentId: string, body: SetAutonomyRequest): Promise<unknown> {
+/** A live run takes the mode and effort now where it can — `appliesTo` says whether it did (Amendment 178). */
+export function setAutonomy(agentId: string, body: SetAutonomyRequest): Promise<SetAutonomyResponse> {
   return api(agentPath(agentId, 'autonomy'), { method: 'POST', body });
 }
 
-/** Unlike autonomy, this can reach a live run — `appliesTo` says whether it did. */
+/** This can reach a live run too — `appliesTo` says whether it did. */
 export function setModel(agentId: string, body: SetModelRequest): Promise<SetModelResponse> {
   return api(agentPath(agentId, 'model'), { method: 'POST', body });
 }

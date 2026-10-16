@@ -699,7 +699,7 @@ export class CopilotBackend implements AgentBackend {
     return true;
   }
 
-  /** For the next message, which is when the SDK applies it. */
+  /** For the next message, which is when the SDK applies it, at the effort the agent has now. */
   async setModel(model: string): Promise<boolean> {
     const session = this.#session;
     if (!this.#live || !session) return false;
@@ -707,6 +707,29 @@ export class CopilotBackend implements AgentBackend {
     await session.setModel(model, effort ? { reasoningEffort: effort } : undefined);
     this.#scope = { ...this.#scope, model };
     return true;
+  }
+
+  /**
+   * Give the rest of this session an autonomy's mode and effort (Amendment 178). The mode is
+   * live as soon as the scope has it, since `gateCall` reads it on every call; an effort goes
+   * with the model, for the next message. Copilot has no "back to the model's default", so a
+   * cleared effort keeps the one the session has until the next run. The tool lists and the
+   * budget stay the ones it started with — `excludedTools` is fixed at session start — so
+   * they wait for the next run. False when there is no live session.
+   */
+  async setAutonomy(autonomy: Autonomy): Promise<boolean> {
+    const session = this.#session;
+    if (!this.#live || !session) return false;
+    const was = this.#scope.autonomy;
+    const { effort: _, ...rest } = was;
+    this.#scope = {
+      ...this.#scope,
+      autonomy: { ...rest, mode: autonomy.mode, ...(autonomy.effort ? { effort: autonomy.effort } : {}) },
+    };
+    if (autonomy.effort && autonomy.effort !== was.effort) {
+      await session.setModel(this.#scope.model, { reasoningEffort: autonomy.effort });
+    }
+    return autonomy.effort !== undefined || was.effort === undefined;
   }
 
   /**

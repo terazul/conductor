@@ -19,7 +19,7 @@
  */
 
 import { onSettingsChanged, readSettings } from '../settings.js';
-import { BUDGET_CEILING_KEY, branchTargetKey } from '@conductor/shared';
+import { BUDGET_CEILING_KEY, PERSONAS_KEY, branchTargetKey, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
 import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
 import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
@@ -72,6 +72,7 @@ import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { budgetChanged } from './alerts.js';
+import { skillsProblem, systemPromptProblem } from './persona.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, continuations, jobBudgetState, newDayNote, renewals, resumeAtMidnight, type PausedForBudget } from './budget.js';
 import {
   handOffLine,
@@ -191,12 +192,28 @@ function agentRow(
     ...(spec.helpers ? { helperCap: spec.helpers } : {}),
     // The roles an orchestrated stack's orchestrator may start, as resolved at launch (Amendment 128).
     ...(spec.helperRoles?.length ? { helperRoles: spec.helperRoles } : {}),
-    // Copied, not referenced: the agent keeps these if the persona changes (Amendment 68).
+    // The launch copy: each run reads the persona as it is now, and these only when it's gone (Amendment 178).
     ...(spec.persona ? { persona: spec.persona } : {}),
     ...(spec.systemPrompt ? { systemPrompt: spec.systemPrompt } : {}),
     ...(spec.skills?.length ? { skills: spec.skills } : {}),
     ...(spec.provider && spec.provider !== 'claude' ? { provider: spec.provider } : {}),
   };
+}
+
+/**
+ * A stored persona as it is now (Amendment 178): the prompt and skills of the persona with the
+ * row's id in Settings — or its successor's, for a built-in that was renamed — built-ins
+ * included, or the row's launch copy when there is none: it was deleted, or what Settings has
+ * is over the limits a launch spec is held to (Amendment 68), which a direct PATCH of the
+ * setting can get past. Only the prompt and skills: the agent's model and autonomy are its own.
+ * Read at each run and not written back, so the row keeps the copy to fall back to.
+ */
+function currentPersona(p: AgentPersona): AgentPersona {
+  if (!p.persona) return p;
+  const now = personaFor(personasFrom(readSettings()[PERSONAS_KEY] ?? null), renamedPersona(p.persona));
+  if (!now || systemPromptProblem(now.systemPrompt) || skillsProblem(now.skills)) return p;
+  const skills = [...new Set(now.skills.map((s) => s.trim()).filter((s) => s !== ''))];
+  return { persona: p.persona, systemPrompt: now.systemPrompt.trim() || null, skills: skills.length ? skills : null };
 }
 
 /** A stored persona as a runner's scope takes it: the persona's id stays on the row. */
@@ -1290,8 +1307,8 @@ export class Supervisor implements AgentControl {
         model: agent.model,
         autonomy: this.#autonomyFor(agentId),
         spentUsd: agent.costUsd,
-        // What its persona gave it at launch, on this run and every resume (Amendment 68).
-        ...personaScope(getAgentPersona(this.#db, agentId)),
+        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 178).
+        ...personaScope(currentPersona(getAgentPersona(this.#db, agentId))),
       });
       this.#runners.set(agentId, runner);
 
@@ -1916,7 +1933,7 @@ export class Supervisor implements AgentControl {
       // A helper is more of its orchestrator, so it runs as the same persona (Amendment 68); started
       // as a role, it runs as that role's (Amendment 128).
       ...(chosen
-        ? personaFields({ persona: chosen.id, systemPrompt: chosen.systemPrompt ?? null, skills: chosen.skills ?? null })
+        ? personaFields(currentPersona({ persona: chosen.id, systemPrompt: chosen.systemPrompt ?? null, skills: chosen.skills ?? null }))
         : personaFields(getAgentPersona(this.#db, orch.id))),
       ...(chosen ? { helperRole: chosen.id } : {}),
       // And on the same engine (Amendment 74).
@@ -2468,8 +2485,8 @@ export class Supervisor implements AgentControl {
         model: agent.model,
         autonomy: this.#autonomyFor(agentId),
         spentUsd: agent.costUsd,
-        // What its persona gave it at launch, on this run and every resume (Amendment 68).
-        ...personaScope(getAgentPersona(this.#db, agentId)),
+        // Its persona as it is now in Settings, its launch copy if that's gone (Amendment 178).
+        ...personaScope(currentPersona(getAgentPersona(this.#db, agentId))),
       });
       this.#runners.set(agentId, runner);
 
@@ -2494,14 +2511,30 @@ export class Supervisor implements AgentControl {
     this.pump();
   }
 
-  /** Write an agent's autonomy and tell every tab. Applies from its next run. */
-  setAutonomy(agentId: string, autonomy: Autonomy): Agent | undefined {
+  /**
+   * Write an agent's autonomy and tell every tab. Every run is built from it; a live run also
+   * takes its permission mode and effort now, where its engine can (Amendment 178). Its tools
+   * and budget are its next run's. 'now' only when the live run took everything this changed:
+   * a change to the tools or the budget is the next run's, whatever else it carried.
+   */
+  async setAutonomy(agentId: string, autonomy: Autonomy): Promise<'now' | 'next run'> {
+    const was = getAgent(this.#db, agentId)?.autonomy;
     setAgentAutonomy(this.#db, agentId, autonomy);
     const agent = getAgent(this.#db, agentId);
     if (agent) this.#pushEntities({ agents: [agent] });
     // A raised budget clears the "over budget" warning, with no status change to say so (Amendment 124).
     budgetChanged();
-    return agent;
+    const runner = this.#runners.get(agentId);
+    if (!runner?.isLive || !runner.setAutonomy) return 'next run';
+    const atStart = (['allowedTools', 'disallowedTools', 'budgetUsd', 'budgetTokens'] as const).some(
+      (k) => JSON.stringify(was?.[k] ?? null) !== JSON.stringify(autonomy[k] ?? null),
+    );
+    try {
+      return (await runner.setAutonomy(autonomy)) && !atStart ? 'now' : 'next run';
+    } catch (err) {
+      console.error(`[supervisor] ${agentId} could not take its autonomy live`, err);
+      return 'next run';
+    }
   }
 
   /**

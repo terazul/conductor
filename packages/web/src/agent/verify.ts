@@ -50,7 +50,7 @@ import { isMermaid, mermaidReason } from '../lib/mermaid.js';
 import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
 import { readFileSync } from 'node:fs';
-import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { SETTINGS_KEY, WORKING_SAYS, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 import { sleepControl } from './sleep.js';
 import {
   TERM_TOKENS,
@@ -1167,6 +1167,15 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
   check('the Agent screen calls an agent with helpers an orchestrator, and passes what starts folded', /const orchestrator = \(agent\?\.helperCap \?\? 0\) > 0;/.test(screen) && /startFoldedKeys\(turns, orchestrator\)/.test(screen) && /startFolded=\{startFolded\}/.test(screen));
   check('and its fold all uses both sets', /foldEvery\(s, agent\.id, replies, startFolded\)/.test(screen) && /unfoldEvery\(s, agent\.id, startFolded\)/.test(screen));
 }
+console.log('\n· a working agent says what its run took (Amendment 178)');
+{
+  const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  check('a tool changed on a working agent is its next run\'s', appliesSays('tools', true, 'now') === 'From the next run — this one keeps the tools it started with.');
+  check('a mode or effort its run took says now; one it could not, the next run', appliesSays('mode', true, 'now').startsWith('Now') && appliesSays('effort', true, 'next run').startsWith('From the next run'));
+  check('an agent not working is told nothing: every run is built from what is set', appliesSays('tools', false, 'now') === '' && appliesSays('mode', false, 'next run') === '');
+  check('the pills, the modes and effort say it, and merging when done is not a tool', /appliesSays\('tools', working, r\.appliesTo\)/.test(comp) && /appliesSays\('mode', working, r\.appliesTo\)/.test(comp) && /appliesSays\('effort', working, r\.appliesTo\)/.test(comp) && /pill\.id !== 'merge_when_done'/.test(comp));
+  check('and under the mode row, while it works, which of them its run takes now', WORKING_SAYS === 'mode and effort now · tools and budget from the next run' && /ag-modesays-when"> · \{WORKING_SAYS\}/.test(comp) && !comp.includes('· takes effect on the next run</span>'));
+}
 
 console.log("\n· an orchestrator's transcript says its finished helpers were removed (Amendment 177)");
 {
@@ -1188,7 +1197,7 @@ console.log("\n· an orchestrator's transcript says its finished helpers were re
 
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed.\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed; a working agent is told which of its changes its run took (Amendment 178).\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

@@ -152,11 +152,13 @@ import {
 } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
+import { readSettings } from '../settings.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
 import { HANDOFF_ASK, NEW_DAY_NUDGE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { ancestorsOf, createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
+import { BUILT_IN_PERSONAS, PERSONAS_KEY, resetPersona, withPersona, withoutPersona, type Persona } from '@conductor/shared';
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
@@ -268,6 +270,9 @@ interface FakeRun {
   options: Options;
   prompts: string[];
   models: string[];
+  /** What `setPermissionMode` and `applyFlagSettings` were called with mid-run (Amendment 178). */
+  modes: string[];
+  flags: Record<string, unknown>[];
   /** Deliver one SDK message, as if the model or the SDK had just sent it. */
   say(m: Record<string, unknown>): void;
   finish(r: {
@@ -311,6 +316,8 @@ function fakeQuery({
     options: options ?? {},
     prompts: [],
     models: [],
+    modes: [],
+    flags: [],
     finished: false,
     say(m) {
       if (run.finished) return;
@@ -357,6 +364,8 @@ function fakeQuery({
   return Object.assign(messages(), {
     interrupt: async () => run.finish({ cost: 0, reason: 'aborted_streaming', isError: true }),
     setModel: async (model?: string) => void run.models.push(model ?? ''),
+    setPermissionMode: async (mode: string) => void run.modes.push(mode),
+    applyFlagSettings: async (f: Record<string, unknown>) => void run.flags.push(f),
   }) as unknown as Query;
 }
 
@@ -395,6 +404,8 @@ interface FakeCopilotSession {
   config: SessionConfig;
   prompts: { prompt: string; mode?: string }[];
   models: string[];
+  /** The `reasoningEffort` each `setModel` carried (Amendment 178). */
+  efforts: (string | undefined)[];
   aborts: number;
   disconnected: boolean;
   emit(type: string, data: Record<string, unknown>, extra?: Record<string, unknown>): void;
@@ -424,6 +435,7 @@ function fakeCopilotClient(): CopilotClientLike {
       config,
       prompts: [],
       models: [],
+      efforts: [],
       aborts: 0,
       disconnected: false,
       emit(type, data, extra = {}) {
@@ -450,7 +462,10 @@ function fakeCopilotClient(): CopilotClientLike {
       disconnect: async () => {
         s.disconnected = true;
       },
-      setModel: async (m: string) => void s.models.push(m),
+      setModel: async (m: string, o?: { reasoningEffort?: string }) => {
+        s.models.push(m);
+        s.efforts.push(o?.reasoningEffort);
+      },
     };
     copilotSessions.push(s);
     return session as never;
@@ -3625,13 +3640,14 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
     const start = runs.length;
     const PROMPT68 = 'You review for security first. Name the threat before the fix.';
+    // Personas Settings doesn't hold, so each run takes the row's launch copy (Amendment 178).
     type Made = { agents?: Agent[]; error?: string; detail?: string };
     const made = await send<Made>('POST', '/api/jobs', {
       projectId: pid,
       prompt: 'the persona prompt',
       isolation: 'in_place',
       agents: [
-        { role: 'reviewer', model: OPUS, brief: 'Review it.', autonomy: DEFAULT_AUTONOMY, persona: 'reviewer', systemPrompt: `  ${PROMPT68}  `, skills: ['pdf', ' docx ', 'pdf'] },
+        { role: 'reviewer', model: OPUS, brief: 'Review it.', autonomy: DEFAULT_AUTONOMY, persona: 'security-reviewer', systemPrompt: `  ${PROMPT68}  `, skills: ['pdf', ' docx ', 'pdf'] },
         { role: 'builder', model: OPUS, brief: 'Build it.', autonomy: DEFAULT_AUTONOMY },
       ],
     });
@@ -3641,7 +3657,7 @@ async function main(): Promise<void> {
     const stored = getAgentPersona(db, withId);
     check(
       'the agent keeps them: the persona by id, the prompt trimmed, the skills without repeats',
-      stored.persona === 'reviewer' && stored.systemPrompt === PROMPT68 && JSON.stringify(stored.skills) === '["pdf","docx"]',
+      stored.persona === 'security-reviewer' && stored.systemPrompt === PROMPT68 && JSON.stringify(stored.skills) === '["pdf","docx"]',
       JSON.stringify(stored),
     );
     check('on the row, not the wire: the Agent the browser gets is the same shape as before', !Object.keys(getAgent(db, withId) ?? {}).some((k) => ['persona', 'systemPrompt', 'skills'].includes(k)));
@@ -3693,7 +3709,15 @@ async function main(): Promise<void> {
     const helperRun = await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Check the API.')))
       ? runs.find((r) => (r.prompts[0] ?? '').includes('Check the API.'))
       : undefined;
-    check('and launches with it', JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${PROMPT68}\n\n${TURN_END_LINE}` }) && JSON.stringify(helperRun?.options.skills) === '["pdf"]');
+    // The builder was renamed the developer (Amendment 84), so each run takes the developer's
+    // prompt and skills from Settings, as it ships here, not the row's launch copy (Amendment 178).
+    const successor = BUILT_IN_PERSONAS.find((b) => b.id === 'developer')!;
+    check(
+      'and launches as the persona the builder is now, the developer',
+      JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${successor.systemPrompt.trim()}\n\n${TURN_END_LINE}` }) &&
+        JSON.stringify(helperRun?.options.skills ?? []) === JSON.stringify(successor.skills),
+      JSON.stringify(helperRun?.options.systemPrompt).slice(0, 120),
+    );
     for (let i = 0; i < 4; i += 1) {
       for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
       await settle(100);
@@ -7202,6 +7226,13 @@ async function main(): Promise<void> {
       { id: 'reviewer', tier: 'opus', model: O_OPUS, brief: 'Review the change.', systemPrompt: 'REVIEWER PROMPT o128', autonomy: rope({ mode: 'default', disallowedTools: [...WRITE_TOOLS] }), tiers: tierIds },
       { id: 'scribe', tier: 'haiku', model: O_HAIKU, brief: 'Write it down.', systemPrompt: 'SCRIBE PROMPT o128', autonomy: rope({ mode: 'acceptEdits' }), tiers: tierIds },
     ];
+    // These are the built-ins as the user edited them in Settings, which each run reads its
+    // persona from (Amendment 178): with the spec's copy alone, a run would get the shipped prompt.
+    let edited128: string | null = null;
+    for (const r of [{ id: 'architect', systemPrompt: 'ARCHITECT PROMPT o128', skills: [] as string[] }, ...ROLES]) {
+      edited128 = withPersona(edited128, { ...BUILT_IN_PERSONAS.find((b) => b.id === r.id)!, systemPrompt: r.systemPrompt ?? '', skills: r.skills ?? [] });
+    }
+    await send('PATCH', '/api/settings', { settings: { [PERSONAS_KEY]: edited128 } });
 
     // ── the pure rules, shared with the screens ─────────────────────────────────
     check('the helpers a stack may start in all: each role once, and sent back twice', SEND_BACKS_MAX === 2 && pipelineHelperCap(4) === 12 && pipelineHelperCap(3) === 9 && pipelineHelperCap(1) === 3);
@@ -7505,6 +7536,7 @@ async function main(): Promise<void> {
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
+    await send('PATCH', '/api/settings', { settings: { [PERSONAS_KEY]: null } });
     sdk.query = realQuery;
   }
 
@@ -8101,13 +8133,184 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n30 · a changed setting takes effect on the next run, and a live run takes the mode and effort (Amendment 178)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const append = (prompt: string | null): unknown => ({ type: 'preset', preset: 'claude_code', append: prompt ? `${prompt}\n\n${TURN_END_LINE}` : TURN_END_LINE });
+    const setPersonas = (raw: string | null) => send('PATCH', '/api/settings', { settings: { [PERSONAS_KEY]: raw } });
+    const autonomyOf = (id: string, a: Record<string, unknown>) => send<{ appliesTo?: string; detail?: string }>('POST', `/api/agents/${id}/autonomy`, { autonomy: a });
+    const runOf = async (text: string, nth = 1): Promise<FakeRun | undefined> => {
+      const of = () => runs.filter((r) => r.prompts.some((p) => p.includes(text)));
+      await until(() => of().length >= nth);
+      return of()[nth - 1];
+    };
+    const again = async (id: string, text: string): Promise<FakeRun | undefined> => {
+      await until(() => getAgent(db, id)?.status === 'done');
+      await send('POST', `/api/agents/${id}/message`, { text });
+      return runOf(text);
+    };
+    const DEV = BUILT_IN_PERSONAS.find((b) => b.id === 'developer')!;
+    const spid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'settings176' })).body.project.id;
+    const job30 = (id: string): void => {
+      insertJob(db, { id, projectId: spid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    };
+    const fix30 = (id: string, jobId: string, a: Partial<Agent>): void => fixture(id, jobId, { projectId: spid, ...a });
+    await setPersonas(null);
+
+    // ── one agent, its settings changed between two runs ─────────────────────────
+    job30('job_s30_dev');
+    fix30('s30_dev', 'job_s30_dev', {
+      status: 'queued',
+      persona: 'developer',
+      systemPrompt: 'LAUNCH COPY 176',
+      skills: ['launch-skill'],
+      autonomy: { mode: 'default', allowedTools: ['Read'], disallowedTools: [], budgetUsd: 5, effort: 'low' },
+    } as Partial<Agent>);
+    sup.pump();
+    const first = await runOf('the job_s30_dev prompt');
+    check('a built-in persona nobody edited runs as it ships, not as the launch copy', JSON.stringify(first?.options.systemPrompt) === JSON.stringify(append(DEV.systemPrompt.trim())) && JSON.stringify(first?.options.skills ?? []) === JSON.stringify(DEV.skills), JSON.stringify(first?.options.systemPrompt).slice(0, 120));
+    check('the first run has what was set', first?.options.permissionMode === 'default' && first.options.effort === 'low' && JSON.stringify(first.options.allowedTools) === '["Read"]' && JSON.stringify(first.options.disallowedTools) === '[]');
+    await until(() => getAgent(db, 's30_dev')?.status === 'working');
+
+    const live = await autonomyOf('s30_dev', { mode: 'acceptEdits', effort: 'high' });
+    check('a working agent given a mode and an effort takes them now', live.status === 200 && live.body.appliesTo === 'now', JSON.stringify(live.body));
+    check('through Query.setPermissionMode and applyFlagSettings, once each', JSON.stringify(first?.modes) === '["acceptEdits"]' && JSON.stringify(first?.flags) === '[{"effortLevel":"high"}]', JSON.stringify([first?.modes, first?.flags]));
+    const tools = await autonomyOf('s30_dev', { allowedTools: ['Read', 'Bash'], disallowedTools: ['WebFetch'], budgetUsd: 7 });
+    check('its tools and budget changed mid-run call no live setter: they are the next run\'s', tools.status === 200 && first?.modes.length === 1 && first.flags.length === 1, JSON.stringify([first?.modes, first?.flags]));
+    check("and the route says so: a change of tools on a working agent answers 'next run'", tools.body.appliesTo === 'next run', JSON.stringify(tools.body));
+    const bypass = await autonomyOf('s30_dev', { mode: 'bypassPermissions' });
+    check("bypass on a run that didn't start able to is the next run's: the SDK takes it only at the start", bypass.body.appliesTo === 'next run' && first?.modes.length === 1, JSON.stringify([bypass.body, first?.modes]));
+    await autonomyOf('s30_dev', { mode: 'acceptEdits' });
+    check('and going back to the mode the run has calls nothing', first?.modes.length === 1);
+    const unset = await autonomyOf('s30_dev', { effort: null });
+    check("an effort taken off goes to the model's default, live", unset.body.appliesTo === 'now' && JSON.stringify(first?.flags.at(-1)) === '{"effortLevel":null}', JSON.stringify(first?.flags));
+    await autonomyOf('s30_dev', { effort: 'high' });
+    const modeOnly = await autonomyOf('s30_dev', { mode: 'plan' });
+    check("a mode alone, after the tools changed, answers 'now': only what this change made counts", modeOnly.body.appliesTo === 'now' && first?.modes.at(-1) === 'plan', JSON.stringify([modeOnly.body, first?.modes]));
+    const both = await autonomyOf('s30_dev', { mode: 'acceptEdits', budgetUsd: 8 });
+    check("a mode and a budget together answer 'next run', though the mode went live", both.body.appliesTo === 'next run' && first?.modes.at(-1) === 'acceptEdits', JSON.stringify([both.body, first?.modes]));
+    await autonomyOf('s30_dev', { budgetUsd: 7 });
+
+    // The persona edited in Settings while it works, its model and tools too.
+    const editedDev = withPersona(null, { ...DEV, systemPrompt: '  EDITED DEV 176  ', skills: ['tdd', ' tdd ', 'pdf'], model: 'claude-haiku-s30', tools: { bash: false, write: false } });
+    await setPersonas(editedDev);
+    first?.finish({ cost: 0, reason: 'completed' });
+    const second = await again('s30_dev', 'the second run 176');
+    check('the next run carries the mode and effort', second?.options.permissionMode === 'acceptEdits' && second.options.effort === 'high', JSON.stringify([second?.options.permissionMode, second?.options.effort]));
+    check('and the tools changed mid-run', JSON.stringify(second?.options.allowedTools) === '["Read","Bash"]' && JSON.stringify(second?.options.disallowedTools) === '["WebFetch"]', JSON.stringify([second?.options.allowedTools, second?.options.disallowedTools]));
+    check('and the budget', near(second?.options.maxBudgetUsd, ceilingOf(7)), String(second?.options.maxBudgetUsd));
+    check('and the persona as Settings has it now: its prompt trimmed, its skills without repeats', JSON.stringify(second?.options.systemPrompt) === JSON.stringify(append('EDITED DEV 176')) && JSON.stringify(second?.options.skills) === '["tdd","pdf"]', JSON.stringify([second?.options.systemPrompt, second?.options.skills]));
+    check("but not the persona's model or tools: those stay the agent's own", second?.options.model === 'opus' && getAgent(db, 's30_dev')?.model === 'opus' && second.options.allowedTools?.includes('Bash') === true, String(second?.options.model));
+    check('the row keeps its launch copy, to fall back to', JSON.stringify(getAgentPersona(db, 's30_dev')) === JSON.stringify({ persona: 'developer', systemPrompt: 'LAUNCH COPY 176', skills: ['launch-skill'] }), JSON.stringify(getAgentPersona(db, 's30_dev')));
+    await setPersonas(resetPersona(editedDev, 'developer'));
+    second?.finish({ cost: 0, reason: 'completed' });
+    const third = await again('s30_dev', 'the third run 176');
+    check('a built-in reset in Settings runs as it ships again', JSON.stringify(third?.options.systemPrompt) === JSON.stringify(append(DEV.systemPrompt.trim())), JSON.stringify(third?.options.systemPrompt).slice(0, 120));
+    third?.finish({ cost: 0, reason: 'completed' });
+
+    // ── a persona of yours, then deleted ─────────────────────────────────────────
+    const mine: Persona = { id: 'mine-176', name: 'Mine', description: '', brief: '', model: '', tools: {}, systemPrompt: 'MINE NOW 176', skills: ['xlsx'], builtIn: false };
+    await setPersonas(withPersona(null, mine));
+    job30('job_s30_own');
+    fix30('s30_own', 'job_s30_own', { status: 'queued', persona: 'mine-176', systemPrompt: 'MINE AT LAUNCH 176', skills: ['docx'], autonomy: DEFAULT_AUTONOMY } as Partial<Agent>);
+    sup.pump();
+    const ownRun = await runOf('the job_s30_own prompt');
+    check('a persona of yours runs as Settings has it, not as it was at launch', JSON.stringify(ownRun?.options.systemPrompt) === JSON.stringify(append('MINE NOW 176')) && JSON.stringify(ownRun?.options.skills) === '["xlsx"]', JSON.stringify([ownRun?.options.systemPrompt, ownRun?.options.skills]));
+    await setPersonas(withoutPersona(withPersona(null, mine), 'mine-176'));
+    ownRun?.finish({ cost: 0, reason: 'completed' });
+    const gone = await again('s30_own', 'after it was deleted 176');
+    check('deleted, the next run falls back to the launch copy', JSON.stringify(gone?.options.systemPrompt) === JSON.stringify(append('MINE AT LAUNCH 176')) && JSON.stringify(gone?.options.skills) === '["docx"]', JSON.stringify([gone?.options.systemPrompt, gone?.options.skills]));
+    gone?.finish({ cost: 0, reason: 'completed' });
+
+    // ── a row from before a built-in was renamed ────────────────────────────────
+    await setPersonas(withPersona(null, { ...DEV, systemPrompt: 'DEVELOPER EDITED 176', skills: ['tdd'] }));
+    job30('job_s30_old');
+    fix30('s30_old', 'job_s30_old', { status: 'queued', persona: 'builder', systemPrompt: 'BUILDER AT LAUNCH 176', skills: ['docx'], autonomy: DEFAULT_AUTONOMY } as Partial<Agent>);
+    sup.pump();
+    const oldRun = await runOf('the job_s30_old prompt');
+    check("an agent stored as the builder runs as its successor, the developer, is in Settings", JSON.stringify(oldRun?.options.systemPrompt) === JSON.stringify(append('DEVELOPER EDITED 176')) && JSON.stringify(oldRun?.options.skills) === '["tdd"]', JSON.stringify([oldRun?.options.systemPrompt, oldRun?.options.skills]));
+    check('and its row still says builder', getAgentPersona(db, 's30_old').persona === 'builder');
+    oldRun?.finish({ cost: 0, reason: 'completed' });
+
+    // ── personas in Settings past a launch spec's limits ────────────────────────
+    const tooLong = withPersona(null, { ...DEV, systemPrompt: 'x'.repeat(20_001) });
+    const refusedLong = await setPersonas(tooLong);
+    check('a save of the personas with a system prompt over 20,000 characters → 400', refusedLong.status === 400 && /developer persona's system prompt is at most 20000 characters/.test(JSON.stringify(refusedLong.body)), JSON.stringify(refusedLong.body).slice(0, 200));
+    const ownLong = await setPersonas(withPersona(null, { ...mine, systemPrompt: 'x'.repeat(20_001) }));
+    check('one of yours too', ownLong.status === 400, String(ownLong.status));
+    const atLimit = await setPersonas(withPersona(null, { ...DEV, systemPrompt: 'x'.repeat(20_000), skills: Array.from({ length: 51 }, (_, i) => `s${i}`) }));
+    check("exactly 20,000 is saved, and skills past a spec's limit too: the editor takes any number", atLimit.status === 200, String(atLimit.status));
+    job30('job_s30_big');
+    fix30('s30_big', 'job_s30_big', { status: 'queued', persona: 'developer', systemPrompt: 'DEV AT LAUNCH 176', skills: ['docx'], autonomy: DEFAULT_AUTONOMY } as Partial<Agent>);
+    sup.pump();
+    const many = await runOf('the job_s30_big prompt');
+    const launchCopy = (r: FakeRun | undefined): boolean => JSON.stringify(r?.options.systemPrompt) === JSON.stringify(append('DEV AT LAUNCH 176')) && JSON.stringify(r?.options.skills) === '["docx"]';
+    check('a persona with more than 50 skills runs as its launch copy, and the run goes ahead', launchCopy(many) && (await until(() => getAgent(db, 's30_big')?.status === 'working')), JSON.stringify([many?.options.skills?.length, getAgent(db, 's30_big')?.status]));
+    await setPersonas(withPersona(null, { ...DEV, skills: ['x'.repeat(101)] }));
+    many?.finish({ cost: 0, reason: 'completed' });
+    const longSkill = await again('s30_big', 'a skill too long 176');
+    check('so does one with a skill name over 100 characters', launchCopy(longSkill), JSON.stringify(longSkill?.options.skills));
+    // As a settings.json edited by hand, or saved before the rule, would hold it.
+    readSettings()[PERSONAS_KEY] = tooLong;
+    longSkill?.finish({ cost: 0, reason: 'completed' });
+    const bigPrompt = await again('s30_big', 'a prompt too long 176');
+    check('and one with a system prompt over 20,000 characters that got into Settings', launchCopy(bigPrompt) && (await until(() => getAgent(db, 's30_big')?.status === 'working')), JSON.stringify(bigPrompt?.options.systemPrompt).slice(0, 80));
+    bigPrompt?.finish({ cost: 0, reason: 'completed' });
+    await setPersonas(null);
+
+    // ── a helper started after its role's persona was edited ─────────────────────
+    const SCRIBE = BUILT_IN_PERSONAS.find((b) => b.id === 'scribe')!;
+    job30('job_s30_orch');
+    fix30('s30_orch', 'job_s30_orch', {
+      role: 'orchestrator',
+      status: 'done',
+      helperCap: 3,
+      autonomy: DEFAULT_AUTONOMY,
+      helperRoles: [{ id: 'scribe', model: 'claude-scribe-s30', brief: 'Write it down.', systemPrompt: 'SCRIBE AT LAUNCH 176', skills: ['md'], autonomy: { ...DEFAULT_AUTONOMY, mode: 'acceptEdits' } }],
+    } as Partial<Agent>);
+    await setPersonas(withPersona(null, { ...SCRIBE, systemPrompt: 'SCRIBE EDITED 176', skills: ['md', 'diagrams'], model: 'claude-haiku-s30' }));
+    const scribe = sup.startHelper('s30_orch', 'Write the notes 176.', undefined, 'scribe');
+    sup.pump();
+    const scribeRun = await runOf('Write the notes 176.');
+    check("a helper started as a role after its persona was edited runs as it is now", JSON.stringify(scribeRun?.options.systemPrompt) === JSON.stringify(append('SCRIBE EDITED 176')) && JSON.stringify(scribeRun?.options.skills) === '["md","diagrams"]', JSON.stringify([scribeRun?.options.systemPrompt, scribeRun?.options.skills]));
+    check("on the role's model and rope, not the persona's", scribeRun?.options.model === 'claude-scribe-s30' && scribeRun.options.permissionMode === 'acceptEdits' && scribe.model === 'claude-scribe-s30', String(scribeRun?.options.model));
+    await setPersonas(null);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
+
+    // ── on Copilot: the mode through its gate, the effort with the model ─────────
+    const cpRope = { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, effort: 'low' };
+    job30('job_s30_cp');
+    fix30('s30_cp', 'job_s30_cp', { status: 'queued', model: 'gpt-5-mini', provider: 'copilot', autonomy: cpRope } as Partial<Agent>);
+    sup.pump();
+    await until(() => copilotSessions.some((x) => x.id === 's30_cp'));
+    const cp = copilotSessions.find((x) => x.id === 's30_cp');
+    await until(() => getAgent(db, 's30_cp')?.status === 'working');
+    const cpLive = await autonomyOf('s30_cp', { mode: 'plan', effort: 'high' });
+    check('a working Copilot agent takes the mode and effort now', cpLive.status === 200 && cpLive.body.appliesTo === 'now', JSON.stringify(cpLive.body));
+    check('the effort goes with its model, for the next message', JSON.stringify(cp?.models) === '["gpt-5-mini"]' && JSON.stringify(cp?.efforts) === '["high"]', JSON.stringify([cp?.models, cp?.efforts]));
+    const asked = await cp?.ask({ kind: 'shell', fullCommandText: 'rm -rf build', intention: 'clean', toolCallId: 'c_s30', commands: [], possiblePaths: [], possibleUrls: [], hasWriteFileRedirection: false, canOfferSessionApproval: true });
+    check('and the mode is the one its gate reads on the next call: plan refuses a command', asked?.kind === 'reject', JSON.stringify(asked));
+    const cpTools = await autonomyOf('s30_cp', { allowedTools: ['Read'] });
+    check("a change of tools on a working Copilot agent answers 'next run'", cpTools.status === 200 && cpTools.body.appliesTo === 'next run', JSON.stringify(cpTools.body));
+    const cpModel = await send<{ appliesTo?: string }>('POST', '/api/agents/s30_cp/model', { model: 'gpt-5' });
+    check('a model switched live goes at the effort it has now, not the one it launched with', cpModel.body.appliesTo === 'now' && cp?.models.at(-1) === 'gpt-5' && cp.efforts.at(-1) === 'high', JSON.stringify([cpModel.body, cp?.models, cp?.efforts]));
+    cp?.emit('session.idle', {});
+    await until(() => getAgent(db, 's30_cp')?.status === 'done');
+    await until(() => sup.slots.used === 0);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

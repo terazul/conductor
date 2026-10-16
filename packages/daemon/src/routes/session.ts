@@ -30,6 +30,7 @@ import type {
   RerunResponse,
   SendMessageRequest,
   SetAutonomyRequest,
+  SetAutonomyResponse,
   SetModelRequest,
   SetModelResponse,
   StopRetryingResponse,
@@ -44,6 +45,7 @@ import { eventLog } from '../eventlog.js';
 import { hub } from '../hub.js';
 import { alerts, initAlerts } from '../session/alerts.js';
 import { budgetUnitRefusal } from '../session/budget.js';
+import { PERSONA_ID, skillsProblem, systemPromptProblem } from '../session/persona.js';
 import { catalog, providerModelRefusal, providerModels, refusal } from '../session/models.js';
 import {
   getAgent,
@@ -137,12 +139,6 @@ function autonomyFor(provider: ProviderId, raw: unknown): Autonomy {
   return autonomy;
 }
 
-/** Limits on what a persona puts in a spec (Amendment 68). */
-const PERSONA_ID = /^[a-z0-9-]{1,60}$/;
-const SYSTEM_PROMPT_MAX = 20_000;
-const SKILL_MAX = 100;
-const SKILLS_MAX = 50;
-
 /**
  * A persona's fields on one spec: refused, not trimmed into shape, since a system prompt
  * cut short or a skill list half-dropped would launch an agent that isn't what was asked
@@ -159,23 +155,16 @@ function parsePersona(role: string, e: Record<string, unknown>): Pick<AgentSpec,
   }
   const prompt = e['systemPrompt'];
   if (prompt !== undefined && prompt !== null) {
-    if (typeof prompt !== 'string') throw new Error(`agent ${role}: systemPrompt must be a string`);
-    if (prompt.length > SYSTEM_PROMPT_MAX) {
-      throw new Error(`agent ${role}: systemPrompt is at most ${SYSTEM_PROMPT_MAX} characters`);
-    }
-    if (prompt.trim()) out.systemPrompt = prompt.trim();
+    const why = systemPromptProblem(prompt);
+    if (why) throw new Error(`agent ${role}: ${why}`);
+    if ((prompt as string).trim()) out.systemPrompt = (prompt as string).trim();
   }
   const skills = e['skills'];
   if (skills !== undefined && skills !== null) {
-    if (!Array.isArray(skills)) throw new Error(`agent ${role}: skills must be an array of skill names`);
-    if (skills.length > SKILLS_MAX) throw new Error(`agent ${role}: at most ${SKILLS_MAX} skills`);
+    const why = skillsProblem(skills);
+    if (why) throw new Error(`agent ${role}: ${why}`);
     const names: string[] = [];
-    for (const s of skills) {
-      if (typeof s !== 'string' || !s.trim() || s.length > SKILL_MAX) {
-        throw new Error(`agent ${role}: every skill is a name of 1 to ${SKILL_MAX} characters`);
-      }
-      if (!names.includes(s.trim())) names.push(s.trim());
-    }
+    for (const s of skills as string[]) if (!names.includes(s.trim())) names.push(s.trim());
     if (names.length > 0) out.skills = names;
   }
   return out;
@@ -892,11 +881,10 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     }
     // Through the supervisor, which broadcasts it. Writing the row alone left every
     // other tab — and this tab's inspector — showing the old budget and pills.
-    sup.setAutonomy(agent.id, next);
-
-    // Takes effect on the agent's next run: permissionMode and the tool lists
-    // are query() options, fixed for the life of one query.
-    return reply.send({ autonomy: next, appliesTo: 'next run' });
+    // A live run takes the mode and effort now where its engine can; the tool lists and the
+    // budget are options of a run's start, so they are its next run's (Amendment 178).
+    const appliesTo = await sup.setAutonomy(agent.id, next);
+    return reply.send({ autonomy: next, appliesTo } satisfies SetAutonomyResponse);
   });
 
   /*

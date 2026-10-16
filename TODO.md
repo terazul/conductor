@@ -70,12 +70,14 @@ the last of it on 12 Oct).
   *Done 16 Oct: Amendment 176.*
   - **Decide:** how often, how many kept, and where restore lives (Settings, or a `make` target).
     *Decided (15 Oct): on daemon start and every 6 h, the last 10 kept, restore as a `make` target that refuses while the daemon runs.*
-- [ ] **A changed setting takes effect on the next run.** Asked for (15 Oct): "when I change a setting for
+- [x] **A changed setting takes effect on the next run.** Asked for (15 Oct): "when I change a setting for
   an agent it should take effect immediately on the next invocation". An agent's model and autonomy have
   routes (`/api/agents/:agentId/model`, `/autonomy`); a persona's prompt, skills and model are copied in at
   launch (Amendments 68 and 128: "a stack that is running keeps what it launched with").
   - **Find first:** which setting was changed and didn't take effect, and whether the run after the change
     read the row or what the agent launched with.
+    *Decided (16 Oct): persona edits reach launched agents and later helpers from their next run (prompt and skills, falling back to the launch copy); a working agent gets mode and effort live, tools and budget from its next run.*
+  *Done 16 Oct: Amendment 178.*
 - [ ] **"one agent" lets you pick what kind of agent.** Asked for (15 Oct): choosing **one agent** always
   launches a developer. The preset is fixed to one `developer` row on opus with no brief
   (`web/src/spawn/presets.ts:242`), and the plan preview gives a preset's rows no role or persona to change.
