@@ -273,6 +273,14 @@ export function pipelineHelperCap(roles: number): number {
 export const PIPELINE_HELPERS_MAX = 48;
 
 /**
+ * How many stacks one Spawn launch may start from one plan (Amendment 181), each its own job,
+ * worktree and branch: the setting `conductor.launch.stacks`, from 1 to STACKS_MAX, else
+ * DEFAULT_STACKS. Spawn offers up to it, and `POST /api/jobs/batch` refuses more.
+ */
+export const STACKS_MAX = 6;
+export const DEFAULT_STACKS = 3;
+
+/**
  * The name a helper is stored under, from the `name` the orchestrator gave `start_helper`:
  * lowercase, runs of anything else as one dash, at most 24 characters. '' for no name. It is
  * also what makes two starts one lane (Amendment 151): the same role with the same name.

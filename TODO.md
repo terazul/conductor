@@ -20,7 +20,7 @@ the last of it on 12 Oct).
 
 ## Right now
 
-- [ ] **TOP PRIORITY. Queue a command to the orchestrator.** Asked for (15 Oct). The nearest thing
+- [x] **TOP PRIORITY. Queue a command to the orchestrator.** Asked for (15 Oct). The nearest thing
   built is **⏲ when done** (Amendment 157, `web/src/agent/scheduled.tsx`; the daemon's `#sendWhenDone`,
   `session/supervisor.ts`): a message sent when the agent's turn ends `done`, refused only for one
   already `done` or `stopped` (`whenDoneRefusal`, scheduled.tsx:36). An orchestrator whose turn ends with
@@ -88,7 +88,7 @@ the last of it on 12 Oct).
   - **Decide:** remember the last pick per project, or always start at developer?
     *Decided (15 Oct): remember the last pick per project; developer the first time.*
   - *Done 16 Oct: Amendment 179.*
-- [ ] **When work is run in parallel, say how many more orchestrators may be set up: 3 at most by
+- [x] **When work is run in parallel, say how many more orchestrators may be set up: 3 at most by
   default.** Asked for (15 Oct). Today running in parallel is done by hand: wave 11 was six Build Stack
   jobs launched one by one, one orchestrator each (`docs/plans/wave-11-tracks.md`). An orchestrator
   can't start another: a helper is inserted with no `helperCap` (`startHelper`, `session/supervisor.ts`),
@@ -97,6 +97,8 @@ the last of it on 12 Oct).
     helpers, up to the number chosen), or Spawn launching several stacks in parallel from one plan?
     Is 3 per launch, or for the whole fleet?
     *Decided (15 Oct): Spawn launches several stacks from one plan, up to 3 per launch. A design note comes first, for approval.*
+    *Decided (16 Oct): design `docs/plans/p1-design.md` approved, option B: one `POST /api/jobs/batch`, no migration; the cap is a setting, `conductor.launch.stacks` (1 to 6, default 3); each stack's prompt and named branch fill in `{track}`; the Fleet card is left for later.*
+    *Done (16 Oct): Amendment 181. Spawn's orchestrated launch has a **stacks** control (1 to the setting, `conductor.launch.stacks`, default 3) and posts N stacks to `POST /api/jobs/batch`, each with `{track}` filled in its prompt and named branch; the daemon checks all before making any, and reports each stack it made or why not (201, or 207 with the rest kept). Left: the Fleet card still shows one job per project, and there is no daemon merge lock.*
 
 - [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
   this replaces "back off to every hour". Today an agent that can't reach the model retries on its

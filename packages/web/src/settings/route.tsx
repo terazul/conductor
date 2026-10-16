@@ -38,7 +38,16 @@ import {
 import { errorText } from '../lib/errors.js';
 import { homeish, saveHome } from './storage.js';
 import { setStorage, useStorage } from './always.js';
-import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, slotsProblem } from './slots.js';
+import {
+  SLOTS_DEFAULT,
+  SLOTS_KEY,
+  SLOTS_MAX,
+  STACKS_DEFAULT,
+  STACKS_KEY,
+  STACKS_MAX,
+  slotsProblem,
+  stacksProblem,
+} from './slots.js';
 import {
   RETRY_DELAYS_KEY,
   retryDelaysFieldProblem,
@@ -184,6 +193,52 @@ function SlotsSection() {
         <p className="st-dim">
           Applies at once. Raising it starts agents that are waiting for a slot. Lowering it stops
           nobody: running agents finish, and nothing new starts until fewer than the limit are running.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * How many stacks one Spawn launch may start from one plan (Amendment 181), as SlotsSection
+ * edits the slot limit; the daemon's `stacksLimit()` reads it and refuses a batch over it.
+ */
+function StacksRow() {
+  const stored = useSetting(STACKS_KEY);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? stored ?? String(STACKS_DEFAULT);
+  const problem = draft === null ? null : stacksProblem(draft);
+  const commit = (): void => {
+    if (draft === null || problem) return;
+    writeSetting(STACKS_KEY, draft.trim() === String(STACKS_DEFAULT) ? null : draft.trim());
+    setDraft(null);
+  };
+  return (
+    <>
+      <label className="st-field">
+        <span>stacks one orchestrated launch may start</span>
+        <input
+          type="number"
+          min={1}
+          max={STACKS_MAX}
+          value={shown}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            else if (e.key === 'Escape') setDraft(null);
+          }}
+        />
+        <span className="st-dim">
+          Default {STACKS_DEFAULT}, up to {STACKS_MAX}.
+        </span>
+      </label>
+      {problem ? (
+        <p className="st-err">{problem}</p>
+      ) : (
+        <p className="st-dim">
+          Spawn's stacks control goes up to this. Each stack is a job of its own, with its own worktree, branch and
+          budget, told its number by {'{track}'} in the prompt; each takes a slot for its orchestrator.
         </p>
       )}
     </>
@@ -993,6 +1048,7 @@ function Settings() {
         </Section>
         <Section title="Agents">
           <SlotsSection />
+          <StacksRow />
           <RetryDelaysRow />
         </Section>
         <Section title="Spend">

@@ -41,6 +41,7 @@ export function Pipeline({
   helpers,
   onHelpers,
   alone,
+  stacks,
 }: {
   listed: readonly ListedRole[];
   personas: readonly Persona[];
@@ -61,6 +62,11 @@ export function Pipeline({
    * (Amendment 142) says its own agent launches plainly, since it does not become an architect.
    */
   alone?: string;
+  /**
+   * How many stacks this launch starts from one plan (Amendment 181), the most there may be
+   * (`conductor.launch.stacks`), and what the control says under it. Absent, no control.
+   */
+  stacks?: { n: number; max: number; onChange: (n: number) => void; notes: readonly string[] };
 }) {
   const offered = offeredRoles(listed, personas);
   return (
@@ -89,7 +95,33 @@ export function Pipeline({
                 ))}
             </select>
             , as these roles and no others
+            {stacks && stacks.max > 1 && (
+              <span className="sp-stacks" role="group" aria-label="Stacks">
+                {' · stacks '}
+                {Array.from({ length: stacks.max }, (_, i) => i + 1).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className="sp-pill is-tight sp-stack"
+                    aria-pressed={k === stacks.n}
+                    title={
+                      k === 1
+                        ? 'One stack: this launch, as always.'
+                        : `${k} stacks from this one plan, each its own job, worktree and branch, told its number by {track} in the prompt.`
+                    }
+                    onClick={() => stacks.onChange(k)}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </span>
+            )}
           </div>
+          {stacks?.notes.map((note) => (
+            <div className="sp-pipe-note" key={note}>
+              {note}
+            </div>
+          ))}
           {listed.map((l) => {
             const persona = personaFor(personas, l.id);
             const reads = isReadOnlyRole(l.id) || persona?.tools.write === false;

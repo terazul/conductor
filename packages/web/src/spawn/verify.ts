@@ -39,7 +39,7 @@ import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.j
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, resetPersona, withPersona, withoutPersona } from './personas.js';
 import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, orchestratorRow, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, setupOf, toPreset, withOrchestrator, withSetup, withoutSetup, type CustomRole, type SavedSetup } from './custom.js';
 import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
-import { DEFAULT_METHOD, METHODS, branchOptions, branchProblem, isolationOf, launchBody, methodFrom, methodReady, pickedNote, presetLabel } from './launch.js';
+import { DEFAULT_METHOD, METHODS, STACKS_KEY, TRACK, branchOptions, branchProblem, isolationOf, launchBody, launchRequest, methodFrom, methodReady, pickedNote, presetLabel, stacksBodies, stacksBudgetLine, stacksFrom, stacksNotes, stacksPreview, stacksRefusal, type LaunchInput } from './launch.js';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { ALL_ON, CLAUDE, NONE, capabilitiesOf, type Capabilities } from '../lib/providers.js';
@@ -760,7 +760,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('budget 500k tokens a day') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /budgetUsd: jobBudgetUsd\(budgetPerAgent, specs\.length, caps\)/.test(src));
+  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /const jobBudget = jobBudgetUsd\(budgetPerAgent, specs\.length, caps\);/.test(src) && /budgetUsd: jobBudget,/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's list or any id", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /list="sp-engine-models"/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd, its hint saying it warns and never stops (Amendment 180)', !/ceilingWords/.test(src) && /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title=\{`[^`]*per day[^`]*never stops it[^`]*`\}\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
@@ -1079,9 +1079,9 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
   check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
   check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
-  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179)', /!customBad && !singleBad && methodOk;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 181)', /!customBad && !singleBad && methodOk && stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
   check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
-  check('what is sent is launchBody, with the method and the name', /body: launchBody\(\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route));
+  check('what is sent is launchBody, by launchRequest, with the method and the name', /launchRequest\(\s*\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route) && /return n <= 1 \? \{ path: '\/api\/jobs', body: bodies\[0\]! \}/.test(readFileSync(new URL('./launch.ts', import.meta.url), 'utf8')));
   check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
   check('the name is cleared after a launch on it, as the prompt is: the branch is taken now', /if \(method === 'named'\) setBranchName\(''\);/.test(route));
   check('Settings offers the same three, and keeps the choice under the same key', /METHODS\.map\(\(m\) => \(/.test(settings) && /put\(\{ method: m\.id \}\)/.test(settings) && !/ISOLATION_WORDS/.test(settings));
@@ -1771,8 +1771,53 @@ console.log('\n29 · "one agent" launches the role and persona you pick, remembe
   check('it reads and writes the project\'s setting, and blocks a launch it cannot run', /useSetting\(projectId \? singleKey\(projectId\) : ''\)/.test(route) && /writeSetting\(singleKey\(projectId\), singleSetting\(next\)\)/.test(route) && /!customBad && !singleBad && methodOk/.test(route));
 }
 
+console.log('\n30 · an orchestrated launch starts several stacks from one plan, each told its number (Amendment 181)');
+{
+  const agents = toAgentSpecs(orchestratedFor(presetById(ORCHESTRATED_ID), defaultListed(personasFrom(null))), defaultPills(), 5, undefined, {}, {}, {}, undefined, personasFrom(null), defaultListed(personasFrom(null)));
+  const input: LaunchInput = {
+    projectId: 'p1',
+    prompt: `Run track **${TRACK}** of docs/plans/wave-13-tracks.md.\nStack ${TRACK}: your lanes are in §${TRACK}.`,
+    method: 'named',
+    branch: `w13/t${TRACK}`,
+    preset: 'orchestrated',
+    agents,
+    budgetUsd: 500,
+  };
+  const three = stacksBodies(input, 3);
+  check('three stacks are three bodies, {track} 1 to 3 in each prompt, every one of them', three.length === 3 && three.every((b, i) => b.prompt === `Run track **${i + 1}** of docs/plans/wave-13-tracks.md.\nStack ${i + 1}: your lanes are in §${i + 1}.`), JSON.stringify(three.map((b) => b.prompt)));
+  check('and in the branch named', JSON.stringify(three.map((b) => b.branch)) === JSON.stringify(['w13/t1', 'w13/t2', 'w13/t3']));
+  check('with the same project, agents, budget, preset and isolation', three.every((b) => b.projectId === 'p1' && JSON.stringify(b.agents) === JSON.stringify(agents) && b.budgetUsd === 500 && b.preset === 'orchestrated' && b.isolation === 'worktree'));
+  const perLaunch = stacksBodies({ ...input, method: 'worktree', branch: '' }, 2);
+  check('a new branch per launch names none, so each job gets conductor/<jobId>', perLaunch.length === 2 && perLaunch.every((b) => b.branch === undefined && b.isolation === 'worktree'));
+
+  check('one stack is today\'s body, to /api/jobs, {track} left as typed', JSON.stringify(stacksBodies(input, 1)) === JSON.stringify([launchBody(input)]) && JSON.stringify(launchRequest(input, 1)) === JSON.stringify({ path: '/api/jobs', body: launchBody(input) }));
+  check('more go to /api/jobs/batch as { jobs }', (() => {
+    const r = launchRequest(input, 3);
+    return r.path === '/api/jobs/batch' && JSON.stringify(r.body) === JSON.stringify({ jobs: three });
+  })());
+
+  check('one stack is never refused here', stacksRefusal('no placeholder', 'in_place', 'main', 1) === null);
+  check('more without {track} in the prompt are refused, in the words agreed', stacksRefusal('Run the plan.', 'worktree', '', 2) === 'Each stack needs its own work: put {track} where its number goes.');
+  check('a branch named without {track} is refused', /branch of its own: put \{track\}/.test(stacksRefusal(`t${TRACK}`, 'named', 'w13/shared', 2) ?? ''));
+  check('the default branch, in the folder, is refused above one', /checkout of its own/.test(stacksRefusal(`t${TRACK}`, 'in_place', '', 2) ?? ''));
+  check('above the limit is refused, and at it is not', /At most 4 stacks/.test(stacksRefusal(`t${TRACK}`, 'worktree', '', 5, 4) ?? '') && stacksRefusal(`t${TRACK}`, 'worktree', '', 4, 4) === null && stacksRefusal(`t${TRACK}`, 'worktree', '', 7) !== null && stacksRefusal(`t${TRACK}`, 'worktree', '', 6) === null);
+  check('a prompt with {track} on a new branch per launch, or a named one with it, goes', stacksRefusal(`t${TRACK}`, 'worktree', '', 3) === null && stacksRefusal(`t${TRACK}`, 'named', `w/${TRACK}`, 3) === null);
+
+  check('the preview is each stack\'s first line, filled', JSON.stringify(stacksPreview(input.prompt, 2)) === JSON.stringify(['Run track **1** of docs/plans/wave-13-tracks.md.', 'Run track **2** of docs/plans/wave-13-tracks.md.']) && stacksPreview(input.prompt, 1).length === 0);
+  check('the budget line multiplies', stacksBudgetLine(3, 500) === '3 stacks × $500 = $1,500' && stacksBudgetLine(1, 500) === null && stacksBudgetLine(3, null) === null, String(stacksBudgetLine(3, 500)));
+  check('the notes say the slots when there are not enough, and the merge lock always', stacksNotes(3, 1).length === 2 && /3 stacks want up to 3 slots at once/.test(stacksNotes(3, 1)[0]!) && stacksNotes(3, 5).length === 1 && /merge lock, as wave-11-tracks\.md §0/.test(stacksNotes(3, 5)[0]!) && stacksNotes(1, 0).length === 0);
+  check('the setting reads 1 to 6, else the default 3', STACKS_KEY === 'conductor.launch.stacks' && stacksFrom(null) === 3 && stacksFrom('2') === 2 && stacksFrom('6') === 6 && ['0', '7', '2.5', '', 'x'].every((v) => stacksFrom(v) === 3));
+
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
+  check('the pills sit beside "helpers in all", one per number up to the setting', /aria-label="Stacks"/.test(picker) && /Array\.from\(\{ length: stacks\.max \}/.test(picker) && /stacks\.onChange\(k\)/.test(picker) && /const stacksMax = stacksFrom\(useSetting\(STACKS_KEY\)\);/.test(route));
+  check('shown only where something orchestrates, and 1 otherwise', /const stacked = listsRoles && orchestrates\(listed\);/.test(route) && /const stacks = stacked \? Math\.min\(stacksAsked, stacksMax\) : 1;/.test(route));
+  check('the choice is the launch\'s: 1 to start, after a launch, and on a preset change', /useState\(1\);\s*const stacksMax/.test(route) && /setPipeHelpers\(null\);\s*setStacks\(1\);/.test(route) && /setStacks\(1\);\s*setPrompt\(''\);/.test(route));
+  check('a 207 is shown per stack, not as "Launch failed"', /function LaunchedStacks/.test(route) && /not started: \{s\.error\}/.test(route) && /stacks launched/.test(route));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane; and every writing agent runs shell unattended by default, a reading one only its read-only commands, with git push denied unless allowed; and one agent launches the role and persona picked for its project, a developer the first time.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane; and every writing agent runs shell unattended by default, a reading one only its read-only commands, with git push denied unless allowed; and one agent launches the role and persona picked for its project, a developer the first time; and an orchestrated launch starts several stacks from one plan, each with its number in its prompt and branch.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

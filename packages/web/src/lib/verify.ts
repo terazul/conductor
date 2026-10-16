@@ -61,7 +61,7 @@ import { screenForKey, tabbed } from './screens.js';
 import { addReferenced, addedLine, nameFrom, tidyPath } from '../fleet/addproject.js';
 import { DECLINE_NOTE, bannerLine, bringLine, homeish, questionLines } from '../settings/storage.js';
 import { importable, mergeIncoming, readSetting, writeSetting } from './settings.js';
-import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, slotsProblem } from '../settings/slots.js';
+import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, STACKS_DEFAULT, STACKS_KEY, STACKS_MAX, slotsProblem, stacksProblem } from '../settings/slots.js';
 import { readDraft, writeDraft } from './drafts.js';
 import { copyText } from './clipboard.js';
 import { SEEN_KEY, isFinished, markSeen, parseSeen, seenOnAgent, serializeSeen, startSeen, unseenFinished } from './seen.js';
@@ -1024,6 +1024,13 @@ console.log('\n20 · a Settings tab, and the slot limit on it (Amendment 47)');
   const def = route.slice(route.indexOf('export const screen'));
   check('Settings is a tab, on 9', /id: 'settings'/.test(def) && /hotkey: '9'/.test(def) && !/tab: false/.test(def));
   check('its launch defaults are the ones Spawn reads', /launchDefaults\(readSetting\)/.test(route) && /launchPatch\(/.test(route));
+  // The stacks one launch may start (Amendment 181), beside the slots, by the same rule as the daemon's.
+  check('a whole number from 1 to 6 is a stacks limit, and anything else says why', ['1', ' 6 ', '3'].every((v) => stacksProblem(v) === null) && ['0', '7', '2.5', '', 'x'].every((v) => stacksProblem(v) !== null));
+  check(
+    "the stacks field's rule is the daemon's: same key, same bounds, from shared",
+    STACKS_KEY === 'conductor.launch.stacks' && daemon.includes("STACKS_KEY = 'conductor.launch.stacks'") && /n >= 1 && n <= STACKS_MAX/.test(daemon) && STACKS_MAX === 6 && STACKS_DEFAULT === 3,
+  );
+  check('Settings shows it beside the slots, and writes nothing at the default', /<SlotsSection \/>\s*<StacksRow \/>/.test(route) && /writeSetting\(STACKS_KEY, draft\.trim\(\) === String\(STACKS_DEFAULT\) \? null : draft\.trim\(\)\)/.test(route));
 }
 
 console.log('\n21 · "allow always" rules say what they allow, who asked, and where else they live (Amendment 48)');
@@ -1753,7 +1760,7 @@ console.log('\n38 · the retry delays are a setting (Amendment 140); the budget 
       r.includes(`useSetting(${key})`) && r.includes(`${prob}(draft)`) && /onBlur=\{commit\}/.test(r) && /e\.key === 'Enter'\) commit\(\)/.test(r) && /e\.key === 'Escape'\) setDraft\(null\)/.test(r) && /className="st-err"/.test(r) && /className="st-dim"/.test(r),
     );
   }
-  check('the delays sit under Agents; Spend has no ceiling or midnight row', /<SlotsSection \/>\s*<RetryDelaysRow \/>/.test(route) && /<SpendSection \/>\s*<\/Section>/.test(route) && !/CeilingRow|MidnightRow|budgetCeiling|budgetResumeAtMidnight/.test(route));
+  check('the delays sit under Agents; Spend has no ceiling or midnight row', /<SlotsSection \/>\s*<StacksRow \/>\s*<RetryDelaysRow \/>/.test(route) && /<SpendSection \/>\s*<\/Section>/.test(route) && !/CeilingRow|MidnightRow|budgetCeiling|budgetResumeAtMidnight/.test(route));
 
   // The keys are the daemon's: the same names its rules are registered under.
   const daemonRetry = readFileSync(new URL('../../../daemon/src/session/retry.ts', import.meta.url), 'utf8');
