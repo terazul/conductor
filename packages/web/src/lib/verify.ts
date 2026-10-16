@@ -68,6 +68,8 @@ import { SEEN_KEY, isFinished, markSeen, parseSeen, seenOnAgent, serializeSeen, 
 import { SEEN_AGENTS_KEY, markAgentsSeen, parseSeenAgents, serializeSeenAgents, unseenDoneAgents } from './seen.js';
 import { REVOKE_NOTE, copyLine, ruleOrigin, ruleTitle } from '../settings/rules.js';
 import { nestHelpers } from '../fleet/nest.js';
+import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents, toggleAgents } from '../fleet/agentlist.js';
+import { NAV_TREE_KEY } from '../shell/navtree.js';
 import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortFacts, sortProjects, type SortFacts } from '../fleet/order.js';
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
 import { OVER_AT, TOTAL_TITLE, WARN_AT, agentPairWords, budgetProblem, dailyMeter, parseBudget, projectPairWords, projectSpendOf, toneOf, totalWords } from '../shell/spend.js';
@@ -1891,9 +1893,77 @@ console.log('\n· today and all-time totals for each agent, project and the flee
   );
 }
 
+console.log("\n· a Fleet card's agents fold, start folded, are kept per card, and what needs you stays (Amendment 173)");
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const mk = (id: string, over: Partial<Agent> = {}): Agent => ({
+    id,
+    jobId: J,
+    projectId: P,
+    role: 'builder',
+    model: 'claude-opus-5',
+    sdkSessionId: 's',
+    status: 'working',
+    blockMode: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 25 },
+    startedAt: null,
+    endedAt: null,
+    ...over,
+  });
+
+  // Folded on first load: nothing stored, or anything broken, is every card folded.
+  check('a card starts folded: nothing stored is folded', !agentsOpen(null, 'a') && !agentsOpen(null, 'b'));
+  check('a broken setting is folded too, not an error', !agentsOpen('{x', 'a') && !agentsOpen('"a"', 'a') && !agentsOpen('[1,2]', 'a'));
+
+  // Kept per card: two cards, one toggled.
+  const one = toggleAgents(null, 'a');
+  check('opening one card opens it and no other', agentsOpen(one, 'a') && !agentsOpen(one, 'b'), String(one));
+  const both = toggleAgents(one, 'b');
+  check('opening the second leaves the first open', agentsOpen(both, 'a') && agentsOpen(both, 'b'), String(both));
+  const back = toggleAgents(both, 'a');
+  check('folding the first leaves the second open', !agentsOpen(back, 'a') && agentsOpen(back, 'b'), String(back));
+  check('folding the only open card removes the setting', toggleAgents(one, 'a') === null);
+
+  // The stored text read back fresh, as a reload reads it, through the settings map.
+  const was = readSetting(FLEET_AGENTS_KEY);
+  writeSetting(FLEET_AGENTS_KEY, null);
+  writeSetting(FLEET_AGENTS_KEY, toggleAgents(readSetting(FLEET_AGENTS_KEY), 'a'));
+  const stored = readSetting(FLEET_AGENTS_KEY);
+  check('the choice is a setting, and survives being read back', stored === '["a"]' && agentsOpen(stored, 'a') && !agentsOpen(stored, 'b'), String(stored));
+  check('it is its own key, not the navigator\'s, so a card and a navigator node never share an id', (FLEET_AGENTS_KEY as string) !== NAV_TREE_KEY && FLEET_AGENTS_KEY.startsWith('conductor.'));
+  writeSetting(FLEET_AGENTS_KEY, was);
+
+  // What needs you is still there while folded, and counted on the toggle.
+  const agents = [mk('w1'), mk('asks'), mk('blk', { status: 'blocked' }), mk('held', { status: 'done' }), mk('w2')];
+  const pending = [{ agentId: 'asks' }];
+  const alerts = [{ agentIds: ['held'] }];
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).join();
+  check('folded, only the agents that need you keep their rows, in their order', ids(shownAgents(agents, false, pending, alerts)) === 'asks,blk,held', ids(shownAgents(agents, false, pending, alerts)));
+  check('open, every agent is listed, in its order', ids(shownAgents(agents, true, pending, alerts)) === 'w1,asks,blk,held,w2');
+  check('folded with nothing waiting, no rows', shownAgents([mk('x'), mk('y')], false, [], []).length === 0);
+  check('a request, a blocked status and an alert each need you; working does not', needsYou(agents[1]!, pending, []) && needsYou(agents[2]!, [], []) && needsYou(agents[3]!, [], alerts) && !needsYou(agents[0]!, pending, alerts));
+  check('the toggle counts them', agentsToggleWords(5, 3) === '5 agents · 3 need you' && agentsToggleWords(4, 1) === '4 agents · 1 needs you');
+  check('and says only the count when nothing waits', agentsToggleWords(1, 0) === '1 agent' && agentsToggleWords(12, 0) === '12 agents');
+
+  // The card draws it.
+  const card = src('../fleet/card.tsx');
+  check('the card reads the setting and its project id', /agentsOpen\(useSetting\(FLEET_AGENTS_KEY\), project\.id\)/.test(card));
+  check('and draws the rows shownAgents gives, not every agent', /shownAgents\(agents, listOpen, pending, allAlerts\)/.test(card) && /rows\.map\(\(a\) => \(\s*<AgentRow/.test(card) && !/agents\.map\(\(a\) => <AgentRow/.test(card));
+  check('the toggle is a real button with aria-expanded, writing the setting', /<button\s+type="button"\s+className=\{`fl-card-fold[\s\S]*?aria-expanded=\{listOpen\}/.test(card) && /writeSetting\(FLEET_AGENTS_KEY, toggleAgents\(readSetting\(FLEET_AGENTS_KEY\), project\.id\)\)/.test(card));
+  check('its Enter and Space stay its own, not the card\'s', /className=\{`fl-card-fold[\s\S]*?onKeyDown=\{\(e\) => e\.stopPropagation\(\)\}/.test(card));
+  check('it says the count and the needs-you count', /agentsToggleWords\(agents\.length, needing\)/.test(card) && /needsYou\(a, pending, allAlerts\)/.test(card));
+  const css = src('../fleet/fleet.css');
+  const rules = ['.fl-card-fold {', '.fl-card-fold:hover {', '.fl-card-fold.is-need {'].map((c) => css.split(c)[1]?.split('}')[0] ?? '');
+  check('the toggle is drawn with tokens only, amber when one needs you', rules.every((b) => b !== '' && !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(b)) && /color: var\(--need\)/.test(rules[2]!));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings; spend reads today and in total for each agent, project and the fleet.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

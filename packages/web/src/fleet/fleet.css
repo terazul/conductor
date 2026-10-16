@@ -250,6 +250,35 @@
   margin-bottom: 11px;
 }
 
+/* The list's toggle (Amendment 173): quiet, a row's height, amber words when one needs you. */
+.fl-card-fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+}
+
+.fl-card-fold:hover {
+  color: var(--ink);
+}
+
+.fl-card-fold.is-need {
+  color: var(--need);
+}
+
+.fl-card-fold-chev {
+  width: 10px;
+}
+
 /* ── agent row ─────────────────────────────────────────────────────────────── */
 
 .fl-arow {

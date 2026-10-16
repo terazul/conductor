@@ -56,9 +56,9 @@ the last of it on 12 Oct).
   - **Decide:** a month in local time, as the day is (`localDay`)? A monthly budget per agent, per project,
     for the whole fleet, or several?
     *Decided (15 Oct): a local month; a monthly budget for the whole fleet and for each project.*
-- [ ] **Fleet cards: the agent list shows and collapses, collapsed by default.** Asked for (15 Oct). The
+- [x] **Fleet cards: the agent list shows and collapses, collapsed by default.** Asked for (15 Oct). The
   card lists every agent (`web/src/fleet/card.tsx:692`, `AgentRow`). Needs a toggle on the card, closed by
-  default, remembered per card the way other folds are.
+  default, remembered per card the way other folds are. *Done 16 Oct: Amendment 173.*
 - [ ] **Back up the database regularly, and bring the last backup back.** Asked for (15 Oct). Today copies
   are made only by hand, into `~/.conductor/backups/`, before migrations (see the 10 Oct note further
   down). Wants: a regular backup (SQLite's `VACUUM INTO` gives a consistent copy while the daemon runs),
