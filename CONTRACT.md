@@ -221,10 +221,14 @@ each stack's prompt and named branch fill in `{track}`; the Fleet card is left f
   `CreateJobsRequest { jobs }` (`wire.ts:316`). It refuses, making nothing: a list that is not 1 to the
   setting (400, the detail naming the setting); any stack `POST /api/jobs` would refuse (400 or 409,
   `stack N: …`, by the same checks, now `parseCreateJob` at `:370`, which `POST /api/jobs` at `:689` also
-  calls, its replies unchanged); a project not there (400); two stacks naming one branch (409, `:728`).
+  calls, its replies unchanged); a project not there (400); two stacks naming one branch (409, `:733`).
   Then each stack is `sup.createJob` in turn. One git refuses fails alone: those before it are kept, those
   after it are still tried, and the reply is 207 with `CreateJobsResponse { jobs, stacks }` (`wire.ts:327`),
-  each `StackLaunch` (`:321`) a job id or the reason; all made is 201 (`:743`).
+  each `StackLaunch` (`:321`) a job id or the reason; all made is 201 (`:748`).
+- **Above one stack, each in its own checkout.** A batch of more than one where any stack is `in_place`
+  or `branch` (the project folder itself, no git work to keep them apart) is 400, `stack N: several stacks
+  cannot share the project folder`, and makes nothing (`routes/session.ts:725`), as Spawn's
+  `stacksRefusal` already holds it. One stack in the folder is still made; `POST /api/jobs` is unchanged.
 - **`{track}` is all a stack is told.** `launch.ts:152`: `withTrack` (`:164`) fills it with 1 to N in the
   prompt and in a named branch (`stacksBodies`, `:196`); `launchRequest` (`:204`) posts one stack to
   `/api/jobs` exactly as before and more to the batch. `stacksRefusal` (`:173`) holds the launch until the
@@ -250,13 +254,14 @@ budget hoisted to `jobBudget`), `:1081` (the launch gate ends `&& stacksWhy === 
 job; there is no daemon merge lock, and stacks that merge into one branch need the plan to say how
 (`wave-11-tracks.md` §0).
 
-*Verified:* `session/verify.ts` §30 (`:8104`), against the real supervisor and the fake SDK, 23 checks: the
+*Verified:* `session/verify.ts` §30 (`:8104`), against the real supervisor and the fake SDK, 25 checks: the
 setting's rule and default; three stacks named `s178/t{1..3}` make three jobs, branches and worktrees, each
 prompt its own number, each with the budget; no branch named makes `conductor/<id>`; four over the default,
 none, or not a list → 400 and nothing made (`:8155`); the setting at 2 refuses three, at 4 makes four;
 a nickname model on stack 2, no prompt, a branch with **(1)**, or a project not there → 400 naming the
-stack, nothing made; two stacks naming one branch → 409, nothing made (`:8169`); a name git refuses on
-stack 2 → 207, stacks 1 and 3 kept with their worktrees (`:8176`) and stack 2's reason given;
+stack, nothing made; two stacks `in_place`, or one `branch`, → 400 and nothing made (`:8169`); two stacks naming
+one branch → 409, nothing made (`:8172`); a name git refuses on
+stack 2 → 207, stacks 1 and 3 kept with their worktrees (`:8179`) and stack 2's reason given;
 `POST /api/jobs` still 201, still `{error: 'prompt is required'}` word for word, and a taken branch still
 409 *could not use that branch*. With the batch's checks switched off (no count bound, each stack sent to
 `createJob` raw, no duplicate check), 9 of them fail. `spawn/verify.ts` §29 (`:1729`) for `{track}`, the

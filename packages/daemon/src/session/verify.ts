@@ -8042,6 +8042,9 @@ async function main(): Promise<void> {
     const noPrompt = await batch([stackBody(8), stackBody(9, { prompt: ' ' })]);
     check('one with no prompt, or a branch not on a worktree → 400, nothing made', noPrompt.status === 400 && /^stack 2: prompt is required/.test(noPrompt.body.error ?? '') && (await batch([stackBody(8), stackBody(9, { isolation: 'in_place' })])).status === 400 && jobsNow() === before);
     check('one for a project not there → 400, nothing made', (await batch([stackBody(8), stackBody(9, { projectId: 'proj_none' })])).status === 400 && jobsNow() === before && branches() === branchesBefore);
+    const inPlace = await batch([stackBody(8, { isolation: 'in_place', branch: undefined }), stackBody(9, { isolation: 'in_place', branch: undefined })]);
+    check('two stacks in the project folder → 400, nothing made', inPlace.status === 400 && /each in its own checkout/.test(inPlace.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${inPlace.status} ${inPlace.body.error} ${inPlace.body.detail}`);
+    check('so is the old in-place branch', (await batch([stackBody(8, { isolation: 'branch', branch: undefined }), stackBody(9)])).status === 400 && jobsNow() === before);
     const twice = await batch([stackBody(8), stackBody(9, { branch: 's178/t8' })]);
     check('two stacks naming one branch → 409, nothing made', twice.status === 409 && /s178\/t8 is named twice/.test(twice.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${twice.status} ${twice.body.detail}`);
 

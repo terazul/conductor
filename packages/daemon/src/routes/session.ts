@@ -687,8 +687,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   /**
    * Several stacks from one Spawn launch (Amendment 178), each its own job, worktree and
    * branch. Every request is checked first, as `POST /api/jobs` checks one, and with them the
-   * count (1 to `stacksLimit()`), that each project is there, and that no two name one branch:
-   * any refusal makes nothing. Then each is created in turn. A stack whose worktree git refuses
+   * count (1 to `stacksLimit()`), that each project is there, that above one each is on a
+   * worktree, and that no two name one branch: any refusal makes nothing. Then each is created in turn. A stack whose worktree git refuses
    * (a name it rejects, a branch checked out elsewhere) fails alone: the ones before it are
    * kept, the ones after it are still tried, and the reply is 207 with every stack's outcome.
    */
@@ -706,6 +706,11 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       }
       if (!getProject(db, parsed.request.projectId)) return fail(reply, 400, `stack ${i + 1}: no such project`);
       requests.push(parsed.request);
+    }
+    // Above one stack each needs a checkout of its own: `in_place` and `branch` are the project folder.
+    const shared = requests.findIndex((r) => r.isolation !== 'worktree');
+    if (requests.length > 1 && shared !== -1) {
+      return fail(reply, 400, `stack ${shared + 1}: several stacks cannot share the project folder`, 'A launch of several stacks needs each in its own checkout: choose a new branch per launch, or a named branch with {track}.');
     }
     const named = requests.map((r) => r.branch).filter((b): b is string => b !== undefined);
     const twice = named.find((b, i) => named.indexOf(b) !== i);
