@@ -377,8 +377,10 @@ only, the plan says so underneath: "reads only (reviewer): no file edits, read-o
 only, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
 get, and what an agent already launched as it is told from its next run: its system prompt
 and skills as Settings has them now (a reset built-in runs as it ships). Its model and tools
-stay the agent's own. A persona you delete, or one the agent's id no longer names, leaves the
-agent with what it launched with (Amendment 176).
+stay the agent's own. An agent launched as the builder or documenter is told what the
+developer or scribe is now. A persona you delete, or one the agent's id no longer names,
+leaves the agent with what it launched with, as does one whose system prompt is over 20,000
+characters or that has more than 50 skills (Amendment 176).
 
 **What the built-in roles are told** (since 10 Oct, each has a system prompt; the text is in
 Settings → **Personas**). Every one is a line of purpose, a few rules about *how* to work, and

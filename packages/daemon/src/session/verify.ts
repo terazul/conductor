@@ -152,6 +152,7 @@ import {
 } from './handoff.js';
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
+import { readSettings } from '../settings.js';
 import { DayWatch, costChanged, dayWatch } from '../daily.js';
 import { HANDOFF_ASK, NEW_DAY_NUDGE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { ancestorsOf, createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
@@ -3708,7 +3709,15 @@ async function main(): Promise<void> {
     const helperRun = await until(() => runs.some((r) => (r.prompts[0] ?? '').includes('Check the API.')))
       ? runs.find((r) => (r.prompts[0] ?? '').includes('Check the API.'))
       : undefined;
-    check('and launches with it', JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${PROMPT68}\n\n${TURN_END_LINE}` }) && JSON.stringify(helperRun?.options.skills) === '["pdf"]');
+    // The builder was renamed the developer (Amendment 84), so each run takes the developer's
+    // prompt and skills from Settings, as it ships here, not the row's launch copy (Amendment 176).
+    const successor = BUILT_IN_PERSONAS.find((b) => b.id === 'developer')!;
+    check(
+      'and launches as the persona the builder is now, the developer',
+      JSON.stringify(helperRun?.options.systemPrompt) === JSON.stringify({ type: 'preset', preset: 'claude_code', append: `${successor.systemPrompt.trim()}\n\n${TURN_END_LINE}` }) &&
+        JSON.stringify(helperRun?.options.skills ?? []) === JSON.stringify(successor.skills),
+      JSON.stringify(helperRun?.options.systemPrompt).slice(0, 120),
+    );
     for (let i = 0; i < 4; i += 1) {
       for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
       await settle(100);
@@ -8170,6 +8179,7 @@ async function main(): Promise<void> {
     check('through Query.setPermissionMode and applyFlagSettings, once each', JSON.stringify(first?.modes) === '["acceptEdits"]' && JSON.stringify(first?.flags) === '[{"effortLevel":"high"}]', JSON.stringify([first?.modes, first?.flags]));
     const tools = await autonomyOf('s30_dev', { allowedTools: ['Read', 'Bash'], disallowedTools: ['WebFetch'], budgetUsd: 7 });
     check('its tools and budget changed mid-run call no live setter: they are the next run\'s', tools.status === 200 && first?.modes.length === 1 && first.flags.length === 1, JSON.stringify([first?.modes, first?.flags]));
+    check("and the route says so: a change of tools on a working agent answers 'next run'", tools.body.appliesTo === 'next run', JSON.stringify(tools.body));
     const bypass = await autonomyOf('s30_dev', { mode: 'bypassPermissions' });
     check("bypass on a run that didn't start able to is the next run's: the SDK takes it only at the start", bypass.body.appliesTo === 'next run' && first?.modes.length === 1, JSON.stringify([bypass.body, first?.modes]));
     await autonomyOf('s30_dev', { mode: 'acceptEdits' });
@@ -8177,6 +8187,11 @@ async function main(): Promise<void> {
     const unset = await autonomyOf('s30_dev', { effort: null });
     check("an effort taken off goes to the model's default, live", unset.body.appliesTo === 'now' && JSON.stringify(first?.flags.at(-1)) === '{"effortLevel":null}', JSON.stringify(first?.flags));
     await autonomyOf('s30_dev', { effort: 'high' });
+    const modeOnly = await autonomyOf('s30_dev', { mode: 'plan' });
+    check("a mode alone, after the tools changed, answers 'now': only what this change made counts", modeOnly.body.appliesTo === 'now' && first?.modes.at(-1) === 'plan', JSON.stringify([modeOnly.body, first?.modes]));
+    const both = await autonomyOf('s30_dev', { mode: 'acceptEdits', budgetUsd: 8 });
+    check("a mode and a budget together answer 'next run', though the mode went live", both.body.appliesTo === 'next run' && first?.modes.at(-1) === 'acceptEdits', JSON.stringify([both.body, first?.modes]));
+    await autonomyOf('s30_dev', { budgetUsd: 7 });
 
     // The persona edited in Settings while it works, its model and tools too.
     const editedDev = withPersona(null, { ...DEV, systemPrompt: '  EDITED DEV 176  ', skills: ['tdd', ' tdd ', 'pdf'], model: 'claude-haiku-s30', tools: { bash: false, write: false } });
@@ -8208,6 +8223,42 @@ async function main(): Promise<void> {
     const gone = await again('s30_own', 'after it was deleted 176');
     check('deleted, the next run falls back to the launch copy', JSON.stringify(gone?.options.systemPrompt) === JSON.stringify(append('MINE AT LAUNCH 176')) && JSON.stringify(gone?.options.skills) === '["docx"]', JSON.stringify([gone?.options.systemPrompt, gone?.options.skills]));
     gone?.finish({ cost: 0, reason: 'completed' });
+
+    // ── a row from before a built-in was renamed ────────────────────────────────
+    await setPersonas(withPersona(null, { ...DEV, systemPrompt: 'DEVELOPER EDITED 176', skills: ['tdd'] }));
+    job30('job_s30_old');
+    fix30('s30_old', 'job_s30_old', { status: 'queued', persona: 'builder', systemPrompt: 'BUILDER AT LAUNCH 176', skills: ['docx'], autonomy: DEFAULT_AUTONOMY } as Partial<Agent>);
+    sup.pump();
+    const oldRun = await runOf('the job_s30_old prompt');
+    check("an agent stored as the builder runs as its successor, the developer, is in Settings", JSON.stringify(oldRun?.options.systemPrompt) === JSON.stringify(append('DEVELOPER EDITED 176')) && JSON.stringify(oldRun?.options.skills) === '["tdd"]', JSON.stringify([oldRun?.options.systemPrompt, oldRun?.options.skills]));
+    check('and its row still says builder', getAgentPersona(db, 's30_old').persona === 'builder');
+    oldRun?.finish({ cost: 0, reason: 'completed' });
+
+    // ── personas in Settings past a launch spec's limits ────────────────────────
+    const tooLong = withPersona(null, { ...DEV, systemPrompt: 'x'.repeat(20_001) });
+    const refusedLong = await setPersonas(tooLong);
+    check('a save of the personas with a system prompt over 20,000 characters → 400', refusedLong.status === 400 && /developer persona's system prompt is at most 20000 characters/.test(JSON.stringify(refusedLong.body)), JSON.stringify(refusedLong.body).slice(0, 200));
+    const ownLong = await setPersonas(withPersona(null, { ...mine, systemPrompt: 'x'.repeat(20_001) }));
+    check('one of yours too', ownLong.status === 400, String(ownLong.status));
+    const atLimit = await setPersonas(withPersona(null, { ...DEV, systemPrompt: 'x'.repeat(20_000), skills: Array.from({ length: 51 }, (_, i) => `s${i}`) }));
+    check("exactly 20,000 is saved, and skills past a spec's limit too: the editor takes any number", atLimit.status === 200, String(atLimit.status));
+    job30('job_s30_big');
+    fix30('s30_big', 'job_s30_big', { status: 'queued', persona: 'developer', systemPrompt: 'DEV AT LAUNCH 176', skills: ['docx'], autonomy: DEFAULT_AUTONOMY } as Partial<Agent>);
+    sup.pump();
+    const many = await runOf('the job_s30_big prompt');
+    const launchCopy = (r: FakeRun | undefined): boolean => JSON.stringify(r?.options.systemPrompt) === JSON.stringify(append('DEV AT LAUNCH 176')) && JSON.stringify(r?.options.skills) === '["docx"]';
+    check('a persona with more than 50 skills runs as its launch copy, and the run goes ahead', launchCopy(many) && (await until(() => getAgent(db, 's30_big')?.status === 'working')), JSON.stringify([many?.options.skills?.length, getAgent(db, 's30_big')?.status]));
+    await setPersonas(withPersona(null, { ...DEV, skills: ['x'.repeat(101)] }));
+    many?.finish({ cost: 0, reason: 'completed' });
+    const longSkill = await again('s30_big', 'a skill too long 176');
+    check('so does one with a skill name over 100 characters', launchCopy(longSkill), JSON.stringify(longSkill?.options.skills));
+    // As a settings.json edited by hand, or saved before the rule, would hold it.
+    readSettings()[PERSONAS_KEY] = tooLong;
+    longSkill?.finish({ cost: 0, reason: 'completed' });
+    const bigPrompt = await again('s30_big', 'a prompt too long 176');
+    check('and one with a system prompt over 20,000 characters that got into Settings', launchCopy(bigPrompt) && (await until(() => getAgent(db, 's30_big')?.status === 'working')), JSON.stringify(bigPrompt?.options.systemPrompt).slice(0, 80));
+    bigPrompt?.finish({ cost: 0, reason: 'completed' });
+    await setPersonas(null);
 
     // ── a helper started after its role's persona was edited ─────────────────────
     const SCRIBE = BUILT_IN_PERSONAS.find((b) => b.id === 'scribe')!;
@@ -8243,6 +8294,8 @@ async function main(): Promise<void> {
     check('the effort goes with its model, for the next message', JSON.stringify(cp?.models) === '["gpt-5-mini"]' && JSON.stringify(cp?.efforts) === '["high"]', JSON.stringify([cp?.models, cp?.efforts]));
     const asked = await cp?.ask({ kind: 'shell', fullCommandText: 'rm -rf build', intention: 'clean', toolCallId: 'c_s30', commands: [], possiblePaths: [], possibleUrls: [], hasWriteFileRedirection: false, canOfferSessionApproval: true });
     check('and the mode is the one its gate reads on the next call: plan refuses a command', asked?.kind === 'reject', JSON.stringify(asked));
+    const cpTools = await autonomyOf('s30_cp', { allowedTools: ['Read'] });
+    check("a change of tools on a working Copilot agent answers 'next run'", cpTools.status === 200 && cpTools.body.appliesTo === 'next run', JSON.stringify(cpTools.body));
     const cpModel = await send<{ appliesTo?: string }>('POST', '/api/agents/s30_cp/model', { model: 'gpt-5' });
     check('a model switched live goes at the effort it has now, not the one it launched with', cpModel.body.appliesTo === 'now' && cp?.models.at(-1) === 'gpt-5' && cp.efforts.at(-1) === 'high', JSON.stringify([cpModel.body, cp?.models, cp?.efforts]));
     cp?.emit('session.idle', {});

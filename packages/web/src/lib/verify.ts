@@ -1225,7 +1225,7 @@ console.log('\n29 · personas are listed, edited, reset and deleted on Settings 
     /TOOL_RULES\.map/.test(editor) && /RULE_CHOICES\.map/.test(editor) && /id: 'write'/.test(route) && ['bash', 'push', 'network', 'mcp'].every((k) => !new RegExp(`id: '${k}'`).test(route)) && /value: undefined, label: "the launch's"/.test(route),
   );
   check('the system prompt says it is appended, and keeps to the daemon’s limit', /Appended to Claude Code's own system prompt/.test(editor) && /maxLength=\{20_000\}/.test(editor));
-  const daemon = readFileSync(new URL('../../../daemon/src/routes/session.ts', import.meta.url), 'utf8');
+  const daemon = readFileSync(new URL('../../../daemon/src/session/persona.ts', import.meta.url), 'utf8');
   check('which is the limit the daemon refuses past', /SYSTEM_PROMPT_MAX = 20_000/.test(daemon));
 }
 

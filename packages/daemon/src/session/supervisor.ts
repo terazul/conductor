@@ -19,7 +19,7 @@
  */
 
 import { onSettingsChanged, readSettings } from '../settings.js';
-import { BUDGET_CEILING_KEY, PERSONAS_KEY, branchTargetKey, personaFor, personasFrom } from '@conductor/shared';
+import { BUDGET_CEILING_KEY, PERSONAS_KEY, branchTargetKey, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
 import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
 import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
@@ -72,6 +72,7 @@ import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { budgetChanged } from './alerts.js';
+import { skillsProblem, systemPromptProblem } from './persona.js';
 import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, continuations, jobBudgetState, newDayNote, renewals, resumeAtMidnight, type PausedForBudget } from './budget.js';
 import {
   handOffLine,
@@ -201,15 +202,16 @@ function agentRow(
 
 /**
  * A stored persona as it is now (Amendment 176): the prompt and skills of the persona with the
- * row's id in Settings, built-ins included, or the row's launch copy when there is none — it was
- * deleted, or the row names one that was renamed away. Only the prompt and skills: the agent's
- * model and autonomy are its own. Read at each run and not written back, so the row keeps the
- * copy to fall back to.
+ * row's id in Settings — or its successor's, for a built-in that was renamed — built-ins
+ * included, or the row's launch copy when there is none: it was deleted, or what Settings has
+ * is over the limits a launch spec is held to (Amendment 68), which a direct PATCH of the
+ * setting can get past. Only the prompt and skills: the agent's model and autonomy are its own.
+ * Read at each run and not written back, so the row keeps the copy to fall back to.
  */
 function currentPersona(p: AgentPersona): AgentPersona {
   if (!p.persona) return p;
-  const now = personaFor(personasFrom(readSettings()[PERSONAS_KEY] ?? null), p.persona);
-  if (!now) return p;
+  const now = personaFor(personasFrom(readSettings()[PERSONAS_KEY] ?? null), renamedPersona(p.persona));
+  if (!now || systemPromptProblem(now.systemPrompt) || skillsProblem(now.skills)) return p;
   const skills = [...new Set(now.skills.map((s) => s.trim()).filter((s) => s !== ''))];
   return { persona: p.persona, systemPrompt: now.systemPrompt.trim() || null, skills: skills.length ? skills : null };
 }
@@ -2512,9 +2514,11 @@ export class Supervisor implements AgentControl {
   /**
    * Write an agent's autonomy and tell every tab. Every run is built from it; a live run also
    * takes its permission mode and effort now, where its engine can (Amendment 176). Its tools
-   * and budget are its next run's. 'now' when the live run took the mode and effort.
+   * and budget are its next run's. 'now' only when the live run took everything this changed:
+   * a change to the tools or the budget is the next run's, whatever else it carried.
    */
   async setAutonomy(agentId: string, autonomy: Autonomy): Promise<'now' | 'next run'> {
+    const was = getAgent(this.#db, agentId)?.autonomy;
     setAgentAutonomy(this.#db, agentId, autonomy);
     const agent = getAgent(this.#db, agentId);
     if (agent) this.#pushEntities({ agents: [agent] });
@@ -2522,8 +2526,11 @@ export class Supervisor implements AgentControl {
     budgetChanged();
     const runner = this.#runners.get(agentId);
     if (!runner?.isLive || !runner.setAutonomy) return 'next run';
+    const atStart = (['allowedTools', 'disallowedTools', 'budgetUsd', 'budgetTokens'] as const).some(
+      (k) => JSON.stringify(was?.[k] ?? null) !== JSON.stringify(autonomy[k] ?? null),
+    );
     try {
-      return (await runner.setAutonomy(autonomy)) ? 'now' : 'next run';
+      return (await runner.setAutonomy(autonomy)) && !atStart ? 'now' : 'next run';
     } catch (err) {
       console.error(`[supervisor] ${agentId} could not take its autonomy live`, err);
       return 'next run';

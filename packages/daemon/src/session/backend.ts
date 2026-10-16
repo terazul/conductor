@@ -149,7 +149,8 @@ export interface AgentBackend {
   setModel(model: string): Promise<boolean>;
   /**
    * Give a live run an autonomy's permission mode and effort (Amendment 176). False when the
-   * live run couldn't take all of it; the tools and the budget are its next run's either way.
+   * live run couldn't take both; the tools and the budget are its next run's either way, which
+   * the supervisor answers for.
    */
   setAutonomy?(autonomy: Autonomy): Promise<boolean>;
   interrupt(): Promise<void>;

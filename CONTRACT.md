@@ -214,26 +214,40 @@ the personas").
 - **Each run reads the persona as it is now.** `personas.ts` moves from `web/src/spawn/` to
   `shared/src/personas.ts` (exported from `@conductor/shared`; the web file re-exports it), so the
   daemon has the same `BUILT_IN_PERSONAS` and reads the same `conductor.personas` setting.
-  `currentPersona` (`daemon/src/session/supervisor.ts:209`) looks up the row's `agents.persona` id
-  with `personaFor(personasFrom(setting))` and takes that persona's system prompt (trimmed; blank
+  `currentPersona` (`daemon/src/session/supervisor.ts:211`) looks up the row's `agents.persona` id,
+  through `renamedPersona` as Spawn does (a row still saying `builder` or `documenter` reads the
+  `developer` or `scribe`, Amendment 84), with `personaFor(personasFrom(setting))` and takes that persona's system prompt (trimmed; blank
   is none) and skills (trimmed, de-duplicated; none is none). Both runner constructions, `#launch`
-  and `#launchWithPrompt` (`:1309`, `:2481`), pass it to `personaScope`, so a first run, a message
+  and `#launchWithPrompt` (`:1311`, `:2483`), pass it to `personaScope`, so a first run, a message
   and a resume all get it. A built-in nobody edited runs as it ships; one reset in Settings runs as
   it ships again.
 - **The launch copy is the fallback.** When the id isn't in Settings (your own persona, deleted, or
-  an id the daemon doesn't know, such as the renamed `builder`, `documenter` and `uiux`: the daemon
-  does not map them the way Spawn does) the run takes the row's `system_prompt` and `skills` as
-  before. A row with no persona is unchanged. Nothing is written back: the row keeps the copy to fall
+  an id the daemon doesn't know, such as `uiux`, which has no successor) the run takes the row's
+  `system_prompt` and `skills` as before. So it does when what Settings has is past the limits a
+  launch spec is held to (Amendment 68): a system prompt over 20,000 characters, more than 50
+  skills, or a skill name over 100 characters. The limits and their checks moved from
+  `routes/session.ts` to `daemon/src/session/persona.ts` (`systemPromptProblem`, `skillsProblem`),
+  which `parsePersona` and `currentPersona` both use; a run is never failed for them. A row with no persona is unchanged. Nothing is written back: the row keeps the copy to fall
   back to, so an `AgentSpec`'s `systemPrompt` and `skills` are now that launch copy.
 - **Only the prompt and skills.** A persona's model and tool rules are not read: the agent's model and
   autonomy are its own row's, and stay what they were set to (on the Agent screen or at launch).
 - **Helpers too.** `startHelper` (`:1934`) passes the listed role's prompt and skills through
   `currentPersona` with the role's id, so a helper started after its role's persona was edited runs
   as it is now, on the role's own model and rope. Its row stores what it started with.
+- **A save of the personas over the prompt limit is refused.** `session/persona.ts` registers a
+  `settingRule` on `conductor.personas`: `PATCH /api/settings` answers 400 ("the developer persona's
+  system prompt is at most 20000 characters") when any edit or persona of yours in it has a longer
+  system prompt. The editor in Settings → Personas holds its prompt to the same `maxLength`, so it
+  can't save one the rule refuses. The skills aren't checked there: the editor takes any number of
+  any length, so a cap would refuse a save it allows; a run falls back instead. A value that isn't
+  JSON is left alone (it reads as the built-ins).
 - **A working run takes its mode and effort now.** `AgentBackend.setAutonomy?` (`backend.ts:154`) is
-  new, plumbed the way `setModel` is: `Supervisor.setAutonomy` (`:2511`) writes the row as before, then
-  gives a live runner the new autonomy, and answers `'now'` when the run took it all and `'next run'`
-  otherwise (no live run, the engine refused, or an error, which is logged).
+  new, plumbed the way `setModel` is: `Supervisor.setAutonomy` (`:2514`) writes the row as before, then
+  gives a live runner the new autonomy, and answers `'now'` only when the run took everything the
+  change made, and `'next run'` otherwise: no live run, the engine refused, an error (logged), or a
+  change to `allowedTools`, `disallowedTools`, `budgetUsd` or `budgetTokens` against what the row had
+  before, even when a mode or effort in the same change went live. What was changed earlier, and
+  waits for the next run, doesn't count against a later change of mode alone.
   `POST /api/agents/:agentId/autonomy` answers `SetAutonomyResponse { autonomy, appliesTo }`
   (`shared/src/wire.ts`).
   - **Claude** (`backends/claude.ts:764`): a changed mode through `Query.setPermissionMode`, a changed
@@ -256,18 +270,23 @@ the personas").
   it." The budget field keeps its own line (it says when the run still stops at the old figure).
 - Checked in `session/verify.ts` §30: a built-in persona nobody edited runs as it ships, not as the
   launch copy; a working agent's mode and effort reach `setPermissionMode` and `applyFlagSettings`
-  once each and answer `'now'`; its tools and budget call no live setter; bypass on a run that didn't
+  once each and answer `'now'`; its tools and budget call no live setter and answer `'next run'`; a
+  mode alone after that answers `'now'`, and a mode with a budget `'next run'`, the mode going live; bypass on a run that didn't
   start in it answers `'next run'`; an effort taken off sends `null`; the next run carries the mode,
   effort, tools and budget, and the persona as edited in Settings (prompt trimmed, skills
   de-duplicated), but not the persona's model or tools; the row keeps its launch copy; a reset
   built-in runs as it ships; your own persona runs as Settings has it, and once deleted the next run
-  takes the launch copy; a helper started after its role's persona was edited runs as edited, on the
+  takes the launch copy; an agent stored as `builder` runs as the developer is edited in Settings;
+  a save with a system prompt over 20,000 characters is refused (a built-in's edit or one of yours),
+  exactly 20,000 with 51 skills is saved; more than 50 skills, a skill name over 100 characters, or
+  an oversized prompt that got into Settings all run as the launch copy, and the run goes ahead; a helper started after its role's persona was edited runs as edited, on the
   role's model and mode; on Copilot the mode and effort go now (the effort with the model, the plan
-  mode refusing a command at the gate), and a live model switch keeps the current effort. §17j's
-  stored persona is now one Settings doesn't hold, and §25 puts its roles' prompts in Settings, as
+  mode refusing a command at the gate), a change of its tools answers `'next run'`, and a live model
+  switch keeps the current effort. §17j's stored persona is now one Settings doesn't hold, its
+  orchestrator stored as `builder` launches its helper as the developer ships, and §25 puts its roles' prompts in Settings, as
   editing them there would. In `agent/verify.ts`: the composer's lines.
 - **Not done.** A persona edit doesn't reach a run already going (the SDK takes a system prompt and
-  skills only at a query's start). The daemon doesn't map the renamed persona ids.
+  skills only at a query's start).
 
 ### Amendment 177 — post-merge, applied. **An orchestrator's transcript says when its finished helpers were removed; a refused message and re-run from here remove none.**
 

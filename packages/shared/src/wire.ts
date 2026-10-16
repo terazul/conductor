@@ -398,8 +398,9 @@ export interface SetAutonomyRequest {
 export interface SetAutonomyResponse {
   autonomy: Autonomy;
   /**
-   * 'now' when a live run took the permission mode and effort; else they are the next run's
-   * (Amendment 176). The tool lists and the budget are always the next run's.
+   * 'now' when a live run took everything the change made: its permission mode and effort;
+   * else 'next run' (Amendment 176). The tool lists and the budget are always the next run's,
+   * so a change to them is 'next run' even when the mode or effort in it went live.
    */
   appliesTo: 'now' | 'next run';
 }
