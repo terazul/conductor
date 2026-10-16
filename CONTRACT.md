@@ -200,6 +200,53 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 173 — post-merge, applied. **A Fleet card's agents fold under one toggle, folded until you open them, each card remembering its own; an agent that needs you keeps its row.**
+
+Web only (`fleet/agentlist.ts` new, `fleet/card.tsx`, `fleet/fleet.css`, `lib/verify.ts`), and
+`docs/MANUAL.md`. No daemon, wire or migration change. Asked for 15 Oct 2026 (TODO.md): *"Fleet
+cards: the agent list shows and collapses, collapsed by default. … Needs a toggle on the card, closed
+by default, remembered per card the way other folds are."* Run as lane F1 of track 3
+(docs/plans/wave-12-tracks.md §2), with nothing to decide. *Amends the Fleet card's agent rows*,
+which listed every agent; Amendment 169's navigator fold is unchanged.
+
+- **The rule** (`fleet/agentlist.ts`, pure). `agentsOpen` (`:25`) reads whether a card's list is
+  open, and `toggleAgents` (`:30`) what to store once it is opened or folded. Both go through the
+  navigator's own `parseOpen`, `toggleOpen`, `serializeOpen` and `isOpen` (`shell/navtree.ts:449-472`),
+  so it is the same kind of set: a JSON array of project ids. It **starts folded**: an id in it means
+  open, as a navigator fold's does. Nothing stored, or anything that isn't an array of strings, is
+  every card folded; folding the last open card removes the setting.
+- **Where it is kept.** Its own setting, `conductor.fleetAgents` (`FLEET_AGENTS_KEY`, `:22`), in the
+  settings file (Amendment 46), so it is the same after a reload and in every browser. Not in
+  `conductor.navTree`: a card's id and a navigator node's can't meet, and opening a card's list opens
+  nothing in the navigator.
+- **Nothing that needs you is folded away.** `needsYou` (`:35`): a request waiting on the agent, a
+  `blocked` status (the row's `shownStatus`, `shell/describe.ts:74`), or an alert naming it (the
+  navigator's `needs`, `agent/tabs.ts:63`). Folded, `shownAgents` (`:48`) keeps those rows, in their
+  order; a held agent's **not handed off** chip (Amendment 120) comes with its row, since its alert
+  names it.
+- **The toggle** (`card.tsx:703`). A `<button>` with `aria-expanded`, first in `.fl-card-agents`,
+  reading `agentsToggleWords` (`agentlist.ts:58`): "▸ 4 agents", or "▸ 4 agents · 1 needs you" in
+  amber (`.fl-card-fold.is-need`, `fleet.css:274`), "▾" when open. It stops its click and its keydown,
+  as the `…` menu does, so Enter and Space toggle the list and don't open the project. A card with no
+  agents has no toggle and still says **no agents yet**.
+
+*Not done / not decided.* The other amber a row can have isn't counted: a model reconnect from its
+first retry and a stop without handing off with no alert are read from the agent's events
+(`currentAction`), which the card has only per row, so those rows fold with the rest. Settings'
+**reset panel sizes and folds** doesn't reset it, as it doesn't reset the navigator's. Not looked at in
+a browser in either theme.
+
+*Verified.* `lib/verify.ts` "a Fleet card's agents fold…" (`:1896`, 20 checks): nothing stored and a
+broken setting are folded; opening card `a` leaves `b` folded, opening `b` leaves `a` open, folding `a`
+leaves `b` open, and folding the only open card stores nothing; written and read back through
+`writeSetting`/`readSetting` it is `["a"]` and opens `a` only; its key isn't the navigator's; folded,
+of five agents only the asking, blocked and alerted ones keep their rows, in order, and open all five
+show; the toggle reads "5 agents · 3 need you", "4 agents · 1 needs you", "1 agent"; the card reads the
+setting by project id, draws `shownAgents`' rows, and its toggle is a button with `aria-expanded` that
+writes the setting and stops its keydown; the CSS is tokens only, amber on `is-need`. **Revert check:**
+with the default flipped to open, 6 checks fail; with folded rows emptied, the needs-you check fails.
+Restored, all pass. `pnpm -r typecheck` is clean, and `make test` is green: 28 PASS.
+
 ### Amendment 172 — post-merge, applied. **The sound plays after a reload too, once you click or type.**
 
 Web only (`attention/notify.ts`, `attention/QueuePanel.tsx`, `attention/verify.ts`). Reported 15 Oct:

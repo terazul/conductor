@@ -9,7 +9,9 @@
  *                   amber one glows, because a blocked project is the only kind
  *                   you have to walk over to.
  *  - AGENT ROWS     what each agent is literally doing, now — not its status
- *                   word. "Edit src/auth/token.ts" beats "working".
+ *                   word. "Edit src/auth/token.ts" beats "working". Folded
+ *                   under one toggle until you open it, per card, except the
+ *                   rows that need you (agentlist.ts, Amendment 173).
  *  - SPARKLINE      real tool calls per 15s bucket for the whole job. Flat and
  *                   grey means stuck or thinking; that distinction is the point.
  *  - DIFFSTAT       useJobDiffstat, so the card shows work done, not work begun.
@@ -27,6 +29,7 @@ import { marksOrchestrator } from '@conductor/shared';
 import {
   useAgentEvents,
   useAgents,
+  useAlerts,
   useJobDiffstat,
   useJobs,
   usePending,
@@ -38,6 +41,8 @@ import { projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { restOf, restWord } from './rest.js';
+import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents, toggleAgents } from './agentlist.js';
+import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
   SCREEN,
   openAgent,
@@ -581,6 +586,7 @@ export function ProjectCard({
   const job = primaryJob(jobs);
   const allAgents = useAgents();
   const allPending = usePending();
+  const allAlerts = useAlerts();
   const servers = useServers();
   const diff = useJobDiffstat(job?.id ?? null);
   const activity = useJobActivity(job?.id ?? null);
@@ -600,6 +606,10 @@ export function ProjectCard({
     () => servers.find((s) => s.jobId === job?.id && s.alive),
     [servers, job?.id],
   );
+  // The list of agents folds, and starts folded; what needs you keeps its row (Amendment 173).
+  const listOpen = agentsOpen(useSetting(FLEET_AGENTS_KEY), project.id);
+  const rows = shownAgents(agents, listOpen, pending, allAlerts);
+  const needing = agents.filter((a) => needsYou(a, pending, allAlerts)).length;
 
   const blocked = pending.length > 0;
   const working = agents.filter((a) => a.status === 'working').length;
@@ -689,7 +699,26 @@ export function ProjectCard({
             <span className="fl-arow-act">no agents yet</span>
           </div>
         ) : (
-          agents.map((a) => <AgentRow key={a.id} agent={a} siblings={agents} pending={pending} />)
+          <>
+            <button
+              type="button"
+              className={`fl-card-fold${needing > 0 ? ' is-need' : ''}`}
+              aria-expanded={listOpen}
+              onClick={(e) => {
+                e.stopPropagation();
+                writeSetting(FLEET_AGENTS_KEY, toggleAgents(readSetting(FLEET_AGENTS_KEY), project.id));
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <span className="fl-card-fold-chev" aria-hidden="true">
+                {listOpen ? '▾' : '▸'}
+              </span>
+              {agentsToggleWords(agents.length, needing)}
+            </button>
+            {rows.map((a) => (
+              <AgentRow key={a.id} agent={a} siblings={agents} pending={pending} />
+            ))}
+          </>
         )}
       </div>
 
