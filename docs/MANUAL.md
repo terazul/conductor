@@ -656,13 +656,20 @@ same for your MCP servers' tools (Jira, Lucid, Obsidian…), which no other pill
 it's off by default, and a reading role never gets it, since some of those tools change
 things outside the folder. Both are in a running agent's guardrails too.
 
+Shell has run unattended by default since 16 Oct 2026. Agents launched before then were
+given it once, when the daemon first started after the update: every agent but a reading
+one (a reviewer, debugger, analyst or auditor, a helper started as one, or a persona with
+**write: off**), and the roles an orchestrator will start its helpers as, the same way. One
+whose shell was denied outright kept that, and `git push` stayed denied where it was. From
+then on its guardrails are what it has: switch shell off on one and it stays off.
+
 **Allow all session** on a request now works even when Claude Code offers no rule of its
 own, which it doesn't for the commands it double-checks. It allows that exact command
 from then on, for the project; a different command still asks.
 
 | | |
 |---|---|
-| **run shell unattended** | Off (the default) means every shell command waits for you. |
+| **run shell unattended** | On by default: every agent but a reading role runs shell commands without asking. Off means every shell command waits for you. |
 | **allow git push** | Off adds a deny rule on `git push` that survives every mode. |
 | **allow network** | Off blocks WebFetch and WebSearch. |
 | **allow MCP tools** | Off (the default) means every MCP tool call waits for you. |
@@ -678,7 +685,8 @@ default. You can change it per agent after launch from the Agent screen (`3`); l
 permission mode, it applies from that agent's **next** run.
 
 See §5. The default is a reasonable middle: edits auto-accepted inside the
-worktree, shell commands ask first.
+worktree, shell commands run without asking (a reading role's only its read-only ones),
+`git push` denied, no network.
 
 ### Launch
 

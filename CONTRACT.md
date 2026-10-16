@@ -200,6 +200,46 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 175 — post-merge, applied. **Every agent runs shell unattended by default, except a reading role, and `git push` stays denied.**
+
+Wave 12, B1. Asked for (15 Oct): "the current defaults ask for permission to do bash when running
+agents". Bash was in `allowedTools` only with the **run shell unattended** pill on, and the pill was
+off, so every command went to a permission prompt and a stack stopped on its first one.
+- **On by default.** `defaultPills()` has `allowBash: true` (`web/src/spawn/autonomy.ts:116`), so
+  Spawn, Settings' built-in launch defaults and an agent added to a job with nobody to copy
+  (`addedAutonomy`) all put bare `Bash` in `allowedTools` (`toAutonomy`, autonomy.ts:171). A pills
+  setting saved in Settings keeps what it says: one saved with shell off still launches it off.
+- **Reading roles unchanged.** `rowAutonomy` (`spawn/presets.ts:447`) still drops bare `Bash` from
+  a reviewer, debugger, analyst or auditor, and from a persona with `write: false`, and gives it only
+  `READ_ONLY_BASH` with the write tools and `READ_ONLY_BASH_DENIED` denied (Amendment 148), so
+  `readOnlyRefusal` (`shared/src/stack.ts:209`) passes it as before. `Bash(git push:*)` stays in
+  `disallowedTools` unless **allow git push** is on; a deny goes before an allow.
+- **Agents already launched: migration 285** (`daemon/src/db/migrations/285_bash_by_default.sql`),
+  once. It appends `Bash` to `agents.autonomy.allowedTools`, and to each role's
+  `autonomy.allowedTools` in an orchestrator's `helper_roles`, in a row (or role) where all of these
+  hold: the JSON is valid and `allowedTools` is an array; the role is not one of READ_ONLY_ROLES,
+  nor, on a helper, is `helper_role` (a listed role's `id`); `disallowedTools` does not hold all four
+  of Edit, Write, MultiEdit and NotebookEdit (a reading persona, a helper like `reviewer-q1`);
+  `Bash` is not already allowed; and `Bash` is not denied outright. Nothing else in the row changes,
+  `helper_roles` keeps its order, and after it the row is the truth: shell switched off later stays
+  off. On this machine's database of 16 Oct it changes nothing: its eight agents were launched with
+  Bash already.
+- **`DEFAULT_AUTONOMY` stays without tools** (`daemon/src/session/store.ts:406`, a comment says why).
+  It stands in for a row with no autonomy or JSON it can't parse, whose role it can't know; a
+  reviewer's broken row given bare Bash and no write denies would run any command unasked. A broken
+  row asks.
+- Checked in `spawn/verify.ts` §28 (the default allows Bash with no prompt for every writing role
+  of the full preset; a reading role and a reading persona get only `READ_ONLY_BASH` and pass
+  `readOnlyRefusal`; `git push` is denied unless allowed; the pill off leaves Bash out; an added
+  agent), with §3, §6 and §25's checks of the asking case now switching the pill off themselves;
+  and in `session/verify.ts` §29 (migration 285 on a database from before it: a developer gains
+  Bash, a reviewer, a reviewer helper and a reading persona don't, one that had it isn't doubled,
+  one denied it stays denied, a broken row is left, an orchestrator's listed roles likewise in order).
+- **Not done.** Wave 12's plan (§3, "Reviewers") has its own stacks' reviewers run any shell
+  command unasked; that is how those stacks are launched, not a default, and a reading role still
+  defaults to the read-only list. A running agent takes a changed rope from its next run, as any
+  guardrail does.
+
 ### Amendment 174 — post-merge, applied. **A message queued on an orchestrator goes at its next wake, with its helpers' report.**
 
 Daemon (`session/supervisor.ts`, `session/handoff.ts`, `session/verify.ts`), web (`agent/scheduled.tsx`,

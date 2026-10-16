@@ -7945,6 +7945,62 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n29 · every agent launched before runs shell unattended, except a reading one, with git push still denied (Amendment 175)');
+  {
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+    for (const f of files.filter((f) => f < '285')) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('sp', 'shell', '/tmp/sp', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('sj', 'sp', 'p', 'in_place', '/tmp/sp', 'main', 'working', 'x')`);
+    const push = 'Bash(git push:*)';
+    const writer = { mode: 'acceptEdits', allowedTools: ['Edit', 'Write'], disallowedTools: [push], budgetUsd: 5 };
+    const reader = { mode: 'default', allowedTools: [...READ_ONLY_BASH], disallowedTools: [...WRITE_TOOLS, push], budgetUsd: 5 };
+    const ag = old.prepare(`INSERT INTO agents (id, job_id, project_id, role, model, status, autonomy, helper_roles, helper_role) VALUES (?, 'sj', 'sp', ?, 'm', 'queued', ?, ?, ?)`);
+    const put = (id: string, role: string, a: unknown, roles: unknown = null, helperRole: string | null = null): void => {
+      ag.run(id, role, typeof a === 'string' ? a : JSON.stringify(a), roles === null ? null : JSON.stringify(roles), helperRole);
+    };
+    put('s_dev', 'developer', writer);
+    put('s_rev', 'reviewer', reader);
+    put('s_rev_q1', 'reviewer-q1', reader, null, 'reviewer');
+    put('s_persona', 'scribe', reader);
+    put('s_had', 'tester', { ...writer, allowedTools: ['Bash', 'Edit'] });
+    put('s_denied', 'builder', { ...writer, disallowedTools: ['Bash', push] });
+    put('s_broken', 'architect', 'not json');
+    put('s_orch', 'orchestrator', writer, [
+      { id: 'developer', model: 'm', autonomy: writer },
+      { id: 'reviewer', model: 'm', autonomy: reader },
+      { id: 'tester', model: 'm', autonomy: { ...writer, allowedTools: ['Bash'] } },
+    ]);
+    const rows = (): Map<string, { autonomy: string; helper_roles: string | null }> =>
+      new Map((old.prepare('SELECT id, autonomy, helper_roles FROM agents').all() as Array<{ id: string; autonomy: string; helper_roles: string | null }>).map((r) => [r.id, r]));
+    const before = rows();
+    old.exec(readFileSync(new URL('285_bash_by_default.sql', dir), 'utf8'));
+    const after = rows();
+    const rope = (id: string): { allowedTools: string[]; disallowedTools: string[] } => JSON.parse(after.get(id)!.autonomy);
+    const same = (id: string): boolean => after.get(id)!.autonomy === before.get(id)!.autonomy;
+    check('a developer gains Bash, after what it had', JSON.stringify(rope('s_dev').allowedTools) === JSON.stringify(['Edit', 'Write', 'Bash']), after.get('s_dev')!.autonomy);
+    check('and keeps git push denied', JSON.stringify(rope('s_dev').disallowedTools) === JSON.stringify([push]));
+    check('a reviewer is left as it was: its read-only commands, no bare Bash', same('s_rev') && !rope('s_rev').allowedTools.includes('Bash'), after.get('s_rev')!.autonomy);
+    check("a reviewer's helper (reviewer-q1) is left as it was", same('s_rev_q1'), after.get('s_rev_q1')!.autonomy);
+    check('a reading persona, its write tools denied, is left as it was', same('s_persona'), after.get('s_persona')!.autonomy);
+    check('one that already had Bash is not given it twice', same('s_had') && rope('s_had').allowedTools.filter((t) => t === 'Bash').length === 1, after.get('s_had')!.autonomy);
+    check('one with Bash denied outright stays denied', same('s_denied'), after.get('s_denied')!.autonomy);
+    check('a row of broken JSON is left to read as the default', after.get('s_broken')!.autonomy === 'not json');
+    const listed = JSON.parse(after.get('s_orch')!.helper_roles!) as Array<{ id: string; autonomy: { allowedTools: string[] } }>;
+    check(
+      "an orchestrator's listed roles: the developer gains Bash, the reviewer doesn't, the tester isn't doubled, in their order",
+      listed.map((r) => r.id).join() === 'developer,reviewer,tester' &&
+        listed[0]!.autonomy.allowedTools.at(-1) === 'Bash' &&
+        JSON.stringify(listed[1]!.autonomy) === JSON.stringify(reader) &&
+        JSON.stringify(listed[2]!.autonomy.allowedTools) === JSON.stringify(['Bash']),
+      after.get('s_orch')!.helper_roles!,
+    );
+    check('a row with no listed roles keeps none', after.get('s_dev')!.helper_roles === null);
+    old.close();
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -7952,7 +8008,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day, and at midnight only an agent its budget paused is continued, within the slots and a pause of everything (or renewed, with the setting off); models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

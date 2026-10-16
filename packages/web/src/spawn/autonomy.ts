@@ -109,13 +109,14 @@ export const MODES: { id: Autonomy['mode']; label: string; hint: string; warn?: 
 export const DEFAULT_MODE: Autonomy['mode'] = 'acceptEdits';
 
 /**
- * The mockup's defaults, unchanged in effect by the relabelling: edits auto-accepted,
- * shell asks, push denied, no network. Only the names moved.
+ * The mockup's defaults: edits auto-accepted, push denied, no network. Shell runs unattended
+ * since Amendment 175: with it off every command waited for you, and a stack stopped on its
+ * first one. A reading role still gets only the read-only commands (`rowAutonomy`).
  */
 export function defaultPills(): PillState {
   return {
     acceptEdits: true,
-    allowBash: false,
+    allowBash: true,
     allowPush: false,
     network: false,
     mcp: false,
@@ -165,8 +166,8 @@ export function toAutonomy(
   const allowedTools = [...READ_TOOLS];
   const disallowedTools: string[] = [];
 
-  // Bash is allowed outright only when the human has granted it. Otherwise it is
-  // absent, which is what routes it to canUseTool.
+  // Bash is allowed outright only when the pill grants it (on by default, Amendment 175).
+  // Otherwise it is absent, which is what routes it to canUseTool.
   if (pills['allowBash']) allowedTools.push('Bash');
 
   if (pills['network']) {
