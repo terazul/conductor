@@ -227,14 +227,23 @@ practice of copying the database by hand before a migration; those copies are le
   (`:119`), so it never holds the process open; stopped on SIGINT/SIGTERM (`index.ts:184`). A failed
   backup logs `[backup] failed: …` and the daemon carries on. Each one prunes to the last 10
   (`pruneBackups`, `:90`). Restarts count: ten starts in a day leave ten backups from that day.
-- **Restore** (`restoreLatest`, `:158`; `make restore`). Refuses while the daemon runs
-  (`daemonRunning`, `:128`): anything answering `/api/health` on `CONDUCTOR_PORT` (7777), the setup
-  server included, or any process holding the database open (`lsof -t`, `:138`), which catches a
-  daemon from another checkout on another port. Refuses too when there is no backup, or when the
-  latest fails `PRAGMA integrity_check` (`:171`). Otherwise the current database is renamed aside
-  **with its `-wal` and `-shm`**, as `backups/conductor-before-restore-<stamp>.db` (`:179`), so it
-  opens whole, what its log held included; then the backup is copied in and renamed into place
-  (`:187`). Undo is copying that file back. It is never pruned.
+- **Restore** (`restoreLatest`, `:201`; `make restore`). Refuses while the daemon runs
+  (`daemonRunning`, `:151`): anything answering `/api/health` on `CONDUCTOR_PORT` (7777), the setup
+  server included, or any process holding the database open (`lsof -t`, `runLsof`, `:135`), which
+  catches a daemon from another checkout on another port. lsof is looked for on PATH, then at
+  `/usr/sbin/lsof` and `/usr/bin/lsof` (`:137`), since `make` may run with a thin PATH. **The check
+  fails safe**: only lsof's clean "no match" (exit 1, nothing printed, `:165`) lets a restore go on;
+  lsof missing or failing any other way refuses with "can't tell whether anything has … open (why)",
+  and says to make lsof runnable, or to copy the backup in by hand with the daemon stopped (`:166`).
+  There is no override. Refuses too when there is no backup, or when the latest fails
+  `PRAGMA integrity_check` (`:219`). Otherwise the current database is renamed aside **with its
+  `-wal` and `-shm`**, as `backups/conductor-before-restore-<stamp>.db` (`:231`), so it opens whole,
+  what its log held included; a name that is taken gets `-2`, `-3` … after the stamp (`asideName`,
+  `:189`), so two restores in a second never overwrite one set-aside with the other. Then the backup
+  is copied in and renamed into place (`:241`). **If that fails**, the set-aside is renamed back
+  (`:248`) and the error says the database is back as it was; if putting it back fails too, the
+  error says there is none at the database's path, names the set-aside, and says to copy it back
+  (`:252`). Undo is copying that file back. It is never pruned.
 - **The targets** (`Makefile:221-225`). `make restore` and `make backup` (one now, safe while the
   daemon runs) are one line each, running `db/backup-cli.ts`; the work is in `backup.ts`, where it is
   tested. Both read the database's place as the daemon does (storage.ts), so `CONDUCTOR_DATA` and
@@ -244,7 +253,7 @@ practice of copying the database by hand before a migration; those copies are le
 other than the latest except by hand. Restarting the daemon often rotates older backups out sooner;
 there is no one-a-day floor.
 
-*Verified.* `db/verify-backup.ts`, in `make test` (`Makefile:204`), 30 checks: three backups taken
+*Verified.* `db/verify-backup.ts`, in `make test` (`Makefile:204`), 46 checks: three backups taken
 while another process writes rows open, pass `integrity_check`, hold more rows each, and one taken
 with a transaction open has what was committed only; names are `conductor-auto-20261016-090000.db`;
 no partial copy is left. Thirteen backups leave exactly the newest 10, and the hand-made copies, a
@@ -255,10 +264,19 @@ leaves nothing. Restore refuses with "the daemon is running … make stop first"
 then brings back the latest (not the one before), which passes `integrity_check`, removes the old
 `-wal`/`-shm`, and sets the old database aside with rows that were only in its log (written by a
 process killed with its connection open); a broken latest backup is refused; no backup and
-`:memory:` say why. **Revert check:** with the name rule loosened to `^conductor`, pruning deleted a
-hand-made copy (a ✗); with the set-aside replaced by a delete, the suite fails. By hand on a tmp
+`:memory:` say why. lsof missing (ENOENT), exiting 1 with an error, or exiting 2 each refuse and
+change nothing; lsof's clean no-match lets it go on, a pid is named, and a database not there never
+asks lsof. With PATH set to nothing, the real lsof is found at `/usr/sbin/lsof` and names a process
+holding the file. A copy that fails after the set-aside puts the database back (rows intact, no
+set-aside or partial left); one that also blocks the put-back throws an error naming the whole
+set-aside. Two restores in the same second keep `…-090050.db` and `…-090050-2.db`, the first not
+overwritten. **Revert check:** with the name rule loosened to `^conductor`, pruning deleted a
+hand-made copy (a ✗); with the set-aside replaced by a delete, the suite fails; with lsof's failures let through, 8 ✗;
+with only `lsof` on PATH tried, the thin-PATH check ✗; with no put-back, the put-back check ✗ and
+the suite stops; with no `-2` suffix, 2 ✗. By hand on a tmp
 `CONDUCTOR_DATA`: `make backup` made one; `make restore` refused with the live daemon on 7777, and
-with a process holding the file on a free port (lsof); on a free port it restored and named the
+with a process holding the file on a free port (lsof), and so again with `/usr/sbin` and `/sbin`
+off PATH (the review's case, which restored before); on a free port it restored and named the
 set-aside. `pnpm -r typecheck` is clean, and `make test` is green: 29 PASS.
 
 ### Amendment 175 — post-merge, applied. **Every agent runs shell unattended by default, except a reading role, and `git push` stays denied.**

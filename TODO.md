@@ -63,10 +63,11 @@ the last of it on 12 Oct).
 - [x] **Fleet cards: the agent list shows and collapses, collapsed by default.** Asked for (15 Oct). The
   card lists every agent (`web/src/fleet/card.tsx:692`, `AgentRow`). Needs a toggle on the card, closed by
   default, remembered per card the way other folds are. *Done 16 Oct: Amendment 173.*
-- [ ] **Back up the database regularly, and bring the last backup back.** Asked for (15 Oct). Today copies
+- [x] **Back up the database regularly, and bring the last backup back.** Asked for (15 Oct). Today copies
   are made only by hand, into `~/.conductor/backups/`, before migrations (see the 10 Oct note further
   down). Wants: a regular backup (SQLite's `VACUUM INTO` gives a consistent copy while the daemon runs),
   the last N kept, and a restore of the latest one, which has to happen with the daemon stopped.
+  *Done 16 Oct: Amendment 176.*
   - **Decide:** how often, how many kept, and where restore lives (Settings, or a `make` target).
     *Decided (15 Oct): on daemon start and every 6 h, the last 10 kept, restore as a `make` target that refuses while the daemon runs.*
 - [ ] **A changed setting takes effect on the next run.** Asked for (15 Oct): "when I change a setting for

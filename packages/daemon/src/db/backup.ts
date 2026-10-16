@@ -23,7 +23,7 @@ import {
   renameSync,
   rmSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { DEFAULT_PORT } from '@conductor/shared';
@@ -120,12 +120,35 @@ export function startBackups(
   return () => clearInterval(timer);
 }
 
+/** What `lsof -t <file>` did: its exit status and output, or the error that kept it from running. */
+export interface LsofRun {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: NodeJS.ErrnoException;
+}
+
+/**
+ * `lsof -t`, from PATH or where macOS and Linux keep it: `make` may run with a thin PATH, and
+ * /usr/sbin is not always on it.
+ */
+export function runLsof(file: string): LsofRun {
+  let run: LsofRun = { status: null, stdout: '', stderr: '' };
+  for (const bin of ['lsof', '/usr/sbin/lsof', '/usr/bin/lsof']) {
+    const r = spawnSync(bin, ['-t', file], { encoding: 'utf8', timeout: 10_000 });
+    run = { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error as NodeJS.ErrnoException | undefined };
+    if (run.error?.code !== 'ENOENT') break;
+  }
+  return run;
+}
+
 /**
  * Why restore must not run now, or null. A daemon answering health on its port, or any process
- * holding the database open (lsof, where there is one): a daemon from another checkout on
- * another port holds the file too.
+ * holding the database open (lsof): a daemon from another checkout on another port holds the file
+ * too. Fails safe: only lsof's clean "no match" (exit 1, nothing printed) lets a restore go on;
+ * lsof missing, or failing any other way, throws, since then nobody can say the file is free.
  */
-export async function daemonRunning(file: string): Promise<string | null> {
+export async function daemonRunning(file: string, opts: { lsof?: (file: string) => LsofRun } = {}): Promise<string | null> {
   const port = Number(process.env['CONDUCTOR_PORT'] ?? DEFAULT_PORT);
   try {
     // Any answer at all: the setup server answers health too (Amendment 46).
@@ -134,13 +157,22 @@ export async function daemonRunning(file: string): Promise<string | null> {
   } catch {
     /* nothing listening */
   }
-  try {
-    const pids = execFileSync('lsof', ['-t', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    if (pids) return `${file} is open in process ${pids.split('\n').join(', ')}`;
-  } catch {
-    /* lsof exits 1 when nobody has it open, or isn't installed */
-  }
-  return null;
+  // A file that isn't there is open in no process; lsof would only complain it can't stat it.
+  if (!existsSync(file)) return null;
+  const r = (opts.lsof ?? runLsof)(file);
+  const pids = r.stdout.trim();
+  if (!r.error && r.status === 0 && pids) return `${file} is open in process ${pids.split('\n').join(', ')}`;
+  if (!r.error && r.status === 1 && !pids && !r.stderr.trim()) return null;
+  const why =
+    r.error?.code === 'ENOENT'
+      ? 'lsof is not installed, or not on PATH, /usr/sbin or /usr/bin'
+      : r.error
+        ? `lsof failed: ${r.error.message}`
+        : `lsof exited ${r.status ?? 'on a signal'}${r.stderr.trim() ? `: ${r.stderr.trim()}` : ''}`;
+  throw new Error(
+    `can't tell whether anything has ${file} open (${why}) — left as it is. ` +
+      'Make lsof runnable and try again; or, with the daemon stopped and nothing holding the file, copy the backup in by hand',
+  );
 }
 
 export interface Restored {
@@ -149,15 +181,31 @@ export interface Restored {
   aside: string | null;
 }
 
+/** `conductor-before-restore-<stamp>.db`, or `…-<stamp>-2.db` and on when that is taken: never one that exists. */
+function asideName(file: string, now: Date): string {
+  const base = join(backupsDir(file), `conductor-before-restore-${stamp(now)}`);
+  const taken = (f: string): boolean => ['', '-wal', '-shm'].some((ext) => existsSync(f + ext));
+  let aside = `${base}.db`;
+  for (let n = 2; taken(aside); n++) aside = `${base}-${n}.db`;
+  return aside;
+}
+
 /**
  * Puts the latest automatic backup in place of `file`. Refuses while the daemon runs, when there
  * is no backup, and when the backup fails `integrity_check`. The database it replaces is set aside
- * first, with its `-wal` and `-shm`, as `backups/conductor-before-restore-<stamp>.db`, so a restore
- * is undone by copying that back; it is never pruned.
+ * first, with its `-wal` and `-shm`, as `backups/conductor-before-restore-<stamp>.db` (a `-2`, `-3`
+ * … after the stamp when that name is taken), so a restore is undone by copying that back; it is
+ * never pruned. When the copy in fails, the set-aside goes back where it was; when that fails too,
+ * the error says where it is.
  */
 export async function restoreLatest(
   file: string,
-  opts: { running?: (file: string) => Promise<string | null>; now?: Date } = {},
+  opts: {
+    running?: (file: string) => Promise<string | null>;
+    now?: Date;
+    /** The copy of the backup into place; a test's stand-in makes it fail. */
+    copy?: (from: string, to: string) => void;
+  } = {},
 ): Promise<Restored> {
   if (file === ':memory:') throw new Error('the database is in memory: there is nothing to restore into');
   const running = await (opts.running ?? daemonRunning)(file);
@@ -175,15 +223,37 @@ export async function restoreLatest(
   if (verdict !== 'ok') throw new Error(`${from} fails integrity_check (${verdict}) — left as it is`);
 
   let aside: string | null = null;
-  if (existsSync(file)) {
-    aside = join(backupsDir(file), `conductor-before-restore-${stamp(opts.now ?? new Date())}.db`);
-    renameSync(file, aside);
-    // Its log goes with it, under the names SQLite looks for, so the aside copy opens whole.
-    for (const ext of ['-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, aside + ext);
-  }
-  for (const ext of ['-wal', '-shm']) rmSync(file + ext, { force: true });
+  // What was moved aside ('' the database, then its log), so a failure can put it back.
+  const moved: string[] = [];
   const partial = `${file}.restoring`;
-  copyFileSync(from, partial);
-  renameSync(partial, file);
+  try {
+    if (existsSync(file)) {
+      aside = asideName(file, opts.now ?? new Date());
+      // Its log goes with it, under the names SQLite looks for, so the aside copy opens whole.
+      for (const ext of ['', '-wal', '-shm']) {
+        if (!existsSync(file + ext)) continue;
+        renameSync(file + ext, aside + ext);
+        moved.push(ext);
+      }
+    }
+    for (const ext of ['-wal', '-shm']) rmSync(file + ext, { force: true });
+    (opts.copy ?? copyFileSync)(from, partial);
+    renameSync(partial, file);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    rmSync(partial, { force: true });
+    if (!aside) throw new Error(`restore failed (${why}) — there was no database at ${file}, and there is none now`);
+    if (moved.length === 0) throw new Error(`restore failed (${why}) — ${file} is as it was`);
+    try {
+      for (const ext of moved) renameSync(aside + ext, file + ext);
+    } catch (back) {
+      throw new Error(
+        `restore failed (${why}), and putting the database back failed too ` +
+          `(${back instanceof Error ? back.message : String(back)}): there is none at ${file} now. ` +
+          `It is at ${aside}, with its -wal and -shm if it had them — copy them back to ${file}`,
+      );
+    }
+    throw new Error(`restore failed (${why}) — the database is back at ${file}, as it was`);
+  }
   return { from, aside };
 }

@@ -8,7 +8,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,7 +17,9 @@ import {
   BACKUPS_KEPT,
   backupNow,
   backupsDir,
+  daemonRunning,
   listBackups,
+  type LsofRun,
   restoreLatest,
   startBackups,
 } from './backup.js';
@@ -93,8 +96,47 @@ function killedAfter(file: string, sql: string): Promise<void> {
   );
 }
 
+/** A port nothing listens on, so `daemonRunning`'s health check never finds the real daemon. */
+function freePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const srv = createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as { port: number };
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** Holds `file` open in another process until it is killed. */
+function holder(file: string): Promise<{ pid: number; stop: () => Promise<void> }> {
+  const src = `require('node:fs').openSync(${JSON.stringify(file)}, 'r'); process.stdout.write('go\\n'); setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ['-e', src], { stdio: ['ignore', 'pipe', 'inherit'] });
+  return new Promise((resolve) =>
+    child.stdout.once('data', () =>
+      resolve({
+        pid: child.pid!,
+        stop: () =>
+          new Promise((done) => {
+            child.once('exit', () => done());
+            child.kill('SIGKILL');
+          }),
+      }),
+    ),
+  );
+}
+
+const refusal = async (f: () => Promise<unknown>): Promise<string> => {
+  try {
+    await f();
+    return '';
+  } catch (err) {
+    return String(err);
+  }
+};
+
 async function main(): Promise<void> {
   mkdirSync(ROOT, { recursive: true });
+  process.env['CONDUCTOR_PORT'] = String(await freePort());
 
   console.log('\n— a backup while another process writes —');
   const home = join(ROOT, 'live');
@@ -244,6 +286,85 @@ async function main(): Promise<void> {
     mem = String(err);
   }
   check('in memory: nothing to restore into', /in memory/.test(mem), mem);
+
+  console.log('\n— is anything holding the database: lsof fails safe —');
+  const lhome = join(ROOT, 'lsof');
+  mkdirSync(lhome);
+  const lfile = join(lhome, 'conductor.db');
+  const ldb = new DatabaseSync(lfile);
+  ldb.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT); INSERT INTO t (x) VALUES ('kept')");
+  backupNow(lfile, { now: at(0) });
+  ldb.exec("INSERT INTO t (x) VALUES ('since')");
+  ldb.close();
+  const lsofIs = (r: Partial<LsofRun>) => (f: string) => daemonRunning(f, { lsof: () => ({ status: null, stdout: '', stderr: '', ...r }) });
+  const enoent = Object.assign(new Error('spawnSync lsof ENOENT'), { code: 'ENOENT' });
+  const missing = await refusal(() => restoreLatest(lfile, { running: lsofIs({ error: enoent }) }));
+  check('lsof missing: restore refuses, and says the check could not run', /can't tell whether anything has/.test(missing) && /lsof is not installed/.test(missing), missing);
+  check('and changes nothing', count(lfile) === 2 && !existsSync(join(lhome, 'backups', 'conductor-before-restore-20261016-090000.db')));
+  const erred = await refusal(() => restoreLatest(lfile, { running: lsofIs({ status: 1, stderr: 'lsof: status error on conductor.db' }) }));
+  check('lsof exiting 1 with an error: refuses, with what lsof said', /can't tell/.test(erred) && /status error/.test(erred), erred);
+  const odd = await refusal(() => restoreLatest(lfile, { running: lsofIs({ status: 2 }) }));
+  check('lsof exiting any other way: refuses', /can't tell/.test(odd) && /exited 2/.test(odd), odd);
+  check('lsof finding a process: says which', (await daemonRunning(lfile, { lsof: () => ({ status: 0, stdout: '4242\n', stderr: '' }) })) === `${lfile} is open in process 4242`);
+  check('lsof\'s clean no-match (exit 1, nothing printed): free', (await daemonRunning(lfile, { lsof: () => ({ status: 1, stdout: '', stderr: '' }) })) === null);
+  const lsofBin = ['/usr/sbin/lsof', '/usr/bin/lsof'].find((f) => existsSync(f));
+  if (lsofBin) {
+    const held = await holder(lfile);
+    const path = process.env['PATH'];
+    process.env['PATH'] = '/nonexistent';
+    let found: string | null = null;
+    try {
+      found = await daemonRunning(lfile);
+    } catch (err) {
+      found = String(err);
+    } finally {
+      process.env['PATH'] = path;
+      await held.stop();
+    }
+    check(`lsof not on PATH: found at ${lsofBin}, and the process holding the file named`, found === `${lfile} is open in process ${held.pid}`, String(found));
+    check('the real lsof, nobody holding it: free', (await daemonRunning(lfile)) === null);
+  } else console.log('  (no lsof in /usr/sbin or /usr/bin: the real-lsof checks are skipped)');
+  check('a database not there: free, lsof not asked', (await daemonRunning(join(lhome, 'none.db'), { lsof: () => { throw new Error('asked'); } })) === null);
+
+  console.log('\n— a restore that fails after the set-aside —');
+  const fails = (f: string): void => {
+    throw Object.assign(new Error(`ENOSPC: no space left on device, copyfile → ${f}`), { code: 'ENOSPC' });
+  };
+  const failed = await refusal(() => restoreLatest(lfile, { running: notRunning, now: at(40), copy: (_, to) => fails(to) }));
+  check('the database is put back where it was, and the error says so', /restore failed \(ENOSPC/.test(failed) && /back at/.test(failed) && existsSync(lfile) && count(lfile) === 2, failed);
+  if (!existsSync(lfile)) {
+    console.log('  (stopping here: the database was not put back)');
+    throw new Error(failed);
+  }
+  check('with nothing left set aside, and no partial copy', !readdirSync(join(lhome, 'backups')).some((f) => f.startsWith('conductor-before-restore')) && !existsSync(`${lfile}.restoring`));
+  const stuck = await refusal(() =>
+    restoreLatest(lfile, {
+      running: notRunning,
+      now: at(41),
+      // Fails, and leaves a folder where the database goes, so it can't be put back either.
+      copy: (_, to) => {
+        mkdirSync(lfile);
+        fails(to);
+      },
+    }),
+  );
+  const stuckAside = join(lhome, 'backups', 'conductor-before-restore-20261016-090041.db');
+  check('when it cannot be put back, the error names the set-aside and says to copy it back', stuck.includes(stuckAside) && /there is none at/.test(stuck) && /copy them back to/.test(stuck), stuck);
+  check('and the set-aside is whole', existsSync(stuckAside) && count(stuckAside) === 2);
+  // As the error says: copy it back.
+  rmSync(lfile, { recursive: true });
+  for (const ext of ['', '-wal', '-shm']) {
+    if (!existsSync(stuckAside + ext)) continue;
+    copyFileSync(stuckAside + ext, lfile + ext);
+    rmSync(stuckAside + ext);
+  }
+
+  console.log('\n— two restores in the same second —');
+  const one = await restoreLatest(lfile, { running: notRunning, now: at(50) });
+  const two = await restoreLatest(lfile, { running: notRunning, now: at(50) });
+  check('each keeps its own set-aside', one.aside === join(lhome, 'backups', 'conductor-before-restore-20261016-090050.db') && two.aside === join(lhome, 'backups', 'conductor-before-restore-20261016-090050-2.db') && existsSync(one.aside!) && existsSync(two.aside!), `${one.aside} ${two.aside}`);
+  check('the first is the database from before, not overwritten by the second', count(one.aside!) === 2 && count(two.aside!) === 1, `${count(one.aside!)} ${count(two.aside!)}`);
+  check('and neither is an automatic backup', listBackups(lfile).length === 1);
 
   rmSync(ROOT, { recursive: true, force: true });
   console.log(`\n${checks - failures}/${checks} checks passed`);
