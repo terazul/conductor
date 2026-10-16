@@ -23,6 +23,27 @@ settingRule(DAILY_KEY, (v) => {
   return Number.isFinite(n) && n > 0 && n <= DAILY_MAX ? null : `dollars, more than 0 and up to ${DAILY_MAX.toLocaleString('en')}`;
 });
 
+/**
+ * The fleet's monthly budget (Amendment 182), beside the daily one and read the same way: dollars,
+ * or null when none is set. The month is local, as the day is (`localMonth`). It only warns.
+ * Each project may have its own, a column of `projects` (290_project_monthly_budget.sql).
+ */
+export const MONTHLY_KEY = 'conductor.monthlyBudget';
+
+export function monthlyBudget(): number | null {
+  const n = Number(readSettings()[MONTHLY_KEY]);
+  return Number.isFinite(n) && n > 0 && n <= DAILY_MAX ? n : null;
+}
+
+/** Whether `n` may be a monthly budget: a project's is held to the fleet's rule. */
+export function monthlyBudgetProblem(n: unknown): string | null {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= DAILY_MAX
+    ? null
+    : `dollars, more than 0 and up to ${DAILY_MAX.toLocaleString('en')}`;
+}
+
+settingRule(MONTHLY_KEY, (v) => monthlyBudgetProblem(Number(v)));
+
 const listeners = new Set<() => void>();
 
 /** Told whenever today's spend grows. */
@@ -37,7 +58,8 @@ export function costChanged(): void {
 
 /**
  * Every open page is told what has been spent: today's figure (Amendment 59), the fleet's
- * all-time total and each project's today and total (Amendment 146). Called whenever spend is
+ * all-time total and each project's today and total (Amendment 146), and the month's, the fleet's
+ * and each project's (Amendment 182). Called whenever spend is
  * credited, in either unit, and at the day change. No hub outside the daemon is not fatal.
  */
 export function broadcastSpend(db: Db): void {

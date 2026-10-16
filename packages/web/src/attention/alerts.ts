@@ -183,6 +183,10 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       // A warning (Amendment 59): nothing to fix from here but the budget, on Settings.
       return [dismiss];
 
+    case 'monthly_budget':
+      // The same for a month (Amendment 182), the fleet's or a project's: put away for the month.
+      return [dismiss];
+
     case 'note_due':
       return [
         ...(alert.projectId && alert.noteId ? [{ id: 'note_done', projectId: alert.projectId, noteId: alert.noteId } as const] : []),
@@ -246,6 +250,19 @@ export function alertProject(alert: Pick<Alert, 'projectId'>, projects: readonly
   return alert.projectId === null ? null : (projects.find((p) => p.id === alert.projectId)?.name ?? null);
 }
 
+/** A monthly budget's notification title (Amendment 182), the project's name before it for a project's. */
+export const MONTHLY_TITLE = "This month's budget reached";
+
+/**
+ * The note on a monthly budget's card (Amendment 182), the fleet's or a project's by name. A
+ * warning only, so it says where the budget is raised, and there is nothing to press.
+ */
+export function monthlyNote(project: string | null): string {
+  return project === null
+    ? 'A warning only: agents keep going. Raise the budget on Settings (9), or stop agents yourself. It resets on the 1st.'
+    : `A warning only: ${project}'s agents keep going. Raise its budget from its Fleet card's Edit, or stop agents yourself. It resets on the 1st.`;
+}
+
 /** A desktop notification's title and body. */
 export function alertNotice(
   alert: Alert,
@@ -261,6 +278,8 @@ export function alertNotice(
   }
   // A warning (Amendment 124): the agent is still working, so it is not asking for you.
   if (alert.kind === 'budget_over') return { title: within(`${head} is over its daily budget`), body: `${head} ${subject}` };
+  // The fleet's month, or a project's under its name (Amendment 182).
+  if (alert.kind === 'monthly_budget') return { title: within(MONTHLY_TITLE), body: `${head} ${subject}` };
   return { title: within(head), body: subject };
 }
 

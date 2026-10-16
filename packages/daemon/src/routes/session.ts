@@ -59,7 +59,8 @@ import {
   listJobs,
   listProjects,
 } from '../session/store.js';
-import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, updateNote } from '../session/store.js';
+import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, setProjectMonthlyBudget, updateNote } from '../session/store.js';
+import { monthlyBudgetProblem } from '../daily.js';
 import { describeRule } from '../session/rules.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { STACKS_KEY, stacksLimit } from '../slots.js';
@@ -488,7 +489,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   });
 
   /**
-   * Edit a project's name and/or path. Bookkeeping only — nothing on disk moves.
+   * Edit a project's name and/or path, and its monthly budget (Amendment 182). Bookkeeping
+   * only — nothing on disk moves.
    *
    * PATCH rather than PUT: the body is a partial, and a PUT that silently reset
    * the field you left out would be the wrong verb for a two-field form where
@@ -499,15 +501,28 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    * patch shape would mean a W0 edit for every field the form grows.
    */
   app.patch<{ Params: { projectId: string } }>('/api/projects/:projectId', async (req, reply) => {
-    const body = (req.body ?? {}) as { name?: unknown; path?: unknown };
+    const body = (req.body ?? {}) as { name?: unknown; path?: unknown; monthlyBudgetUsd?: unknown };
     const patch: { name?: string; path?: string } = {};
     if (typeof body.name === 'string') patch.name = body.name;
     if (typeof body.path === 'string') patch.path = body.path;
-    if (patch.name === undefined && patch.path === undefined) {
-      return fail(reply, 400, 'nothing to change', 'send a name, a path, or both');
+    // Dollars, held to the fleet's monthly rule, or null to take it away. Checked before
+    // anything is written, so a bad budget changes nothing else either.
+    const monthly = body.monthlyBudgetUsd;
+    if (monthly !== undefined && monthly !== null) {
+      const problem = monthlyBudgetProblem(monthly);
+      if (problem) return fail(reply, 400, 'not a monthly budget', problem);
     }
+    if (patch.name === undefined && patch.path === undefined && monthly === undefined) {
+      return fail(reply, 400, 'nothing to change', 'send a name, a path, a monthly budget, or any of them');
+    }
+    if (!getProject(db, req.params.projectId)) return fail(reply, 404, 'no such project');
     try {
-      const project = await sup.editProject(req.params.projectId, patch);
+      let project = patch.name !== undefined || patch.path !== undefined ? await sup.editProject(req.params.projectId, patch) : undefined;
+      if (monthly !== undefined) {
+        setProjectMonthlyBudget(db, req.params.projectId, monthly as number | null);
+        // Tells every page, and the budget may add or clear its alert.
+        project = sendProject(req.params.projectId);
+      }
       if (!project) return fail(reply, 404, 'no such project');
       return reply.send({ project });
     } catch (err) {

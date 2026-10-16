@@ -37,7 +37,7 @@ import {
   useProjectStatus,
   useServers,
 } from '../lib/store.js';
-import { projectPairWords, projectSpendOf } from '../shell/spend.js';
+import { monthlyDraft, projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { restOf, restWord } from './rest.js';
@@ -164,7 +164,7 @@ type MenuState = 'closed' | 'menu' | 'edit' | 'dirs' | 'remove';
 /** Roughly how tall each state renders, for deciding which way to open. */
 const NEEDED: Record<Exclude<MenuState, 'closed'>, number> = {
   menu: 112,
-  edit: 330,
+  edit: 400,
   dirs: 300,
   remove: 290,
 };
@@ -189,6 +189,10 @@ function CardMenu({
   const [state, setState] = useState<MenuState>('closed');
   const [name, setName] = useState(project.name);
   const [path, setPath] = useState(project.path);
+  // Its monthly budget in dollars, empty for none (Amendment 182).
+  const budgetText = (): string => (project.monthlyBudgetUsd == null ? '' : String(project.monthlyBudgetUsd));
+  const [monthly, setMonthly] = useState(budgetText);
+  const monthlyNow = monthlyDraft(monthly, project.monthlyBudgetUsd);
   const cmd = useCommand();
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -253,15 +257,17 @@ function CardMenu({
     cmd.dismiss();
     setName(project.name);
     setPath(project.path);
+    setMonthly(budgetText());
     setState('closed');
   };
 
   const save = (): void =>
     void cmd.run('Updating the project', async () => {
-      const patch: { name?: string; path?: string } = {};
+      const patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null } = {};
       if (name.trim() && name.trim() !== project.name) patch.name = name.trim();
       if (path.trim() && path.trim() !== project.path) patch.path = path.trim();
-      if (patch.name === undefined && patch.path === undefined) {
+      if ('send' in monthlyNow && monthlyNow.send !== undefined) patch.monthlyBudgetUsd = monthlyNow.send;
+      if (patch.name === undefined && patch.path === undefined && patch.monthlyBudgetUsd === undefined) {
         setState('closed');
         return null;
       }
@@ -363,8 +369,19 @@ function CardMenu({
                     transcripts keep pointing at the old directory — only new work uses this path.
                   </p>
                 )}
+                <label className="fl-f">
+                  <span>monthly budget, $</span>
+                  <input
+                    value={monthly}
+                    inputMode="decimal"
+                    placeholder="none"
+                    title="This project's spend this month is held up against it. A warning only: nothing stops."
+                    onChange={(e) => setMonthly(e.target.value)}
+                  />
+                </label>
+                {'problem' in monthlyNow && <p className="fl-f-warn">{monthlyNow.problem}</p>}
                 <div className="fl-menu-row">
-                  <button type="button" className="fl-btn" disabled={cmd.busy} onClick={save}>
+                  <button type="button" className="fl-btn" disabled={cmd.busy || 'problem' in monthlyNow} onClick={save}>
                     {cmd.busy ? 'saving…' : 'save'}
                   </button>
                   <button
@@ -613,7 +630,8 @@ export function ProjectCard({
 
   const blocked = pending.length > 0;
   const working = agents.filter((a) => a.status === 'working').length;
-  // What the project spent today and in total (Amendment 146), kept when agents are removed.
+  // What the project spent today, this month (Amendment 182) and in total (Amendment 146), kept
+  // when agents are removed.
   const spendList = useProjectSpend();
   const spend = projectPairWords(projectSpendOf(spendList, project.id, agents));
 
@@ -734,9 +752,10 @@ export function ProjectCard({
         )}
         <span
           className="fl-card-spend"
-          title="Spent by this project's agents today, and since Conductor started counting. Removing an agent or a job keeps it."
+          title="Spent by this project's agents today, this month, and since Conductor started counting. Removing an agent or a job keeps it."
         >
-          {spend.today} · {spend.total}
+          {spend.today}
+          {spend.month && ` · ${spend.month}`} · {spend.total}
         </span>
 
         <span className="fl-card-actions">

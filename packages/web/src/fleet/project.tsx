@@ -394,8 +394,9 @@ export function ProjectScreen() {
             </div>
             <div className="pj-kv">
               <span>spend</span>
-              <span title="What this project's agents spent today, and since Conductor started counting: removing an agent or a job keeps it">
-                {spend.today} · {spend.total}
+              <span title="What this project's agents spent today, this month, and since Conductor started counting: removing an agent or a job keeps it">
+                {spend.today}
+                {spend.month && ` · ${spend.month}`} · {spend.total}
               </span>
             </div>
           </div>
@@ -453,9 +454,10 @@ export function ProjectScreen() {
           )}
           <span
             className="pj-headspend"
-            title="Spent by this project's agents today, and since Conductor started counting. Removing an agent or a job keeps it."
+            title="Spent by this project's agents today, this month, and since Conductor started counting. Removing an agent or a job keeps it."
           >
-            <b>{spend.today}</b> · {spend.total}
+            <b>{spend.today}</b>
+            {spend.month && ` · ${spend.month}`} · {spend.total}
           </span>
 
           <div className="fl-panehead-r">

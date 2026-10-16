@@ -43,10 +43,13 @@ import {
   isEmpty,
   modelCell,
   modelName,
+  monthlyBudgetCell,
   otherEnginesRan,
   percent,
   projectChoices,
   projectNote,
+  projectSpendRows,
+  PROJECT_SPEND_NOTE,
   rangeLine,
   rate,
   ratio,
@@ -361,9 +364,38 @@ console.log('\n7 · the screen is registered, reachable on 8, and in both themes
   check('and no status colour is used decoratively', !/var\(--(live|need|done|queue|idle)\)/.test(css));
 }
 
+// ── Amendment 182: each project's month beside today and total, with its monthly budget ──
+{
+  const projects = [
+    { id: 'p2', name: 'Zeta', monthlyBudgetUsd: 50 },
+    { id: 'p1', name: 'Alpha' },
+    { id: 'p3', name: 'Mid', monthlyBudgetUsd: 10 },
+  ];
+  const spend = [
+    { projectId: 'p1', today: 1.5, month: 12.25, total: 40, tokensToday: 0, tokensMonth: 0, tokensTotal: 0 },
+    { projectId: 'p2', today: 2, month: 52, total: 90, tokensToday: 0, tokensMonth: 0, tokensTotal: 0 },
+  ];
+  const rows = projectSpendRows(projects, spend);
+  check('By project: a row per project, by name', rows.map((r) => r.name).join() === 'Alpha,Mid,Zeta', rows.map((r) => r.name).join());
+  const [alpha, mid, zeta] = rows;
+  check('a row reads today, this month and total in dollars', alpha?.today === '$1.50' && alpha.month === '$12.25' && alpha.total === '$40.00', JSON.stringify(alpha));
+  check('with no monthly budget the budget cell is a dash and nothing is over', alpha?.budget === '—' && alpha.over === false, JSON.stringify(alpha));
+  check('a project at or over its monthly budget says so in words', zeta?.budget === '$50.00 · 104%, over' && zeta.over === true, JSON.stringify(zeta));
+  check('a project with no spend yet reads $0.00 and 0% of its budget', mid?.today === '$0.00' && mid.month === '$0.00' && mid.budget === '$10.00 · 0%' && !mid.over, JSON.stringify(mid));
+  check('the chosen project alone, when one is chosen', projectSpendRows(projects, spend, 'p2').map((r) => r.id).join() === 'p2');
+  check('no rows until the daemon has sent spend', projectSpendRows(projects, null).length === 0);
+  check('under a budget: its share, rounded down, and no "over"', monthlyBudgetCell(49.99, 50) === '$50.00 · 99%' && monthlyBudgetCell(50, 50) === '$50.00 · 100%, over', monthlyBudgetCell(49.99, 50));
+  const old = projectSpendRows([{ id: 'p1', name: 'Alpha', monthlyBudgetUsd: 5 }], [{ projectId: 'p1', today: 1, total: 2, tokensToday: 0, tokensTotal: 0 }]);
+  check("an older daemon's spend, with no month, reads a dash and just the budget, never over", old[0]?.month === '—' && old[0].budget === '$5.00' && !old[0].over, JSON.stringify(old[0]));
+  check('the note says the table is not the range, and that a budget only warns', /not the range/.test(PROJECT_SPEND_NOTE) && /only warns/.test(PROJECT_SPEND_NOTE) && /from the 1st/.test(PROJECT_SPEND_NOTE));
+  const route = src('./route.tsx');
+  check('the screen draws the By project table from the store, for the chosen project', /projectSpendRows\(projects, useProjectSpend\(\), projectId\)/.test(route) && /<ProjectSpendTable rows=\{spendRows\} \/>/.test(route) && /<h2 className="mt-h">By project<\/h2>/.test(route));
+  check('and over a budget is never a colour there: its cells carry no class', !/ProjectSpendTable[\s\S]*?className=\{[^}]*over/.test(route));
+}
+
 console.log(
   failures === 0
-    ? "\nAmendment 122/136/165 web verify: PASS — a cost-per-day chart has a bar for every day of the range, scaled to the highest, in ink and in words, and none for a single day; time per turn says why it runs high; the retry rate is out of Claude's calls and says so when others ran; time is per turn, subagents included; speed is each model's own, averaged; the project picker is a setting, with a note on when its counts begin;" + ' every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per turn and speed use only timed turns; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
+    ? "\nAmendment 122/136/165 web verify: PASS — a cost-per-day chart has a bar for every day of the range, scaled to the highest, in ink and in words, and none for a single day; time per turn says why it runs high; the retry rate is out of Claude's calls and says so when others ran; time is per turn, subagents included; speed is each model's own, averaged; the project picker is a setting, with a note on when its counts begin; each project's today, this month, monthly budget and total, over a budget in words (Amendment 182);" + ' every rate is two real counts divided or a dash; a token engine shows tokens and no dollars; the failed share leaves out your stop, a pause and a budget stop; time per turn and speed use only timed turns; the three ranges, the day table, the before-metrics line and its caveat read from a response alone; 8 is Metrics and nothing else; the status bar says 1–8; the stylesheet is tokens only, set for both themes.\n'
     : `\nAmendment 122/136/165 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

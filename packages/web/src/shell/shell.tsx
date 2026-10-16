@@ -40,7 +40,7 @@ import { openAttention } from './nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { Navigator, useRoute } from './Navigator.js';
 import { DETAILS_KEY, NAV_OPEN_KEY, detailsShown, navShown, rightPanelFor } from './navtree.js';
-import { DAILY_KEY, TOTAL_TITLE, dailyMeter, parseBudget, totalWords } from './spend.js';
+import { DAILY_KEY, MONTHLY_KEY, MONTH_TITLE, TOTAL_TITLE, dailyMeter, monthMeter, monthWords, parseBudget, totalWords } from './spend.js';
 import { useNow } from './clock.js';
 import { PauseAll } from './pauseall.js';
 import { fmtAge, fmtMoney } from './ui.js';
@@ -195,9 +195,32 @@ function useBuild(): Build | null {
   return build;
 }
 
+/**
+ * This month's spend, after today's (Amendment 182): against the monthly budget when there is one,
+ * in the meter's colours, with no bar. Nothing from a daemon before it.
+ */
+function MonthSpend({ costMonth }: { costMonth: number | null }) {
+  const budget = parseBudget(useSetting(MONTHLY_KEY));
+  if (costMonth === null) return null;
+  if (budget === null) {
+    return (
+      <span className="sh-spend-total" title={MONTH_TITLE}>
+        {monthWords(costMonth)}
+      </span>
+    );
+  }
+  const m = monthMeter(costMonth, budget);
+  return (
+    <span className="sh-spend-month" data-tone={m.tone} title={m.title}>
+      · {m.label}
+    </span>
+  );
+}
+
 /** Today's spend, and against the daily budget when there is one (Amendment 59). */
-function DailySpend({ costToday, costTotal }: { costToday: number; costTotal: number | null }) {
+function DailySpend({ costToday, costMonth, costTotal }: { costToday: number; costMonth: number | null; costTotal: number | null }) {
   const budget = parseBudget(useSetting(DAILY_KEY));
+  const month = <MonthSpend costMonth={costMonth} />;
   // The fleet's all-time total after today's (Amendment 146); absent from a daemon before it.
   const total =
     costTotal === null ? null : (
@@ -209,6 +232,7 @@ function DailySpend({ costToday, costTotal }: { costToday: number; costTotal: nu
     return (
       <span className="sh-spend-pair">
         <span>{fmtMoney(costToday)} today</span>
+        {month}
         {total}
       </span>
     );
@@ -222,6 +246,7 @@ function DailySpend({ costToday, costTotal }: { costToday: number; costTotal: nu
         </span>
         {m.label}
       </span>
+      {month}
       {total}
     </span>
   );
@@ -230,7 +255,7 @@ function DailySpend({ costToday, costTotal }: { costToday: number; costTotal: nu
 function StatusBar() {
   const build = useBuild();
   const status = useFeedStatus();
-  const { slots, costToday, costTotal, seq } = useStatusBar();
+  const { slots, costToday, costMonth, costTotal, seq } = useStatusBar();
   return (
     <footer className="sh-statusbar">
       <span>
@@ -252,7 +277,7 @@ function StatusBar() {
         <span>
           {slots.used}/{slots.total} agent slots
         </span>
-        <DailySpend costToday={costToday} costTotal={costTotal} />
+        <DailySpend costToday={costToday} costMonth={costMonth} costTotal={costTotal} />
         {build && (
           <span className="sh-build" data-behind={build.behind} title={buildTitle(build)}>
             {build.behind ? '⚠ ' : ''}

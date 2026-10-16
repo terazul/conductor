@@ -200,6 +200,54 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 182 — post-merge, applied. **This month's spend reads beside today's, and a monthly budget, the fleet's and each project's, sits beside the daily one. It only warns.**
+
+Daemon (`session/store.ts`, `daily.ts`, `session/alerts.ts`, `routes/session.ts`, `hub.ts`), shared
+(`wire.ts`), web (status bar, Settings, Fleet, Project, Metrics, Needs You), and `docs/MANUAL.md`.
+Migration 290. Decided 15 Oct 2026 (docs/plans/wave-12-tracks.md §3): *a local month; a monthly
+budget for the fleet and for each project; budgets only warn* (Amendment 180). Run as lane M3 of
+track 3.
+
+- **A month is local, as a day is.** `localMonth()` (`session/store.ts:822`) is `localDay()`'s first
+  seven characters, so it follows `setDayClock` and turns with the day: nothing new watches for it.
+  `costMonth` (`:842`) sums `cost_daily` where `substr(day, 1, 7)` is this month, and `projectSpend`
+  (`:927`) sums `project_spend_daily` the same way into `ProjectSpend.month` and `tokensMonth`. The
+  backfill's `'0000-00-00'` row is in no month. No table is added: the months are sums of the days.
+- **The figures travel with today's.** `spendFigures` (`store.ts:958`) carries `costMonth`, so the
+  snapshot (`supervisor.ts:539`, unchanged), every `cost` frame (`daily.ts:67`) and the day change's
+  frame have it; the hub merges it as a scalar (`hub.ts:114`). `Snapshot.costMonth`,
+  `ServerFrame cost.costMonth` and `ProjectSpend.month`/`tokensMonth` are optional (`wire.ts:862`,
+  `:1143`, `:879`), so an older daemon still renders and its pages show no month.
+- **The fleet's monthly budget is a setting**, `conductor.monthlyBudget` (`daily.ts:31`), dollars
+  more than 0 and up to 1,000,000 (`monthlyBudgetProblem`, `:39`; the setting rule `:45`), set on
+  Settings beside the daily one (`settings/route.tsx:431`). **A project's is a column**,
+  `projects.monthly_budget_usd` (`db/migrations/290_project_monthly_budget.sql`; an existing project
+  reads null), `Project.monthlyBudgetUsd` (`wire.ts:50`, absent when none), set by
+  `PATCH /api/projects/:id { monthlyBudgetUsd }` (`routes/session.ts:510`), held to the same rule,
+  null to clear, refused with 400 before anything is written. It is set from the Fleet card's Edit
+  (`fleet/card.tsx:195`); the patch tells every page through the entities frame.
+- **Reaching one raises a `monthly_budget` alert, and nothing else** (`session/alerts.ts:244`): the
+  fleet's has id `monthly:YYYY-MM` and `projectId` null, a project's `monthly:YYYY-MM:<projectId>`;
+  each carries `spent` and `budget`. Their only action is Dismiss (`attention/alerts.ts:186`), which
+  lasts the month because the month is in the id; the 1st starts clean. They are read again when
+  spend is credited, when a budget setting or a project's budget changes, and at the day change. No
+  agent, job or message is paused, refused, held or limited for one (Amendment 180).
+- **The pages.** The status bar reads `· $X this month` after today's, or `$X of $Y this month` in
+  the daily meter's colours when the fleet has a budget (`shell/shell.tsx:202`, `shell/spend.ts:55`).
+  A Fleet card's footer and the Project screen read the project's month between today and total
+  (`spend.ts` `projectPairWords`). Metrics has a By project table: today, this month, the monthly
+  budget with its share (over said in words, not colour) and total (`metrics/route.tsx:301`,
+  `metrics/rules.ts:465`).
+- **Removed while here:** `lastStatusDay` in `session/store.ts`, which nothing called.
+  `jobCostToday` stays: the §27 checks read it.
+
+Checks: `session/verify.ts` §32 (`:8244`) — the month sums for the fleet and a project without the
+month before's last day; the turn to the 1st reads 0 and its cost frame carries 0; no alert below a
+budget, exactly one at or over it, the fleet's and a project's apart, with an agent still sent and
+run; Dismiss lasts the month; bad values refused and null clears; migration 290 on an older
+database. `web/src/lib/verify.ts` §39 (`:1955`), `web/src/attention/verify.ts` §9 (`:808`) and
+`web/src/metrics/verify.ts` (`:367`) check the words, the meter and the table.
+
 ### Amendment 181 — post-merge, applied. **Spawn launches several orchestrated stacks from one plan, each its own job, worktree and branch, told its number by `{track}`; the daemon checks them all before it makes any.**
 
 Shared (`stack.ts`, `wire.ts`), daemon (`slots.ts`, `routes/session.ts`, `session/verify.ts`), web

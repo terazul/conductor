@@ -42,6 +42,12 @@ export interface Project {
   extraDirs?: string[];
   /** Your notes on it, newest first (Amendment 55). Absent when there are none. */
   notes?: ProjectNote[];
+  /**
+   * Its monthly budget in dollars (Amendment 182), set on the Fleet card's edit form. Absent, or
+   * null, when it has none. It only warns: this local month's spend reaching it is a
+   * `monthly_budget` alert, and nothing stops.
+   */
+  monthlyBudgetUsd?: number | null;
 }
 
 /** A note you keep on a project, to track where you are (Amendment 55). */
@@ -746,6 +752,13 @@ export type AlertKind =
   | 'connection'
   | 'server_down'
   | 'daily_budget'
+  /**
+   * This local month's spend reached a monthly budget (Amendment 182): the fleet's, from Settings
+   * (`projectId` null, id `monthly:YYYY-MM`), or a project's own (`projectId` set, id
+   * `monthly:YYYY-MM:<projectId>`). `spent` and `budget` are dollars. A warning only, dismissed
+   * for the month.
+   */
+  | 'monthly_budget'
   | 'note_due'
   | 'blocked_dep'
   | 'handoff_held'
@@ -789,7 +802,10 @@ export interface Alert {
   noteText?: string;
   due?: string;
   late?: boolean;
-  /** daily_budget (Amendment 59): today's spend, and the budget it reached. */
+  /**
+   * daily_budget (Amendment 59): today's spend, and the budget it reached. monthly_budget
+   * (Amendment 182): this month's, the fleet's or the project's.
+   */
   spent?: number;
   budget?: number;
   /** failed: what the SDK said, from the status event's `detail`. */
@@ -842,6 +858,8 @@ export interface Snapshot {
   costTotal?: number;
   /** Amendment 146: each project's spend today and over its whole life. Optional for the same reason. */
   projectSpend?: ProjectSpend[];
+  /** Amendment 182: what the fleet has spent this local month. Optional for the same reason. */
+  costMonth?: number;
   /** Amendment 46. Optional so a recording made before it still replays. */
   settings?: Record<string, string>;
   /** Amendment 111: messages waiting for their time. Optional for the same reason. */
@@ -857,8 +875,12 @@ export interface Snapshot {
 export interface ProjectSpend {
   projectId: string;
   today: number;
+  /** This local month, its days summed (Amendment 182). Optional, so an older daemon still renders. */
+  month?: number;
   total: number;
   tokensToday: number;
+  /** The same in tokens. */
+  tokensMonth?: number;
   tokensTotal: number;
 }
 
@@ -1118,7 +1140,7 @@ export type ServerFrame =
    * Amendment 146 adds the fleet's all-time total and each project's today and total, optional
    * so a page from before reads the frame as it did.
    */
-  | { type: 'cost'; costToday: number; costTotal?: number; projectSpend?: ProjectSpend[] }
+  | { type: 'cost'; costToday: number; costMonth?: number; costTotal?: number; projectSpend?: ProjectSpend[] }
   /** Slots in use and the limit, each time either changes (Amendment 47). */
   | { type: 'slots'; slots: { used: number; total: number } }
   /** A terminal command started, or ended (Amendment 58). */

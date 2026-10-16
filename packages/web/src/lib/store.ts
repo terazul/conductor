@@ -59,6 +59,8 @@ interface State {
   costToday: number;
   /** The fleet's all-time spend (Amendment 146); null when the daemon has not said (one from before it). */
   costTotal: number | null;
+  /** The fleet's spend this local month (Amendment 182); null when the daemon has not said. */
+  costMonth: number | null;
   /** Each project's spend today and in total (Amendment 146); null when the daemon has not said. */
   projectSpend: ProjectSpend[] | null;
   /** Messages waiting for their time (Amendment 111), soonest first. */
@@ -81,6 +83,7 @@ function initialState(): State {
     slots: { used: 0, total: 7 },
     costToday: 0,
     costTotal: null,
+    costMonth: null,
     projectSpend: null,
     scheduled: [],
     eventsByAgent: new Map(),
@@ -187,6 +190,7 @@ class Store {
         // The totals beside it (Amendment 146), when the daemon sends them; a frame without
         // them leaves what the tab had.
         if (frame.costTotal !== undefined) s.costTotal = frame.costTotal;
+        if (frame.costMonth !== undefined) s.costMonth = frame.costMonth;
         if (frame.projectSpend !== undefined) s.projectSpend = frame.projectSpend;
         break;
 
@@ -233,6 +237,8 @@ class Store {
     // A daemon from before Amendment 146 sends neither: the status bar shows today alone, and
     // a project its current agents' sum (`projectSpendOf`, shell/spend.ts).
     s.costTotal = snap.costTotal ?? null;
+    // And one from before Amendment 182 no month: the status bar leaves it out.
+    s.costMonth = snap.costMonth ?? null;
     s.projectSpend = snap.projectSpend ?? null;
     // A daemon from before Amendment 111 sends none.
     s.scheduled = snap.scheduled ?? [];
@@ -519,10 +525,11 @@ export function useJobDiffstat(jobId: string | null): DiffStat {
   );
 }
 
-export function useStatusBar(): { slots: State['slots']; costToday: number; costTotal: number | null; seq: number } {
+export function useStatusBar(): { slots: State['slots']; costToday: number; costMonth: number | null; costTotal: number | null; seq: number } {
   return useSelect('statusbar', (s) => ({
     slots: s.slots,
     costToday: s.costToday,
+    costMonth: s.costMonth,
     costTotal: s.costTotal,
     seq: s.seq,
   }));

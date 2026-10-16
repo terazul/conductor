@@ -31,6 +31,7 @@ import {
   continueAgent,
   finishedConfirm,
   mergeAndClean,
+  monthlyNote,
   mergeFinished,
   restoreAndContinue,
   dismissAlert,
@@ -46,6 +47,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   connection: { label: 'Model API', tone: 'var(--need)' },
   server_down: { label: 'Dev server down', tone: 'var(--fail)' },
   daily_budget: { label: 'Daily budget', tone: 'var(--fail)' },
+  monthly_budget: { label: 'Monthly budget', tone: 'var(--fail)' },
   note_due: { label: 'Note due', tone: 'var(--need)' },
   blocked_dep: { label: 'Waiting', tone: 'var(--need)' },
   handoff_held: { label: 'Not handed off', tone: 'var(--need)' },
@@ -246,6 +248,9 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         {alert.kind === 'daily_budget' && alert.spent !== undefined && alert.budget !== undefined && (
           <Kv k="today" v={`${fmtMoney(alert.spent)} of ${fmtMoney(alert.budget)}`} tone="var(--fail)" />
         )}
+        {alert.kind === 'monthly_budget' && alert.spent !== undefined && alert.budget !== undefined && (
+          <Kv k="this month" v={`${fmtMoney(alert.spent)} of ${fmtMoney(alert.budget)}`} tone="var(--fail)" />
+        )}
 
         <div className="atn-actions">
           {actions.map((a, i) => (
@@ -343,6 +348,7 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             midnight.
           </div>
         )}
+        {alert.kind === 'monthly_budget' && <div className="atn-note">{monthlyNote(project)}</div>}
       </div>
 
       {cmd.busy ? (

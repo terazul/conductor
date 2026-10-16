@@ -73,11 +73,13 @@ import {
   addCostToday,
   addSpendToday,
   agentsThatSpentOn,
+  costMonth,
   costToday,
   costTotal,
   listProjects,
   projectSpend,
   getAgent,
+  getProject,
   jobCostToday,
   spentToday as agentSpentToday,
   getJob,
@@ -108,6 +110,7 @@ import {
   setAgentAutonomy,
   setAgentStatus,
   localDay,
+  localMonth,
   setDayClock,
   helpersOf,
   unreportedHelpers,
@@ -8238,6 +8241,132 @@ async function main(): Promise<void> {
     await until(() => sup.slots.used === 0);
   }
 
+  console.log('\n32 · this month beside today, and a monthly budget for the fleet and each project, which only warns (Amendment 182)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const monthly = async () => (await get<Snapshot>('/api/snapshot')).body.alerts.filter((a) => a.kind === 'monthly_budget');
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2035, 1, 28, 12, 0, 0); // the last day of February
+    setDayClock(() => now);
+    watch?.check();
+
+    const mpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'month181' })).body.project.id;
+    insertJob(db, { id: 'job_m181', projectId: mpid, prompt: 'the month prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    fixture('m_a', 'job_m181', { projectId: mpid });
+    const mine = (): ProjectSpend | undefined => projectSpend(db).find((p) => p.projectId === mpid);
+    // The project at ROOT is the one earlier sections spent in too, so its total is read from here.
+    const base = { total: mine()?.total ?? 0, tokens: mine()?.tokensTotal ?? 0, name: getProject(db, mpid)?.name };
+    // Spent on the last day of the month before, on two days of March, and since today is read
+    // as part of a month, a third figure then lands in the month as the days pass.
+    const credit = (usd: number): void => {
+      addCostToday(db, usd);
+      addSpendToday(db, 'm_a', { usd, tokens: 100 });
+    };
+    credit(9);
+    check('the fake clock sets the month', localMonth() === '2035-02' && near(costMonth(db), 9) && near(mine()?.month, 9), `${localMonth()} ${costMonth(db)}`);
+    now = new Date(2035, 2, 1, 9, 0, 0);
+    watch?.check();
+    credit(3);
+    now = new Date(2035, 2, 2, 9, 0, 0);
+    watch?.check();
+    credit(4);
+    check("the fleet's month sums its days, without the month before's last", near(costMonth(db), 7) && near(costToday(db), 4), `${costMonth(db)} ${costToday(db)}`);
+    check("and a project's, in dollars and tokens, beside today and its total", near(mine()?.month, 7) && mine()?.tokensMonth === 200 && near(mine()?.today, 4) && near((mine()?.total ?? 0) - base.total, 16) && (mine()?.tokensTotal ?? 0) - base.tokens === 300, JSON.stringify(mine()));
+    const hello = (await get<Snapshot>('/api/snapshot')).body;
+    check("the snapshot carries the fleet's month and each project's", near(hello.costMonth, 7) && near(hello.projectSpend?.find((p) => p.projectId === mpid)?.month, 7), JSON.stringify({ m: hello.costMonth }));
+
+    // ── a fleet budget: no alert below it, exactly one at or over, and work goes on ──
+    const bad = await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': '-5' } });
+    const bad2 = await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': 'lots' } });
+    check('the setting refuses what is not dollars over 0', bad.status === 400 && bad2.status === 400 && readSettings()['conductor.monthlyBudget'] === undefined, `${bad.status} ${bad2.status}`);
+    await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': '10' } });
+    check('below the monthly budget, no alert', (await monthly()).length === 0);
+    const mark = eyes.frames.length;
+    fixture('m_run', 'job_m181', { projectId: mpid, status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    let at = runs.length;
+    sup.pump();
+    await until(() => runs.length === at + 1);
+    runs[at]!.finish({ cost: 3, reason: 'completed' });
+    await until(() => getAgent(db, 'm_run')?.status === 'done');
+    const fleetAlert = await monthly();
+    check('at the budget, exactly one monthly alert, for the fleet', fleetAlert.length === 1 && fleetAlert[0]!.id === 'monthly:2035-03' && fleetAlert[0]!.projectId === null && near(fleetAlert[0]!.spent, 10) && fleetAlert[0]!.budget === 10, JSON.stringify(fleetAlert));
+    check('every tab hears it, and the cost frame carries the month', await until(() => eyes.frames.slice(mark).some((f) => f.type === 'alerts' && f.alerts.some((a) => a.kind === 'monthly_budget')) && eyes.frames.slice(mark).some((f) => f.type === 'cost' && near(f.costMonth, 10))));
+    fixture('m_more', 'job_m181', { projectId: mpid, status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    at = runs.length;
+    sup.pump();
+    check('over it, an agent is still sent', await until(() => runs.length === at + 1));
+    runs[at]!.finish({ cost: 2, reason: 'completed' });
+    check('and runs to the end', await until(() => getAgent(db, 'm_more')?.status === 'done'));
+    check('over it, still the one alert', (await monthly()).length === 1 && near((await monthly())[0]!.spent, 12));
+
+    // ── a project's budget, beside the fleet's ──
+    const badCol = await send('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: 0 });
+    const badCol2 = await send('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: '20' });
+    const badCol3 = await send('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: 2_000_000 });
+    check("a project's budget refuses 0, a string and more than a million", badCol.status === 400 && badCol2.status === 400 && badCol3.status === 400 && getProject(db, mpid)?.monthlyBudgetUsd === undefined, `${badCol.status} ${badCol2.status} ${badCol3.status}`);
+    const high = await send<{ project: Project }>('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: 50 });
+    check('a project takes a monthly budget and says it back', high.status === 200 && high.body.project.monthlyBudgetUsd === 50, JSON.stringify(high.body));
+    check("under its budget, the project has no alert of its own", (await monthly()).filter((a) => a.projectId === mpid).length === 0);
+    const ent = eyes.frames.length;
+    const low = await send<{ project: Project }>('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: 12 });
+    const both = await monthly();
+    const theirs = both.filter((a) => a.projectId === mpid);
+    check('at its budget, exactly one alert for the project, beside the fleet\'s', low.status === 200 && both.length === 2 && theirs.length === 1 && theirs[0]!.id === `monthly:2035-03:${mpid}` && near(theirs[0]!.spent, 12) && theirs[0]!.budget === 12, JSON.stringify(both));
+    check('and every tab hears the project change', await until(() => eyes.frames.slice(ent).some((f) => f.type === 'entities' && f.projects?.some((p) => p.id === mpid && p.monthlyBudgetUsd === 12) === true)));
+    check('the name and path are left as they were', getProject(db, mpid)?.name === base.name && getProject(db, mpid)?.path === ROOT);
+
+    // ── dismissed lasts the month; the next month starts clean ──
+    for (const a of both) check(`dismissing ${a.id} → 204`, (await fetch(`${BASE}/api/alerts/${encodeURIComponent(a.id)}/dismiss`, { method: 'POST' })).status === 204);
+    check('both put away', (await monthly()).length === 0);
+    credit(1);
+    costChanged();
+    check('more spend in the same month does not bring them back', (await monthly()).length === 0 && near(costMonth(db), 13));
+    const turn = eyes.frames.length;
+    now = new Date(2035, 3, 1, 0, 0, 20);
+    check('the month turns with the day', watch?.check() === true && localMonth() === '2035-04');
+    check("this month reads zero for the fleet and the project", costMonth(db) === 0 && mine()?.month === 0 && mine()?.tokensMonth === 0, JSON.stringify(mine()));
+    check("and the turn's cost frame carries 0 for the month", await until(() => eyes.frames.slice(turn).some((f) => f.type === 'cost' && f.costMonth === 0 && f.projectSpend?.some((p) => p.projectId === mpid && p.month === 0) === true)));
+    check('the totals do not move', near((mine()?.total ?? 0) - base.total, 22));
+    credit(13);
+    costChanged();
+    const april = await monthly();
+    check("a new month's spend over the budgets raises new alerts, not March's dismissed ones", april.length === 2 && april.some((a) => a.id === 'monthly:2035-04') && april.some((a) => a.id === `monthly:2035-04:${mpid}`), JSON.stringify(april.map((a) => a.id)));
+
+    // ── null clears, and a cleared budget takes its alert with it ──
+    const cleared = await send<{ project: Project }>('PATCH', `/api/projects/${mpid}`, { monthlyBudgetUsd: null });
+    check("null clears a project's budget, and its alert", cleared.status === 200 && cleared.body.project.monthlyBudgetUsd === undefined && (await monthly()).every((a) => a.projectId !== mpid), JSON.stringify(cleared.body));
+    await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': null } });
+    check("and null clears the fleet's", readSettings()['conductor.monthlyBudget'] === undefined && (await monthly()).length === 0);
+
+    // ── migration 290, on a database from before it ──
+    {
+      const old = new DatabaseSync(':memory:');
+      old.exec('PRAGMA foreign_keys = ON');
+      const dir = new URL('../db/migrations/', import.meta.url);
+      const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+      for (const f of files.filter((f) => f < '290')) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+      old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('mp_old', 'old', '/tmp/mp_old', 'x')`);
+      old.exec(readFileSync(new URL('290_project_monthly_budget.sql', dir), 'utf8'));
+      const got = old.prepare("SELECT monthly_budget_usd FROM projects WHERE id = 'mp_old'").get() as { monthly_budget_usd: number | null } | undefined;
+      check('migration 290 applies to an existing database, and an old project has no monthly budget', got !== undefined && got.monthly_budget_usd === null, JSON.stringify(got));
+      check('and reads as none', getProject(old as unknown as Db, 'mp_old')?.monthlyBudgetUsd === undefined);
+      old.close();
+    }
+
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2035-01-01'").run();
+    db.prepare("DELETE FROM project_spend_daily WHERE day >= '2035-01-01'").run();
+    db.prepare("DELETE FROM agent_spend_daily WHERE day >= '2035-01-01'").run();
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -8245,7 +8374,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
