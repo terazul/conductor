@@ -31,7 +31,7 @@ settingRule(SLOTS_KEY, (v) => {
 
 
 /**
- * How many stacks one Spawn launch may start (Amendment 178): `conductor.launch.stacks`, from 1
+ * How many stacks one Spawn launch may start (Amendment 181): `conductor.launch.stacks`, from 1
  * to STACKS_MAX, else DEFAULT_STACKS. Read on every batch, as the slot limit is. Each stack is a
  * job, and the slots still decide how many of them run at once.
  */

@@ -1079,7 +1079,7 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
   check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
   check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
-  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 178)', /!customBad && !singleBad && methodOk && stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 181)', /!customBad && !singleBad && methodOk && stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
   check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
   check('what is sent is launchBody, by launchRequest, with the method and the name', /launchRequest\(\s*\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route) && /return n <= 1 \? \{ path: '\/api\/jobs', body: bodies\[0\]! \}/.test(readFileSync(new URL('./launch.ts', import.meta.url), 'utf8')));
   check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
@@ -1771,7 +1771,7 @@ console.log('\n29 · "one agent" launches the role and persona you pick, remembe
   check('it reads and writes the project\'s setting, and blocks a launch it cannot run', /useSetting\(projectId \? singleKey\(projectId\) : ''\)/.test(route) && /writeSetting\(singleKey\(projectId\), singleSetting\(next\)\)/.test(route) && /!customBad && !singleBad && methodOk/.test(route));
 }
 
-console.log('\n30 · an orchestrated launch starts several stacks from one plan, each told its number (Amendment 178)');
+console.log('\n30 · an orchestrated launch starts several stacks from one plan, each told its number (Amendment 181)');
 {
   const agents = toAgentSpecs(orchestratedFor(presetById(ORCHESTRATED_ID), defaultListed(personasFrom(null))), defaultPills(), 5, undefined, {}, {}, {}, undefined, personasFrom(null), defaultListed(personasFrom(null)));
   const input: LaunchInput = {

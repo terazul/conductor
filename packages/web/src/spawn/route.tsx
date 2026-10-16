@@ -282,10 +282,10 @@ function Spawn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [launched, setLaunched] = useState<CreateJobResponse | null>(null);
-  /** The stacks a batch launch started, or each one's reason (Amendment 178); null after one stack. */
+  /** The stacks a batch launch started, or each one's reason (Amendment 181); null after one stack. */
   const [launchedStacks, setLaunchedStacks] = useState<CreateJobsResponse | null>(null);
   /**
-   * How many stacks this launch starts from one plan (Amendment 178): state of this launch, as a
+   * How many stacks this launch starts from one plan (Amendment 181): state of this launch, as a
    * preset's edits are (Amendment 99), and back to 1 after it and when you choose a preset.
    */
   const [stacksAsked, setStacks] = useState(1);
@@ -535,7 +535,7 @@ function Spawn() {
   }, [presetId, singlePick.role]);
 
   /*
-   * Stacks (Amendment 178), offered where the roles are listed and something orchestrates: one
+   * Stacks (Amendment 181), offered where the roles are listed and something orchestrates: one
    * otherwise, and never more than the setting lets the daemon take now.
    */
   const stacked = listsRoles && orchestrates(listed);
@@ -569,7 +569,7 @@ function Spawn() {
         },
         stacks,
       );
-      // One stack posts what a launch always posted; more go as one batch, 201 or 207 (Amendment 178).
+      // One stack posts what a launch always posted; more go as one batch, 201 or 207 (Amendment 181).
       if (request.path === '/api/jobs') {
         setLaunched(await api<CreateJobResponse>(request.path, { method: 'POST', body: request.body }));
       } else {
@@ -613,7 +613,7 @@ function Spawn() {
           placeholder="Rotate refresh tokens on every exchange and revoke the ancestor chain on reuse. Tests first."
           spellCheck={false}
         />
-        {/* Each stack's first line, its number filled in (Amendment 178), and why it can't launch. */}
+        {/* Each stack's first line, its number filled in (Amendment 181), and why it can't launch. */}
         {stacks > 1 && (
           <div className="sp-stack-lines" aria-label="Each stack's first line">
             {stacksPreview(prompt, stacks).map((line, i) => (
@@ -1247,7 +1247,7 @@ function Spawn() {
           )}
         </div>
         {tokenWhy && <div className="sp-cf-note t-fail is-still">{tokenWhy}</div>}
-        {/* Each stack is a job with this budget of its own (Amendment 178). */}
+        {/* Each stack is a job with this budget of its own (Amendment 181). */}
         {stacksBudgetLine(stacks, jobBudget) && <div className="sp-cf-note">{stacksBudgetLine(stacks, jobBudget)}</div>}
 
         {/*
@@ -1382,7 +1382,7 @@ function Launched({ result }: { result: CreateJobResponse }) {
 }
 
 /**
- * What a batch launch did (Amendment 178): every stack asked for, in order, the ones started
+ * What a batch launch did (Amendment 181): every stack asked for, in order, the ones started
  * with the way into their job and the one git refused with its reason. A 207 is read here, so
  * a stack that failed after others started is said as that and not as "Launch failed".
  */

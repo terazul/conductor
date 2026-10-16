@@ -351,7 +351,7 @@ async function checkProviderModels(specs: AgentSpec[]): Promise<void> {
 type ParsedJob = { ok: true; request: CreateJobRequest } | { ok: false; status: number; error: string; detail?: string };
 
 /**
- * `POST /api/jobs`'s checks, in one place, so the batch (Amendment 178) checks each stack
+ * `POST /api/jobs`'s checks, in one place, so the batch (Amendment 181) checks each stack
  * exactly as one launch is checked: the prompt, the agents and their models, and a branch's
  * shape. Git's word on the branch comes later, in `createJob`.
  */
@@ -685,7 +685,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   });
 
   /**
-   * Several stacks from one Spawn launch (Amendment 178), each its own job, worktree and
+   * Several stacks from one Spawn launch (Amendment 181), each its own job, worktree and
    * branch. Every request is checked first, as `POST /api/jobs` checks one, and with them the
    * count (1 to `stacksLimit()`), that each project is there, that above one each is on a
    * worktree, and that no two name one branch: any refusal makes nothing. Then each is created in turn. A stack whose worktree git refuses

@@ -200,7 +200,7 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
-### Amendment 178 — post-merge, applied. **Spawn launches several orchestrated stacks from one plan, each its own job, worktree and branch, told its number by `{track}`; the daemon checks them all before it makes any.**
+### Amendment 181 — post-merge, applied. **Spawn launches several orchestrated stacks from one plan, each its own job, worktree and branch, told its number by `{track}`; the daemon checks them all before it makes any.**
 
 Shared (`stack.ts`, `wire.ts`), daemon (`slots.ts`, `routes/session.ts`, `session/verify.ts`), web
 (`spawn/launch.ts`, `spawn/route.tsx`, `spawn/Pipeline.tsx`, `spawn/spawn.css`, `spawn/verify.ts`,
@@ -215,58 +215,58 @@ each stack's prompt and named branch fill in `{track}`; the Fleet card is left f
 - **The cap is a setting.** `STACKS_MAX = 6` and `DEFAULT_STACKS = 3` (`stack.ts:280`); `stacksLimit()`
   (`slots.ts:40`) reads `conductor.launch.stacks` (`:38`), a whole number 1 to 6, else 3, and its
   `settingRule` (`:46`) refuses anything else on `PATCH /api/settings`. Settings → Agents shows it as
-  **stacks one orchestrated launch may start** (`StacksRow`, `settings/route.tsx:214`, under the slots at
-  `:1126`), checked by `stacksProblem` (`settings/slots.ts:28`), and writes `null` at the default.
-- **One batch, checked first.** `POST /api/jobs/batch` (`routes/session.ts:710`) takes
+  **stacks one orchestrated launch may start** (`StacksRow`, `settings/route.tsx:206`, under the slots at
+  `:1051`), checked by `stacksProblem` (`settings/slots.ts:28`), and writes `null` at the default.
+- **One batch, checked first.** `POST /api/jobs/batch` (`routes/session.ts:695`) takes
   `CreateJobsRequest { jobs }` (`wire.ts:316`). It refuses, making nothing: a list that is not 1 to the
   setting (400, the detail naming the setting); any stack `POST /api/jobs` would refuse (400 or 409,
-  `stack N: …`, by the same checks, now `parseCreateJob` at `:370`, which `POST /api/jobs` at `:689` also
-  calls, its replies unchanged); a project not there (400); two stacks naming one branch (409, `:733`).
+  `stack N: …`, by the same checks, now `parseCreateJob` at `:358`, which `POST /api/jobs` at `:674` also
+  calls, its replies unchanged); a project not there (400); two stacks naming one branch (409, `:718`).
   Then each stack is `sup.createJob` in turn. One git refuses fails alone: those before it are kept, those
   after it are still tried, and the reply is 207 with `CreateJobsResponse { jobs, stacks }` (`wire.ts:327`),
-  each `StackLaunch` (`:321`) a job id or the reason; all made is 201 (`:748`).
+  each `StackLaunch` (`:321`) a job id or the reason; all made is 201 (`:733`).
 - **Above one stack, each in its own checkout.** A batch of more than one where any stack is `in_place`
   or `branch` (the project folder itself, no git work to keep them apart) is 400, `stack N: several stacks
-  cannot share the project folder`, and makes nothing (`routes/session.ts:725`), as Spawn's
+  cannot share the project folder`, and makes nothing (`routes/session.ts:713`), as Spawn's
   `stacksRefusal` already holds it. One stack in the folder is still made; `POST /api/jobs` is unchanged.
 - **`{track}` is all a stack is told.** `launch.ts:152`: `withTrack` (`:164`) fills it with 1 to N in the
   prompt and in a named branch (`stacksBodies`, `:196`); `launchRequest` (`:204`) posts one stack to
   `/api/jobs` exactly as before and more to the batch. `stacksRefusal` (`:173`) holds the launch until the
   prompt has `{track}`, a named branch has it too, and the method is not **(1) the folder's own branch**.
   Spawn doesn't read the plan.
-- **On Spawn.** When the plan orchestrates (`stacked`, `route.tsx:502`, the preset or a Custom row), the
+- **On Spawn.** When the plan orchestrates (`stacked`, `route.tsx:541`, the preset or a Custom row), the
   head of the listed roles adds **· stacks 1 2 3** (`Pipeline.tsx:99`), up to the setting; with notes
   (`stacksNotes`, `launch.ts:229`) when the stacks want more slots than are free, and that their merging
-  is the plan's to say. Under the prompt, each stack's first line filled in (`route.tsx:579`); the budget
-  line `3 stacks × $500 = $1,500` (`:1176`); the button **launch 3 stacks** (`:1252`); after it,
+  is the plan's to say. Under the prompt, each stack's first line filled in (`route.tsx:619`); the budget
+  line `3 stacks × $500 = $1,500` (`:1251`); the button **launch 3 stacks** (`:1327`); after it,
   **3 stacks launched** or **2 of 3 stacks launched**, each with its branch and a watch link or
-  **not started:** and why (`LaunchedStacks`, `:1314`). Choosing a preset, or a launch, puts it back to 1.
+  **not started:** and why (`LaunchedStacks`, `:1389`). Choosing a preset, or a launch, puts it back to 1.
 
 *Departures from the design:* the batch also refuses a project not there, so a typo'd id makes nothing
 rather than N failures; it does not pre-check a branch checked out elsewhere or the default branch, which
 git reports per stack in the 207. After a failed stack the rest are still tried, so one taken branch
 doesn't cost the others. `POST /api/jobs`'s checks moved into `parseCreateJob` unchanged, and three
-existing checks were rewritten for the new shape at the same strength: `spawn/verify.ts:762` (the job's
-budget hoisted to `jobBudget`), `:1081` (the launch gate ends `&& stacksWhy === null`) and `lib/verify.ts`
+existing checks were rewritten for the new shape at the same strength: `spawn/verify.ts:763` (the job's
+budget hoisted to `jobBudget`), `:1082` (the launch gate ends `&& stacksWhy === null`) and `lib/verify.ts`
 (the Agents section now `SlotsSection`, `StacksRow`, `RetryDelaysRow`).
 
 *Not done:* the Fleet card still shows one job per project, so a project's stacks show there as its latest
 job; there is no daemon merge lock, and stacks that merge into one branch need the plan to say how
 (`wave-11-tracks.md` §0).
 
-*Verified:* `session/verify.ts` §30 (`:8104`), against the real supervisor and the fake SDK, 25 checks: the
+*Verified:* `session/verify.ts` §31 (`:7981`), against the real supervisor and the fake SDK, 25 checks: the
 setting's rule and default; three stacks named `s178/t{1..3}` make three jobs, branches and worktrees, each
 prompt its own number, each with the budget; no branch named makes `conductor/<id>`; four over the default,
-none, or not a list → 400 and nothing made (`:8155`); the setting at 2 refuses three, at 4 makes four;
+none, or not a list → 400 and nothing made (`:8032`); the setting at 2 refuses three, at 4 makes four;
 a nickname model on stack 2, no prompt, a branch with **(1)**, or a project not there → 400 naming the
-stack, nothing made; two stacks `in_place`, or one `branch`, → 400 and nothing made (`:8169`); two stacks naming
-one branch → 409, nothing made (`:8172`); a name git refuses on
-stack 2 → 207, stacks 1 and 3 kept with their worktrees (`:8179`) and stack 2's reason given;
+stack, nothing made; two stacks `in_place`, or one `branch`, → 400 and nothing made (`:8046`); two stacks naming
+one branch → 409, nothing made (`:8049`); a name git refuses on
+stack 2 → 207, stacks 1 and 3 kept with their worktrees (`:8055`) and stack 2's reason given;
 `POST /api/jobs` still 201, still `{error: 'prompt is required'}` word for word, and a taken branch still
 409 *could not use that branch*. With the batch's checks switched off (no count bound, each stack sent to
-`createJob` raw, no duplicate check), 9 of them fail. `spawn/verify.ts` §29 (`:1729`) for `{track}`, the
+`createJob` raw, no duplicate check), 9 of them fail. `spawn/verify.ts` §30 (`:1774`) for `{track}`, the
 refusals, the bodies, the preview, the budget line, the notes and the route's wiring; `lib/verify.ts` §20
-(`:1038`) for the setting's bounds, its key matching the daemon's, and its row. `make test` green.
+(`:1028`) for the setting's bounds, its key matching the daemon's, and its row. `make test` green.
 
 ### Amendment 180 — post-merge, applied. **A budget only warns: past it, or past twice it, an agent and its job keep working, and nothing pauses, refuses, holds or limits them for it.**
 

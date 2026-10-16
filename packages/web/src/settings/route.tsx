@@ -200,7 +200,7 @@ function SlotsSection() {
 }
 
 /**
- * How many stacks one Spawn launch may start from one plan (Amendment 178), as SlotsSection
+ * How many stacks one Spawn launch may start from one plan (Amendment 181), as SlotsSection
  * edits the slot limit; the daemon's `stacksLimit()` reads it and refuses a batch over it.
  */
 function StacksRow() {

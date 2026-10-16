@@ -63,7 +63,7 @@ export function Pipeline({
    */
   alone?: string;
   /**
-   * How many stacks this launch starts from one plan (Amendment 178), the most there may be
+   * How many stacks this launch starts from one plan (Amendment 181), the most there may be
    * (`conductor.launch.stacks`), and what the control says under it. Absent, no control.
    */
   stacks?: { n: number; max: number; onChange: (n: number) => void; notes: readonly string[] };

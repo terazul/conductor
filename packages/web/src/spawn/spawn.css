@@ -1003,7 +1003,7 @@
   color: var(--ink3);
 }
 
-/* The stacks control (Amendment 178), beside "helpers in all": small pills on the head line. */
+/* The stacks control (Amendment 181), beside "helpers in all": small pills on the head line. */
 .sp-stacks {
   display: inline-flex;
   align-items: baseline;

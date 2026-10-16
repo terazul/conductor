@@ -1024,7 +1024,7 @@ console.log('\n20 · a Settings tab, and the slot limit on it (Amendment 47)');
   const def = route.slice(route.indexOf('export const screen'));
   check('Settings is a tab, on 9', /id: 'settings'/.test(def) && /hotkey: '9'/.test(def) && !/tab: false/.test(def));
   check('its launch defaults are the ones Spawn reads', /launchDefaults\(readSetting\)/.test(route) && /launchPatch\(/.test(route));
-  // The stacks one launch may start (Amendment 178), beside the slots, by the same rule as the daemon's.
+  // The stacks one launch may start (Amendment 181), beside the slots, by the same rule as the daemon's.
   check('a whole number from 1 to 6 is a stacks limit, and anything else says why', ['1', ' 6 ', '3'].every((v) => stacksProblem(v) === null) && ['0', '7', '2.5', '', 'x'].every((v) => stacksProblem(v) !== null));
   check(
     "the stacks field's rule is the daemon's: same key, same bounds, from shared",

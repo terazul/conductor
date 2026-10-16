@@ -309,7 +309,7 @@ export interface CreateJobResponse {
 }
 
 /**
- * `POST /api/jobs/batch` (Amendment 178): several stacks from one Spawn launch, each its own
+ * `POST /api/jobs/batch` (Amendment 181): several stacks from one Spawn launch, each its own
  * job. Every request is checked first, and a refusal of any makes none (400, or 409 for two
  * naming one branch). Then each is created in turn.
  */

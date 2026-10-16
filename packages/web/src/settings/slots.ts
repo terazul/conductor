@@ -18,7 +18,7 @@ export function slotsProblem(v: string): string | null {
 }
 
 /**
- * How many stacks one Spawn launch may start (Amendment 178), as `stacksLimit()` in the same
+ * How many stacks one Spawn launch may start (Amendment 181), as `stacksLimit()` in the same
  * daemon file reads `conductor.launch.stacks`. The count and its bounds are shared's.
  */
 export { STACKS_KEY } from '../spawn/launch.js';

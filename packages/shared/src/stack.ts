@@ -273,7 +273,7 @@ export function pipelineHelperCap(roles: number): number {
 export const PIPELINE_HELPERS_MAX = 48;
 
 /**
- * How many stacks one Spawn launch may start from one plan (Amendment 178), each its own job,
+ * How many stacks one Spawn launch may start from one plan (Amendment 181), each its own job,
  * worktree and branch: the setting `conductor.launch.stacks`, from 1 to STACKS_MAX, else
  * DEFAULT_STACKS. Spawn offers up to it, and `POST /api/jobs/batch` refuses more.
  */

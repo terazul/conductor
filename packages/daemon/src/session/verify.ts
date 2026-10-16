@@ -7978,7 +7978,7 @@ async function main(): Promise<void> {
     old.close();
   }
 
-  console.log('\n31 · several stacks from one launch, one batch: checked first, then made in turn (Amendment 178)');
+  console.log('\n31 · several stacks from one launch, one batch: checked first, then made in turn (Amendment 181)');
   {
     sdk.query = fakeQuery as typeof sdk.query;
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });

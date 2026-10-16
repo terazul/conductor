@@ -144,7 +144,7 @@ export function launchBody(i: LaunchInput): CreateJobRequest {
 }
 
 /**
- * Several stacks from one launch (Amendment 178). An orchestrated launch may start up to the
+ * Several stacks from one launch (Amendment 181). An orchestrated launch may start up to the
  * setting's count of stacks from one plan, each its own job, worktree and branch, and each
  * told its own work by `{track}`: the stack's number, 1 to N, put in the prompt and in a
  * branch you name. Spawn doesn't read the plan file; the number is all a stack is told.
