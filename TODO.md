@@ -28,6 +28,7 @@ the last of it on 12 Oct).
   Since Amendment 167 that message also removes the finished helpers when it is sent.
   - **Decide:** is **⏲ when done** what's wanted, but easier to reach on an orchestrator? Or should a queued
     message go at its *next* wake, alongside its helpers' reports, instead of after everything?
+    *Decided (15 Oct): at its next wake, alongside its helpers' reports.*
 - [ ] **TOP PRIORITY. Every agent has Bash by default.** Asked for (15 Oct): "the current defaults ask for
   permission to do bash when running agents". Today Bash is left out of `allowedTools` unless the
   **allow Bash** pill is on, which routes each call to a permission prompt. The pill is off by default
@@ -37,12 +38,14 @@ the last of it on 12 Oct).
   Amendments 41 and 89), and `Bash(git push:*)` stays denied unless **allow push** is on (autonomy.ts:182).
   - **Decide:** new launches only, or agents already launched too? Those keep the tools they launched
     with, unless "a changed setting takes effect on the next run" below changes that.
+    *Decided (15 Oct): new launches and agents already launched; reading roles stay read-only and `git push` stays denied without **allow push**.*
 - [ ] **A budget that's exceeded doesn't stop anything: it's only a warning.** Asked for (15 Oct), in those
   words. Today an agent that reaches its budget is `paused` (`budget_exhausted`, `#settle` in
   supervisor.ts), and a job past its budget only warns: queued agents are held at its ceiling, twice it
   (Amendment 124, `jobBudgetState`, `session/budget.ts:290`), and running ones are stopped only by their own.
   - **Decide:** is this a bug report (budgets should stop the work) or the change wanted (budgets should
     only warn)? Then: which budgets, the agent's, the job's, or both?
+    *Decided (15 Oct): the change wanted. Budgets only warn and never stop work, the agent's and the job's, with no ceiling.*
 - [ ] **Monthly spend and a monthly budget beside the daily one.** Asked for (15 Oct): track what was spent
   this month, start again at 0 when the month turns, and allow a monthly budget as well as the daily one.
   Every spend table is per day already: `agent_spend_daily` (210), `project_spend_daily`, which outlives its
@@ -51,6 +54,7 @@ the last of it on 12 Oct).
   cap read the same way.
   - **Decide:** a month in local time, as the day is (`localDay`)? A monthly budget per agent, per project,
     for the whole fleet, or several?
+    *Decided (15 Oct): a local month; a monthly budget for the whole fleet and for each project.*
 - [ ] **Fleet cards: the agent list shows and collapses, collapsed by default.** Asked for (15 Oct). The
   card lists every agent (`web/src/fleet/card.tsx:692`, `AgentRow`). Needs a toggle on the card, closed by
   default, remembered per card the way other folds are.
@@ -59,6 +63,7 @@ the last of it on 12 Oct).
   down). Wants: a regular backup (SQLite's `VACUUM INTO` gives a consistent copy while the daemon runs),
   the last N kept, and a restore of the latest one, which has to happen with the daemon stopped.
   - **Decide:** how often, how many kept, and where restore lives (Settings, or a `make` target).
+    *Decided (15 Oct): on daemon start and every 6 h, the last 10 kept, restore as a `make` target that refuses while the daemon runs.*
 - [ ] **A changed setting takes effect on the next run.** Asked for (15 Oct): "when I change a setting for
   an agent it should take effect immediately on the next invocation". An agent's model and autonomy have
   routes (`/api/agents/:agentId/model`, `/autonomy`); a persona's prompt, skills and model are copied in at
@@ -72,6 +77,7 @@ the last of it on 12 Oct).
   Custom setup (`CustomSetup.tsx:86`) and a job's **+ agent** (`AddAgent.tsx:95`). The check at
   `spawn/verify.ts:766` (one agent runs a developer) should still hold for the default.
   - **Decide:** remember the last pick per project, or always start at developer?
+    *Decided (15 Oct): remember the last pick per project; developer the first time.*
 - [ ] **When work is run in parallel, say how many more orchestrators may be set up: 3 at most by
   default.** Asked for (15 Oct). Today running in parallel is done by hand: wave 11 was six Build Stack
   jobs launched one by one, one orchestrator each (`docs/plans/wave-11-tracks.md`). An orchestrator
@@ -80,6 +86,7 @@ the last of it on 12 Oct).
   - **Decide:** is this an orchestrator starting other orchestrators (a helper that may itself start
     helpers, up to the number chosen), or Spawn launching several stacks in parallel from one plan?
     Is 3 per launch, or for the whole fleet?
+    *Decided (15 Oct): Spawn launches several stacks from one plan, up to 3 per launch. A design note comes first, for approval.*
 
 - [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
   this replaces "back off to every hour". Today an agent that can't reach the model retries on its

@@ -113,9 +113,17 @@ waits on, and how it's checked.
 |---|---|
 | Running | Three Build Stacks at once, one per track; each merges and pushes its own lanes |
 | Priority | B1 and Q1 lead their tracks |
+| Budget | $500 per stack |
+| B1 | Bash by default for new launches **and** agents already launched: every agent's autonomy allows Bash, except reading roles (still read-only) and `Bash(git push:*)` without **allow push** |
+| S2 | Spawn remembers the last pick of **one agent** per project; developer the first time |
+| Q1 | A message queued on an orchestrator goes at its **next wake**, alongside its helpers' reports, not after everything |
+| P1 | **Spawn launches several stacks from one plan**, up to 3 per launch, each its own job. The design note (`docs/plans/p1-design.md`) still needs the user's approval before code |
+| K1 | A consistent backup (`VACUUM INTO`) on daemon start and every 6 h, the last 10 kept in `~/.conductor/backups/`, restore as a `make` target that refuses while the daemon runs |
+| M2 | The wanted change: **budgets only warn and never stop work**, the agent's and the job's, with no ceiling |
+| M3 | A **local** month, as the day is. A monthly budget for the **whole fleet** and for **each project**, beside the daily ones |
 
-Still open before launch: the budget per stack (wave 11 used $500). Every **Decide:** above can be
-answered now, and written in this table, so the stacks don't stop to ask.
+Every **Decide:** above is answered here (15 Oct), so the stacks don't stop to ask. P1's design note
+is the one approval still due, before P1's code.
 
 ## 4. Launch
 
