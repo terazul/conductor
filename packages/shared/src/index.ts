@@ -10,3 +10,4 @@ export * from './rerun.js';
 export * from './budget.js';
 export * from './retry.js';
 export * from './headings.js';
+export * from './personas.js';

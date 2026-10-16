@@ -200,6 +200,75 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 176 — post-merge, applied. **A changed setting takes effect on the next run: a persona edit too, and a working run takes its mode and effort now.**
+
+Wave 12, S1. Asked for (15 Oct): "when I change a setting for an agent it should take effect
+immediately on the next invocation". Every run already built its backend from the agent row, so a
+changed model, mode, tool list, effort or budget reached the next run. What didn't was a persona:
+its prompt and skills were copied into the row at launch and read from there.
+**Decided by the user (16 Oct):** persona edits reach agents already launched, from their next run;
+a working agent takes what its engine can take live; tools and budget wait for the next run. **This
+amends Amendment 68** ("a running or sleeping agent keeps what it launched with") **and Amendment
+128** (a helper's system prompt and skills are the listed role's copy, "the daemon needs no copy of
+the personas").
+- **Each run reads the persona as it is now.** `personas.ts` moves from `web/src/spawn/` to
+  `shared/src/personas.ts` (exported from `@conductor/shared`; the web file re-exports it), so the
+  daemon has the same `BUILT_IN_PERSONAS` and reads the same `conductor.personas` setting.
+  `currentPersona` (`daemon/src/session/supervisor.ts:209`) looks up the row's `agents.persona` id
+  with `personaFor(personasFrom(setting))` and takes that persona's system prompt (trimmed; blank
+  is none) and skills (trimmed, de-duplicated; none is none). Both runner constructions, `#launch`
+  and `#launchWithPrompt` (`:1309`, `:2481`), pass it to `personaScope`, so a first run, a message
+  and a resume all get it. A built-in nobody edited runs as it ships; one reset in Settings runs as
+  it ships again.
+- **The launch copy is the fallback.** When the id isn't in Settings (your own persona, deleted, or
+  an id the daemon doesn't know, such as the renamed `builder`, `documenter` and `uiux`: the daemon
+  does not map them the way Spawn does) the run takes the row's `system_prompt` and `skills` as
+  before. A row with no persona is unchanged. Nothing is written back: the row keeps the copy to fall
+  back to, so an `AgentSpec`'s `systemPrompt` and `skills` are now that launch copy.
+- **Only the prompt and skills.** A persona's model and tool rules are not read: the agent's model and
+  autonomy are its own row's, and stay what they were set to (on the Agent screen or at launch).
+- **Helpers too.** `startHelper` (`:1934`) passes the listed role's prompt and skills through
+  `currentPersona` with the role's id, so a helper started after its role's persona was edited runs
+  as it is now, on the role's own model and rope. Its row stores what it started with.
+- **A working run takes its mode and effort now.** `AgentBackend.setAutonomy?` (`backend.ts:154`) is
+  new, plumbed the way `setModel` is: `Supervisor.setAutonomy` (`:2511`) writes the row as before, then
+  gives a live runner the new autonomy, and answers `'now'` when the run took it all and `'next run'`
+  otherwise (no live run, the engine refused, or an error, which is logged).
+  `POST /api/agents/:agentId/autonomy` answers `SetAutonomyResponse { autonomy, appliesTo }`
+  (`shared/src/wire.ts`).
+  - **Claude** (`backends/claude.ts:764`): a changed mode through `Query.setPermissionMode`, a changed
+    effort through `Query.applyFlagSettings({ effortLevel })` (`null` when taken off: the model's
+    default). `bypassPermissions` needs `allowDangerouslySkipPermissions` at the query's start, so a run
+    that didn't start in it answers `'next run'` and its mode is left. The stale comment on `setModel`
+    that said the mode had no live equivalent is gone.
+  - **Copilot** (`backends/copilot.ts:720`): the mode is the one its permission gate reads at every
+    request, so it holds from the next tool call; a changed effort goes through `session.setModel` with
+    the same model and the new `reasoningEffort`. An effort taken off can't be sent, so it answers
+    `'next run'`. Its live `setModel` now uses the effort the agent has now, not the one it launched with.
+  - **Tools and budget are the next run's** on both: `allowedTools`, `disallowedTools` and Claude's
+    `maxBudgetUsd` are options of a run's start. Copilot's token budget was already checked live from
+    the row at every usage report (`copilot.ts:571`). Nothing is interrupted or restarted.
+- **The composer says which.** Under the mode row, while an agent works: "mode and effort now · tools
+  and budget from the next run" (`WORKING_SAYS`, `web/src/agent/settingsfold.ts:87`; it replaces
+  "takes effect on the next run"). A change made while it works says what the run did with it
+  (`appliesSays`, `:80`): a tool pill "From the next run — this one keeps the tools it started with.",
+  a mode or effort "Now — this run goes on with it." or "From the next run — this one couldn't take
+  it." The budget field keeps its own line (it says when the run still stops at the old figure).
+- Checked in `session/verify.ts` §30: a built-in persona nobody edited runs as it ships, not as the
+  launch copy; a working agent's mode and effort reach `setPermissionMode` and `applyFlagSettings`
+  once each and answer `'now'`; its tools and budget call no live setter; bypass on a run that didn't
+  start in it answers `'next run'`; an effort taken off sends `null`; the next run carries the mode,
+  effort, tools and budget, and the persona as edited in Settings (prompt trimmed, skills
+  de-duplicated), but not the persona's model or tools; the row keeps its launch copy; a reset
+  built-in runs as it ships; your own persona runs as Settings has it, and once deleted the next run
+  takes the launch copy; a helper started after its role's persona was edited runs as edited, on the
+  role's model and mode; on Copilot the mode and effort go now (the effort with the model, the plan
+  mode refusing a command at the gate), and a live model switch keeps the current effort. §17j's
+  stored persona is now one Settings doesn't hold, and §25 puts its roles' prompts in Settings, as
+  editing them there would. In `agent/verify.ts`: the composer's lines.
+- **Not done.** A persona edit doesn't reach a run already going (the SDK takes a system prompt and
+  skills only at a query's start). The daemon doesn't map the renamed persona ids.
+
 ### Amendment 177 — post-merge, applied. **An orchestrator's transcript says when its finished helpers were removed; a refused message and re-run from here remove none.**
 
 Shared (`events.ts`), daemon (`session/supervisor.ts`, `terminal/pty.ts`, `session/verify.ts`), web

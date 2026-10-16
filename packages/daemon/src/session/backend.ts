@@ -147,6 +147,11 @@ export interface AgentBackend {
   send(text: string, synthetic?: boolean): boolean;
   /** Switch model for the next reply. False when the live run couldn't. */
   setModel(model: string): Promise<boolean>;
+  /**
+   * Give a live run an autonomy's permission mode and effort (Amendment 176). False when the
+   * live run couldn't take all of it; the tools and the budget are its next run's either way.
+   */
+  setAutonomy?(autonomy: Autonomy): Promise<boolean>;
   interrupt(): Promise<void>;
   stop(): Promise<void>;
 }

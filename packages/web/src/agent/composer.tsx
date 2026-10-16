@@ -43,7 +43,7 @@ import { queueWhenDone, scheduleMessage, sendMessage, sentText, setAutonomy, set
 import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
-import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { SETTINGS_KEY, WORKING_SAYS, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
   id: string;
@@ -315,8 +315,12 @@ export function Composer({ agent }: { agent: Agent }) {
     const nowOn = pill.on(autonomy);
     const patch = pill.flip(autonomy, !nowOn);
     setDraft({ ...autonomy, ...patch });
-    const ok = await policy.run(`Changing "${pill.label}"`, () =>
-      setAutonomy(agent.id, { autonomy: patch }),
+    // Merging when done isn't a tool; the rest are the next run's (Amendment 176).
+    const working = agent.status === 'working' && pill.id !== 'merge_when_done';
+    const ok = await policy.run(
+      `Changing "${pill.label}"`,
+      () => setAutonomy(agent.id, { autonomy: patch }),
+      (r) => appliesSays('tools', working, r.appliesTo),
     );
     // Drop the optimistic copy either way — on success the daemon's own update
     // arrives through the store, and on failure `reported` is still the truth.
@@ -332,8 +336,11 @@ export function Composer({ agent }: { agent: Agent }) {
   const pickMode = async (mode: Autonomy['mode']) => {
     if (mode === autonomy.mode) return;
     setDraft({ ...autonomy, mode });
-    const ok = await policy.run(`Switching to "${mode}"`, () =>
-      setAutonomy(agent.id, { autonomy: { mode } }),
+    const working = agent.status === 'working';
+    const ok = await policy.run(
+      `Switching to "${mode}"`,
+      () => setAutonomy(agent.id, { autonomy: { mode } }),
+      (r) => appliesSays('mode', working, r.appliesTo),
     );
     if (!ok) setDraft(null);
   };
@@ -342,8 +349,11 @@ export function Composer({ agent }: { agent: Agent }) {
   const pickEffort = async (effort: EffortLevel) => {
     if (effort === (autonomy.effort ?? DEFAULT_EFFORT)) return;
     setDraft({ ...autonomy, effort });
-    const ok = await policy.run(`Setting effort to "${effort}"`, () =>
-      setAutonomy(agent.id, { autonomy: { effort } }),
+    const working = agent.status === 'working';
+    const ok = await policy.run(
+      `Setting effort to "${effort}"`,
+      () => setAutonomy(agent.id, { autonomy: { effort } }),
+      (r) => appliesSays('effort', working, r.appliesTo),
     );
     if (!ok) setDraft(null);
   };
@@ -824,16 +834,15 @@ export function Composer({ agent }: { agent: Agent }) {
         )}
 
         {/*
-         * The consequence, and when it starts. `appliesTo: 'next run'` is what the route
-         * has always returned and the UI has always discarded — permissionMode is a
-         * query() option, fixed for the life of one query, so telling someone their
-         * click took effect immediately would be false.
+         * The consequence, and when it starts. A working run takes a new mode and effort
+         * live; its tools and budget are options of its start, so they wait for its next
+         * run (Amendment 176).
          */}
         {current && (open || current.danger) && (
           <div className={`ag-modesays${current.danger ? ' is-danger' : ''}`}>
             {current.says}
             {agent.status === 'working' && (
-              <span className="ag-modesays-when"> · takes effect on the next run</span>
+              <span className="ag-modesays-when"> · {WORKING_SAYS}</span>
             )}
           </div>
         )}

@@ -30,6 +30,7 @@ import type {
   RerunResponse,
   SendMessageRequest,
   SetAutonomyRequest,
+  SetAutonomyResponse,
   SetModelRequest,
   SetModelResponse,
   StopRetryingResponse,
@@ -892,11 +893,10 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     }
     // Through the supervisor, which broadcasts it. Writing the row alone left every
     // other tab — and this tab's inspector — showing the old budget and pills.
-    sup.setAutonomy(agent.id, next);
-
-    // Takes effect on the agent's next run: permissionMode and the tool lists
-    // are query() options, fixed for the life of one query.
-    return reply.send({ autonomy: next, appliesTo: 'next run' });
+    // A live run takes the mode and effort now where its engine can; the tool lists and the
+    // budget are options of a run's start, so they are its next run's (Amendment 176).
+    const appliesTo = await sup.setAutonomy(agent.id, next);
+    return reply.send({ autonomy: next, appliesTo } satisfies SetAutonomyResponse);
   });
 
   /*

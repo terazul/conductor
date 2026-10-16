@@ -375,7 +375,10 @@ persona with **write: off** reads only, and a reading role (reviewer, debugger, 
 auditor) never writes, whatever its persona says. When a persona or a reading role pins a row read-
 only, the plan says so underneath: "reads only (reviewer): no file edits, read-only shell
 only, no MCP, mode ask me." Editing a persona changes what new launches and saved setups
-get. A running or sleeping agent keeps what it launched with.
+get, and what an agent already launched as it is told from its next run: its system prompt
+and skills as Settings has them now (a reset built-in runs as it ships). Its model and tools
+stay the agent's own. A persona you delete, or one the agent's id no longer names, leaves the
+agent with what it launched with (Amendment 176).
 
 **What the built-in roles are told** (since 10 Oct, each has a system prompt; the text is in
 Settings → **Personas**). Every one is a line of purpose, a few rules about *how* to work, and
@@ -458,7 +461,7 @@ whose steps you already know.
   it before it decides whether the step is ready, and then writes the next brief. A step that
   stopped is not a step that is ready.
 - **Each helper runs as its role.** It has that persona's system prompt (what the built-in roles
-  are told, above), skills, tools and model, and its lane is named for the role and the work's
+  are told, above) and skills as Settings has them when it starts, its role's tools and model, and its lane is named for the role and the work's
   name (`developer-api`, `reviewer`, …), under the orchestrator's. A reading role (reviewer,
   debugger, analyst, auditor) stays read-only: the write tools are denied outright, whatever the pills
   say. The orchestrator may
@@ -1351,9 +1354,12 @@ Two things hold regardless of mode:
   "always ask" rule: don't count on any mode to stop before a destructive command.
   What must never happen belongs in `disallowedTools`, which no mode overrides.
 
-Changing autonomy on a running agent takes effect on its **next** run, not
-mid-flight — the permission mode is fixed for the life of one query. The Agent screen
-says so under the mode row while an agent is working.
+Changing autonomy on a working agent: its **mode and effort** take effect now, in the run
+that is going (on Copilot, from its next tool call and next message). Its **tools and budget**
+take effect on its **next** run: they are fixed when a run starts, and the run isn't stopped
+for them. The Agent screen says so under the mode row while an agent is working, and after a
+change says which it was. Two exceptions wait for the next run too: switching Claude to
+bypass, unless the run started in it, and taking a Copilot agent's effort off (Amendment 176).
 
 ---
 

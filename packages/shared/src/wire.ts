@@ -395,6 +395,15 @@ export interface SetAutonomyRequest {
   autonomy: Partial<Autonomy>;
 }
 
+export interface SetAutonomyResponse {
+  autonomy: Autonomy;
+  /**
+   * 'now' when a live run took the permission mode and effort; else they are the next run's
+   * (Amendment 176). The tool lists and the budget are always the next run's.
+   */
+  appliesTo: 'now' | 'next run';
+}
+
 /**
  * Nicknames Claude Code resolves through `~/.claude/settings.json`. Conductor does not
  * store them: an agent keeps the exact id it was given, so what it runs on cannot change
