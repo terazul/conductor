@@ -1569,6 +1569,15 @@ survive a restart, and go at the agent's next turn that ends done. The button is
 that is already done or was stopped, since no turn of its would end: send the message now
 instead.
 
+**On an orchestrator it goes at its next wake.** An orchestrator (an agent that can start helpers)
+ends its turn waiting for them, not done, so on one the button reads **⏲ next wake**. The message
+goes when its helpers have ended and it is woken with their report, after the report, marked as a
+message from you: so you can steer it mid-run without waiting for everything. If its turn ends done
+with no helper still going, it goes then, as **⏲ when done** does. Whichever comes first, it goes once.
+In the list it reads *when its helpers report, or when its turn ends*. Sent with a wake it is part of
+the work in progress, so its finished helpers stay; sent at done, as a new task, they are removed.
+In the transcript it is inside the wake's **auto** turn.
+
 A terminated agent reads **stopped** — not "finished", which would claim it had. Its
 transcript and spend stay, and nothing on disk is touched: the worktree, the branch and
 every file it wrote are exactly where they were. To stop a whole job at once, use

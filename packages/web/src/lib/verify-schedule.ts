@@ -12,7 +12,7 @@ import { PAUSE_UNTIL_KEY } from '@conductor/shared';
 import { store } from './store.js';
 import { fmtIn, fmtWhen, fromLocalInput, nextHour, toLocalInput, tomorrowMorning, whenProblem } from './when.js';
 import { activePause } from '../shell/pauseall.js';
-import { slotWaits, whenDoneRefusal, whenDoneWaits } from '../agent/scheduled.js';
+import { slotWaits, whenDoneLabel, whenDoneRefusal, whenDoneWaits } from '../agent/scheduled.js';
 import { SLOT_WAIT_TEXT, sentText } from '../agent/endpoints.js';
 
 let failures = 0;
@@ -121,13 +121,27 @@ console.log('\n5 · a message queued until the agent is done (Amendment 157)');
   check('it shows that it is waiting on a failure, a pause or a question', /failed/.test(whenDoneWaits('failed', true)) && /paused/.test(whenDoneWaits('paused', true)) && /asked you/.test(whenDoneWaits('blocked', true)));
   check('the ones behind it wait their turn, one per turn', whenDoneWaits('working', false) === 'after the one before it');
   const comp = src('../agent/composer.tsx');
-  check('the composer has "when done" beside "later"', /⏲ later[\s\S]*⏲ when done/.test(comp));
+  check('the composer has "when done" beside "later"', /⏲ later[\s\S]*\{whenDoneLabel\(orchestrator\)\}/.test(comp) && whenDoneLabel(false) === '⏲ when done');
   check('it queues what is typed', /queueWhenDone\(agent\.id, body\)/.test(comp));
   check('and is off when no turn of its would end', /disabled=\{[^}]*doneRefused !== null\}/.test(comp));
   const ends = src('../agent/endpoints.ts');
   check("it posts trigger 'done', no time", /\{ trigger: 'done', text \}/.test(ends));
   const list = src('../agent/scheduled.tsx');
-  check('the list shows it as "when done", with what it waits on', /m\.trigger === 'done' \? '⏲ when done'/.test(list) && /whenDoneWaits\(status, m\.id === firstDone\)/.test(list));
+  check('the list shows it as "when done", with what it waits on', /m\.trigger === 'done' \? whenDoneLabel\(orchestrator\)/.test(list) && /whenDoneWaits\(status, m\.id === firstDone, orchestrator\)/.test(list));
+}
+
+console.log('\n5b · on an orchestrator, a queued message goes at its next wake (Amendment 174)');
+{
+  check('it is called "next wake" there, "when done" anywhere else', whenDoneLabel(true) === '⏲ next wake' && whenDoneLabel(false) === '⏲ when done');
+  check('working or waiting on its helpers, it goes with their report or when its turn ends', whenDoneWaits('working', true, true) === 'when its helpers report, or when its turn ends' && whenDoneWaits('queued', true, true) === whenDoneWaits('working', true, true));
+  check('waiting through a question, a failure or a pause as before', whenDoneWaits('blocked', true, true) === whenDoneWaits('blocked', true) && whenDoneWaits('paused', true, true) === whenDoneWaits('paused', true) && whenDoneWaits('failed', true, true) === whenDoneWaits('failed', true));
+  check('the ones behind it still wait their turn', whenDoneWaits('working', false, true) === 'after the one before it');
+  check('an agent that is no orchestrator reads as before', whenDoneWaits('working', true, false) === 'when this turn ends' && whenDoneWaits('queued', true) === 'after its next turn');
+  check('still refused for one done or stopped, orchestrator or not', whenDoneRefusal('done') !== null && whenDoneRefusal('stopped') !== null);
+  const comp = src('../agent/composer.tsx');
+  check('the composer knows an orchestrator by its helper cap, and says so on the button and its notice', /const orchestrator = \(agent\.helperCap \?\? 0\) > 0;/.test(comp) && /next wake, with its helpers' report/.test(comp));
+  const list = src('../agent/scheduled.tsx');
+  check('so does the list', /const orchestrator = \(agent\?\.helperCap \?\? 0\) > 0;/.test(list) && /at its next wake, or when it is done/.test(list));
 }
 
 console.log('\n6 · a message that waits for a slot (Amendment 168)');

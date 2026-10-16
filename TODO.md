@@ -29,6 +29,9 @@ the last of it on 12 Oct).
   - **Decide:** is **⏲ when done** what's wanted, but easier to reach on an orchestrator? Or should a queued
     message go at its *next* wake, alongside its helpers' reports, instead of after everything?
     *Decided (15 Oct): at its next wake, alongside its helpers' reports.*
+  - *Done (15 Oct): Amendment 174. A `'done'` row on an orchestrator goes with its helpers' report at
+    its next wake, or at `done` if that comes first, once; a wake's message clears no helpers. The
+    button and the row read **⏲ next wake** on an orchestrator.*
 - [ ] **TOP PRIORITY. Every agent has Bash by default.** Asked for (15 Oct): "the current defaults ask for
   permission to do bash when running agents". Today Bash is left out of `allowedTools` unless the
   **allow Bash** pill is on, which routes each call to a permission prompt. The pill is off by default

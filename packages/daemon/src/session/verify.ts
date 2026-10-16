@@ -160,9 +160,9 @@ import { rerunNote, rerunStatusNote } from './rerun.js';
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
-import { deleteScheduled, insertScheduled, listScheduled, nextForSlot } from './schedule.js';
+import { deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone } from './schedule.js';
 import { SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
-import { pipelineHelperBrief, pipelineReportClosing, pipelineSection } from './handoff.js';
+import { pipelineHelperBrief, pipelineReportClosing, pipelineSection, wakeMessage } from './handoff.js';
 
 /*
  * Nothing here may ask the real model API or start a real Claude Code: §12 answers for
@@ -3253,6 +3253,61 @@ async function main(): Promise<void> {
     eyes167.close();
     const badHelpers = await send('POST', '/api/jobs', { projectId: pid, prompt: 'x', isolation: 'in_place', agents: [{ role: 'builder', model: OPUS, helpers: 9, autonomy: DEFAULT_AUTONOMY }] });
     check('a job asking for more than 8 helpers → 400', badHelpers.status === 400);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+
+    // ── Amendment 174: a message queued on an orchestrator goes at its next wake, with its helpers' report ──
+    await until(() => sup.slots.used === 0);
+    const whenDone174 = (id: string, text: string) => send<{ message?: { trigger: string } }>('POST', `/api/agents/${id}/scheduled`, { trigger: 'done', text });
+    const waiting174 = (id: string) => listScheduled(db).filter((m) => m.agentId === id).map((m) => m.text);
+    job('job_q1', 25);
+    fixture('agt_orch174', 'job_q1', { status: 'queued', helperCap: 2, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 5 } });
+    const s174 = runs.length;
+    sup.pump();
+    await until(() => runs.length === s174 + 1);
+    const orch174 = runs[s174];
+    await until(() => (orch174?.prompts.length ?? 0) > 0);
+    const started174 = said(await mcp('agt_orch174', 'tools/call', { name: 'start_helper', arguments: { task: 'Write the parser.', name: 'parser' } }));
+    await until(() => runs.length === s174 + 2);
+    const helper174 = helpersOf(db, 'agt_orch174')[0];
+    const q174 = await whenDone174('agt_orch174', 'Also handle escapes.');
+    check('a message queued on a working orchestrator with a helper going → 201, a done row', !started174.isError && helper174 !== undefined && q174.status === 201 && q174.body.message?.trigger === 'done', JSON.stringify(q174.body));
+    orch174?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_orch174')?.status === 'queued');
+    check('its turn ends waiting on the helper: queued, and the message still waits', getAgent(db, 'agt_orch174')?.status === 'queued' && nextWhenDone(db, 'agt_orch174')?.text === 'Also handle escapes.' && runs.length === s174 + 2);
+    eventLog().emit({ projectId: pid, jobId: 'job_q1', agentId: helper174!.id }, { kind: 'text', text: 'Parser done: escapes left.' });
+    runs[s174 + 1]?.finish({ cost: 0, reason: 'completed' });
+    check('when the helper ends, the orchestrator is woken', await until(() => runs.length === s174 + 3));
+    const wake174 = runs[s174 + 2];
+    await until(() => (wake174?.prompts.length ?? 0) > 0);
+    const wp = wake174?.prompts[0] ?? '';
+    check(
+      'its wake prompt carries the report, then your message, marked as yours',
+      wp.includes('[builder-parser]') && wp.includes('Parser done: escapes left.') && wp.endsWith(`\n\n${wakeMessage('Also handle escapes.')}`),
+      wp,
+    );
+    check('the row is gone once the prompt is handed to the run', nextWhenDone(db, 'agt_orch174') === null && waiting174('agt_orch174').length === 0);
+    check('part of the work in progress, not a new task: its helper is not removed (Amendment 167)', getAgent(db, helper174!.id) !== undefined && helpersOf(db, 'agt_orch174').length === 1);
+    check('and it waited for no slot: no slot row, the wake is the run that took it', nextForSlot(db, 'agt_orch174') === null && typeof wake174?.options.resume === 'string');
+    // A second one, queued during the wake: no helper outstanding at the done that follows, so it goes there, as before.
+    await whenDone174('agt_orch174', 'Then the changelog.');
+    wake174?.finish({ cost: 0, reason: 'completed' });
+    check('with no helper outstanding, the next goes at done, as Amendment 157 sends it', await until(() => runs.length === s174 + 4));
+    const after174 = runs[s174 + 3];
+    await until(() => (after174?.prompts.length ?? 0) > 0);
+    check('sent once: the first is not sent again at done', after174?.prompts[0] === 'Then the changelog.' && runs.slice(s174).filter((r) => r.prompts.some((p) => p.includes('Also handle escapes.'))).length === 1, JSON.stringify(after174?.prompts));
+    check('and, a message of yours through sendMessage, it removes the finished helper (Amendment 167)', getAgent(db, helper174!.id) === undefined && waiting174('agt_orch174').length === 0);
+    after174?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'agt_orch174')?.status === 'done');
+    await settle(100);
+    check('and nothing more goes', runs.length === s174 + 4);
+
+    fixture('agt_orch174b', 'job_q1', { role: 'planner', status: 'queued', helperCap: 2, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 5 } });
+    const t174 = runs.length;
+    sup.pump();
+    await until(() => runs.length === t174 + 1 && Boolean(getAgent(db, 'agt_orch174b')?.sdkSessionId));
+    await whenDone174('agt_orch174b', 'One more pass.');
+    runs[t174]?.finish({ cost: 0, reason: 'completed' });
+    check('an orchestrator that started no helpers still gets it when its turn ends done', await until(() => runs.length === t174 + 2) && (await until(() => runs[t174 + 1]?.prompts[0] === 'One more pass.')), JSON.stringify(runs[t174 + 1]?.prompts));
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     sdk.query = realQuery;
   }
