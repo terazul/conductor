@@ -10,6 +10,8 @@
  * One queued for when the agent is done (Amendment 157) says **⏲ when done** instead of a
  * time, and what it is waiting for: this turn to end, or, while the agent is stopped on a
  * question, a failure or a pause, that it is waiting through it. Several go one per turn.
+ * On an orchestrator it says **⏲ next wake** (Amendment 174): it goes with its helpers' report
+ * when they have ended, or when its turn ends done, whichever comes first.
  *
  * One you sent while every slot was taken (Amendment 168) says **⏲ waiting for a slot**: the
  * daemon made it, it goes when a slot frees, and cancelling it puts the agent back.
@@ -40,12 +42,22 @@ export function whenDoneRefusal(status: AgentStatus): string | null {
 }
 
 /**
+ * What a message queued for when the agent is done is called: on an orchestrator (one that can
+ * start helpers) it goes at its next wake, with its helpers' report (Amendment 174).
+ */
+export function whenDoneLabel(orchestrator: boolean): string {
+  return orchestrator ? '⏲ next wake' : '⏲ when done';
+}
+
+/**
  * What a message queued for when the agent is done is waiting for, at the agent's status.
  * `first` is the next to go; the ones behind it wait for its turn. A question, a failure or a
- * pause aren't done, so it says it is waiting through them.
+ * pause aren't done, so it says it is waiting through them. An orchestrator's, working or
+ * waiting on its helpers, goes with their report or at the end of its turn (Amendment 174).
  */
-export function whenDoneWaits(status: AgentStatus | undefined, first: boolean): string {
+export function whenDoneWaits(status: AgentStatus | undefined, first: boolean, orchestrator = false): string {
   if (!first) return 'after the one before it';
+  if (orchestrator && (status === 'working' || status === 'queued')) return 'when its helpers report, or when its turn ends';
   switch (status) {
     case 'working':
       return 'when this turn ends';
@@ -87,7 +99,9 @@ const firstLine = (text: string): string => {
 
 export function ScheduledList({ agentId }: { agentId: string }) {
   const items = useAgentScheduled(agentId);
-  const status = useAgent(agentId)?.status;
+  const agent = useAgent(agentId);
+  const status = agent?.status;
+  const orchestrator = (agent?.helperCap ?? 0) > 0;
   const firstDone = items.find((m) => m.trigger === 'done' && !m.error)?.id;
   const firstSlot = items.find((m) => m.trigger === 'slot' && !m.error)?.id;
   const now = new Date(useNow(30_000));
@@ -116,12 +130,12 @@ export function ScheduledList({ agentId }: { agentId: string }) {
           >
             <span className="ag-sched-chev" aria-hidden="true">{open.has(m.id) ? '▾' : '▸'}</span>
             <span className="ag-sched-when">
-              {m.trigger === 'done' ? '⏲ when done' : m.trigger === 'slot' ? '⏲ waiting for a slot' : `⏲ ${fmtWhen(m.at, now)}`}
+              {m.trigger === 'done' ? whenDoneLabel(orchestrator) : m.trigger === 'slot' ? '⏲ waiting for a slot' : `⏲ ${fmtWhen(m.at, now)}`}
               {!m.error && (
                 <span className="ag-sched-in">
                   {' · '}
                   {m.trigger === 'done'
-                    ? whenDoneWaits(status, m.id === firstDone)
+                    ? whenDoneWaits(status, m.id === firstDone, orchestrator)
                     : m.trigger === 'slot'
                       ? slotWaits(status, m.id === firstSlot)
                       : fmtIn(m.at, now)}
@@ -147,7 +161,9 @@ export function ScheduledList({ agentId }: { agentId: string }) {
           <div className="ag-sched-full" role="region" aria-label="the scheduled message">
             <div className="ag-sched-meta">
               {m.trigger === 'done'
-                ? 'to be sent when it is done · queued'
+                ? orchestrator
+                  ? 'to be sent at its next wake, or when it is done · queued'
+                  : 'to be sent when it is done · queued'
                 : m.trigger === 'slot'
                   ? 'to be sent when a slot frees · sent'
                   : `to be sent ${fmtWhen(m.at, now)} · scheduled`}{' '}

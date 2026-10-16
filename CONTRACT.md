@@ -200,6 +200,56 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 174 — post-merge, applied. **A message queued on an orchestrator goes at its next wake, with its helpers' report.**
+
+Daemon (`session/supervisor.ts`, `session/handoff.ts`, `session/verify.ts`), web (`agent/scheduled.tsx`,
+`agent/composer.tsx`, `lib/verify-schedule.ts`) and `docs/MANUAL.md`. Asked for 15 Oct 2026, top priority:
+"queue a command to the orchestrator". **⏲ when done** (Amendment 157) sends a message when the agent's turn
+ends `done`, but an orchestrator whose turn ends with helpers still going is `queued`, not `done`
+(`#awaitHelpers`), so its queued message waited for the whole run of helpers, and then, sent through
+`sendMessage`, removed them (Amendment 167). *Decided (15 Oct): at its next wake, alongside its helpers'
+reports, not after everything.* *Amends Amendment 157* for an orchestrator only.
+- **The wake.** When pump relaunches an orchestrator because its helpers have ended, `#takeHelperReport`
+  builds their report and now also takes the oldest `'done'` row (`#takeWakeMessage`,
+  `supervisor.ts:2002`, called at `:1988`): its text goes after the report, as *And a message from the
+  user, queued while you worked:* (`wakeMessage`, `handoff.ts:578`), and the row is deleted. One per wake,
+  oldest first, as `'done'` is one per turn. The same row and trigger: no new migration, no new value in
+  the trigger's CHECK. Any wake that carries a report carries it, **re-run from here** too (its note
+  includes the report).
+- **Or at done.** An orchestrator whose turn ends `done` with no helper outstanding sends it through
+  `#sendWhenDone` (`supervisor.ts:1544`) as before. Whichever comes first takes the row, so it goes
+  exactly once.
+- **Amendments 167 and 168.** Delivered with a wake it is part of the work in progress, not a new task:
+  it does **not** clear finished helpers (167), since the orchestrator is mid-pipeline and those helpers
+  were just reported; and it waits for no slot (168), because the wake already holds the one pump gave
+  it. Delivered at `done` it is `sendMessage` as before: it clears finished helpers per 167 and waits for
+  a slot per 168.
+- **Left for later** where `#sendWhenDone` leaves it: everything paused (`#hold`), the job being stopped
+  (`#halting`), a relaunch wanted (`#resumeWanted`), or a message waiting for a slot, which goes first.
+  **Refused** as `sendMessage` refuses (its budget, its folder gone): the row keeps the reason
+  (`failScheduled`), and the wake goes with the report alone.
+- **A restart.** The row is deleted in the same synchronous step that marks the helpers reported
+  (`markReported`), just before the prompt is handed to the run, so a restart before then leaves both
+  for the wake after it, and one after it does not send the row again.
+- **Web.** On an orchestrator (`helperCap` above 0) the composer's button and the row above the box read
+  **⏲ next wake** (`whenDoneLabel`, `scheduled.tsx:48`; the button at `composer.tsx:597`), and the row says
+  *when its helpers report, or when its turn ends* while it is working or waiting on them
+  (`whenDoneWaits`, `scheduled.tsx:58`). Still refused for one `done` or `stopped` (`whenDoneRefusal`,
+  unchanged). Anywhere else it reads **⏲ when done**, as before.
+
+*Not done:* the message goes inside the wake prompt, which is Conductor's, so the transcript shows it
+under **auto**, folded as an orchestrator's auto turns start (Amendment 164), not as a turn of yours.
+A non-orchestrator's queued message is unchanged.
+
+*Verified:* `session/verify.ts` §17c (the block "Amendment 174" at `:3258`), against the real supervisor and
+the fake SDK: a `'done'` row queued over HTTP on a working orchestrator with a helper going waits while it
+is `queued` on the helper; when the helper ends, the wake prompt ends with the report then the message, the
+row is gone, the helper is not removed and no slot row was made; a second row queued during the wake goes
+at the `done` that follows, through `sendMessage`, which then removes the finished helper; the first is in
+one run only and nothing more goes; and an orchestrator that started no helpers gets its row at `done`.
+With `#takeWakeMessage` switched off, five of these fail. `lib/verify-schedule.ts` §5b for the wording.
+`make test` green.
+
 ### Amendment 173 — post-merge, applied. **A Fleet card's agents fold under one toggle, folded until you open them, each card remembering its own; an agent that needs you keeps its row.**
 
 Web only (`fleet/agentlist.ts` new, `fleet/card.tsx`, `fleet/fleet.css`, `lib/verify.ts`), and

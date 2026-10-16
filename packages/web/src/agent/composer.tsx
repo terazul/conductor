@@ -40,7 +40,7 @@ import {
 } from '../lib/providers.js';
 import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } from '../spawn/autonomy.js';
 import { queueWhenDone, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
-import { LaterRow, ScheduledList, whenDoneRefusal } from './scheduled.js';
+import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
 import { SETTINGS_KEY, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
@@ -297,14 +297,16 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   // Send it when the agent is done (Amendment 157): the same text, once its turn ends as `done`.
+  // An orchestrator's goes sooner, at its next wake, with its helpers' report (Amendment 174).
   const doneRefused = whenDoneRefusal(agent.status);
+  const orchestrator = (agent.helperCap ?? 0) > 0;
   const whenDone = async () => {
     const body = text.trim();
     if (body.length === 0) return;
     const ok = await send.run(
       'Queueing a message',
       () => queueWhenDone(agent.id, body),
-      () => 'Queued: it goes when this turn ends done.',
+      () => (orchestrator ? "Queued: it goes at its next wake, with its helpers' report, or when this turn ends done." : 'Queued: it goes when this turn ends done.'),
     );
     if (ok) setText('');
   };
@@ -585,9 +587,14 @@ export function Composer({ agent }: { agent: Agent }) {
               className="ag-later-btn"
               onClick={() => void whenDone()}
               disabled={send.busy || text.trim().length === 0 || doneRefused !== null}
-              title={doneRefused ?? 'Send this message when its turn ends done: one per turn, in order'}
+              title={
+                doneRefused ??
+                (orchestrator
+                  ? "Send this message at its next wake, with its helpers' report, or when its turn ends done: one per wake, in order"
+                  : 'Send this message when its turn ends done: one per turn, in order')
+              }
             >
-              ⏲ when done
+              {whenDoneLabel(orchestrator)}
             </button>
             <button
               type="button"

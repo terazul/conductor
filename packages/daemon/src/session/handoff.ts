@@ -571,6 +571,14 @@ export function helperReport(
   ].join('\n');
 }
 
+/**
+ * A message you queued on an orchestrator (**⏲ next wake**, Amendment 174), as it is told it: after
+ * its helpers' report, in the same wake, marked as yours so it isn't read as a helper's words.
+ */
+export function wakeMessage(text: string): string {
+  return `And a message from the user, queued while you worked:\n\n${text}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Orchestrated stacks (Amendment 128)
 // ─────────────────────────────────────────────────────────────────────────────

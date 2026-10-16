@@ -86,6 +86,7 @@ import {
   pipelineSection,
   stackLine,
   turnsFromEvents,
+  wakeMessage,
   type Upstream,
 } from './handoff.js';
 import type { ToolAccess, ToolRole } from '../routes/helpers.js';
@@ -1973,7 +1974,7 @@ export class Supervisor implements AgentControl {
     setAgentDependsOn(this.#db, agentId, agent.dependsOn.filter((id) => !done.some((h) => h.id === id)));
     // Each one's whole conversation, shared out within a quarter of this orchestrator's window (Amendment 120).
     const jobPrompt = getJob(this.#db, agent.jobId)?.prompt ?? '';
-    return helperReport(
+    const report = helperReport(
       done.map((h) => ({
         role: h.role,
         status: h.status,
@@ -1984,6 +1985,33 @@ export class Supervisor implements AgentControl {
       // An orchestrated stack's orchestrator is told to judge the step and write the next brief (Amendment 128).
       agent.pipelineRoles?.length ? pipelineReportClosing(SEND_BACKS_MAX) : undefined,
     );
+    const yours = this.#takeWakeMessage(agent);
+    return yours ? `${report}\n\n${wakeMessage(yours)}` : report;
+  }
+
+  /**
+   * The oldest message you queued for when it is done, taken for an orchestrator's wake (Amendment
+   * 174): it goes with its helpers' report, one per wake, and the row is deleted here, in the same
+   * step that marks them reported, just before the prompt is handed to the run. Part of the work in
+   * progress, not a new task: it clears no helpers (Amendment 167) and waits for no slot (Amendment
+   * 168), since the wake holds the one pump gave it. Left for later where `#sendWhenDone` would leave
+   * it: everything paused, the job being stopped, a relaunch wanted, or a message waiting for a slot,
+   * which goes first. Refused as `sendMessage` refuses (its budget, its folder gone): the row keeps
+   * the reason, and the wake goes with the report alone. '' when nothing goes.
+   */
+  #takeWakeMessage(agent: Agent): string {
+    if (this.#hold || this.#resumeWanted.has(agent.id) || this.#halting.has(agent.jobId)) return '';
+    if (nextForSlot(this.#db, agent.id)) return '';
+    const m = nextWhenDone(this.#db, agent.id);
+    if (!m) return '';
+    const job = getJob(this.#db, agent.jobId);
+    const refusal =
+      budgetRefusal(agent) ??
+      (job && !existsSync(job.worktreePath) ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : null);
+    if (refusal) failScheduled(this.#db, m.id, refusal);
+    else deleteScheduled(this.#db, m.id);
+    broadcastScheduled(this.#db);
+    return refusal ? '' : m.text;
   }
 
   /**
