@@ -2021,7 +2021,8 @@ export class Supervisor implements AgentControl {
    *
    * All or none. Kept, every one, while any is still going or unreported, has a message of yours
    * waiting to be sent, or has a shell of yours still running. The job's budget counts only the
-   * agents it still has, as after any Remove; the project's spend keeps theirs.
+   * agents it still has, as after any Remove; the project's spend keeps theirs. One
+   * `helpers_removed` on the orchestrator says how many went, and which.
    */
   #clearFinishedHelpers(orch: Agent): void {
     if (!orch.helperCap) return;
@@ -2038,6 +2039,11 @@ export class Supervisor implements AgentControl {
       for (const r of rewireOnRemoval(agentsForJob(this.#db, orch.jobId), h.id)) setAgentDependsOn(this.#db, r.agentId, r.dependsOn);
       this.#dropAgentRow(h.id);
     }
+    // Said on the orchestrator, so its transcript tells you where they went (Amendment 177).
+    eventLog().emit(
+      { projectId: orch.projectId, jobId: orch.jobId, agentId: orch.id },
+      { kind: 'helpers_removed', count: helpers.length, names: helpers.map((h) => h.role) },
+    );
     hub().broadcast({ type: 'resync' });
   }
 

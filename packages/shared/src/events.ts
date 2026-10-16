@@ -268,6 +268,18 @@ export interface ConsolePayload {
   text: string;
 }
 
+/**
+ * An orchestrator's helpers were removed, all of them, because you gave it a new task once
+ * they had all finished (Amendment 177, of 167). On the orchestrator, so its transcript says
+ * where they went. Nothing counts it: not a turn, not spend.
+ */
+export interface HelpersRemovedPayload {
+  kind: 'helpers_removed';
+  count: number;
+  /** Their roles, oldest first, e.g. `developer-api`. */
+  names: string[];
+}
+
 export type EventPayload =
   | TextPayload
   | UserTextPayload
@@ -282,7 +294,8 @@ export type EventPayload =
   | WorktreePayload
   | DevServerPayload
   | ConsolePayload
-  | ApiRetryPayload;
+  | ApiRetryPayload
+  | HelpersRemovedPayload;
 
 export type EventKind = EventPayload['kind'];
 
