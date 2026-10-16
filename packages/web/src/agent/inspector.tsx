@@ -11,7 +11,7 @@
  * the cap that will actually pause the agent.
  */
 
-import { ceilingWords, type Agent, type Job } from '@conductor/shared';
+import type { Agent, Job } from '@conductor/shared';
 import { budgetOf, budgetWords, scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { filesTouched, latestTodo } from '../shell/describe.js';
 import { DiffNums, fmtElapsed, fmtMoney, fmtTokens } from '../shell/ui.js';
@@ -110,11 +110,7 @@ export function Inspector({
                 </span>
               </div>
               {budget.state !== 'ok' && (
-                <p className="ag-isec-note">
-                  {budget.state === 'over'
-                    ? `Over today's budget, which only warns. It stops at ${budgetWords(budget.unit, budget.ceiling)} today.`
-                    : `Stopped at ${budgetWords(budget.unit, budget.ceiling)} today, ${ceilingWords()} its daily budget. It starts again at midnight.`}
-                </p>
+                <p className="ag-isec-note">Over today's budget, which only warns: nothing stops it. It starts again at midnight.</p>
               )}
             </>
           ) : (

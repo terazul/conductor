@@ -31,7 +31,6 @@ import { ORDER_KEY, SORTS, SORT_KEY, SORT_RANK, fleetSort, moveBefore, parseOrde
 import { dirRoot, parseDirRoot } from '../files/tabs.js';
 import { projectNeeds } from './describe.js';
 import { budgetOf, sumBudgets } from './autonomy.js';
-import { readBudgetCeilingFrom } from '@conductor/shared';
 import {
   DETAILS_KEY,
   NAV_OPEN_KEY,
@@ -526,12 +525,10 @@ console.log('\n12 · each agent row has its budget meter, and a job row the sum 
     'the hover says the figure, its unit, and what over means',
     meterTitle(row('m2').budget!, "builder's daily budget") === "builder's daily budget: $20.00 of $25.00 today, 80%" &&
       meterTitle(row('t1').budget!, 'x') === 'x: 480k tokens of 500k tokens today, 96%' &&
-      /over it; a warning, it stops at \$50\.00/.test(meterTitle(budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 30, 25), DAY)!, 'x')),
+      /over it; a warning only, nothing stops$/.test(meterTitle(budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 30, 25), DAY)!, 'x')),
     meterTitle(row('t1').budget!, 'x'),
   );
-  readBudgetCeilingFrom(() => 1.5);
-  check("the ceiling it names is the setting's: at 1.5, $25 stops at $37.50", budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 30, 25), DAY)?.ceiling === 37.5 && budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 37.5, 25), DAY)?.state === 'ceiling');
-  readBudgetCeilingFrom(() => 2);
+  check('and it names no ceiling, since there is none (Amendment 180): $75 of $25 is only over', budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 75, 25), DAY)?.state === 'over' && !/stops at|ceiling/.test(meterTitle(budgetOf(spent(agent('o', 'm', 'jm', 'builder'), 75, 25), DAY)!, 'x')));
 
   const nav = src('./Navigator.tsx');
   const css = src('./shell.css');

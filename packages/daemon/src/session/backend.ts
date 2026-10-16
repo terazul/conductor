@@ -95,9 +95,7 @@ export interface RunnerScope {
    * The agent's LIFETIME spend when this run starts. A resumed Claude session's first result
    * already carries it, so the run needs it to tell a continued total from a fresh one
    * (`lifetimeCost`) and to add only the growth to today's spend. It is not what a budget
-   * counts: that is the agent's spend today (Amendment 129), which the runner reads from the
-   * store when it starts a query, so the SDK's `maxBudgetUsd` can be what is left of the
-   * ceiling today.
+   * counts: that is the agent's spend today (Amendment 129), which the store keeps.
    */
   spentUsd: number;
   /**

@@ -75,20 +75,12 @@ import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited 
 import { OVER_AT, TOTAL_TITLE, WARN_AT, agentPairWords, budgetProblem, dailyMeter, parseBudget, projectPairWords, projectSpendOf, toneOf, totalWords } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
-  BUDGET_CEILING_KEY,
-  BUDGET_RESUME_KEY,
   RETRY_DELAYS_KEY,
-  ceilingFieldProblem,
-  ceilingShown,
-  ceilingValue,
-  midnightOn,
-  midnightValue,
   retryDelaysFieldProblem,
   retryDelaysShown,
   retryDelaysValue,
   retryDelaysWords,
 } from '../settings/budgets.js';
-import { budgetCeiling, ceilingOf, ceilingWords } from '@conductor/shared';
 import { readdirSync, statSync } from 'node:fs';
 import type { StorageState } from '@conductor/shared';
 import { keyLine, keyStateFrom, loginLine, providerLabel, readCopilotLogin, readKeyState, saveKey } from './providers.js';
@@ -684,15 +676,12 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
     failureSentence('sdk_new_thing'),
   );
   check('no reason at all points at the transcript', failureSentence(undefined) === 'ended with an error — see the transcript');
-  // Amendment 124: it stops at twice its budget, so the sentence says that, not "spent its budget".
-  check('at its ceiling, it says it stopped at twice its budget', failureSentence('budget_exhausted', capped(5, 10)) === 'stopped at twice its $5 daily budget');
-  check(
-    'raised since it stopped, it says so instead of the old figure',
-    failureSentence('budget_exhausted', capped(15, 5)) === 'stopped on its daily budget, now raised to $15',
-    failureSentence('budget_exhausted', capped(15, 5)),
-  );
-  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'stopped at twice its $0.01 daily budget');
-  check('no cap known, no figure', failureSentence('budget_exhausted') === 'reached its budget');
+  // Amendment 180: a budget only warns. An agent the old ceiling paused says so, and that continue carries on.
+  check('paused by the old ceiling, it says its budget and that continue carries on', failureSentence('budget_exhausted', capped(5, 10)) === 'was paused by its $5 daily budget, which only warns now — continue carries on', failureSentence('budget_exhausted', capped(5, 10)));
+  check('raised since, it names the figure as it is now, and asks for no raise', failureSentence('budget_exhausted', capped(15, 5)) === 'was paused by its $15 daily budget, which only warns now — continue carries on');
+  check('cents are kept', failureSentence('budget_exhausted', capped(0.01, 0.02)) === 'was paused by its $0.01 daily budget, which only warns now — continue carries on');
+  check('no cap known, no figure', failureSentence('budget_exhausted') === 'was paused by its budget, which only warns now — continue carries on');
+  check('never a stop at twice it, nor a raise to make first', !/twice|stopped at|raise/.test(failureSentence('budget_exhausted', capped(5, 10))));
 
   const T = Date.parse('2026-09-26T12:00:00Z');
   const at = (payload: EventPayload, ms: number): Event => ({ ...ev(payload, ms), agentId: 'agt_s' });
@@ -762,7 +751,7 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   const t1 = alertTitle(alert({}), [working]);
   check('a failure alert reads like the agent line', `${t1.head} ${t1.subject}` === 'builder ran out of turns');
   const t2 = alertTitle(alert({ kind: 'budget', cause: 'budget_exhausted' }), [{ ...working, costUsd: 10, spentToday: { day: localDayOf(), usd: 10, tokens: 0 } }]);
-  check('a budget alert says it stopped at twice its budget', t2.subject === 'stopped at twice its $5 daily budget', t2.subject);
+  check('a budget alert, for an agent the old ceiling paused, says continue carries on', t2.subject === 'was paused by its $5 daily budget, which only warns now — continue carries on', t2.subject);
   const t3 = alertTitle(
     alert({ kind: 'connection', cause: 'unreachable', agentIds: ['agt_s', 'agt_r'], attempt: 3, maxRetries: 10 }),
     [working, reviewer],
@@ -778,7 +767,7 @@ console.log('\n11 · a stopped agent and an outage read as sentences (F10, F13, 
   check('an agent this tab has not heard of is shown by id', alertTitle(alert({ agentIds: ['agt_gone'] }), []).head === 'agt_gone');
 
   check('top bar: failed', alertWord({ kind: 'failed', cause: 'x' }) === 'failed');
-  check('top bar: budget', alertWord({ kind: 'budget', cause: 'budget_exhausted' }) === 'at its daily budget');
+  check('top bar: budget', alertWord({ kind: 'budget', cause: 'budget_exhausted' }) === 'paused by its budget');
   check('top bar: server', alertWord({ kind: 'server_down', cause: 'x' }) === 'server down');
   check('top bar: login', alertWord({ kind: 'connection', cause: 'auth' }) === 'model API login');
   check('top bar: no answer', alertWord({ kind: 'connection', cause: 'unreachable' }) === 'no model API');
@@ -1522,8 +1511,7 @@ console.log("\n36 · an agent's budget warns, in words (Amendment 124)");
   const j = alertTitle(warn({ cause: 'job_budget_over', agentIds: [], budget: 50 }), [A({ role: 'architect' }), A({ id: 'agt_p', role: 'developer' }), A({ id: 'agt_q', role: 'tester', jobId: 'other' })]);
   check("a job's names the agents in it, since the job has no name on the wire", j.head === 'the architect · developer job' && j.subject === 'is over its $50 daily budget — a warning only', `${j.head} ${j.subject}`);
   check('the top bar has a word or two for each', alertWord(warn()) === 'over its daily budget' && alertWord(warn({ cause: 'job_budget_over' })) === 'job over its daily budget');
-  check('a stop at twice a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'stopped at twice its 500k-token daily budget');
-  check('raised since, it says so in tokens too', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 2_000_000 } })) === 'stopped on its daily budget, now raised to 2M tokens');
+  check('an old pause on a token budget says so in tokens', failureSentence('budget_exhausted', A({ costUsd: 0, inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 }, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } })) === 'was paused by its 500k-token daily budget, which only warns now — continue carries on');
 }
 
 console.log("\n· an agent's budget is coloured as it fills, like the daily budget (Amendment 125)");
@@ -1675,7 +1663,7 @@ console.log("\n· a budget counts what was spent today, and goes back to zero at
   check('the bar is today\'s $4.10 of $25, not the $31.40 of its life', budgetOf(four)?.spent === 4.1 && budgetOf(four)?.cap === 25 && budgetOf(four)?.state === 'ok' && budgetOf(four)?.pct === 16);
   const stale = mk('d2', { spentToday: { day: yesterday, usd: 99, tokens: 0 } });
   check('a stamp from an earlier day reads 0: an open page is renewed at midnight before the daemon says anything', budgetOf(stale)?.spent === 0 && budgetOf(stale)?.state === 'ok' && budgetOf(stale)?.tone === 'ok' && budgetOf(stale)?.over === false);
-  check('the day it is asked about can be given: the same stamp is spent on that day, and nothing the day after', budgetOf(stale, yesterday)?.spent === 99 && budgetOf(stale, yesterday)?.state === 'ceiling' && budgetOf(stale, today)?.spent === 0);
+  check('the day it is asked about can be given: the same stamp is spent on that day, and nothing the day after', budgetOf(stale, yesterday)?.spent === 99 && budgetOf(stale, yesterday)?.state === 'over' && budgetOf(stale, today)?.spent === 0);
   check('an agent with no stamp has spent nothing today (a recording, or one from before)', budgetOf(mk('d3'))?.spent === 0 && budgetState(mk('d3')) === 'ok');
   const tokensToday = mk('d4', { autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 }, spentToday: { day: today, usd: 0, tokens: 612_000 }, inputTokens: 9_000_000 });
   check('a token budget reads today\'s tokens, not the lifetime ones', budgetOf(tokensToday)?.spent === 612_000 && budgetOf(tokensToday)?.state === 'over' && budgetOf(tokensToday)?.unit === 'tokens');
@@ -1702,10 +1690,9 @@ console.log("\n· a budget counts what was spent today, and goes back to zero at
   check('the fold is the shared one', /spentToday: spentAfterUsage\(a, p\)/.test(src('./store.ts')));
 
   // Words.
-  check('a renewed stop says so, and that continue needs no raise', /renewed for the new day, so continue needs no raise/.test(failureSentence('budget_exhausted', mk('d6'), true)) && /renewed for the new day, so continue needs no raise/.test(failureSentence('job_budget_reached', mk('d6'), true)));
-  check('the job\'s hold reads daily without it too', failureSentence('job_budget_reached') === "reached its job's daily budget");
-  const renewedCard = alertTitle({ id: 'b', kind: 'budget', cause: 'budget_exhausted', projectId: P, jobId: J, agentIds: ['d6'], since: new Date().toISOString(), renewed: true }, [mk('d6')]);
-  check("the Budget reached card of an agent whose budget was renewed says it", /renewed for the new day/.test(renewedCard.subject), renewedCard.subject);
+  check('the job\'s old hold reads daily, and says continue carries on', failureSentence('job_budget_reached') === "was held for its job's daily budget, which only warns now — continue carries on");
+  const oldCard = alertTitle({ id: 'b', kind: 'budget', cause: 'budget_exhausted', projectId: P, jobId: J, agentIds: ['d6'], since: new Date().toISOString() }, [mk('d6')]);
+  check('the card of an agent the old ceiling paused says nothing about renewing', /continue carries on/.test(oldCard.subject) && !/renewed/.test(oldCard.subject), oldCard.subject);
 
   // The screens say daily, and read today's figures.
   const comp = src('../agent/composer.tsx');
@@ -1716,7 +1703,7 @@ console.log("\n· a budget counts what was spent today, and goes back to zero at
   check('the composer counts today: its spent figure and its folded line are today\'s, and the lifetime one is beside it', /spentOn\(agent\)/.test(comp) && /agentPairWords\(agent, caps\.costUsd\)/.test(comp) && /\{pair\.today\}/.test(comp) && /· \{pair\.total\}/.test(comp) && !/agent\.costUsd >= /.test(comp));
   check('the composer\'s budget fields say per day', /Budget in dollars per day/.test(comp) && /Budget in tokens per day/.test(comp));
   check('the details panel shows today against the budget, and today and the lifetime spend as a plain line', /`today \$\{fmtMoney\(budget\.spent\)\} of \$\{fmtMoney\(budget\.cap\)\}`/.test(insp) && />spent</.test(insp) && /\{pair\.today\} · \{pair\.total\}/.test(insp));
-  check('Needs You says daily on both cards and says nothing resumes by itself on a renewed one', /label: 'Budget reached for today'/.test(card) && /label: 'Over its daily budget'/.test(card) && /Nothing resumes by itself/.test(card));
+  check('Needs You says daily on the warning, and an old pause says continue carries on with no raise and nothing continues by itself', /label: 'Paused by its budget'/.test(card) && /label: 'Over its daily budget'/.test(card) && /continue carries it on as it is, with\s+no raise first/.test(card) && /Nothing continues it by itself/.test(card) && !/renewed/.test(card));
   check('Spawn\'s pill says per agent per day, with a tooltip that says it starts again at midnight', /⏱ budget per agent per day \$/.test(spawn) && /starts again at midnight/.test(spawn));
   check('nothing on a screen decides from the lifetime figure: the budget is read through budgetOf', !/costUsd\s*>=\s*\w*(cap|budget)/i.test(comp + insp + src('./../fleet/lane.tsx') + src('./../fleet/card.tsx')));
 }
@@ -1743,7 +1730,7 @@ console.log('\n37 · only a project you have not looked at since it finished say
   check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
-console.log('\n38 · the retry delays, the budget ceiling and midnight are settings (Amendment 140)');
+console.log('\n38 · the retry delays are a setting (Amendment 140); the budget ceiling and midnight are not (Amendment 180)');
 {
   // The delays: the daemon's rule, said as a sentence in the field.
   check('the default reads as the setting writes it', retryDelaysShown(null) === '5, 15, 30, 60, 300' && retryDelaysShown('garbage') === '5, 15, 30, 60, 300');
@@ -1753,49 +1740,29 @@ console.log('\n38 · the retry delays, the budget ceiling and midnight are setti
   check('what is written is tidied, and the default is written as nothing', retryDelaysValue('2,7') === '2, 7' && retryDelaysValue(' 5,15, 30,60,300 ') === null);
   check('the hint says the waits and the tries', retryDelaysWords(null) === '5 s, 15 s, 30 s, 1 min, 5 min: five tries, then the agent has failed' && retryDelaysWords('90') === '90 s: one try, then the agent has failed', retryDelaysWords(null));
 
-  // The ceiling.
-  check('a number from 1 to 10 is a ceiling', ['1', '1.5', '2', '10', ' 3 '].every((v) => ceilingFieldProblem(v) === null));
-  check('anything else says why', ['0.5', '0', '10.5', 'twice', '', '-2', 'Infinity'].every((v) => ceilingFieldProblem(v) === 'A number from 1 to 10, such as 2 or 1.5.'));
-  check('2 is written as nothing; the field shows 2 for nothing', ceilingValue('2') === null && ceilingValue('1.5') === '1.5' && ceilingShown(null) === '2' && ceilingShown('3') === '3');
-
-  // The page reads the ceiling from its copy of the settings (lib/settings.ts), so every meter and sentence stops where the daemon does.
-  const at75 = { autonomy: { mode: 'acceptEdits' as const, allowedTools: [], disallowedTools: [], budgetUsd: 5 }, spentToday: { day: localDayOf(), usd: 7.5, tokens: 0 } };
-  const was = readSetting(BUDGET_CEILING_KEY);
-  writeSetting(BUDGET_CEILING_KEY, '1.5');
-  check('with 1.5 set, the page reads 1.5: $25 stops at $37.50, and the words say 1.5×', budgetCeiling() === 1.5 && ceilingOf(25) === 37.5 && ceilingWords() === '1.5×' && failureSentence('budget_exhausted', at75) === 'stopped at 1.5× its $5 daily budget', failureSentence('budget_exhausted', at75));
-  writeSetting(BUDGET_CEILING_KEY, 'nonsense');
-  check('a value that is not one reads as twice', budgetCeiling() === 2 && ceilingWords() === 'twice');
-  writeSetting(BUDGET_CEILING_KEY, was);
-  check('and with none it is twice, as before', budgetCeiling() === 2 && ceilingOf(25) === 50);
-
-  // Midnight.
-  check('midnight continues unless set off; on is written as nothing', midnightOn(null) && midnightOn('on') && !midnightOn('off') && midnightValue(true) === null && midnightValue(false) === 'off');
-
   // The rows, on Settings (9), in the slot row's pattern.
   const route = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
   const rowOf = (name: string): string => {
     const i = route.indexOf(`function ${name}()`);
     return i === -1 ? '' : route.slice(i, route.indexOf('\nfunction ', i + 10));
   };
-  for (const [name, key, prob] of [['RetryDelaysRow', 'RETRY_DELAYS_KEY', 'retryDelaysFieldProblem'], ['CeilingRow', 'BUDGET_CEILING_KEY', 'ceilingFieldProblem']] as const) {
+  for (const [name, key, prob] of [['RetryDelaysRow', 'RETRY_DELAYS_KEY', 'retryDelaysFieldProblem']] as const) {
     const r = rowOf(name);
     check(
       `${name}: a draft, checked as it is typed, written on Enter or blur, put back by Esc, with a hint or the problem`,
       r.includes(`useSetting(${key})`) && r.includes(`${prob}(draft)`) && /onBlur=\{commit\}/.test(r) && /e\.key === 'Enter'\) commit\(\)/.test(r) && /e\.key === 'Escape'\) setDraft\(null\)/.test(r) && /className="st-err"/.test(r) && /className="st-dim"/.test(r),
     );
   }
-  check('MidnightRow: on and off, written through the setting, and the hint says what each does', /useSetting\(BUDGET_RESUME_KEY\)/.test(rowOf('MidnightRow')) && /midnightValue\(true\)/.test(rowOf('MidnightRow')) && /midnightValue\(false\)/.test(rowOf('MidnightRow')));
-  check('the delays sit under Agents, the ceiling and midnight under Spend', /<SlotsSection \/>\s*<RetryDelaysRow \/>/.test(route) && /<SpendSection \/>\s*<CeilingRow \/>\s*<MidnightRow \/>/.test(route));
+  check('the delays sit under Agents; Spend has no ceiling or midnight row', /<SlotsSection \/>\s*<RetryDelaysRow \/>/.test(route) && /<SpendSection \/>\s*<\/Section>/.test(route) && !/CeilingRow|MidnightRow|budgetCeiling|budgetResumeAtMidnight/.test(route));
 
   // The keys are the daemon's: the same names its rules are registered under.
   const daemonRetry = readFileSync(new URL('../../../daemon/src/session/retry.ts', import.meta.url), 'utf8');
   const daemonBudget = readFileSync(new URL('../../../daemon/src/session/budget.ts', import.meta.url), 'utf8');
   check(
-    'the daemon has a rule for each, from the same shared functions',
-    RETRY_DELAYS_KEY === 'conductor.retryDelays' && BUDGET_CEILING_KEY === 'conductor.budgetCeiling' && BUDGET_RESUME_KEY === 'conductor.budgetResumeAtMidnight' &&
+    'the daemon has a rule for the delays, from the same shared function, and none for a ceiling',
+    RETRY_DELAYS_KEY === 'conductor.retryDelays' &&
       daemonRetry.includes('settingRule(RETRY_DELAYS_KEY, retryDelaysProblem)') &&
-      daemonBudget.includes('settingRule(BUDGET_CEILING_KEY, budgetCeilingProblem)') &&
-      daemonBudget.includes('settingRule(BUDGET_RESUME_KEY, budgetResumeProblem)'),
+      !/settingRule\(|BUDGET_CEILING_KEY|BUDGET_RESUME_KEY/.test(daemonBudget),
   );
 }
 
@@ -1963,7 +1930,7 @@ console.log("\n· a Fleet card's agents fold, start folded, are kept per card, a
 
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays, the budget ceiling and midnight are set on Settings; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

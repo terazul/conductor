@@ -25,8 +25,8 @@ export type AlertAction =
   | { id: 'continue'; label: 'continue' | 'retry' | 'resume'; agentIds: readonly string[]; role?: string }
   /**
    * Raise the budget to `to` (in `unit`, dollars when absent), then continue, unless
-   * `onlyRaise`: the warning for an agent that is over its budget but not stopped
-   * (Amendment 124) has nothing to continue.
+   * `onlyRaise`: the warning for an agent that is over its budget, which nothing stops
+   * (Amendments 124, 180), has nothing to continue.
    */
   | { id: 'raise'; agentId: string; by: number; to: number; unit?: 'tokens'; onlyRaise?: true }
   | { id: 'open'; agentId: string; role?: string }
@@ -114,14 +114,9 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
 
     case 'budget': {
       if (!first) return [dismiss];
-      const b = budgetOf(first);
-      // Still at its ceiling (twice its budget): continuing alone would be refused, so every way on raises it.
-      const fix: AlertAction[] =
-        b !== null && b.state === 'ceiling'
-          ? raisesFor(first, b, false)
-          : resumable(first)
-            ? [{ id: 'continue', label: 'continue', agentIds: [first.id] }]
-            : [];
+      // Paused by the ceiling before Amendment 180. Nothing refuses a continue now, however far
+      // past its budget it is, so continue is the fix, with no raise first.
+      const fix: AlertAction[] = resumable(first) ? [{ id: 'continue', label: 'continue', agentIds: [first.id] }] : [];
       return [...fix, ...open, dismiss];
     }
 
@@ -131,7 +126,7 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       const target = alert.cause === 'job_budget_over' ? jobRaiseTarget(alert.jobId, agents) : first;
       if (!target) return [dismiss];
       const b = budgetOf(target);
-      const raises = b !== null && b.state !== 'ceiling' ? raisesFor(target, b, true) : [];
+      const raises = b !== null ? raisesFor(target, b, true) : [];
       const go: AlertAction[] = [{ id: 'open', agentId: target.id, ...(target === first ? {} : { role: target.role }) }];
       return [...raises, ...go, dismiss];
     }

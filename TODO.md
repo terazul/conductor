@@ -44,13 +44,14 @@ the last of it on 12 Oct).
     *Decided (15 Oct): new launches and agents already launched; reading roles stay read-only and `git push` stays denied without **allow push**.*
     *Decided (16 Oct): existing agents get it by a one-time migration, 285; after it the row is the truth.*
   *Done 16 Oct: Amendment 175 (the shell pill on by default; migration 285 gives Bash to every agent launched before, but a reading one).*
-- [ ] **A budget that's exceeded doesn't stop anything: it's only a warning.** Asked for (15 Oct), in those
+- [x] **A budget that's exceeded doesn't stop anything: it's only a warning.** Asked for (15 Oct), in those
   words. Today an agent that reaches its budget is `paused` (`budget_exhausted`, `#settle` in
   supervisor.ts), and a job past its budget only warns: queued agents are held at its ceiling, twice it
   (Amendment 124, `jobBudgetState`, `session/budget.ts:290`), and running ones are stopped only by their own.
   - **Decide:** is this a bug report (budgets should stop the work) or the change wanted (budgets should
     only warn)? Then: which budgets, the agent's, the job's, or both?
     *Decided (15 Oct): the change wanted. Budgets only warn and never stop work, the agent's and the job's, with no ceiling.*
+  *Done 16 Oct: Amendment 180.*
 - [ ] **Monthly spend and a monthly budget beside the daily one.** Asked for (15 Oct): track what was spent
   this month, start again at 0 when the month turns, and allow a monthly budget as well as the daily one.
   Every spend table is per day already: `agent_spend_daily` (210), `project_spend_daily`, which outlives its

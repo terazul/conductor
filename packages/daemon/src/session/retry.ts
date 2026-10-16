@@ -131,8 +131,6 @@ export type NoRetry =
   | 'stopped'
   /** The run was interrupted, not failed. */
   | 'interrupted'
-  /** It reached its cap, which is paused with a reason and not failed. */
-  | 'budget'
   /** The agent's own limit or a failure that is not the model's. */
   | 'not_the_model'
   /** It failed, but not as the API's trouble, or in a way waiting can't mend. */
@@ -164,14 +162,13 @@ export interface EndedRun {
  * Whether a run that just ended is tried again, and after how long. Pure.
  *
  * Retried: the API was unreachable, throttled or failing. Not retried: a login or billing
- * problem (needs a person), a budget stop, your own stop or pause, an interruption, one of
+ * problem (needs a person), your own stop or pause, an interruption, one of
  * the agent's own limits, and anything that was not the API's doing. The sixth failure in a
  * row is not retried either: that is the agent `failed`, as it always was.
  */
 export function decideRetry(r: EndedRun): RetryVerdict {
   const no = (why: NoRetry): RetryVerdict => ({ retry: false, why });
   if (r.userStopped) return no('stopped');
-  if (r.terminalReason === 'budget_exhausted') return no('budget');
   if (!r.isError) return no('not_an_error');
   if (r.terminalReason !== null && CUT_SHORT_BY_US.has(r.terminalReason)) return no('interrupted');
   if (r.terminalReason !== null && NOT_THE_MODEL.has(r.terminalReason)) return no('not_the_model');

@@ -4,10 +4,10 @@
  * `Agent.autonomy` is a required field on the shared type as of Amendment 7, so
  * this reads it directly — the defensive shape-validation that used to live here
  * is gone. What remains are the two derivations the UI needs: what a tool will
- * actually do, and what spend will actually pause the agent.
+ * actually do, and what spend it is warned about (a budget pauses nothing, Amendment 180).
  */
 
-import { agentBudget, capState, ceilingOf, type Agent, type Autonomy, type BudgetState } from '@conductor/shared';
+import { agentBudget, capState, type Agent, type Autonomy, type BudgetState } from '@conductor/shared';
 import { tokenWords } from '../lib/providers.js';
 import { toneOf, type SpendTone } from './spend.js';
 
@@ -56,20 +56,18 @@ export interface Budget {
   spent: number;
   /** The daily budget: what the agent may spend today before it is warned (Amendments 124, 129). */
   cap: number;
-  /** What stops it: the budget times the ceiling, twice unless Settings says otherwise (Amendment 140). */
-  ceiling: number;
   /** `spent / cap`, held at 1 once it is full: the bar never overflows. */
   fraction: number;
   /** `spent / cap` as a whole percent, past 100 when it is over. */
   pct: number;
-  /** ok under the budget, over from it, ceiling from the ceiling. */
+  /** ok under the budget, over from it. */
   state: BudgetState;
   /**
    * The colour it reads in: the status bar's daily meter's thresholds and tokens
    * (Amendment 125), green, yellow from 75%, red from 95% and so from the budget on.
    */
   tone: SpendTone;
-  /** At or past the budget. A warning, not a stop: only `state === 'ceiling'` has stopped it. */
+  /** At or past the budget. A warning, never a stop (Amendment 180). */
   over: boolean;
   /**
    * What `spent` and `cap` count (Amendment 80): dollars, or input plus output tokens for
@@ -79,19 +77,19 @@ export interface Budget {
 }
 
 /**
- * Today's spend against the daily budget that will warn about this agent, and the ceiling that
- * will stop it (Amendments 124, 129). `spent` is what it spent on `today` (the local day of
+ * Today's spend against the daily budget that will warn about this agent (Amendments 124, 129);
+ * nothing stops it (Amendment 180). `spent` is what it spent on `today` (the local day of
  * this browser unless the caller says): an agent whose day stamp is older reads 0, so a page
- * left open past midnight shows the budget renewed before the daemon pushes anything. The
+ * left open past midnight shows today's spend back at zero before the daemon pushes anything. The
  * agent's lifetime `costUsd` is not read here.
  *
  * Deliberately NOT a context-window percentage: CONTRACT §8 leaves that open
  * because it cannot yet be derived honestly, and "a misleading percentage is
- * worse than none". Budget is a real number with a real consequence, so the
+ * worse than none". Budget is a real number with a real warning, so the
  * meter measures that and the tokens are reported as tokens.
  *
  * The agent's own budget only. It used to fall back to the job's, but an uncapped agent
- * also uncaps its job (the daemon's `jobCap`), so no job figure ever pauses it and a
+ * also uncaps its job (the daemon's `jobCap`), so no job figure ever warns about it and a
  * bar measuring one would be measuring nothing.
  */
 export function budgetOf(agent: Pick<Agent, 'spentToday' | 'autonomy'>, today?: string): Budget | null {
@@ -106,7 +104,6 @@ function budgetFigures(spent: number, cap: number, unit: Budget['unit']): Budget
   return {
     spent,
     cap,
-    ceiling: ceilingOf(cap),
     fraction: Math.min(1, ratio),
     pct: Math.round(ratio * 100),
     state,
@@ -121,7 +118,7 @@ function budgetFigures(spent: number, cap: number, unit: Budget['unit']): Budget
  * against the sum of their budgets, in the same tones as each agent's (`toneOf`). Null when
  * none of them has a budget. Dollars when any budget is in dollars, and then only those: a
  * token figure added to dollars would be no figure at all. Only a picture of the agents'
- * own budgets, not the daemon's job ceiling (`jobCap`), which an uncapped agent lifts.
+ * own budgets, not the daemon's job budget (`jobCap`), which an uncapped agent lifts.
  */
 export function sumBudgets(budgets: readonly (Budget | null)[]): Budget | null {
   const have = budgets.filter((b): b is Budget => b !== null);

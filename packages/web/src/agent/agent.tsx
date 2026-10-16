@@ -591,13 +591,10 @@ export function AgentScreen() {
 
   const elapsed = elapsedMs === null ? null : fmtElapsed(elapsedMs);
   /*
-   * Stopped on its ceiling, twice its daily budget (Amendments 124, 129). Amber, not red: nothing
-   * broke, and the next move is a person's — raise it in the composer below. Not while
-   * working (the run is still under it) and not once terminated (nothing is coming back
-   * to spend). Between the budget and the ceiling it is only over it, and still works.
+   * Over its daily budget (Amendments 124, 129): a warning, and only that (Amendment 180), so
+   * it works on however far past it goes. Not once stopped: nothing is coming back to spend.
    */
   const budgetNow = budgetOf(agent);
-  const atBudget = budgetNow?.state === 'ceiling' && agent.status !== 'working' && agent.status !== 'stopped';
   const overBudget = budgetNow?.state === 'over' && agent.status !== 'stopped';
 
   const exportTranscript = () => {
@@ -699,10 +696,9 @@ export function AgentScreen() {
               needs you · {needsHere}
             </button>
           )}
-          {atBudget && <Tag tone="need">budget reached today</Tag>}
           {overBudget && (
             <Tag tone="need">
-              <span title={`A warning only: it stops at ${budgetWords(budgetNow.unit, budgetNow.ceiling)} today`}>over today's budget</span>
+              <span title="A warning only: nothing stops it">over today's budget</span>
             </Tag>
           )}
           <span className="ag-model" title={agent.model}>

@@ -57,7 +57,6 @@ import { broadcastSpend } from '../../daily.js';
 import { eventLog } from '../../eventlog.js';
 import { callTool, toolsFor, type ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
-import { budgetRefusal } from '../budget.js';
 import { recordCall, type Recorded } from '../metrics.js';
 import { openRouterKey } from '../secrets.js';
 import { addSpendToday, finishRun, getAgent, newId, openRequestsForAgent, setAgentSession, setAgentUsage, startRun } from '../store.js';
@@ -333,8 +332,6 @@ function toCopilot(d: PermissionDecision): PermissionRequestResult {
 // the backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RunEnd = TurnEnd | { kind: 'budget' };
-
 const bag = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
@@ -349,7 +346,7 @@ export class CopilotBackend implements AgentBackend {
   #events: CopilotEvents;
   /** Aborted by interrupt(), so a request the human hasn't answered is parked, as for Claude. */
   #asks = new AbortController();
-  #end: ((e: RunEnd) => void) | null = null;
+  #end: ((e: TurnEnd) => void) | null = null;
   /** Lifetime tokens, from what was stored when this run began. */
   #tokens = { input: 0, output: 0 };
   /** The last `ask_user` call started, so its question carries the call's id. */
@@ -509,28 +506,26 @@ export class CopilotBackend implements AgentBackend {
 
   // ── events ────────────────────────────────────────────────────────────────
 
-  #onEvent(event: SessionEvent, outcome: RunOutcome): void {
+  #onEvent(event: SessionEvent): void {
     const step = this.#events.take(event);
     for (const p of step.payloads) {
       if (p.kind === 'tool_start' && p.tool === 'AskUserQuestion') this.#lastAsk = p.toolUseId;
       this.#emit(p);
     }
     if (step.replied) modelAnswered(this.#scope.agentId);
-    if (step.usage) this.#count(step.usage, outcome, step.call);
+    if (step.usage) this.#count(step.usage, step.call);
     if (step.end) this.#finish(step.end);
   }
 
   /**
    * One model call's tokens, added to the lifetime totals and to the agent's spend TODAY the
    * moment they arrive — the event is ephemeral, and a run cut short would otherwise count
-   * nothing. The dollar spend is the stored one, untouched. Then the ceiling, twice the
-   * daily token budget (Amendments 124, 129): an agent past it is stopped the way Claude's budget stop ends a run,
-   * and the supervisor pauses it with the note. Between the budget and the ceiling it goes
-   * on, and Needs You warns (session/alerts.ts, which hears the usage event just emitted).
+   * nothing. The dollar spend is the stored one, untouched. Past the daily token budget it
+   * goes on, and Needs You warns (session/alerts.ts, which hears the usage event just emitted):
+   * a budget stops nothing (Amendment 180).
    */
   #count(
     u: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
-    outcome: RunOutcome,
     call?: { model?: string; durationMs?: number },
   ): void {
     this.#tokens.input += u.inputTokens;
@@ -567,17 +562,9 @@ export class CopilotBackend implements AgentBackend {
       ...(metrics ? { model: metrics.model, calls: 1, ...(metrics.apiMs !== null ? { apiMs: metrics.apiMs } : {}) } : {}),
       today,
     });
-    const agent = getAgent(this.#db, this.#scope.agentId);
-    if (!this.#stopping && agent && budgetRefusal(agent)) {
-      outcome.terminalReason = 'budget_exhausted';
-      this.#stopping = true;
-      // Ended first, so the abort's own events can't say it was only interrupted.
-      this.#finish({ kind: 'budget' });
-      void this.#session?.abort().catch(() => {});
-    }
   }
 
-  #finish(end: RunEnd): void {
+  #finish(end: TurnEnd): void {
     const done = this.#end;
     this.#end = null;
     done?.(end);
@@ -607,7 +594,7 @@ export class CopilotBackend implements AgentBackend {
     this.#live = true;
     this.#stopping = false;
     this.#asks = new AbortController();
-    const ended = new Promise<RunEnd>((r) => (this.#end = r));
+    const ended = new Promise<TurnEnd>((r) => (this.#end = r));
     let off: (() => void) | null = null;
 
     try {
@@ -625,7 +612,7 @@ export class CopilotBackend implements AgentBackend {
       this.#sessionId = agentId;
       outcome.sessionId = agentId;
       setAgentSession(this.#db, agentId, agentId);
-      off = session.on((e: SessionEvent) => this.#onEvent(e, outcome));
+      off = session.on((e: SessionEvent) => this.#onEvent(e));
 
       if (this.#stopping) {
         this.#finish({ kind: 'aborted' });
@@ -638,9 +625,7 @@ export class CopilotBackend implements AgentBackend {
       }
 
       const end = await ended;
-      if (end.kind === 'budget' || outcome.terminalReason === 'budget_exhausted') {
-        outcome.terminalReason = 'budget_exhausted';
-      } else if (end.kind === 'error' && !this.#stopping) {
+      if (end.kind === 'error' && !this.#stopping) {
         outcome.isError = true;
         outcome.terminalReason = 'session_error';
         outcome.errorDetail = end.message.trim().split('\n')[0]?.slice(0, 400) || null;

@@ -48,7 +48,7 @@ import { eventLog } from '../../eventlog.js';
 import type { ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
 import { classifyRetry } from '../retry.js';
-import { lifetimeCost, runLimit } from '../budget.js';
+import { lifetimeCost } from '../budget.js';
 import { broadcastSpend, costChanged } from '../../daily.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
 import { recordRunWindows } from '../windows.js';
@@ -59,7 +59,6 @@ import {
   openRequestsForAgent,
   setAgentSession,
   setAgentUsage,
-  spentToday,
   startRun,
   type DeferredTool,
 } from '../store.js';
@@ -203,10 +202,6 @@ export class ClaudeBackend implements AgentBackend {
 
   #buildOptions(resume: string | null): Options {
     const { autonomy, worktreePath, model, extraDirs, helperCap, handOff, systemPrompt, skills } = this.#scope;
-    // What was spent TODAY when this query starts (Amendment 129), read from the store rather than
-    // the scope: a run moved past a call it can't make (`#runPast`) starts a second query after
-    // the first has spent, and the lifetime figure in the scope says nothing about the day.
-    const left = runLimit(autonomy.budgetUsd, spentToday(this.#db, this.#scope.agentId).usd);
     const tools = helperCap || handOff ? helperTools(this.#scope.agentId, { helperCap, handOff }) : null;
 
     return {
@@ -236,9 +231,7 @@ export class ClaudeBackend implements AgentBackend {
       allowedTools: tools ? [...autonomy.allowedTools, ...tools.allowed] : autonomy.allowedTools,
       ...(tools ? { mcpServers: tools.servers } : {}),
       disallowedTools: autonomy.disallowedTools,
-      // What is LEFT of today's CEILING, twice the daily budget (Amendments 124, 129): the budget
-      // only warns, and the SDK counts from this query's start, so it is given the remainder.
-      ...(left !== null ? { maxBudgetUsd: left } : {}),
+      // No `maxBudgetUsd`, ever: a budget only warns (Amendment 180), and that limit is a hard stop.
       // Omitted when unset, so the SDK's own default applies rather than ours.
       ...(autonomy.effort ? { effort: autonomy.effort } : {}),
       ...(resume ? { resume } : {}),
@@ -611,14 +604,7 @@ export class ClaudeBackend implements AgentBackend {
       }
 
       case 'result': {
-        // `terminal_reason` is optional, and the subtype is what the SDK documents a
-        // budget stop by, so a budget stop reads the same whichever of the two it sent.
-        outcome.terminalReason =
-          typeof m['terminal_reason'] === 'string'
-            ? m['terminal_reason']
-            : m['subtype'] === 'error_max_budget_usd'
-              ? 'budget_exhausted'
-              : null;
+        outcome.terminalReason = typeof m['terminal_reason'] === 'string' ? m['terminal_reason'] : null;
         outcome.isError = m['is_error'] === true;
         // A failure with no terminal_reason — a resume of a session that is gone — is
         // explained here and nowhere else (F20).

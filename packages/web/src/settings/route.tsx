@@ -40,15 +40,7 @@ import { homeish, saveHome } from './storage.js';
 import { setStorage, useStorage } from './always.js';
 import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, slotsProblem } from './slots.js';
 import {
-  BUDGET_CEILING,
-  BUDGET_CEILING_KEY,
-  BUDGET_RESUME_KEY,
   RETRY_DELAYS_KEY,
-  ceilingFieldProblem,
-  ceilingShown,
-  ceilingValue,
-  midnightOn,
-  midnightValue,
   retryDelaysFieldProblem,
   retryDelaysShown,
   retryDelaysValue,
@@ -238,73 +230,6 @@ function RetryDelaysRow() {
           time. Needs You has the card from the first try.
         </p>
       )}
-    </>
-  );
-}
-
-/**
- * The budget ceiling (Amendment 140): what stops an agent, as a multiple of its daily budget.
- * Between the budget and the ceiling it is only warned about.
- */
-function CeilingRow() {
-  const stored = useSetting(BUDGET_CEILING_KEY);
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? ceilingShown(stored);
-  const problem = draft === null ? null : ceilingFieldProblem(draft);
-  const commit = (): void => {
-    if (draft === null || problem) return;
-    writeSetting(BUDGET_CEILING_KEY, ceilingValue(draft));
-    setDraft(null);
-  };
-  return (
-    <>
-      <label className="st-field">
-        <span>an agent stops at its daily budget times</span>
-        <input
-          inputMode="decimal"
-          value={shown}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commit();
-            else if (e.key === 'Escape') setDraft(null);
-          }}
-        />
-      </label>
-      {problem ? (
-        <p className="st-err">{problem}</p>
-      ) : (
-        <p className="st-dim">
-          From 1 to 10; default {BUDGET_CEILING}. At its budget an agent is warned and works on; at this multiple of it,
-          it is paused, and a job's agents still to start are held at the same multiple of their budgets together. 1
-          stops it at the budget itself. Applies at the next check, for every agent.
-        </p>
-      )}
-    </>
-  );
-}
-
-/** Whether midnight continues an agent paused only by the day's budget (Amendment 140). */
-function MidnightRow() {
-  const on = midnightOn(useSetting(BUDGET_RESUME_KEY));
-  return (
-    <>
-      <div className="st-field">
-        <span>at midnight, continue agents the day's budget paused</span>
-        <div className="st-pills">
-          <button type="button" className="st-pill" aria-pressed={on} onClick={() => writeSetting(BUDGET_RESUME_KEY, midnightValue(true))}>
-            on
-          </button>
-          <button type="button" className="st-pill" aria-pressed={!on} onClick={() => writeSetting(BUDGET_RESUME_KEY, midnightValue(false))}>
-            off
-          </button>
-        </div>
-      </div>
-      <p className="st-dim">
-        {on
-          ? "On: when the day changes, an agent paused only by its daily budget or its job's is continued, as ▶ resume would, and its transcript says a new day's budget began. A pause you made is left as it is, and while everything is paused until a time they wait for it, within the agents-at-once limit as always. If Conductor was not running at midnight, it does this when it starts."
-          : 'Off: when the day changes, an agent paused by its budget stays paused, its budget renewed, until you press continue.'}
-      </p>
     </>
   );
 }
@@ -1072,8 +997,6 @@ function Settings() {
         </Section>
         <Section title="Spend">
           <SpendSection />
-          <CeilingRow />
-          <MidnightRow />
         </Section>
         <Section title="Providers">
           <ProvidersSection />

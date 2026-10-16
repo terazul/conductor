@@ -6,10 +6,10 @@
  *     and `parked` agents do not. That asymmetry is the whole point of parking:
  *     a human who wanders off stops costing us a slot (PLAN.md §1 finding B).
  *   • dependsOn gating — the mockup's "starts now / parallel / after both".
- *   • budgets. An agent's is a figure PER DAY (what it spent today, back to zero at midnight)
- *     that warns when passed and stops it at twice the budget, checked before every launch and
- *     resume; a job's is the sum of its agents' budgets, with the same ceiling, checked before
- *     a queued agent starts (session/budget.ts, Amendments 124, 129).
+ *   • budgets, which it no longer enforces: an agent's is a figure PER DAY (what it spent
+ *     today, back to zero at midnight) and a job's the sum of its agents', and past either
+ *     Needs You warns while the work goes on. Nothing here refuses, holds or pauses for a
+ *     budget (session/budget.ts, Amendments 129, 180).
  *
  * ISOLATION is delegated, not reimplemented. Track C's WorkspaceService owns
  * worktree lifecycle, so this calls `workspace().open(...)` IN-PROCESS for all
@@ -19,7 +19,7 @@
  */
 
 import { onSettingsChanged, readSettings } from '../settings.js';
-import { BUDGET_CEILING_KEY, PERSONAS_KEY, branchTargetKey, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
+import { PERSONAS_KEY, branchTargetKey, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
 import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
 import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
@@ -73,7 +73,6 @@ import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { budgetChanged } from './alerts.js';
 import { skillsProblem, systemPromptProblem } from './persona.js';
-import { JOB_BUDGET_NOTE, budgetNote, budgetRefusal, continuations, jobBudgetState, newDayNote, renewals, resumeAtMidnight, type PausedForBudget } from './budget.js';
 import {
   handOffLine,
   handoffCap,
@@ -119,7 +118,6 @@ import {
   getAgentProvider,
   insertJob,
   insertProject,
-  jobCostToday,
   jobsForProject,
   answeredSinceLastRun,
   lastDeferredTool,
@@ -145,8 +143,6 @@ import {
   getRerunPending,
   setRerunPending,
   lastStatusNote,
-  lastStatusDay,
-  localDay,
   type AgentPersona,
 } from './store.js';
 import { reportedWindow } from './windows.js';
@@ -342,16 +338,6 @@ export const RETRY_NUDGE =
   'not report back: do that work again yourself rather than wait for it.';
 
 /**
- * What an agent the new day continued is told (Amendment 140): it was paused at its daily
- * budget's ceiling (or its job's), and nothing it ran then finished. A synthetic turn, shown
- * as `auto` like every resume prompt.
- */
-export const NEW_DAY_NUDGE =
-  'Continue from where you stopped. You were paused because you reached your daily budget; ' +
-  "a new day's budget has begun, so you can carry on. If a tool call was still running when " +
-  'you were paused, it was stopped before it finished, so check what it did before relying on it.';
-
-/**
  * Sent once, on its own, to an agent that a restart interrupted and that then ended its
  * turn without calling `hand_off` while agents wait for it (Amendment 119). Without it the
  * agent is held and you are asked; most of the time what it needs is this sentence.
@@ -380,14 +366,6 @@ export interface ProjectRemoval {
  */
 /** Statuses from which an agent cannot be stopped, because it already has. */
 const ENDED_STATUSES: ReadonlySet<AgentStatus> = new Set(['done', 'failed', 'stopped']);
-
-/** An agent at its cap. The message is the sentence the person reads (budget.ts). */
-export class BudgetReachedError extends Error {
-  constructor(sentence: string) {
-    super(sentence);
-    this.name = 'BudgetReachedError';
-  }
-}
 
 /** A hand-off that can't be done, with the sentence that says why (Amendment 104). The route answers 409. */
 export class HandOffRefusedError extends Error {
@@ -446,8 +424,6 @@ export class Supervisor implements AgentControl {
    * when the next wait starts. The tries used and the waits live in `retryBook()`.
    */
   #retryRuns = new Set<string>();
-  /** Agents the new day continued (Amendment 140), told NEW_DAY_NUDGE on their next run. */
-  #newDayRuns = new Set<string>();
   /*
    * Agents `rerunFrom` queued, with the roles whose reply changed, are resumed with `rerunNote`
    * on their next run (Amendment 102). That is kept in the agent's row (`rerun_pending`, set by
@@ -512,7 +488,7 @@ export class Supervisor implements AgentControl {
    *
    * RESUMED, NOT PAUSED (Amendment 53). It used to pause them, and you pressed resume on
    * each. Now they are queued with their sessions, so `pump()` resumes them — into free
-   * slots, within their budgets, like any queued agent — and each is told the restart
+   * slots, like any queued agent — and each is told the restart
    * happened (`RESTART_NUDGE`). One with no session yet starts from its prompt.
    */
   reconcile(): number {
@@ -549,13 +525,6 @@ export class Supervisor implements AgentControl {
   register(): void {
     // A new limit applies at once: a raised one starts what was waiting for a slot.
     onSettingsChanged((changed) => {
-      // A new budget ceiling (Amendment 140): the warnings and stops are read again, and a job
-      // whose agents were held at the old one may start. Nothing paused is woken by it, as
-      // raising a budget wakes nothing.
-      if (changed.includes(BUDGET_CEILING_KEY)) {
-        budgetChanged();
-        this.pump();
-      }
       if (!changed.includes(SLOTS_KEY)) return;
       this.#pushSlots();
       this.pump();
@@ -1006,10 +975,6 @@ export class Supervisor implements AgentControl {
 
       const job = getJob(this.#db, agent.jobId);
       if (!job || job.status === 'paused' || job.status === 'failed') continue;
-      if (this.#overBudget(job)) {
-        this.#pause(agent.id, JOB_BUDGET_NOTE);
-        continue;
-      }
 
       /*
        * With its session, when it has one. A queued agent with a session is one that
@@ -1070,39 +1035,16 @@ export class Supervisor implements AgentControl {
   }
 
   /**
-   * At the job's CEILING: twice the sum of the agents' CURRENT budgets, not `job.budgetUsd`,
-   * which stays the figure Spawn launched with. Comparing against that meant raising one
-   * agent's budget still left its queued siblings paused at the old total. Between the sum
-   * and twice it, the job is over its budget and only warned (Amendment 124): see Alerts.
-   * Against what its agents spent TODAY, so it is under again at midnight (Amendment 129).
-   */
-  #overBudget(job: Job): boolean {
-    return jobBudgetState(agentsForJob(this.#db, job.id), jobCostToday(this.#db, job.id)) === 'ceiling';
-  }
-
-  /**
    * The day changed (Amendment 129; `onDayTurn`, from the watch of Amendment 103). Budgets are
-   * per day, so every agent's reads from zero now. This does four things:
-   *  • an agent paused ONLY by its budget, at its ceiling or held for its job's, is CONTINUED,
-   *    as ▶ resume continues it, and told so (Amendment 140, Q4 of wave 10; `#newDayFor`). Not
-   *    a pause you made, a failure, or any other note. With `conductor.budgetResumeAtMidnight`
-   *    off it stays paused instead, its pause rewritten to say its budget is renewed and that
-   *    continue needs no raise (`renewals`, which was all Amendment 129 did);
+   * per day, so every agent's reads from zero now. Nothing is continued or rewritten: since
+   * Amendment 180 no budget pauses anything, and an agent its ceiling paused before then waits
+   * for ▶ continue, which nothing refuses. So this does two things:
    *  • every agent that spent anything yesterday is pushed afresh, so an open page redraws its
    *    bar at zero (the page also reads a stale day stamp as zero by itself);
-   *  • the alerts are checked again, so the "over budget" warnings of yesterday clear;
-   *  • pump(), within the slots, the job's budget and a pause of everything.
-   * Returns how many pauses were continued or rewritten.
+   *  • the alerts are checked again, so the "over budget" warnings of yesterday clear.
    */
-  newDay(day: string, was: string): number {
-    const paused = listAgents(this.#db)
-      .filter((a) => a.status === 'paused')
-      .map((agent) => this.#pausedForBudget(agent));
-    const changed = this.#newDayFor(paused, day);
-
-    const fresh = agentsThatSpentOn(this.#db, was)
-      .filter((id) => !changed.has(id))
-      .flatMap((id) => getAgent(this.#db, id) ?? []);
+  newDay(was: string): void {
+    const fresh = agentsThatSpentOn(this.#db, was).flatMap((id) => getAgent(this.#db, id) ?? []);
     if (fresh.length > 0) {
       try {
         this.#pushEntities({ agents: fresh });
@@ -1111,71 +1053,6 @@ export class Supervisor implements AgentControl {
       }
     }
     budgetChanged();
-    // A queued agent that was waiting on the job's figure goes, if the new day's figure allows it.
-    this.pump();
-    return changed.size;
-  }
-
-  /**
-   * At start (Amendment 140): a daemon that was down at midnight saw no day turn, so a budget
-   * pause written on an earlier day than today (`lastStatusDay`) is given what the turn would
-   * have given it: continued, or with the setting off renewed. Amendment 129 left these as
-   * they were until the next midnight. Run after the scheduler has put back a pause of
-   * everything (routes/session.ts), so a continued agent waits for that as any queued one.
-   * Returns how many pauses were continued or rewritten.
-   */
-  catchUpDay(): number {
-    const today = localDay();
-    const paused = listAgents(this.#db)
-      .filter((a) => a.status === 'paused')
-      .filter((a) => {
-        const day = lastStatusDay(this.#db, a.id);
-        return day !== null && day < today;
-      })
-      .map((agent) => this.#pausedForBudget(agent));
-    const changed = this.#newDayFor(paused, today);
-    if (changed.size > 0) {
-      budgetChanged();
-      console.log(`[supervisor] the day changed while the daemon was down: ${changed.size} budget pause(s) brought up to ${today}`);
-    }
-    return changed.size;
-  }
-
-  #pausedForBudget(agent: Agent): PausedForBudget {
-    const job = getJob(this.#db, agent.jobId);
-    return { agent, note: lastStatusNote(this.#db, agent.id) ?? undefined, jobAtCeiling: job !== undefined && this.#overBudget(job) };
-  }
-
-  /**
-   * What a new day does to the budget pauses in `paused` (Amendment 140): with the setting on,
-   * continues the ones only a budget paused and that have room today (`continuations`), each
-   * queued as ▶ resume queues it, with `newDayNote` on its status and `NEW_DAY_NUDGE` for its
-   * model. Queued, so the slots, the job's budget and a pause of everything (`#hold`, which
-   * starts nothing until it ends) still decide when it runs. The rest, and all of them with the
-   * setting off, are rewritten as renewed (`renewals`). Returns the agents it changed.
-   */
-  #newDayFor(paused: readonly PausedForBudget[], day: string): Set<string> {
-    const changed = new Set<string>();
-    if (resumeAtMidnight()) {
-      for (const id of continuations(paused, day)) {
-        const agent = getAgent(this.#db, id);
-        if (!agent || agent.status !== 'paused') continue;
-        if (agent.sdkSessionId) this.#newDayRuns.add(id);
-        try {
-          this.resumeAgent(id, newDayNote(day));
-          changed.add(id);
-        } catch (err) {
-          this.#newDayRuns.delete(id);
-          if (!(err instanceof BudgetReachedError)) throw err;
-        }
-      }
-    }
-    const rewrites = renewals(paused.filter((p) => !changed.has(p.agent.id)), day);
-    for (const r of rewrites) {
-      this.#pause(r.agentId, r.note);
-      changed.add(r.agentId);
-    }
-    return changed;
   }
 
   #pause(agentId: string, note: string): void {
@@ -1183,8 +1060,6 @@ export class Supervisor implements AgentControl {
     if (!agent) return;
     // A pause of any kind ends the bout of waiting for the model (Amendment 123).
     this.#forgetRetries(agentId);
-    // And whatever the new day's continue was going to tell it (Amendment 140).
-    this.#newDayRuns.delete(agentId);
     setAgentStatus(this.#db, agentId, 'paused');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
@@ -1263,13 +1138,6 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!job) return;
 
-    // At its ceiling (twice its budget, Amendment 124): stop here and say so, rather than
-    // start a run the SDK would end on its first turn. Reached from pump() and from
-    // answering a parked request. Over the budget but under the ceiling it runs.
-    if (budgetRefusal(agent)) {
-      this.#pause(agentId, budgetNote(agent));
-      return;
-    }
     // Its folder is gone: failed with the reason, rather than a launch error (Amendment 114).
     if (this.#refuseGone(agentId, job)) return;
 
@@ -1392,9 +1260,6 @@ export class Supervisor implements AgentControl {
     // Tried again after the model couldn't be reached (Amendment 123).
     if (this.#retryRuns.has(agentId) && !arbiter().stagedFor(agentId)) return RETRY_NUDGE;
 
-    // Continued by the new day after its budget paused it (Amendment 140).
-    if (this.#newDayRuns.delete(agentId) && !arbiter().stagedFor(agentId)) return NEW_DAY_NUDGE;
-
     const staged = arbiter().stagedFor(agentId);
     if (!staged) {
       // Queued with its session and nothing answered: woken from a pause while every
@@ -1476,17 +1341,6 @@ export class Supervisor implements AgentControl {
     arbiter().clearStaged(agentId);
 
     /*
-     * Out of budget is not broken. Nothing failed: it reached the cap you set, and
-     * raising the cap continues the same session. So `paused`, with the reason, and
-     * not `failed` — which painted it red and failed its whole job.
-     */
-    if (outcome.terminalReason === 'budget_exhausted') {
-      this.#pause(agentId, budgetNote(getAgent(this.#db, agentId) ?? agent));
-      this.#rollUpJob(agent.jobId);
-      return;
-    }
-
-    /*
      * The model couldn't be reached (Amendment 123). Waiting can help, so instead of `failed`
      * the agent waits for its next try, queued, with its slot freed and its job still live.
      * Anything else ends the bout: failed, done or waiting on helpers all start the count again.
@@ -1554,7 +1408,7 @@ export class Supervisor implements AgentControl {
    * to end `done` too. Only `done` sends one: a question, a failure or a pause leave it
    * waiting. While everything is paused it waits for the pause to end (`release`).
    *
-   * Refused as `sendMessage` refuses (its budget, its folder gone): the row keeps the reason,
+   * Refused as `sendMessage` refuses (its folder gone): the row keeps the reason,
    * like a timed one, and is not tried again. Not where the run is about to be relaunched
    * (`#resumeWanted`) or its job is being stopped, which would be a second run.
    */
@@ -1573,7 +1427,7 @@ export class Supervisor implements AgentControl {
       deleteScheduled(this.#db, m.id);
     } catch (err) {
       // No session to take it: it waits for the next `done`, as a timed one waits for a session.
-      if (!(err instanceof BudgetReachedError) && /cannot receive messages yet/.test(thrown(err))) return;
+      if (/cannot receive messages yet/.test(thrown(err))) return;
       failScheduled(this.#db, m.id, thrown(err));
     }
     broadcastScheduled(this.#db);
@@ -1770,14 +1624,13 @@ export class Supervisor implements AgentControl {
    * that run did not begin as a restart resume.
    *
    * Not sent where nothing may start by itself (everything held until a time, a job paused,
-   * halting or failed, a cap reached, a folder that is gone) or where there is no session
+   * halting or failed, a folder that is gone) or where there is no session
    * to resume: the hold stands and you are asked. True when it was sent.
    */
   #askToHandOff(agent: Agent): boolean {
     if (!agent.sdkSessionId || this.#hold || this.#halting.has(agent.jobId)) return false;
     const job = getJob(this.#db, agent.jobId);
     if (!job || job.status === 'paused' || job.status === 'failed' || !existsSync(job.worktreePath)) return false;
-    if (budgetRefusal(agent)) return false;
     // Every slot taken (Amendment 168): it waits for one as your message would, and goes then.
     if (this.#slotsUsed() >= slotLimit()) {
       insertScheduled(this.#db, agent.id, null, HANDOFF_ASK, 'slot', true);
@@ -2013,7 +1866,7 @@ export class Supervisor implements AgentControl {
    * progress, not a new task: it clears no helpers (Amendment 167) and waits for no slot (Amendment
    * 168), since the wake holds the one pump gave it. Left for later where `#sendWhenDone` would leave
    * it: everything paused, the job being stopped, a relaunch wanted, or a message waiting for a slot,
-   * which goes first. Refused as `sendMessage` refuses (its budget, its folder gone): the row keeps
+   * which goes first. Refused as `sendMessage` refuses (its folder gone): the row keeps
    * the reason, and the wake goes with the report alone. '' when nothing goes.
    */
   #takeWakeMessage(agent: Agent): string {
@@ -2022,9 +1875,7 @@ export class Supervisor implements AgentControl {
     const m = nextWhenDone(this.#db, agent.id);
     if (!m) return '';
     const job = getJob(this.#db, agent.jobId);
-    const refusal =
-      budgetRefusal(agent) ??
-      (job && !existsSync(job.worktreePath) ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : null);
+    const refusal = job && !existsSync(job.worktreePath) ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : null;
     if (refusal) failScheduled(this.#db, m.id, refusal);
     else deleteScheduled(this.#db, m.id);
     broadcastScheduled(this.#db);
@@ -2124,8 +1975,8 @@ export class Supervisor implements AgentControl {
 
   /**
    * Busy, or at a status it can still run from: what `DELETE /api/workspaces/:jobId` refuses on
-   * (Amendment 152, review). Unlike `deleteProject`'s test, the status counts: an agent paused
-   * at a ceiling, `queued` behind a cap or waiting to retry, or `blocked` on a parked request
+   * (Amendment 152, review). Unlike `deleteProject`'s test, the status counts: an agent paused,
+   * `queued` behind a cap or waiting to retry, or `blocked` on a parked request
    * has no run in flight, yet its work is in the worktree and it runs there again. The live
    * runner still counts too, because the status can lag a run that is just starting. Only
    * `done`, `failed` and `stopped` are over (`ENDED_STATUSES`).
@@ -2197,8 +2048,6 @@ export class Supervisor implements AgentControl {
     if (!agent?.sdkSessionId) throw new Error(`agent ${agentId} cannot receive messages yet`);
 
     // Refused, not launched: the status stays as it is and the sentence says why.
-    const refusal = budgetRefusal(agent);
-    if (refusal) throw new BudgetReachedError(refusal);
     const job = getJob(this.#db, agent.jobId);
     if (job && !existsSync(job.worktreePath)) {
       throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
@@ -2249,21 +2098,19 @@ export class Supervisor implements AgentControl {
 
   /**
    * pump() gave this agent a slot: its oldest waiting message goes, in its session, as it would
-   * have when you sent it. Refused as `sendMessage` refuses — a cap reached or the folder gone
-   * while it waited — the row keeps the reason, as a timed one does, and the agent says why.
+   * have when you sent it. Refused as `sendMessage` refuses — the folder gone while it
+   * waited — the row keeps the reason, as a timed one does, and the agent says why.
    */
   #sendForSlot(agent: Agent, m: { id: string; text: string; synthetic: boolean }): void {
     const job = getJob(this.#db, agent.jobId);
-    const refusal = budgetRefusal(agent);
-    if (!agent.sdkSessionId || !job || refusal || !existsSync(job.worktreePath)) {
+    if (!agent.sdkSessionId || !job || !existsSync(job.worktreePath)) {
       failScheduled(
         this.#db,
         m.id,
-        refusal ?? (job ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : `agent ${agent.id} cannot receive messages yet`),
+        job ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : `agent ${agent.id} cannot receive messages yet`,
       );
       broadcastScheduled(this.#db);
-      if (refusal) this.#pause(agent.id, budgetNote(agent));
-      else if (job) this.#refuseGone(agent.id, job);
+      if (job) this.#refuseGone(agent.id, job);
       return;
     }
     deleteScheduled(this.#db, m.id);
@@ -2323,8 +2170,8 @@ export class Supervisor implements AgentControl {
    * the orchestrator hears them as stopped (Amendment 51).
    *
    * ALL OR NOTHING. Everything that can be refused is checked before the first agent is
-   * stopped: the plan (`rerunPlan`), each agent's budget and the job's. A refusal carries
-   * its reason and changes nothing.
+   * stopped: the plan (`rerunPlan`). A refusal carries its reason and changes nothing. A
+   * budget refuses nothing (Amendment 180).
    *
    * Not here: an agent that hasn't started (it reads the new reply when it does), one that
    * was stopped (refused: the ones behind it would wait for good), and the files.
@@ -2343,14 +2190,6 @@ export class Supervisor implements AgentControl {
     if (plan.refusal) throw new RerunRefusedError(plan.refusal);
 
     const going = plan.steps.filter((s) => s.action !== 'wait');
-    for (const s of going) {
-      const sentence = budgetRefusal(getAgent(this.#db, s.agentId)!);
-      if (sentence) throw new RerunRefusedError(`${s.role} can't go again. ${sentence}`);
-    }
-    const job = getJob(this.#db, jobId);
-    if (job && this.#overBudget(job)) {
-      throw new RerunRefusedError("The job has reached its budget, so the agents can't go again. Raise a cap first.");
-    }
 
     this.#rerunning.add(jobId);
     // Held out of `pump` while they stop: each stop frees a slot and pumps, and a sibling
@@ -2688,21 +2527,15 @@ export class Supervisor implements AgentControl {
 
   /**
    * The pause is over, or was never on (a restart after its time). Every agent `hold`
-   * paused is woken as ▶ resume wakes it, and whatever was queued starts. One at its budget
-   * stays paused, with the budget's reason. Returns how many it woke.
+   * paused is woken as ▶ resume wakes it, and whatever was queued starts. Returns how many it woke.
    */
   release(): number {
     this.#hold = false;
     let woke = 0;
     for (const a of listAgents(this.#db)) {
       if (a.status !== 'paused' || lastStatusNote(this.#db, a.id) !== HOLD_NOTE) continue;
-      try {
-        this.resumeAgent(a.id);
-        woke += 1;
-      } catch (err) {
-        if (!(err instanceof BudgetReachedError)) throw err;
-        this.#pause(a.id, budgetNote(a));
-      }
+      this.resumeAgent(a.id);
+      woke += 1;
     }
     // A turn that ended `done` during the pause: its queued message goes now (Amendment 157).
     for (const id of [...this.#owedWhenDone]) {
@@ -2715,15 +2548,12 @@ export class Supervisor implements AgentControl {
   }
 
   /**
-   * ▶ resume. `note`, when given, is said on the status event that queues it: the new day's
-   * continue says why it went (Amendment 140); a person's resume says nothing.
+   * ▶ resume. Never refused for a budget (Amendment 180), so it is how an agent the old
+   * ceiling paused carries on.
    */
-  resumeAgent(agentId: string, note?: string): void {
+  resumeAgent(agentId: string): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent || agent.status !== 'paused') return;
-
-    const refusal = budgetRefusal(agent);
-    if (refusal) throw new BudgetReachedError(refusal);
 
     this.#goWithout(agent);
 
@@ -2739,7 +2569,7 @@ export class Supervisor implements AgentControl {
     setAgentStatus(this.#db, agentId, 'queued');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
-      { kind: 'status', status: 'queued', ...(note ? { error: note } : {}) },
+      { kind: 'status', status: 'queued' },
     );
     this.pump();
   }
@@ -3035,9 +2865,9 @@ let offDay: (() => void) | null = null;
 export function initSupervisor(db: Db): Supervisor {
   const made = new Supervisor(db);
   instance = made;
-  // Budgets are per day: at the day change the new day's budgets are renewed (Amendment 129).
+  // Budgets are per day: at the day change every agent's reads from zero (Amendment 129).
   offDay?.();
-  offDay = onDayTurn((day, was) => made.newDay(day, was));
+  offDay = onDayTurn((_day, was) => made.newDay(was));
   return made;
 }
 

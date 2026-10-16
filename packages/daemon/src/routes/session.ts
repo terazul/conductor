@@ -60,7 +60,6 @@ import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, 
 import { describeRule } from '../session/rules.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import {
-  BudgetReachedError,
   FolderGoneError,
   HandOffRefusedError,
   initSupervisor,
@@ -385,7 +384,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   const sup = initSupervisor(db);
   sup.register();
   arbiter().attach(sup);
-  // What needs you besides a tool call: failures, budget stops, outages (F10, F13).
+  // What needs you besides a tool call: failures, budgets passed, outages (F10, F13).
   const alertsNow = initAlerts(db);
 
   // A daemon killed while agents were blocked comes back with requests that
@@ -398,9 +397,6 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   // pump: a pause still on holds the supervisor before anything queued can start.
   const sched = initScheduler(db, sup);
   await sched.start();
-  // The day changed while the daemon was down (Amendment 140): budget pauses from an earlier
-  // day are continued (or renewed, with the setting off), after the pause above is back on.
-  sup.catchUpDay();
   sup.pump();
 
   app.addHook('onClose', async () => {
@@ -743,8 +739,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       const result = sup.sendMessage(req.params.agentId, body.text.trim(), body.synthetic === true);
       return reply.send({ ok: true, delivery: result });
     } catch (err) {
-      // A budget refusal's message is the sentence to show, so it goes out bare; so is a folder that's gone.
-      const detail = err instanceof BudgetReachedError || err instanceof FolderGoneError ? err.message : String(err);
+      // A folder that's gone says so in a sentence to show, so it goes out bare.
+      const detail = err instanceof FolderGoneError ? err.message : String(err);
       return fail(reply, 409, 'could not deliver message', detail);
     }
   });
@@ -763,12 +759,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/resume', async (req, reply) => {
     if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
-    try {
-      sup.resumeAgent(req.params.agentId);
-    } catch (err) {
-      if (err instanceof BudgetReachedError) return fail(reply, 409, 'at its budget', err.message);
-      throw err;
-    }
+    // Never refused for a budget (Amendment 180).
+    sup.resumeAgent(req.params.agentId);
     return reply.send({ ok: true });
   });
 
@@ -778,7 +770,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    * the worktree is touched. A body is not needed: the plan is whatever the job looks like now.
    *
    * 409 when it can't be done, with the reason in `detail` (the agent has nothing after it, is
-   * still working, an agent after it was stopped or is at its budget): the state is in the way,
+   * still working, an agent after it was stopped): the state is in the way,
    * not the request.
    */
   app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/rerun', async (req, reply) => {

@@ -150,7 +150,7 @@ export interface Agent {
    * its budget (`autonomy.budgetUsd` or `budgetTokens`) is read against. `costUsd` stays the
    * agent's lifetime spend and is no longer what the budget counts. `agentBudget` (budget.ts)
    * reads this when the stamp is the day the caller passes and reads 0 when it is older, so
-   * a page left open past midnight shows a renewed budget before the daemon says a word.
+   * a page left open past midnight shows the new day's zero before the daemon says a word.
    * Absent reads as 0: an agent from before this, or a recording, has spent nothing today.
    */
   spentToday?: DaySpend;
@@ -692,9 +692,10 @@ export interface SendConsoleToAgentResponse {
 
 /**
  *  - 'failed':      an agent ended `failed`. `cause` is the terminal reason.
- *  - 'budget':      an agent stopped on its cap (`budget_exhausted`) or its job's
- *                   (`job_budget_reached`). The caps are per day since Amendment 129, and
- *                   `renewed` says a new day has renewed it.
+ *  - 'budget':      an agent the old ceiling paused, on its cap (`budget_exhausted`) or its
+ *                   job's (`job_budget_reached`), before Amendment 180 took the ceiling away.
+ *                   Nothing raises a new one; it lasts while that agent stays paused, and
+ *                   continue carries on, since no budget refuses anything now.
  *  - 'connection':  the model API is unreachable or refusing the login, or the retries
  *                   ran out. `cause` is a RetryCause. One alert per outage, not per agent.
  *  - 'server_down': a dev server stopped answering and nobody asked it to stop.
@@ -711,8 +712,8 @@ export interface SendConsoleToAgentResponse {
  *                   `attempt` of `maxRetries` this retry, and `retryAt` when it happens.
  *                   Held in memory, like a connection alert. It clears when the try starts.
  *  - 'budget_over': an agent, or its job, is past its budget and still working
- *                   (Amendment 124). A warning: nothing is paused, and it stops only at
- *                   twice the budget. `cause` is 'budget_over' for an agent (`agentIds` is
+ *                   (Amendment 124). A warning, and only that: nothing is paused or
+ *                   stopped, however far past it is (Amendment 180). `cause` is 'budget_over' for an agent (`agentIds` is
  *                   it) or 'job_budget_over' for a job (`jobId`, no `agentIds`), `spent`
  *                   and `budget` are in `unit`.
  */
@@ -779,12 +780,6 @@ export interface Alert {
   retryAt?: string;
   /** budget_over (Amendment 124): what `spent` and `budget` count. Absent is dollars. */
   unit?: 'usd' | 'tokens';
-  /**
-   * budget (Amendment 129): the new day renewed this agent's budget while it was paused at the
-   * ceiling. It is still paused, since nothing resumes by itself, and continue needs no raise.
-   * Present only when true.
-   */
-  renewed?: boolean;
   /**
    * finished and merged (Amendment 144): the job's branch, the branch it goes into, and how
    * many commits it had that one lacked when the job finished. finished: `detail` says why it

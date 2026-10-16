@@ -346,7 +346,7 @@ export function foldLabel(statuses: readonly AgentStatus[]): string {
  */
 export function meterTitle(b: Budget, whose: string): string {
   const said = (n: number): string => budgetWords(b.unit, n);
-  const tail = b.state === 'ok' ? '' : b.state === 'over' ? ` — over it; a warning, it stops at ${said(b.ceiling)}` : ' — at its ceiling';
+  const tail = b.state === 'ok' ? '' : ' — over it; a warning only, nothing stops';
   return `${whose}: ${said(b.spent)} of ${said(b.cap)} today, ${b.pct}%${tail}`;
 }
 

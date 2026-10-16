@@ -272,17 +272,13 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   check('and no continue when there is no session to continue', lost === 'open dismiss', lost);
 
   const budget = alert({ kind: 'budget', cause: 'budget_exhausted' });
-  // Amendment 124: the stop is at twice the budget ($10 of a $5 budget), so that is where the card raises.
-  const atCap = ids(alertActions(budget, [agent({ costUsd: 10 })]));
-  check(
-    'at its ceiling, every way on raises it — continue alone would be refused',
-    atCap === 'raise:10->15 raise:25->30 open dismiss',
-    atCap,
-  );
-  const cents = alertActions(budget, [agent({ costUsd: 0.02, autonomy: { ...agent().autonomy, budgetUsd: 0.01 } })]);
-  check('the raise starts from the cap, not from what was spent', cents[0]?.id === 'raise' && cents[0].to === 10.01);
+  // Amendment 180: nothing refuses a continue for a budget, so an agent the old ceiling paused just continues.
+  const atCap = ids(alertActions(budget, [agent({ costUsd: 10, spentToday: { day: localDayOf(), usd: 10, tokens: 0 } })]));
+  check('paused by the old ceiling, at twice its budget, it continues with no raise first', atCap === 'continue:a1 open dismiss', atCap);
+  const far = ids(alertActions(budget, [agent({ costUsd: 50, spentToday: { day: localDayOf(), usd: 50, tokens: 0 } })]));
+  check('and so it does at ten times it', far === 'continue:a1 open dismiss', far);
   const raised = ids(alertActions(budget, [agent({ autonomy: { ...agent().autonomy, budgetUsd: 15 } })]));
-  check('raised already, it just continues', raised === 'continue:a1 open dismiss', raised);
+  check('raised already, it just continues too', raised === 'continue:a1 open dismiss', raised);
   check('an agent this tab has not heard of can only be put away', ids(alertActions(budget, [])) === 'dismiss');
 
   const outage = alert({ kind: 'connection', cause: 'unreachable', projectId: null, agentIds: ['a1', 'a2'], attempt: 4 });
@@ -364,7 +360,7 @@ console.log('\n5 · a stopped agent is offered only what can work, and is counte
   const note = alertNotice(budget, [agent({ costUsd: 10 })], projects);
   check(
     'a budget notification reads like a request one',
-    note.title === 'demo · builder needs you' && note.body === 'builder stopped at twice its $5 daily budget',
+    note.title === 'demo · builder needs you' && note.body === 'builder was paused by its $5 daily budget, which only warns now — continue carries on',
     JSON.stringify(note),
   );
   const net = alertNotice(outage, both, projects);
@@ -627,7 +623,8 @@ console.log("\n9 · an agent's budget warns: the card for it, and the one that s
   const tokenAgent = agent({ costUsd: 0, inputTokens: 400_000, outputTokens: 150_000, autonomy: { mode: 'default', allowedTools: [], disallowedTools: [], budgetUsd: null, budgetTokens: 500_000 } });
   const tokens = ids(alertActions(alert({ unit: 'tokens', spent: 550_000, budget: 500_000 }), [tokenAgent]));
   check('a token budget raises in tokens: +100k and +500k', tokens === 'raise:100000->600000tokens only raise:500000->1000000tokens only open dismiss', tokens);
-  check('at its ceiling the warning offers no raise: the budget-reached card has them', ids(alertActions(alert(), [agent({ costUsd: 10 })])) === 'open dismiss');
+  const twice = ids(alertActions(alert({ spent: 10 }), [agent({ costUsd: 10, spentToday: { day: localDayOf(), usd: 10, tokens: 0 } })]));
+  check('at twice its budget the warning still only raises: there is no ceiling past which it stops (Amendment 180)', twice === 'raise:10->15 only raise:25->30 only open dismiss', twice);
   check('an agent this tab has not heard of can only be put away', ids(alertActions(alert(), [])) === 'dismiss');
 
   // A job's warning has no agent of its own: it raises the one still spending that has spent the most.
@@ -644,10 +641,10 @@ console.log("\n9 · an agent's budget warns: the card for it, and the one that s
   const jobActions = alertActions(jobAlert, team);
   check('and names it, since the card is about the job', jobActions.at(-2)?.id === 'open' && (jobActions.at(-2) as { role?: string }).role === 'developer' && jobActions[0]?.id === 'raise' && jobActions[0].agentId === 'a2', ids(jobActions));
 
-  // The card that stops (kind 'budget') raises at twice the budget, in the agent's unit.
+  // An agent the old ceiling paused (kind 'budget') only continues, in either unit (Amendment 180).
   const stopped = alert({ kind: 'budget', cause: 'budget_exhausted' });
-  check('the stop at twice a token budget raises in tokens (it used to offer only a continue that is refused)', ids(alertActions(stopped, [{ ...tokenAgent, status: 'paused', inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 } }])) === 'raise:100000->600000tokens raise:500000->1000000tokens open dismiss');
-  check('and between the budget and the ceiling a stopped agent only continues', ids(alertActions(stopped, [agent({ status: 'paused', costUsd: 7 })])) === 'continue open dismiss');
+  check('paused at twice a token budget, it continues with no raise', ids(alertActions(stopped, [{ ...tokenAgent, status: 'paused', inputTokens: 600_000, outputTokens: 400_000, spentToday: { day: localDayOf(), usd: 0, tokens: 1_000_000 } }])) === 'continue open dismiss');
+  check('and so does one paused between the budget and twice it', ids(alertActions(stopped, [agent({ status: 'paused', costUsd: 7 })])) === 'continue open dismiss');
 
   const projects: Project[] = [{ id: 'p1', name: 'demo' } as Project];
   const note = alertNotice(alert(), [agent()], projects);
@@ -658,7 +655,7 @@ console.log("\n9 · an agent's budget warns: the card for it, and the one that s
   check('the card has a label for the kind, in amber like a stop', /budget_over: \{ label: 'Over its daily budget', tone: 'var\(--need\)' \}/.test(card));
   check('a raise that only raises does not continue; one that continues still does', /if \(a\.onlyRaise\) void cmd\.run\('Raising the budget', \(\) => raiseBudget\(agent, a\.to, a\.unit\)/.test(card) && /raiseAndContinue\(agent, a\.to, a\.unit\)/.test(card));
   check('a token raise sends budgetTokens, a dollar one budgetUsd', /unit === 'tokens' \? \{ budgetTokens: to \} : \{ budgetUsd: to \}/.test(api));
-  check('the card says it is only a warning, and the ceiling, in the words of the one set (Amendment 140)', /A warning only:/.test(card) && /\{` \$\{ceilingWords\(\)\} `\}the budget/.test(card) && /k="stops at"/.test(card));
+  check('the card says it is only a warning, however far past it goes, and names no ceiling (Amendment 180)', /A warning only:/.test(card) && /however far past/.test(card) && !/ceilingWords|ceilingOf|k="stops at"/.test(card));
 }
 
 console.log("\n10 · a budget is per day: the cards, and what a new day changes (Amendment 129)");
@@ -683,7 +680,7 @@ console.log("\n10 · a budget is per day: the cards, and what a new day changes 
     endedAt: null,
     ...over,
   });
-  const stop = (renewed?: boolean): Alert => ({
+  const stop = (): Alert => ({
     id: 'al_stop',
     kind: 'budget',
     cause: 'budget_exhausted',
@@ -691,18 +688,17 @@ console.log("\n10 · a budget is per day: the cards, and what a new day changes 
     jobId: 'j1',
     agentIds: ['a1'],
     since: new Date().toISOString(),
-    ...(renewed ? { renewed: true } : {}),
   });
   const ids = (as: readonly AlertAction[]): string => as.map((a) => (a.id === 'raise' ? `raise:${a.by}->${a.to}` : a.id === 'continue' ? `continue` : a.id)).join(' ');
 
-  // Paused at its ceiling today: every way on raises the budget. The next morning the same agent only continues.
+  // Paused by the old ceiling: today, the next morning, with nothing spent: each only continues (Amendment 180).
   const atCeiling = mk('a1', { spentToday: { day, usd: 55, tokens: 0 } });
-  check('at its ceiling today, the card raises the daily budget', ids(alertActions(stop(), [atCeiling])) === 'raise:10->35 raise:25->50 open dismiss', ids(alertActions(stop(), [atCeiling])));
+  check('at more than twice its budget today, the card still only continues', ids(alertActions(stop(), [atCeiling])) === 'continue open dismiss', ids(alertActions(stop(), [atCeiling])));
   const nextDay = mk('a1', { spentToday: { day: before, usd: 55, tokens: 0 } });
-  check('a tab that still has yesterday\'s stamp offers a plain continue, with no raise', ids(alertActions(stop(true), [nextDay])) === 'continue open dismiss', ids(alertActions(stop(true), [nextDay])));
-  check('and so does the daemon\'s own renewed figure: nothing spent on the new day', ids(alertActions(stop(true), [mk('a1', { spentToday: { day, usd: 0, tokens: 0 } })])) === 'continue open dismiss');
-  const renewed = alertNotice(stop(true), [nextDay], [{ id: 'p1', name: 'demo' } as Project]);
-  check('the notification says the budget was renewed, not that it needs a raise', renewed.title === 'demo · builder needs you' && /renewed for the new day, so continue needs no raise/.test(renewed.body), JSON.stringify(renewed));
+  check('and so does one that still has yesterday\'s stamp', ids(alertActions(stop(), [nextDay])) === 'continue open dismiss');
+  check('and one with nothing spent on the new day', ids(alertActions(stop(), [mk('a1', { spentToday: { day, usd: 0, tokens: 0 } })])) === 'continue open dismiss');
+  const paused = alertNotice(stop(), [atCeiling], [{ id: 'p1', name: 'demo' } as Project]);
+  check('the notification says continue carries on, not that it needs a raise or a renewal', paused.title === 'demo · builder needs you' && paused.body === 'builder was paused by its $25 daily budget, which only warns now — continue carries on', JSON.stringify(paused));
 
   // The job's warning raises the agent that spent the most TODAY, not the one with the largest lifetime figure.
   const team = [
@@ -714,7 +710,7 @@ console.log("\n10 · a budget is per day: the cards, and what a new day changes 
 
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
   const alerts = readFileSync(new URL('./alerts.ts', import.meta.url), 'utf8');
-  check('the card tells what a renewed budget means: still paused, press continue', /alert\.kind === 'budget' && alert\.renewed &&/.test(card) && /Nothing resumes by itself while "continue at midnight"/.test(card));
+  check('the card of an old pause says continue carries it on, with nothing renewed and nothing continuing by itself', /alert\.kind === 'budget' && \(/.test(card) && /continue carries it on/.test(card) && /Nothing continues it by itself/.test(card) && !/renewed|continue at midnight/.test(card + alerts));
   check('the warning\'s notification says daily', /is over its daily budget/.test(alerts));
   check('nothing here compares the lifetime figure with a budget', !/costUsd\s*>=?\s*\w*(cap|budget)/i.test(alerts + card));
 }
