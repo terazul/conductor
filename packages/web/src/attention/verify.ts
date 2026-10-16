@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { MONTHLY_TITLE, alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, monthlyNote, resumable, waitingRoles, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime, soundHint } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -805,9 +805,29 @@ console.log('\n12 · the sound plays after a reload too, once you click or type 
   check('the Needs You panel shows the sound pill through soundHint', /soundHint\(ladderPrefs\.soundEnabled, ladderPrefs\.soundArmed, channelHint\(c, oldestMs\)\)/.test(panel));
 }
 
+console.log('\n9 · a monthly budget only warns (Amendment 182)');
+{
+  const fleet: Alert = { id: 'monthly:2026-10', kind: 'monthly_budget', cause: 'monthly budget reached', projectId: null, jobId: null, agentIds: [], since: '2026-10-16T09:00:00Z', spent: 104, budget: 100 };
+  const mine: Alert = { ...fleet, id: 'monthly:2026-10:p1', cause: 'project monthly budget reached', projectId: 'p1' };
+  const projects: Project[] = [{ id: 'p1', name: 'demo' } as Project];
+  check('the fleet\'s card can only be put away: nothing to continue, raise or stop', alertActions(fleet, []).map((a) => a.id).join() === 'dismiss');
+  check('and so can a project\'s', alertActions(mine, []).map((a) => a.id).join() === 'dismiss');
+  check('the fleet\'s reads as the month', JSON.stringify(alertTitle(fleet, [])) === JSON.stringify({ head: "this month's spend", subject: 'reached the monthly budget' }), JSON.stringify(alertTitle(fleet, [])));
+  check('a project\'s as its month', JSON.stringify(alertTitle(mine, [])) === JSON.stringify({ head: "this project's month", subject: 'reached its monthly budget' }), JSON.stringify(alertTitle(mine, [])));
+  check('its word is "over monthly budget"', alertWord(fleet) === 'over monthly budget' && alertWord(mine) === 'over monthly budget');
+  const n1 = alertNotice(fleet, [], projects);
+  const n2 = alertNotice(mine, [], projects);
+  check('the fleet\'s notification', n1.title === MONTHLY_TITLE && MONTHLY_TITLE === "This month's budget reached" && n1.body === "this month's spend reached the monthly budget", JSON.stringify(n1));
+  check('a project\'s carries its name', n2.title === "demo · This month's budget reached" && n2.body === "this project's month reached its monthly budget", JSON.stringify(n2));
+  check('the note says agents keep going, how to raise it, and that it resets on the 1st', monthlyNote(null) === 'A warning only: agents keep going. Raise the budget on Settings (9), or stop agents yourself. It resets on the 1st.');
+  check('a project\'s says so of its agents, and its Fleet card\'s Edit', monthlyNote('demo') === "A warning only: demo's agents keep going. Raise its budget from its Fleet card's Edit, or stop agents yourself. It resets on the 1st.");
+  const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
+  check('the card shows spent of budget, this month, and the note', /monthly_budget: \{ label: 'Monthly budget'/.test(card) && /k="this month"/.test(card) && /monthlyNote\(project\)/.test(card));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack E verify: PASS — waits, tool calls and answers read as they should.\n'
+    ? '\nTrack E verify: PASS — waits, tool calls and answers read as they should; a monthly budget only warns.\n'
     : `\nTrack E verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

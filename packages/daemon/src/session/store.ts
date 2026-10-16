@@ -54,6 +54,8 @@ interface ProjectRow {
   /** Set by `setDefaultBranch` (Amendment 117); not on the wire `Project`, nothing outside this file reads it. */
   default_branch_set: number;
   created_at: string;
+  /** The project's monthly budget in dollars, or null for none (290_project_monthly_budget.sql). */
+  monthly_budget_usd?: number | null;
 }
 
 /** A project's directories after its first, in the order they were added (Amendment 39). */
@@ -76,6 +78,8 @@ const toProject = (db: Db, r: ProjectRow): Project => {
     extraDirs: projectDirs(db, r.id),
     // Only when there are some, so a project's shape is what it always was (Amendment 55).
     ...(notes.length > 0 ? { notes } : {}),
+    // The same: only when one is set, so a project without one reads as before (Amendment 182).
+    ...(r.monthly_budget_usd != null ? { monthlyBudgetUsd: r.monthly_budget_usd } : {}),
   };
 };
 
@@ -246,6 +250,15 @@ export function defaultBranchIsSet(db: Db, id: string): boolean {
  */
 export function setDefaultBranch(db: Db, id: string, branch: string): Project | undefined {
   db.prepare('UPDATE projects SET default_branch = ?, default_branch_set = 1 WHERE id = ?').run(branch, id);
+  return getProject(db, id);
+}
+
+/**
+ * Set a project's monthly budget in dollars, or with null take it away (Amendment 182). The
+ * caller has checked it (PATCH /api/projects/:id). It only warns: Needs You's `monthly_budget`.
+ */
+export function setProjectMonthlyBudget(db: Db, id: string, usd: number | null): Project | undefined {
+  db.prepare('UPDATE projects SET monthly_budget_usd = ? WHERE id = ?').run(usd, id);
   return getProject(db, id);
 }
 
@@ -620,19 +633,6 @@ export function lastStatusNote(db: Db, agentId: string): string | null {
   return typeof p.error === 'string' ? p.error : null;
 }
 
-/**
- * The local day (`localDay`) the agent's last status event was written on, or null for none.
- * A daemon started after midnight tells by this which budget pauses are from an earlier day
- * (Amendment 140): it had no day turn to see.
- */
-export function lastStatusDay(db: Db, agentId: string): string | null {
-  const r = row<{ ts: string }>(
-    db.prepare(`SELECT ts FROM events WHERE agent_id = ? AND kind = 'status' ORDER BY seq DESC LIMIT 1`).get(agentId),
-  );
-  const t = r ? Date.parse(r.ts) : NaN;
-  return Number.isFinite(t) ? localDay(new Date(t)) : null;
-}
-
 export function listAgents(db: Db): Agent[] {
   return readAgents(db);
 }
@@ -815,6 +815,14 @@ export function localDay(d: Date = dayClock()): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * The local month, `YYYY-MM`: the first seven characters of `localDay`, so a month turns when
+ * its last day does (Amendment 182). What the month's figures and the monthly budgets read.
+ */
+export function localMonth(d: Date = dayClock()): string {
+  return localDay(d).slice(0, 7);
+}
+
 export function addCostToday(db: Db, delta: number): void {
   if (delta <= 0) return;
   db.prepare(
@@ -828,6 +836,14 @@ export function costToday(db: Db): number {
     db.prepare('SELECT cost_usd FROM cost_daily WHERE day = ?').get(localDay()),
   );
   return r?.cost_usd ?? 0;
+}
+
+/** What the fleet has spent this local month: the month's days of `cost_daily`, summed (Amendment 182). */
+export function costMonth(db: Db): number {
+  const r = row<{ total: number }>(
+    db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_daily WHERE substr(day, 1, 7) = ?').get(localMonth()),
+  );
+  return r?.total ?? 0;
 }
 
 /** Cumulative spend for a job over its whole life. Information: no cap reads it (Amendment 129). */
@@ -904,30 +920,43 @@ export function costTotal(db: Db): number {
 }
 
 /**
- * Each project's spend today and over its whole life, from `project_spend_daily`, which no
- * removal touches. Only the projects there are: a forgotten project's rows are kept, unread.
- * Every project is listed, with zeros when it has spent nothing.
+ * Each project's spend today, this local month (Amendment 182) and over its whole life, from
+ * `project_spend_daily`, which no removal touches. Only the projects there are: a forgotten
+ * project's rows are kept, unread. Every project is listed, with zeros when it has spent nothing.
  */
 export function projectSpend(db: Db): ProjectSpend[] {
-  return rows<{ id: string; today: number; total: number; tokens_today: number; tokens_total: number }>(
+  type Sums = { id: string; today: number; month: number; total: number; tokens_today: number; tokens_month: number; tokens_total: number };
+  const day = localDay();
+  const month = localMonth();
+  return rows<Sums>(
     db
       .prepare(
         `SELECT p.id,
-                COALESCE(SUM(CASE WHEN s.day = ? THEN s.cost_usd END), 0) AS today,
-                COALESCE(SUM(s.cost_usd), 0)                              AS total,
-                COALESCE(SUM(CASE WHEN s.day = ? THEN s.tokens END), 0)   AS tokens_today,
-                COALESCE(SUM(s.tokens), 0)                                AS tokens_total
+                COALESCE(SUM(CASE WHEN s.day = ? THEN s.cost_usd END), 0)               AS today,
+                COALESCE(SUM(CASE WHEN substr(s.day, 1, 7) = ? THEN s.cost_usd END), 0) AS month,
+                COALESCE(SUM(s.cost_usd), 0)                                            AS total,
+                COALESCE(SUM(CASE WHEN s.day = ? THEN s.tokens END), 0)                 AS tokens_today,
+                COALESCE(SUM(CASE WHEN substr(s.day, 1, 7) = ? THEN s.tokens END), 0)   AS tokens_month,
+                COALESCE(SUM(s.tokens), 0)                                              AS tokens_total
            FROM projects p LEFT JOIN project_spend_daily s ON s.project_id = p.id
           GROUP BY p.id
           ORDER BY p.id`,
       )
-      .all(localDay(), localDay()),
-  ).map((r) => ({ projectId: r.id, today: r.today, total: r.total, tokensToday: r.tokens_today, tokensTotal: r.tokens_total }));
+      .all(day, month, day, month),
+  ).map((r) => ({
+    projectId: r.id,
+    today: r.today,
+    month: r.month,
+    total: r.total,
+    tokensToday: r.tokens_today,
+    tokensMonth: r.tokens_month,
+    tokensTotal: r.tokens_total,
+  }));
 }
 
-/** The `cost` frame's figures, and the snapshot's: today, the fleet's all-time total, each project's pair. */
-export function spendFigures(db: Db): { costToday: number; costTotal: number; projectSpend: ProjectSpend[] } {
-  return { costToday: costToday(db), costTotal: costTotal(db), projectSpend: projectSpend(db) };
+/** The `cost` frame's figures, and the snapshot's: today, this month, the fleet's all-time total, each project's three. */
+export function spendFigures(db: Db): { costToday: number; costMonth: number; costTotal: number; projectSpend: ProjectSpend[] } {
+  return { costToday: costToday(db), costMonth: costMonth(db), costTotal: costTotal(db), projectSpend: projectSpend(db) };
 }
 
 /**

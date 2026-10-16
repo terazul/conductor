@@ -55,7 +55,7 @@ import {
   retryDelaysValue,
   retryDelaysWords,
 } from './budgets.js';
-import { DAILY_KEY, OVER_AT, WARN_AT, budgetProblem, dailyMeter, parseBudget } from '../shell/spend.js';
+import { DAILY_KEY, MONTHLY_KEY, OVER_AT, WARN_AT, budgetProblem, dailyMeter, monthMeter, parseBudget } from '../shell/spend.js';
 import {
   keyLine,
   loginLine,
@@ -417,6 +417,53 @@ function SpendSection() {
           The status bar shows it as a bar: yellow from {Math.round(WARN_AT * 100)}%, red from{' '}
           {Math.round(OVER_AT * 100)}%. Reaching it is a warning in Needs You; nothing is stopped. The day is yours:
           it resets at midnight here.
+        </p>
+      )}
+      <MonthlyField />
+    </>
+  );
+}
+
+/**
+ * The fleet's monthly budget (Amendment 182), beside the daily one and the same field. A project's
+ * own is set from its Fleet card's Edit.
+ */
+function MonthlyField() {
+  const stored = useSetting(MONTHLY_KEY);
+  const { costMonth } = useStatusBar();
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? stored ?? '';
+  const problem = draft === null ? null : budgetProblem(draft);
+  const budget = parseBudget(stored);
+  const spent = costMonth ?? 0;
+  const commit = (): void => {
+    if (draft === null || problem) return;
+    writeSetting(MONTHLY_KEY, draft.trim() === '' ? null : String(Number(draft.trim())));
+    setDraft(null);
+  };
+  return (
+    <>
+      <label className="st-field">
+        <span>monthly budget, in dollars — empty for none</span>
+        <input
+          inputMode="decimal"
+          value={shown}
+          placeholder="none"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            else if (e.key === 'Escape') setDraft(null);
+          }}
+        />
+      </label>
+      {problem ? (
+        <p className="st-err">{problem}</p>
+      ) : (
+        <p className="st-dim">
+          {budget !== null ? `${monthMeter(spent, budget).label}. ` : `$${spent.toFixed(2)} spent this month. `}
+          The status bar shows it after today, in the same colours. Reaching it is a warning in Needs You; nothing is
+          stopped. The month is yours too: it resets on the 1st. Each project can have its own, from its Fleet card's Edit.
         </p>
       )}
     </>

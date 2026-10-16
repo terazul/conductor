@@ -848,6 +848,20 @@
   cursor: help;
 }
 
+/* This month's spend against the monthly budget (Amendment 182): the daily meter's colours, no bar. */
+.sh-spend-month {
+  color: var(--ink3);
+  cursor: help;
+}
+
+.sh-spend-month[data-tone='warn'] {
+  color: var(--need);
+}
+
+.sh-spend-month[data-tone='over'] {
+  color: var(--fail);
+}
+
 /* Pause everything until a time (Amendment 111): the bar's control, its panel, and the on state. */
 .sh-pause-btn {
   font: inherit;

@@ -19,7 +19,8 @@ import { api } from '../lib/feed.js';
 export { removeProject, type ProjectRemoval } from '../spawn/endpoints.js';
 
 /**
- * Edit a project's name and/or path.
+ * Edit a project's name and/or path, and its monthly budget in dollars, null for none
+ * (Amendment 182).
  *
  * Send only what changed — the daemon treats the body as a partial, so omitting
  * `path` leaves it alone rather than clearing it. Also not in `wire.ts`, for
@@ -27,7 +28,7 @@ export { removeProject, type ProjectRemoval } from '../spawn/endpoints.js';
  */
 export function editProject(
   projectId: string,
-  patch: { name?: string; path?: string },
+  patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null },
 ): Promise<{ project: Project }> {
   return api(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: patch });
 }

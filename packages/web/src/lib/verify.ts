@@ -72,7 +72,24 @@ import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents,
 import { NAV_TREE_KEY } from '../shell/navtree.js';
 import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortFacts, sortProjects, type SortFacts } from '../fleet/order.js';
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
-import { OVER_AT, TOTAL_TITLE, WARN_AT, agentPairWords, budgetProblem, dailyMeter, parseBudget, projectPairWords, projectSpendOf, toneOf, totalWords } from '../shell/spend.js';
+import {
+  MONTHLY_KEY,
+  MONTH_TITLE,
+  OVER_AT,
+  TOTAL_TITLE,
+  WARN_AT,
+  agentPairWords,
+  budgetProblem,
+  dailyMeter,
+  monthMeter,
+  monthWords,
+  monthlyDraft,
+  parseBudget,
+  projectPairWords,
+  projectSpendOf,
+  toneOf,
+  totalWords,
+} from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
   RETRY_DELAYS_KEY,
@@ -1816,8 +1833,8 @@ console.log('\n· today and all-time totals for each agent, project and the flee
   const shell = src('../shell/shell.tsx');
   check(
     "the bar draws today's spend (with its meter) and then the total, which is absent from a daemon before it",
-    /const \{ slots, costToday, costTotal, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costTotal=\{costTotal\} \/>/.test(shell) &&
-      /costTotal === null \? null/.test(shell) && /title=\{TOTAL_TITLE\}/.test(shell) && /\{totalWords\(costTotal\)\}/.test(shell) && /\{m\.label\}\s*<\/span>\s*\{total\}/.test(shell),
+    /const \{ slots, costToday, costMonth, costTotal, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costMonth=\{costMonth\} costTotal=\{costTotal\} \/>/.test(shell) &&
+      /costTotal === null \? null/.test(shell) && /title=\{TOTAL_TITLE\}/.test(shell) && /\{totalWords\(costTotal\)\}/.test(shell) && /\{m\.label\}\s*<\/span>\s*\{month\}\s*\{total\}/.test(shell),
   );
 
   // ── a project's pair ──
@@ -1836,8 +1853,8 @@ console.log('\n· today and all-time totals for each agent, project and the flee
   const proj = src('../fleet/project.tsx');
   check(
     "the Project screen's header and its column read the project's pair, not the current agents' costUsd",
-    /projectPairWords\(projectSpendOf\(spendList, active \?\? '', agents\)\)/.test(proj) && /<span\s+className="pj-headspend"[\s\S]*?<b>\{spend\.today\}<\/b> · \{spend\.total\}/.test(proj) &&
-      /<span>spend<\/span>\s*<span[^>]*>\s*\{spend\.today\} · \{spend\.total\}/.test(proj) && !/a\.costUsd, 0\)/.test(proj),
+    /projectPairWords\(projectSpendOf\(spendList, active \?\? '', agents\)\)/.test(proj) && /<span\s+className="pj-headspend"[\s\S]*?<b>\{spend\.today\}<\/b>\s*\{spend\.month && ` · \$\{spend\.month\}`\} · \{spend\.total\}/.test(proj) &&
+      /<span>spend<\/span>\s*<span[^>]*>\s*\{spend\.today\}\s*\{spend\.month && ` · \$\{spend\.month\}`\} · \{spend\.total\}/.test(proj) && !/a\.costUsd, 0\)/.test(proj),
   );
   check("and so does each Fleet card's footer", /projectPairWords\(projectSpendOf\(spendList, project\.id, agents\)\)/.test(src('../fleet/card.tsx')) && /className="fl-card-spend"/.test(src('../fleet/card.tsx')));
   const facts = sortFacts([{ id: P }], here, [], ps);
@@ -1935,9 +1952,47 @@ console.log("\n· a Fleet card's agents fold, start folded, are kept per card, a
   check('the toggle is drawn with tokens only, amber when one needs you', rules.every((b) => b !== '' && !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(b)) && /color: var\(--need\)/.test(rules[2]!));
 }
 
+console.log('\n39 · this month beside today, and a monthly budget beside the daily one (Amendment 182)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  check('the month meter keeps the daily colours: green, yellow from 75%, red from 95%', monthMeter(5, 10).tone === 'ok' && monthMeter(7.5, 10).tone === 'warn' && monthMeter(9.5, 10).tone === 'over' && monthMeter(30, 10).fraction === 1);
+  check('it says spend of budget, this month', monthMeter(42.1, 100).label === '$42.10 of $100.00 this month', monthMeter(42.1, 100).label);
+  check('under, what is left and that it resets on the 1st', monthMeter(40, 100).title === "40% of this month's budget, $60.00 left. Resets on the 1st.", monthMeter(40, 100).title);
+  check('over, by how much, and that agents keep going', monthMeter(130, 100).title === "130% of this month's budget — $30.00 over. Agents keep going; it only warns.", monthMeter(130, 100).title);
+  check('with no monthly budget the bar says "· $X this month"', monthWords(40.1) === '· $40.10 this month' && monthWords(0) === '· $0.00 this month');
+  check('and its hover says from when', MONTH_TITLE === 'spent by every agent this month, from the 1st, in local time');
+  const daemon = readFileSync(new URL('../../../daemon/src/daily.ts', import.meta.url), 'utf8');
+  check("the monthly setting is the daemon's", MONTHLY_KEY === 'conductor.monthlyBudget' && daemon.includes("MONTHLY_KEY = 'conductor.monthlyBudget'"));
+  const same = monthlyDraft('50', 50);
+  const cleared = monthlyDraft('  ', 50);
+  const set = monthlyDraft('75.5', null);
+  const bad = monthlyDraft('-3', 50);
+  check("a project's draft: unchanged sends nothing", 'send' in same && same.send === undefined && 'send' in monthlyDraft('', undefined) && (monthlyDraft('', undefined) as { send: unknown }).send === undefined);
+  check('emptied sends null, a figure sends dollars', 'send' in cleared && cleared.send === null && 'send' in set && set.send === 75.5);
+  check('anything else says why, before it is sent', 'problem' in bad && 'problem' in monthlyDraft('lots', null) && 'problem' in monthlyDraft('2000000', null));
+  check("a project's pair carries its month when the daemon sends one", projectPairWords({ today: 1, month: 12.5, total: 40, tokensToday: 0, tokensMonth: 0, tokensTotal: 0 }).month === 'month $12.50');
+  check('in tokens where nothing reported dollars', projectPairWords({ today: 0, month: 0, total: 0, tokensToday: 0, tokensMonth: 3_400, tokensTotal: 9_000 }).month === 'month 3.4k tok');
+  check('and none from a daemon before it', projectPairWords({ today: 1, total: 2, tokensToday: 0, tokensTotal: 0 }).month === undefined);
+  const shell = src('../shell/shell.tsx');
+  check(
+    'the status bar draws the month between today and the total: the meter with a budget, the figure without, nothing from an older daemon',
+    /function MonthSpend\(\{ costMonth \}/.test(shell) && /parseBudget\(useSetting\(MONTHLY_KEY\)\)/.test(shell) && /if \(costMonth === null\) return null/.test(shell) &&
+      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell),
+  );
+  const css = src('../shell/shell.css');
+  const month = ['.sh-spend-month {', ".sh-spend-month[data-tone='warn'] {", ".sh-spend-month[data-tone='over'] {"].map((c) => css.split(c)[1]?.split('}')[0] ?? '');
+  check("its colours are the daily meter's, tokens only", month.every((b) => b !== '' && !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(b)) && /var\(--need\)/.test(month[1]!) && /var\(--fail\)/.test(month[2]!), month.join(' | '));
+  const store = src('./store.ts');
+  check('a cost frame moves the month, and an older one leaves it', /if \(frame\.costMonth !== undefined\) s\.costMonth = frame\.costMonth/.test(store) && /s\.costMonth = snap\.costMonth \?\? null/.test(store));
+  const card = src('../fleet/card.tsx');
+  check("a Fleet card's Edit sets the project's monthly budget, and its footer reads the month", /monthlyDraft\(monthly, project\.monthlyBudgetUsd\)/.test(card) && /monthlyBudgetUsd/.test(card) && /\{spend\.month && ` · \$\{spend\.month\}`\}/.test(card));
+  const settings = src('../settings/route.tsx');
+  check('Settings has the monthly budget beside the daily one', /function MonthlyField\(/.test(settings) && /writeSetting\(MONTHLY_KEY/.test(settings) && /<MonthlyField \/>/.test(settings));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

@@ -49,8 +49,8 @@ import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { agentBudget, budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
-import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
-import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
+import { costMonth, costToday, dueNotes, getAgent, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend } from './store.js';
+import { DAILY_KEY, MONTHLY_KEY, dailyBudget, monthlyBudget, onCostChanged, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
 import { finishAlerts, onFinishesChanged } from './finish.js';
 
@@ -128,9 +128,10 @@ export class Alerts {
     this.#off.push(eventLog().subscribe((e) => this.#onEvent(e)));
     // Not the `dev_server` event: forgetting a server that is already down has none.
     this.#off.push(onServersChanged(() => this.refresh()));
-    // The daily budget (Amendment 59): checked when the spend grows or the budget moves.
+    // The daily budget (Amendment 59), and the monthly ones (Amendment 182): checked when the
+    // spend grows or a budget moves. A project's is set by its PATCH, which refreshes.
     this.#off.push(onCostChanged(() => this.refresh()));
-    this.#off.push(onSettingsChanged((changed) => changed.includes(DAILY_KEY) && this.refresh()));
+    this.#off.push(onSettingsChanged((changed) => (changed.includes(DAILY_KEY) || changed.includes(MONTHLY_KEY)) && this.refresh()));
     // An agent starts or stops waiting to be tried again (Amendment 123).
     this.#off.push(onRetryChanged(() => this.refresh()));
     // A job finished and was offered, or merged by itself (Amendment 144).
@@ -161,7 +162,7 @@ export class Alerts {
       ...this.#serversDown(),
       ...finishAlerts(this.#db),
     ].sort((a, b) => a.since.localeCompare(b.since));
-    return [...this.#daily(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
+    return [...this.#daily(), ...this.#monthly(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
       (a) => !this.#dismissed(a.id),
     );
   }
@@ -229,6 +230,41 @@ export class Alerts {
         budget,
       },
     ];
+  }
+
+  /** When a month's spend first reached its budget, by alert id, so `since` holds still. */
+  #monthlySince = new Map<string, string>();
+
+  /**
+   * This local month's spend has reached a monthly budget (Amendment 182): the fleet's, from
+   * Settings, and each project's that has one. A warning only, as the daily one is: nothing is
+   * paused, held or refused. One per month for each — its id carries the month, and a project's its
+   * id too — so dismissing it lasts the month, and the next one starts clean.
+   */
+  #monthly(): Alert[] {
+    const month = localMonth();
+    const since = (id: string): string => {
+      if (!this.#monthlySince.has(id)) this.#monthlySince.set(id, new Date().toISOString());
+      return this.#monthlySince.get(id)!;
+    };
+    const out: Alert[] = [];
+    const fleet = monthlyBudget();
+    const spent = fleet === null ? 0 : costMonth(this.#db);
+    if (fleet !== null && spent >= fleet) {
+      const id = `monthly:${month}`;
+      out.push({ id, kind: 'monthly_budget', cause: 'monthly budget reached', projectId: null, jobId: null, agentIds: [], since: since(id), spent, budget: fleet });
+    }
+    const budgeted = listProjects(this.#db).filter((p) => p.monthlyBudgetUsd != null);
+    if (budgeted.length === 0) return out;
+    const months = new Map(projectSpend(this.#db).map((s) => [s.projectId, s.month]));
+    for (const p of budgeted) {
+      const budget = p.monthlyBudgetUsd!;
+      const spentP = months.get(p.id) ?? 0;
+      if (spentP < budget) continue;
+      const id = `monthly:${month}:${p.id}`;
+      out.push({ id, kind: 'monthly_budget', cause: 'project monthly budget reached', projectId: p.id, jobId: null, agentIds: [], since: since(id), spent: spentP, budget });
+    }
+    return out;
   }
 
   /** False when there is no such open alert. */

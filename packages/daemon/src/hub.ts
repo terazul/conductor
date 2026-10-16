@@ -45,7 +45,7 @@ const contributors = new Set<SnapshotContributor>();
  * entities your track knows about and they accumulate with everyone else's,
  * merged by identity. You do not need to know who else contributes.
  *
- * Scalar slices (slots, costToday, costTotal, projectSpend) are single-owner: last contributor wins, so
+ * Scalar slices (slots, costToday, costMonth, costTotal, projectSpend) are single-owner: last contributor wins, so
  * set them only from the track that owns the number. `seq` is never yours.
  */
 export function registerSnapshotContributor(fn: SnapshotContributor): () => void {
@@ -111,6 +111,7 @@ export function buildSnapshot(): Snapshot {
     // them from the one track that actually owns the number.
     if (slice.slots !== undefined) snap.slots = slice.slots;
     if (slice.costToday !== undefined) snap.costToday = slice.costToday;
+    if (slice.costMonth !== undefined) snap.costMonth = slice.costMonth;
     if (slice.costTotal !== undefined) snap.costTotal = slice.costTotal;
     if (slice.projectSpend !== undefined) snap.projectSpend = slice.projectSpend;
     if (slice.settings !== undefined) snap.settings = slice.settings;

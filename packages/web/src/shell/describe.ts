@@ -458,6 +458,11 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
       return { head: `dev server :${alert.port ?? '?'}`, subject: 'stopped answering' };
     case 'daily_budget':
       return { head: "today's spend", subject: 'reached the daily budget' };
+    case 'monthly_budget':
+      // A project's carries its name on the card's tag (Amendment 182).
+      return alert.projectId === null
+        ? { head: "this month's spend", subject: 'reached the monthly budget' }
+        : { head: "this project's month", subject: 'reached its monthly budget' };
     case 'note_due':
       return { head: 'a note', subject: alert.late ? `is late (due ${alert.due ?? '?'})` : 'is due today' };
     case 'blocked_dep': {
@@ -505,6 +510,8 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
       return 'server down';
     case 'daily_budget':
       return 'over daily budget';
+    case 'monthly_budget':
+      return 'over monthly budget';
     case 'note_due':
       return alert.late ? 'note late' : 'note due';
     case 'blocked_dep':

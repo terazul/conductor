@@ -52,7 +52,7 @@ the last of it on 12 Oct).
     only warn)? Then: which budgets, the agent's, the job's, or both?
     *Decided (15 Oct): the change wanted. Budgets only warn and never stop work, the agent's and the job's, with no ceiling.*
   *Done 16 Oct: Amendment 180.*
-- [ ] **Monthly spend and a monthly budget beside the daily one.** Asked for (15 Oct): track what was spent
+- [x] **Monthly spend and a monthly budget beside the daily one.** Asked for (15 Oct): track what was spent
   this month, start again at 0 when the month turns, and allow a monthly budget as well as the daily one.
   Every spend table is per day already: `agent_spend_daily` (210), `project_spend_daily`, which outlives its
   agents (240), and `cost_daily`. So a month's figure is a sum over its days, with no new counter. The
@@ -61,6 +61,7 @@ the last of it on 12 Oct).
   - **Decide:** a month in local time, as the day is (`localDay`)? A monthly budget per agent, per project,
     for the whole fleet, or several?
     *Decided (15 Oct): a local month; a monthly budget for the whole fleet and for each project.*
+  *Done 16 Oct: Amendment 182.*
 - [x] **Fleet cards: the agent list shows and collapses, collapsed by default.** Asked for (15 Oct). The
   card lists every agent (`web/src/fleet/card.tsx:692`, `AgentRow`). Needs a toggle on the card, closed by
   default, remembered per card the way other folds are. *Done 16 Oct: Amendment 173.*

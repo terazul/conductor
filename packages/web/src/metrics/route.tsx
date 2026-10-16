@@ -26,7 +26,7 @@ import type { MetricsRange, MetricsResponse } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
 import { errorText } from '../lib/errors.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useProjects, useStatusBar } from '../lib/store.js';
+import { useAgents, useProjectSpend, useProjects, useStatusBar } from '../lib/store.js';
 import { CostChart } from './chart.js';
 import { getMetrics } from './endpoints.js';
 import {
@@ -35,6 +35,7 @@ import {
   HOW_COUNTED,
   MODEL_COLUMNS,
   PROJECT_KEY,
+  PROJECT_SPEND_NOTE,
   RANGES,
   RANGE_KEY,
   asProject,
@@ -49,11 +50,13 @@ import {
   modelName,
   projectChoices,
   projectNote,
+  projectSpendRows,
   rangeLine,
   share,
   showDays,
   tiles,
   type Column,
+  type ProjectSpendRow,
 } from './rules.js';
 import './metrics.css';
 
@@ -114,6 +117,7 @@ function Metrics() {
   const projects = useProjects();
   const projectId = asProject(useSetting(PROJECT_KEY), projects);
   const { resp, error, loading, load } = useMetrics(range, projectId);
+  const spendRows = projectSpendRows(projects, useProjectSpend(), projectId);
   // What the screen shows is the answer for the range and project it was asked for, never an older one.
   const shown = resp && resp.range === range && (resp.project?.id ?? null) === projectId ? resp : null;
 
@@ -168,6 +172,7 @@ function Metrics() {
           )}
           {!shown && !error && <div className="mt-note">Reading…</div>}
           {shown && <Report resp={shown} />}
+          {shown && <ProjectSpendTable rows={spendRows} />}
         </div>
       </div>
     </div>
@@ -290,6 +295,51 @@ export function Report({ resp }: { resp: MetricsResponse }) {
         </ul>
       </details>
     </>
+  );
+}
+
+/** Amendment 182: each project's today, this month beside its monthly budget, and total. Exported for a check. */
+export function ProjectSpendTable({ rows }: { rows: ReadonlyArray<ProjectSpendRow> }) {
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label="by project">
+      <h2 className="mt-h">By project</h2>
+      <table className="mt-table">
+        <thead>
+          <tr>
+            <th scope="col" className="mt-name">
+              Project
+            </th>
+            <th scope="col" title="Spent today, since local midnight">
+              Today
+            </th>
+            <th scope="col" title="Spent this month, from the 1st, in local time">
+              This month
+            </th>
+            <th scope="col" title="The project's monthly budget, and how much of it this month has used. It only warns.">
+              Monthly budget
+            </th>
+            <th scope="col" title="Spent since Conductor began counting">
+              Total
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <th scope="row" className="mt-name">
+                {r.name}
+              </th>
+              <td>{r.today}</td>
+              <td>{r.month}</td>
+              <td>{r.budget}</td>
+              <td>{r.total}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-quiet">{PROJECT_SPEND_NOTE}</p>
+    </section>
   );
 }
 

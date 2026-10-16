@@ -15,6 +15,8 @@ import { localDayOf, spentOn, type Agent, type ProjectSpend } from '@conductor/s
 import { tokenWords } from '../lib/providers.js';
 
 export const DAILY_KEY = 'conductor.dailyBudget';
+/** The fleet's monthly budget (Amendment 182), beside the daily one and read the same way. */
+export const MONTHLY_KEY = 'conductor.monthlyBudget';
 export const WARN_AT = 0.75;
 export const OVER_AT = 0.95;
 
@@ -46,11 +48,50 @@ export function dailyMeter(spent: number, budget: number): { fraction: number; t
   };
 }
 
+/**
+ * This local month's spend against the monthly budget (Amendment 182): the daily meter's colours
+ * and words, for the month. It only warns, as the daily one does.
+ */
+export function monthMeter(spent: number, budget: number): { fraction: number; tone: SpendTone; label: string; title: string } {
+  const fraction = budget > 0 ? spent / budget : 0;
+  const money = (n: number): string => `$${n.toFixed(2)}`;
+  const pct = Math.round(fraction * 100);
+  return {
+    fraction: Math.min(1, Math.max(0, fraction)),
+    tone: toneOf(fraction),
+    label: `${money(spent)} of ${money(budget)} this month`,
+    title:
+      fraction >= 1
+        ? `${pct}% of this month's budget — ${money(spent - budget)} over. Agents keep going; it only warns.`
+        : `${pct}% of this month's budget, ${money(budget - spent)} left. Resets on the 1st.`,
+  };
+}
+
+/** The status bar's month with no monthly budget set, after today's figure: `· $40.10 this month`. */
+export function monthWords(spent: number): string {
+  return `· $${spent.toFixed(2)} this month`;
+}
+
+/** What the status bar's month means, on hover. */
+export const MONTH_TITLE = 'spent by every agent this month, from the 1st, in local time';
+
 /** A budget as the Settings field says it: empty is none. Why not, or null. */
 export function budgetProblem(v: string): string | null {
   if (v.trim() === '') return null;
   const n = Number(v);
   return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? null : 'Dollars, more than 0.';
+}
+
+/**
+ * A project's monthly budget as its Fleet card's edit form sends it (Amendment 182): undefined
+ * when the field says what the project has (nothing to send), null when it was emptied (none),
+ * dollars otherwise, or why not.
+ */
+export function monthlyDraft(draft: string, current: number | null | undefined): { send: number | null | undefined } | { problem: string } {
+  const problem = budgetProblem(draft);
+  if (problem !== null) return { problem };
+  const next = draft.trim() === '' ? null : Number(draft);
+  return { send: next === (current ?? null) ? undefined : next };
 }
 
 // ── today and in total (Amendment 146) ─────────────────────────────────────────
@@ -69,19 +110,27 @@ function figure(usd: number, tokens: number, dollars: boolean): string {
 }
 
 /**
- * A project's pair, **today $a · total $b** (Amendment 146). Dollars; tokens beside them where
- * its agents ran on engines that report only tokens (`today $1.20 + 3k tok · total …`), and
- * tokens alone where nothing reported dollars.
+ * A project's figures, **today $a · month $c · total $b** (Amendment 146; the month, Amendment
+ * 182). Dollars; tokens beside them where its agents ran on engines that report only tokens
+ * (`today $1.20 + 3k tok · total …`), and tokens alone where nothing reported dollars. `month` is
+ * undefined when the daemon said no month (one from before Amendment 182), and then it is left out.
  */
-export function projectPairWords(p: Pick<ProjectSpend, 'today' | 'total' | 'tokensToday' | 'tokensTotal'>): {
+export function projectPairWords(
+  p: Pick<ProjectSpend, 'today' | 'total' | 'tokensToday' | 'tokensTotal' | 'month' | 'tokensMonth'>,
+): {
   today: string;
+  month: string | undefined;
   total: string;
 } {
   const usd = p.total > 0 || p.tokensTotal === 0;
   const tok = p.tokensTotal > 0;
   const one = (d: number, t: number): string =>
     usd && tok ? `${figure(d, t, true)} + ${figure(d, t, false)}` : figure(d, t, usd);
-  return { today: `today ${one(p.today, p.tokensToday)}`, total: `total ${one(p.total, p.tokensTotal)}` };
+  return {
+    today: `today ${one(p.today, p.tokensToday)}`,
+    month: p.month === undefined ? undefined : `month ${one(p.month, p.tokensMonth ?? 0)}`,
+    total: `total ${one(p.total, p.tokensTotal)}`,
+  };
 }
 
 /**

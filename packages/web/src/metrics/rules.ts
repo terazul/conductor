@@ -30,6 +30,8 @@ import type {
   MetricsModelRow,
   MetricsRange,
   MetricsResponse,
+  Project,
+  ProjectSpend,
 } from '@conductor/shared';
 import { providerLabel, tokenWords } from '../lib/providers.js';
 
@@ -442,3 +444,59 @@ export const HOW_COUNTED: ReadonlyArray<string> = [
   'What is shown is kept after a job or agent is removed. Runs from before recording began are not in the tables, only in the line under them.',
   'A project’s counts begin when per-project counting was added; runs before that are under All projects only.',
 ];
+
+/**
+ * Amendment 182. One project's spend for the By project table: today, this local month, its
+ * monthly budget and since counting began, from the daemon's figures and not from the range.
+ * Over a budget is said in words, not in colour: --fail is the failures', and a budget only warns.
+ */
+export interface ProjectSpendRow {
+  id: string;
+  name: string;
+  today: string;
+  month: string;
+  budget: string;
+  total: string;
+  over: boolean;
+}
+
+/** The rows, by name, for the chosen project or every one; none until the daemon has sent spend. */
+export function projectSpendRows(
+  projects: ReadonlyArray<Pick<Project, 'id' | 'name' | 'monthlyBudgetUsd'>>,
+  spend: ReadonlyArray<ProjectSpend> | null,
+  only: string | null = null,
+): ProjectSpendRow[] {
+  if (!spend) return [];
+  // A daemon from before Amendment 182 sends no month on any row; a project with no row yet spent 0.
+  const months = spend.length === 0 || spend.some((x) => x.month !== undefined);
+  return [...projects]
+    .filter((p) => only === null || p.id === only)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((p) => {
+      const s = spend.find((x) => x.projectId === p.id);
+      const month = s ? s.month : months ? 0 : undefined;
+      const cap = p.monthlyBudgetUsd ?? null;
+      const over = cap !== null && month !== undefined && month >= cap;
+      return {
+        id: p.id,
+        name: p.name,
+        today: dollars(s?.today ?? 0),
+        month: month === undefined ? '—' : dollars(month),
+        budget: monthlyBudgetCell(month, cap),
+        total: dollars(s?.total ?? 0),
+        over,
+      };
+    });
+}
+
+/** `—` with none; `$50.00 · 40%`; `$50.00 · 104%, over`; just the budget when the month is unknown. */
+export function monthlyBudgetCell(month: number | undefined, budget: number | null): string {
+  if (budget === null) return '—';
+  if (month === undefined) return dollars(budget);
+  const pct = Math.floor((month / budget) * 100);
+  return `${dollars(budget)} · ${pct}%${month >= budget ? ', over' : ''}`;
+}
+
+/** The note under the table. */
+export const PROJECT_SPEND_NOTE =
+  'Spend since Conductor began counting, not the range above. A month is from the 1st, in local time. A monthly budget only warns: agents keep going.';
