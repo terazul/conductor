@@ -200,6 +200,46 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 179 — post-merge, applied. **"one agent" launches the role and persona you pick, and Spawn remembers the pick per project.**
+
+Wave 12, S2. Asked for (15 Oct): choosing **one agent** always launched a developer. The preset was
+one `developer` row on opus with no brief (`web/src/spawn/presets.ts`), and the plan gave a
+preset's row no role or persona to change.
+**Decided by the user (15 Oct):** Spawn remembers the last pick per project; a developer the first
+time.
+- **The picker is the row Custom setup uses.** With **one agent** chosen, its row in the plan has a
+  `RoleRow` under it (`web/src/spawn/RoleRow.tsx`, as in Custom setup and a job's **+ agent**): a
+  role (any name a Custom row takes, the known ones offered) and a persona. Picking a persona names
+  the agent after it unless the role was typed by hand, as on a Custom row. `RoleRow`'s `onBrief`
+  is now optional: absent, the row has no brief field. One agent passes none, because its prompt
+  is its brief. No other preset shows the picker.
+- **What changes is the role and the persona, nothing else.** `singlePreset`
+  (`web/src/spawn/single.ts`) is the preset with its one row's `role` and `persona` set; its model
+  tier (opus), `does` and empty brief stay the preset's, and its model picker in the plan is where
+  the model changes. `toAgentSpecs` takes it as any preset row: the spec carries the persona's id,
+  system prompt and skills, and `rowAutonomy` pins a reading role (reviewer, debugger, analyst,
+  auditor) or a persona with `write: false` read-only, as anywhere else: the read-only commands
+  (`READ_ONLY_BASH`) and no bare `Bash`, the write tools denied, which `readOnlyRefusal` takes. A
+  writing pick has `Bash` by default (Amendment 175). A role a Custom row couldn't take blocks the
+  launch and says why (`singleProblems`, Custom's `customProblems` for one row).
+- **Remembered per project.** The pick is the setting `conductor.launch.single.<projectId>`
+  (`singleKey`), JSON `{ role, persona? }` with `persona` as a Custom row has it (absent is the
+  role's own, `''` none), written when it can launch. Back on a developer the setting is cleared.
+  `parseSingle` reads it: nothing stored, a malformed value, a role that can't launch, or a persona
+  since deleted is a developer; a renamed persona id (`renamedPersona`, Amendment 84) reads as its
+  successor. With no project chosen the pick is held for the screen only. The one agent's model
+  pick follows its role when the role changes.
+- **The default is unchanged.** Nothing stored, `singlePreset` is the preset as it was, so the
+  launch is one developer on opus, the developer persona, no brief.
+
+*Verified:* `web/src/spawn/verify.ts` §29: the default is still a developer; a picked persona
+launches as that persona with its prompt, skills and role, on the preset's tier and brief; a
+reading role, a reading persona on a role of another name, and an own persona that writes nothing
+are read-only and pass `readOnlyRefusal`; the pick is remembered for its project and not another;
+a deleted persona falls back to a developer and a renamed one maps; the picker is shown for one
+agent only, with no brief field. §19's pin of what the launch waits for now includes one agent's
+role.
+
 ### Amendment 178 — post-merge, applied. **A changed setting takes effect on the next run: a persona edit too, and a working run takes its mode and effort now.**
 
 Wave 12, S1. Asked for (15 Oct): "when I change a setting for an agent it should take effect

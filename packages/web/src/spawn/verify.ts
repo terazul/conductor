@@ -44,6 +44,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { ALL_ON, CLAUDE, NONE, capabilitiesOf, type Capabilities } from '../lib/providers.js';
 import { DEFAULT_BUDGET_TOKENS, autonomyOn, jobBudgetUsd, modeOn, specsOn } from './engine.js';
+import { DEFAULT_SINGLE, SINGLE_ID, parseSingle, singleKey, singlePreset, singleProblems, singleSetting } from './single.js';
 import {
   PRESETS,
   TIER_HINTS,
@@ -1078,7 +1079,7 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
   check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
   check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
-  check('the launch waits for the name, and for nothing else new', /!customBad && methodOk;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179)', /!customBad && !singleBad && methodOk;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
   check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
   check('what is sent is launchBody, with the method and the name', /body: launchBody\(\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route));
   check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
@@ -1726,8 +1727,52 @@ console.log('\n28 · every agent runs shell unattended by default, except a read
   check('an agent added to a job with nobody takes Spawn\'s defaults: a writer has Bash, a reader the read-only list', added.allowedTools.includes('Bash') && added.disallowedTools.includes('Bash(git push:*)') && !addedReader.allowedTools.includes('Bash') && READ_ONLY_BASH.every((t) => addedReader.allowedTools.includes(t)), JSON.stringify({ added, addedReader }));
 }
 
+console.log('\n29 · "one agent" launches the role and persona you pick, remembered per project (Amendment 179)');
+{
+  const every = personasFrom(null);
+  const own = { ...personaFor(every, 'developer')!, id: 'persona-1', name: 'Tester', builtIn: false, systemPrompt: 'You test things.', skills: ['javascript-typescript-jest'], tools: {} };
+  const withTester = personasFrom(withPersona(null, own));
+  const launch = (pick: Parameters<typeof singlePreset>[0], personas = every) =>
+    toAgentSpecs(singlePreset(pick), defaultPills(), 5, 'high', {}, {}, {}, DEFAULT_MODE, personas);
+
+  check('nothing stored is a developer, the preset as it is', JSON.stringify(parseSingle(null, every)) === JSON.stringify(DEFAULT_SINGLE) && JSON.stringify(singlePreset(DEFAULT_SINGLE)) === JSON.stringify(presetById(SINGLE_ID)));
+  const dflt = launch(DEFAULT_SINGLE);
+  const dev = personaFor(every, 'developer')!;
+  check('so the default launches one developer on opus with no brief, as the developer persona with Bash', dflt.length === 1 && dflt[0]!.role === 'developer' && dflt[0]!.persona === 'developer' && dflt[0]!.systemPrompt === dev.systemPrompt && dflt[0]!.brief === undefined && presetById(SINGLE_ID).roles[0]!.model === 'opus' && dflt[0]!.autonomy.allowedTools.includes('Bash'), JSON.stringify(dflt[0]));
+
+  const picked = launch({ role: 'tester', persona: 'persona-1' }, withTester)[0]!;
+  check('a picked persona launches as that persona, with its prompt and skills, and its role', picked.role === 'tester' && picked.persona === 'persona-1' && picked.systemPrompt === 'You test things.' && JSON.stringify(picked.skills) === JSON.stringify(['javascript-typescript-jest']), JSON.stringify(picked));
+  check('on the preset\'s model tier and brief, not the persona\'s', singlePreset({ role: 'tester', persona: 'persona-1' }).roles[0]!.model === 'opus' && singlePreset({ role: 'tester', persona: 'persona-1' }).roles[0]!.brief === '' && picked.brief === undefined);
+
+  const readOnly = (x: AgentSpec) => !x.autonomy.allowedTools.includes('Bash') && READ_ONLY_BASH.every((t) => x.autonomy.allowedTools.includes(t)) && WRITE_TOOLS.every((t) => x.autonomy.disallowedTools.includes(t)) && readOnlyRefusal(x.role, x.autonomy) === null;
+  const reviewer = launch({ role: 'reviewer' })[0]!;
+  check('a reading role picked for one agent is read-only: no bare Bash, the write tools denied, and the daemon takes it', reviewer.persona === 'reviewer' && readOnly(reviewer), JSON.stringify(reviewer.autonomy));
+  const readingPersona = launch({ role: 'helper', persona: 'reviewer' })[0]!;
+  check('so is a reading persona on a role of any name', !isReadOnlyRole('helper') && readingPersona.persona === 'reviewer' && readOnly(readingPersona) && readOnlyRefusal('reviewer', readingPersona.autonomy) === null, JSON.stringify(readingPersona.autonomy));
+  const reader = personasFrom(withPersona(null, { ...own, tools: { write: false } }));
+  check('and an own persona that writes nothing', readOnly(launch({ role: 'tester', persona: 'persona-1' }, reader)[0]!));
+
+  const settings: Record<string, string | null> = {};
+  const pick = { role: 'reviewer', persona: 'reviewer' };
+  settings[singleKey('prj_a')] = singleSetting(pick);
+  check('the pick is remembered for its project', JSON.stringify(parseSingle(settings[singleKey('prj_a')] ?? null, every)) === JSON.stringify(pick) && singleKey('prj_a') === 'conductor.launch.single.prj_a');
+  check('and not for another', JSON.stringify(parseSingle(settings[singleKey('prj_b')] ?? null, every)) === JSON.stringify(DEFAULT_SINGLE));
+  check('back on a developer, the setting is cleared', singleSetting(DEFAULT_SINGLE) === null && singleSetting({ role: 'developer', persona: 'developer' }) === null && singleSetting({ role: 'developer', persona: '' }) !== null);
+  const stored = singleSetting({ role: 'tester', persona: 'persona-1' });
+  check('a stored pick of a persona since deleted is a developer again', JSON.stringify(parseSingle(stored, withTester)) === JSON.stringify({ role: 'tester', persona: 'persona-1' }) && JSON.stringify(parseSingle(stored, personasFrom(withoutPersona(withPersona(null, own), 'persona-1')))) === JSON.stringify(DEFAULT_SINGLE));
+  check('a renamed persona is read as its successor', parseSingle(JSON.stringify({ role: 'builder', persona: 'builder' }), every).persona === 'developer' && parseSingle(JSON.stringify({ role: 'builder' }), every).persona === 'developer');
+  check('a malformed or unlaunchable value is a developer', [ '{', '[]', '{"role":3}', '{"role":"Bad Role"}' ].every((v) => JSON.stringify(parseSingle(v, every)) === JSON.stringify(DEFAULT_SINGLE)) && singleProblems({ role: '' }).length > 0 && singleProblems({ role: 'tester' }).length === 0);
+  check('other presets are unchanged', presetById('full').roles.length === 5 && presetById('review').roles[0]!.role === 'reviewer' && PRESETS.filter((p) => p.id === SINGLE_ID).length === 1);
+
+  const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
+  const roleRow = readFileSync(new URL('./RoleRow.tsx', import.meta.url), 'utf8');
+  check('Spawn shows a RoleRow for one agent, and for no other preset', /\{presetId === SINGLE_ID && \(\s*<div className="sp-single">[\s\S]*?<RoleRow/.test(route) && (route.match(/<RoleRow\b/g) ?? []).length === 1 && /const base = presetId === SINGLE_ID \? singlePreset\(singlePick\) : presetById\(presetId\)/.test(route));
+  check('without a brief field, since the prompt is its brief', !/<RoleRow[^>]*onBrief/.test(route.slice(route.indexOf('<RoleRow'), route.indexOf('/>', route.indexOf('<RoleRow')))) && /\{onBrief && \(\s*<textarea/.test(roleRow));
+  check('it reads and writes the project\'s setting, and blocks a launch it cannot run', /useSetting\(projectId \? singleKey\(projectId\) : ''\)/.test(route) && /writeSetting\(singleKey\(projectId\), singleSetting\(next\)\)/.test(route) && /!customBad && !singleBad && methodOk/.test(route));
+}
+
 console.log(
   failures === 0
-    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane; and every writing agent runs shell unattended by default, a reading one only its read-only commands, with git push denied unless allowed.\n'
+    ? '\nTrack A spawn: PASS — presets resolve, each role takes its own model, launch defaults are read, custom setups hold together, presets and Custom rows take their personas, a reading role cannot write, and a launch on another engine sends its provider, its model and a cap in its own unit while a Claude launch is unchanged; and a row moves up or down a stack, its waits following it; and a launch picks its git methodology, a removed row re-chains what waited for it, and a changed preset says so; and (2) offers the project\'s branches, local then on origin; and a Custom setup can orchestrate, launched as the preset is, saving its listed roles, with an older setup read as before; and an orchestrated stack chooses its helpers in all and sends work back per lane; and every writing agent runs shell unattended by default, a reading one only its read-only commands, with git push denied unless allowed; and one agent launches the role and persona picked for its project, a developer the first time.\n'
     : `\nTrack A spawn: FAIL — ${failures} check(s) failed.\n`,
 );process.exit(failures === 0 ? 0 : 1);

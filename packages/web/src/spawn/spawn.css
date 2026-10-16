@@ -1138,3 +1138,11 @@
 .sp-awaits {
   padding: 3px 0 0 90px;
 }
+
+/* One agent's role and persona, under its row of the plan (Amendment 179). */
+.sp-single {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 2px 15px;
+}
