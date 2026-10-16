@@ -97,6 +97,7 @@ the last of it on 12 Oct).
     helpers, up to the number chosen), or Spawn launching several stacks in parallel from one plan?
     Is 3 per launch, or for the whole fleet?
     *Decided (15 Oct): Spawn launches several stacks from one plan, up to 3 per launch. A design note comes first, for approval.*
+    *Decided (16 Oct): design `docs/plans/p1-design.md` approved, option B: one `POST /api/jobs/batch`, no migration; the cap is a setting, `conductor.launch.stacks` (1 to 6, default 3); each stack's prompt and named branch fill in `{track}`; the Fleet card is left for later.*
 
 - [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
   this replaces "back off to every hour". Today an agent that can't reach the model retries on its
