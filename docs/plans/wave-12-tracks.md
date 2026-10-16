@@ -17,7 +17,7 @@ pushing, and never force-pushing. These are the changes:
   before building, unless §3 already answers it. It offers the options the entry names, with a
   recommendation. The answer goes into the TODO entry as *Decided (date): …*. Lanes with nothing to
   decide come first in each track, so a stack has work while its questions wait.
-- **Fixed numbers.** Migrations: **290** M3, **300** P1, if they need one. Nothing else may add one
+- **Fixed numbers.** Migrations: **285** B1 (decided 16 Oct), **290** M3, **300** P1, if they need one. Nothing else may add one
   without asking. (260 and 280 were wave 11's, R2 and G1, and are left alone.)
 - **Files several tracks edit:** `CONTRACT.md` (top), `docs/MANUAL.md`, `TODO.md`,
   `session/supervisor.ts` (all three: track 1 in `#launch` and what it reads, track 2 in
@@ -121,13 +121,20 @@ waits on, and how it's checked.
 | K1 | A consistent backup (`VACUUM INTO`) on daemon start and every 6 h, the last 10 kept in `~/.conductor/backups/`, restore as a `make` target that refuses while the daemon runs |
 | M2 | The wanted change: **budgets only warn and never stop work**, the agent's and the job's, with no ceiling |
 | M3 | A **local** month, as the day is. A monthly budget for the **whole fleet** and for **each project**, beside the daily ones |
+| B1, how existing agents get Bash (16 Oct) | A **one-time migration 285** adds `Bash` to `allowedTools` for every agent that isn't a reading role. After it, the row is the truth: Bash turned off later stays off, as "ask me". 285 is reserved for it |
+| Reviewers (16 Oct) | In wave 12's stacks the **reviewer runs Bash without asking** (tests, `git diff`, `git show`). It still may not edit or write files, and `git push` stays denied. On 15 Oct both reviewers stopped on their first command and waited 10 h |
 
-Every **Decide:** above is answered here (15 Oct), so the stacks don't stop to ask. P1's design note
+Every **Decide:** above is answered here (15 and 16 Oct), so the stacks don't stop to ask. P1's design note
 is the one approval still due, before P1's code.
 
 ## 4. Launch
 
-Each track is a Build Stack on project `conductor` (`prj_ec2cacdb-a67`), isolation `worktree`, with
+*16 Oct: the first launch (15 Oct, jobs `job_eb84c829-d1b`, `job_048b5a32-785`, `job_778a2d6e-557`) ended when the
+database was reset. Its work so far is on two branches, not reviewed or merged: Q1 on
+`conductor/job_048b5a32-785` (`0d039ff`) and F1 on `conductor/job_778a2d6e-557` (`3d1d9d3`). A relaunch should
+start tracks 2 and 3 from those and review them first. Not relaunched yet, by the user's choice.*
+
+Each track is a Build Stack on project `conductor` (`prj_e1242060-a07` since the database was reset on 16 Oct), isolation `worktree`, with
 the architect orchestrating developer (opus), reviewer (sonnet) and validator (sonnet). The job's
 prompt is:
 

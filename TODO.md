@@ -39,6 +39,7 @@ the last of it on 12 Oct).
   - **Decide:** new launches only, or agents already launched too? Those keep the tools they launched
     with, unless "a changed setting takes effect on the next run" below changes that.
     *Decided (15 Oct): new launches and agents already launched; reading roles stay read-only and `git push` stays denied without **allow push**.*
+    *Decided (16 Oct): existing agents get it by a one-time migration, 285; after it the row is the truth.*
 - [ ] **A budget that's exceeded doesn't stop anything: it's only a warning.** Asked for (15 Oct), in those
   words. Today an agent that reaches its budget is `paused` (`budget_exhausted`, `#settle` in
   supervisor.ts), and a job past its budget only warns: queued agents are held at its ceiling, twice it
