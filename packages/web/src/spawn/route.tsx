@@ -77,13 +77,17 @@ import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
   CUSTOM_ID,
   FIRST_ROLE,
+  KNOWN_ROLES,
   SETUPS_KEY,
   customProblems,
   orchestratorRow,
   parseSetups,
   personaPicks,
+  roleFromName,
+  rowPersona,
   setupOf,
   toPreset,
+  untouchedRole,
   withSetup,
   withoutSetup,
   type CustomRole,
@@ -95,8 +99,9 @@ import { defaultListed, helperCapFor, helpersInAll, orchestrates, unresolvedList
 import { METHODS, branchOptions, branchProblem, launchBody, methodReady, pickedNote, presetLabel, type Method } from './launch.js';
 import { getBranches } from '../branches/endpoints.js';
 import { useReorder } from './reorder.js';
-import { WaitsFor } from './RoleRow.js';
-import { PERSONAS_KEY, personasFrom } from './personas.js';
+import { RoleRow, WaitsFor } from './RoleRow.js';
+import { PERSONAS_KEY, personaFor, personasFrom } from './personas.js';
+import { SINGLE_ID, asRow, parseSingle, singleKey, singlePreset, singleProblems, singleSetting, type SinglePick } from './single.js';
 import { useDraft } from '../lib/drafts.js';
 import {
   CLAUDE,
@@ -298,12 +303,31 @@ function Spawn() {
   const personas = useMemo(() => personasFrom(personasRaw), [personasRaw]);
   const isCustom = presetId === CUSTOM_ID;
   /*
+   * What "one agent" launches (Amendment 179): the role and persona last picked for this
+   * project, else a developer. An edit is held here as typed and stored once it can launch, so
+   * a role half typed doesn't snap back to the stored one.
+   */
+  const storedSingle = parseSingle(useSetting(projectId ? singleKey(projectId) : ''), personas);
+  const [singleEdit, setSingleEdit] = useState<{ projectId: string | null; pick: SinglePick } | null>(null);
+  const singlePick = singleEdit && singleEdit.projectId === projectId ? singleEdit.pick : storedSingle;
+  const chooseSingle = (next: SinglePick): void => {
+    setSingleEdit({ projectId, pick: next });
+    if (projectId && singleProblems(next).length === 0) writeSetting(singleKey(projectId), singleSetting(next));
+  };
+  /* As a Custom row does: picking a persona names the agent after it, unless it was named by hand. */
+  const pickSinglePersona = (id: string): void => {
+    const next = id ? personaFor(personas, id) : undefined;
+    const untouched = untouchedRole(singlePick.role, rowPersona(asRow(singlePick), personas), personas);
+    chooseSingle({ role: next && untouched ? roleFromName(next.name) : singlePick.role, persona: id });
+  };
+  const singleBad = presetId === SINGLE_ID && singleProblems(singlePick).length > 0;
+  /*
    * This launch's changes to a preset's rows (Amendment 99): the order and who waits for
    * whom. Held here and nowhere else, so it is not stored and does not turn the preset into
    * a Custom setup; choosing a preset again, or the button in the plan, puts it back.
    */
   const [arranged, setArranged] = useState<{ presetId: string; roles: PresetRole[] } | null>(null);
-  const base = presetById(presetId);
+  const base = presetId === SINGLE_ID ? singlePreset(singlePick) : presetById(presetId);
   /*
    * An orchestrated pipeline's roles (Amendment 128): the default list until you change it, and
    * none on an engine that cannot start helpers. With none the stack is one agent, so the
@@ -464,15 +488,30 @@ function Spawn() {
       setHelpers({});
       setListedEdit(null);
       setPipeHelpers(null);
-      const next = id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : presetById(id);
+      const next =
+        id === CUSTOM_ID ? toPreset(CUSTOM_ID, 'custom', custom, personas) : id === SINGLE_ID ? singlePreset(singlePick) : presetById(id);
       setPicks(every ? pickAll(next, every) : {});
     },
-    [every, custom, personas],
+    [every, custom, personas, singlePick],
   );
+
+  /*
+   * One agent's model pick follows its role (Amendment 179): renaming it, or a project that
+   * remembers another, keeps the id picked rather than dropping it.
+   */
+  useEffect(() => {
+    if (presetId !== SINGLE_ID) return;
+    setPicks((p) => {
+      const ids = Object.entries(p);
+      if (ids.length === 0 || (ids.length === 1 && ids[0]![0] === singlePick.role)) return p;
+      const id = ids[0]![1];
+      return id ? { [singlePick.role]: id } : {};
+    });
+  }, [presetId, singlePick.role]);
 
   const free = Math.max(0, slots.total - slots.used);
   const willQueue = Math.max(0, specs.length - free);
-  const canLaunch = prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && methodOk;
+  const canLaunch = prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && !singleBad && methodOk;
   /** This launch's rows are not the preset's own, so its label says so (Amendment 115). */
   const changed = !isCustom && !sameStack(preset.roles, base.roles);
 
@@ -992,6 +1031,42 @@ function Spawn() {
                 </div>
                 {/* What this row runs with that you didn't click, and why (Amendment 147). */}
                 {note && <div className="sp-rownote">{note}</div>}
+                {/*
+                 * One agent's role and persona (Amendment 179), with the row Custom setup and a
+                 * job's "+ agent" use. Its brief is the prompt, so the row has none; its model is
+                 * the picker above. Kept for the project, so its next one agent starts as this.
+                 */}
+                {presetId === SINGLE_ID && (
+                  <div className="sp-single">
+                    <datalist id="sp-single-roles">
+                      {KNOWN_ROLES.map((k) => (
+                        <option key={k} value={k} />
+                      ))}
+                    </datalist>
+                    <RoleRow
+                      label="The agent"
+                      role={singlePick.role}
+                      persona={singlePick.persona}
+                      shownPersona={rowPersona(asRow(singlePick), personas)}
+                      brief=""
+                      personas={personas}
+                      rolesList="sp-single-roles"
+                      waitOptions={[]}
+                      waits={[]}
+                      onRole={(role) => chooseSingle({ ...singlePick, role })}
+                      onPersona={pickSinglePersona}
+                      onToggleWait={() => undefined}
+                    />
+                    {singleProblems(singlePick).map((p) => (
+                      <div key={p} className="sp-cf-note t-fail is-still">
+                        {p}
+                      </div>
+                    ))}
+                    <div className="sp-rownote">
+                      {selected ? `Remembered for ${selected.name}: its next one agent starts as this.` : 'Pick a project to remember it there.'}
+                    </div>
+                  </div>
+                )}
                 {/*
                  * The roles an orchestrated stack's orchestrator may start (Amendment 128), under
                  * its row: editable here, sent with the launch. With none listed the row above is

@@ -319,7 +319,7 @@ Spawn. Jobs that were launched with it are unchanged.
 | **review only** | one reviewer. Judges a change; reports findings. |
 | **analysis** | analyst explains how the code works, then scribe writes that into the project's docs. |
 | **Analysis Only** | analyst explains how the code works, then scribe writes the findings down. |
-| **one agent** | a single developer, no structure. |
+| **one agent** | a single agent, no structure: a developer unless you pick another. Under its row in the plan, pick its role and persona; Spawn remembers the pick for the project, so its next one agent starts as that. A reading role or persona is read-only, as anywhere. |
 | **custom…** | the agents you add yourself. One of them can orchestrate: see "An orchestrated pipeline" below. |
 
 **Who waits for whom.** The plan under the presets lists the agents in the order they run, and

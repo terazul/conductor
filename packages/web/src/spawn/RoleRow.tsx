@@ -87,7 +87,8 @@ export function RoleRow({
   onRole: (role: AgentRole) => void;
   onPersona: (id: string) => void;
   onToggleWait: (role: AgentRole) => void;
-  onBrief: (brief: string) => void;
+  /** Absent: no brief field — "one agent", whose brief is the prompt (Amendment 179). */
+  onBrief?: (brief: string) => void;
   /** Absent: no ✕ on the row. */
   onRemove?: () => void;
   removeDisabled?: boolean;
@@ -133,15 +134,17 @@ export function RoleRow({
         )}
       </div>
       {p?.description && <div className="sp-cpersona-says">{p.description}</div>}
-      <textarea
-        className="sp-input sp-cbrief"
-        rows={2}
-        value={brief}
-        aria-label={`${label}'s brief`}
-        placeholder={p?.brief ? p.brief : BRIEF_HINT}
-        title={p?.brief ? `${p.name}'s brief. Type here to use your own for this launch.` : undefined}
-        onChange={(e) => onBrief(e.target.value)}
-      />
+      {onBrief && (
+        <textarea
+          className="sp-input sp-cbrief"
+          rows={2}
+          value={brief}
+          aria-label={`${label}'s brief`}
+          placeholder={p?.brief ? p.brief : BRIEF_HINT}
+          title={p?.brief ? `${p.name}'s brief. Type here to use your own for this launch.` : undefined}
+          onChange={(e) => onBrief(e.target.value)}
+        />
+      )}
       {children}
     </div>
   );

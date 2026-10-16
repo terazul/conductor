@@ -78,7 +78,7 @@ the last of it on 12 Oct).
     read the row or what the agent launched with.
     *Decided (16 Oct): persona edits reach launched agents and later helpers from their next run (prompt and skills, falling back to the launch copy); a working agent gets mode and effort live, tools and budget from its next run.*
   *Done 16 Oct: Amendment 178.*
-- [ ] **"one agent" lets you pick what kind of agent.** Asked for (15 Oct): choosing **one agent** always
+- [x] **"one agent" lets you pick what kind of agent.** Asked for (15 Oct): choosing **one agent** always
   launches a developer. The preset is fixed to one `developer` row on opus with no brief
   (`web/src/spawn/presets.ts:242`), and the plan preview gives a preset's rows no role or persona to change.
   The picker for both is built already: `RoleRow` (`spawn/RoleRow.tsx`, role input and persona select), used by
@@ -86,6 +86,7 @@ the last of it on 12 Oct).
   `spawn/verify.ts:766` (one agent runs a developer) should still hold for the default.
   - **Decide:** remember the last pick per project, or always start at developer?
     *Decided (15 Oct): remember the last pick per project; developer the first time.*
+  - *Done 16 Oct: Amendment 179.*
 - [ ] **When work is run in parallel, say how many more orchestrators may be set up: 3 at most by
   default.** Asked for (15 Oct). Today running in parallel is done by hand: wave 11 was six Build Stack
   jobs launched one by one, one orchestrator each (`docs/plans/wave-11-tracks.md`). An orchestrator
