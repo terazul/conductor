@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ceilingOf, ceilingWords, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
+import { type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { openBranches } from '../shell/nav.js';
@@ -42,7 +42,7 @@ import {
 
 const KIND: Record<AlertKind, { label: string; tone: string }> = {
   failed: { label: 'Agent failed', tone: 'var(--fail)' },
-  budget: { label: 'Budget reached for today', tone: 'var(--need)' },
+  budget: { label: 'Paused by its budget', tone: 'var(--need)' },
   connection: { label: 'Model API', tone: 'var(--need)' },
   server_down: { label: 'Dev server down', tone: 'var(--fail)' },
   daily_budget: { label: 'Daily budget', tone: 'var(--fail)' },
@@ -221,13 +221,10 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
 
         {roles !== '' && <Kv k={mine.length > 1 ? 'agents' : 'agent'} v={roles} />}
         {alert.kind === 'budget' && first && budgetOf(first) !== null && (
-          <Kv k="today" v={spentOf(first)} tone={alert.renewed ? undefined : 'var(--need)'} />
+          <Kv k="today" v={spentOf(first)} />
         )}
         {alert.kind === 'budget_over' && alert.spent !== undefined && alert.budget !== undefined && (
-          <>
-            <Kv k="today" v={`${said(alert.spent, alert.unit)} of ${said(alert.budget, alert.unit)}`} tone="var(--need)" />
-            <Kv k="stops at" v={said(ceilingOf(alert.budget), alert.unit)} />
-          </>
+          <Kv k="today" v={`${said(alert.spent, alert.unit)} of ${said(alert.budget, alert.unit)}`} tone="var(--need)" />
         )}
         {alert.kind === 'failed' && <Kv k="reason" v={alert.cause} />}
         {alert.kind === 'blocked_dep' && blocker && <Kv k="waiting on" v={`${blocker.role} · ${alert.cause}`} />}
@@ -328,17 +325,16 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             It stopped without being asked to. The preview can start it again.
           </div>
         )}
-        {alert.kind === 'budget' && alert.renewed && (
+        {alert.kind === 'budget' && (
           <div className="atn-note">
-            The new day renewed its budget, so continue needs no raise. Nothing resumes by itself while "continue at midnight"
-            is off on Settings (9): it is still paused until you press continue.
+            It was paused when a budget still stopped agents. A budget only warns now, so continue carries it on as it is, with
+            no raise first. Nothing continues it by itself.
           </div>
         )}
         {alert.kind === 'budget_over' && (
           <div className="atn-note">
-            A warning only: {alert.cause === 'job_budget_over' ? 'the agents keep going' : 'it keeps working'}. Raise the budget to
-            quiet it, or leave it; it starts again at midnight. {alert.cause === 'job_budget_over' ? 'Agents still to start are held' : 'It is paused'} at
-            {` ${ceilingWords()} `}the budget.
+            A warning only: {alert.cause === 'job_budget_over' ? 'the agents keep going' : 'it keeps working'}, however far past
+            it goes. Raise the budget to quiet it, or leave it; it starts again at midnight.
           </div>
         )}
         {alert.kind === 'daily_budget' && (

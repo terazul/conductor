@@ -105,8 +105,8 @@ const turnListeners = new Set<(day: string, was: string) => void>();
 
 /**
  * Told when the day changes (Amendment 129), after the status bar and the alerts have been:
- * the new day and the one before. The supervisor renews budgets here, since an agent's
- * budget is per day. Another listener rather than a change to the watch: the watch stays the
+ * the new day and the one before. The supervisor tells every tab its budgets read from zero
+ * here, since an agent's budget is per day. Another listener rather than a change to the watch: the watch stays the
  * one Amendment 103 describes, and a listener that throws does not stop the others.
  */
 export function onDayTurn(fn: (day: string, was: string) => void): () => void {

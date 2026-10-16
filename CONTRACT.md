@@ -200,6 +200,68 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 180 — post-merge, applied. **A budget only warns: past it, or past twice it, an agent and its job keep working, and nothing pauses, refuses, holds or limits them for it.**
+
+Daemon (`session/budget.ts`, `supervisor.ts`, `alerts.ts`, `retry.ts`, `schedule.ts`,
+`backends/claude.ts`, `backends/copilot.ts`, `routes/session.ts`), shared (`budget.ts`, `wire.ts`),
+web (Settings, Spawn, Agent, Needs You, Fleet), and `docs/MANUAL.md`. No migration. Decided 15 Oct
+2026 (docs/plans/wave-12-tracks.md §3): *budgets only warn and never stop work, the agent's and
+the job's, with no ceiling.* Run as lane M2 of track 3.
+
+*Supersedes* Amendment 124's ceiling (twice the budget, where an agent was paused), Amendment
+129's refusal at the ceiling and its midnight renewal of budget pauses, Amendment 140's ceiling
+setting (`conductor.budgetCeiling`) and its midnight continue (`conductor.budgetResumeAtMidnight`,
+with the start-up catch-up and the new-day nudge), and Amendment 77's stop of a token-budgeted run
+at its cap. *Keeps* the figure, its warning, the per-day count and the midnight reset
+(Amendments 124, 129), and `budgetUnitRefusal` (a budget in the unit its engine can't count is still
+refused at Spawn).
+
+- **The state is ok or over** (`BudgetState`, `shared/src/budget.ts:38`; `capState` `:44`,
+  `budgetState` `:100`). There is no `ceiling`, and no `ceilingOf`, `runLimit`, `budgetRefusal`,
+  `budgetNote`, `jobBudgetState`, `renewals`, `continuations`, `newDayNote` or `resumeAtMidnight`
+  in `daemon/src/session/budget.ts`; what is left there is the daemon's reading of the shared rule
+  (`:38`, `:42`), `budgetStop` (`:83`), `budgetUnitRefusal` (`:93`) and `jobCap` (`:115`, a warning's
+  figure now).
+- **The SDK is given no `maxBudgetUsd`** (`backends/claude.ts:234`), so a Claude run never ends
+  `error_max_budget_usd`, and its mapping to `budget_exhausted` is gone. A Copilot or OpenRouter run
+  is not ended at its token budget either (`backends/copilot.ts:525`). This also drops Amendment
+  178's check that a changed budget reaches the next run as `maxBudgetUsd` (`session/verify.ts`
+  §30), since no run is given one now.
+- **The supervisor stops nothing for a budget.** `#settle`'s `budget_exhausted` branch is gone
+  (it paused the agent with the budget note), and so are the ceiling holds in `#launch`, in
+  `sendMessage` and in the message that waited for a slot (`#sendForSlot`), and the job hold in
+  `pump`. Each was deleted where it stood, with nothing else in those methods changed. `retry.ts`
+  has no `'budget'` reason not to retry, `BudgetReachedError` is gone, and the resume route
+  (`routes/session.ts:762`) and a scheduled message (`schedule.ts:279`) no longer catch it. With it
+  goes Amendment 177's check that a message refused because its budget is reached removes no
+  helper (`session/verify.ts` §17c, the block at `:3318`), since none is refused now; its folder-gone
+  check stays.
+- **Midnight resets and continues nothing.** `newDay(was)` (`supervisor.ts:1046`) pushes afresh
+  the agents that spent yesterday, so every tab reads their budgets from zero, and that is all;
+  `catchUpDay`, `NEW_DAY_NUDGE` and the start-up call in `routes/session.ts` are gone.
+- **An agent the old ceiling already paused stays paused.** Nothing continues it by itself.
+  `budgetStop` (`budget.ts:83`) still reads its note, the `budget reached…` and `job budget
+  reached…` ones and a midnight's `…renewed for` rewrite of either, so it stays a `budget` card in
+  Needs You (`alerts.ts:11`, `:439`), now **Paused by its budget** (`AlertCard.tsx:45`), saying that a
+  budget only warns and continue carries it on (`AlertCard.tsx:328`). Its one action is
+  **continue**, with no raise (`attention/alerts.ts:115`). A resume or a message to it, however far
+  past its budget it is, is never refused (`supervisor.ts:2554`, `routes/session.ts:762`).
+  `Alert.renewed` is gone from the wire.
+- **The words.** Nothing says a budget stops: the composer's line is *over today's budget: $27 of
+  $25 — a warning only; it keeps working* (`settingsfold.ts:62`), the Fleet and Project meters' hover
+  says *a warning only, nothing stops* (`lane.tsx:165`, `:178`; `navtree.ts:349`), and the Over its
+  daily budget card says it keeps working however far past it goes (`AlertCard.tsx:336`). Settings (9)
+  has no ceiling and no midnight-continue field (`settings/budgets.ts:3`). A value stored for either
+  is left in `settings.json` and read by nothing.
+
+Checked by `packages/daemon/src/session/verify.ts` §11 (`:1155`: an agent past twice its budget
+still launches, resumes and takes messages, the SDK given no `maxBudgetUsd`, an old pause continued
+by hand), §24 (`:6949`: the warning stands, the token agent runs on past the old 1M ceiling, a job at
+twice its budget starts its queued agent, a stored ceiling setting moves nothing), §26 (`:7476`) and
+§27 (`:7680`: midnight continues nothing, at the turn or at start), `session/verify-schedule.ts` §7 (a
+scheduled message to an agent past twice its budget goes out, with no limit), and the web verify scripts. With
+`maxBudgetUsd` put back in `claude.ts`, 14 of those checks fail.
+
 ### Amendment 179 — post-merge, applied. **"one agent" launches the role and persona you pick, and Spawn remembers the pick per project.**
 
 Wave 12, S2. Asked for (15 Oct): choosing **one agent** always launched a developer. The preset was

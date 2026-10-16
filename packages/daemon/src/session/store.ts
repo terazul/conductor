@@ -947,7 +947,7 @@ export function jobCostToday(db: Db, jobId: string): number {
   return r?.total ?? 0;
 }
 
-/** The agents that spent anything on `day`. The day change pushes these afresh, their budgets having renewed. */
+/** The agents that spent anything on `day`. The day change pushes these afresh, their budgets reading from zero. */
 export function agentsThatSpentOn(db: Db, day: string): string[] {
   return rows<{ agent_id: string }>(
     db.prepare('SELECT agent_id FROM agent_spend_daily WHERE day = ? AND (cost_usd > 0 OR tokens > 0)').all(day),

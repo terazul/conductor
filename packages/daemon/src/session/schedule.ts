@@ -37,7 +37,7 @@ import { rows, type Db } from '../db/index.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { onSettingsChanged, patchSettings, readSettings, settingRule } from '../settings.js';
 import { newId } from './store.js';
-import { BudgetReachedError, type Supervisor } from './supervisor.js';
+import type { Supervisor } from './supervisor.js';
 
 /** How often the clock is looked at. */
 export const SCHEDULE_TICK_MS = 5_000;
@@ -276,7 +276,7 @@ export class Scheduler {
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
         // Not started yet, so it has no session to take a message: it is tried again.
-        if (!(err instanceof BudgetReachedError) && /cannot receive messages yet/.test(text)) continue;
+        if (/cannot receive messages yet/.test(text)) continue;
         failScheduled(this.#db, m.id, text);
         changed = true;
       }

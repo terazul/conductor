@@ -23,7 +23,6 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { BUDGET_CEILING_KEY, parseBudgetCeiling, readBudgetCeilingFrom } from '@conductor/shared';
 import { api } from './feed.js';
 import { ApiError } from './errors.js';
 
@@ -131,13 +130,6 @@ function localRead(key: string): string | null {
 export function readSetting(key: string): string | null {
   return values[key] ?? (loaded ? null : localRead(key));
 }
-
-/*
- * The budget ceiling is the daemon's `conductor.budgetCeiling` (Amendment 140): the page reads
- * it from this map, as the daemon reads its file (daemon/src/session/budget.ts), so every
- * `ceilingOf` here (shell/autonomy.ts:105, agent/composer.tsx:377) stops where the daemon does.
- */
-readBudgetCeilingFrom(() => parseBudgetCeiling(readSetting(BUDGET_CEILING_KEY)));
 
 /** Change a setting here now, and in the daemon a moment later. `null` removes it. */
 export function writeSetting(key: string, value: string | null): void {

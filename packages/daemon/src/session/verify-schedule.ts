@@ -320,13 +320,14 @@ async function main(): Promise<void> {
   const gone2 = await send<{ error: string }>('DELETE', `/api/scheduled/${later.body.message.id}`);
   check('DELETE again → 404', gone2.status === 404);
 
-  // At its budget: due, refused, kept with the reason, not tried again.
+  // Past twice its budget: due, and sent all the same, since a budget only warns (Amendment 180).
   agent('agt_capped', { status: 'done', sdkSessionId: 'sess_capped', costUsd: 2, autonomy: { ...DEFAULT_AUTONOMY, budgetUsd: 1 } });
   await send('POST', '/api/agents/agt_capped/scheduled', { at: new Date().toISOString(), text: 'over budget' });
   await scheduler().tick();
   const capped = listScheduled(db).find((m) => m.agentId === 'agt_capped');
-  check('an agent at its budget: kept, with the reason', capped !== undefined && /budget/.test(capped.error ?? ''), JSON.stringify(capped));
-  check('and nothing ran', !runs.some((r) => r.options.resume === 'sess_capped'));
+  check('an agent past twice its budget: sent, not kept', capped === undefined, JSON.stringify(capped));
+  const cappedRun = await until(() => runs.some((r) => r.options.resume === 'sess_capped'));
+  check('and it ran, with no budget limit for the SDK', cappedRun && runs.find((r) => r.options.resume === 'sess_capped')?.options.maxBudgetUsd === undefined);
 
   // Not started yet: no session to take it, so it waits and is tried again.
   agent('agt_unstarted', { status: 'paused', sdkSessionId: null });

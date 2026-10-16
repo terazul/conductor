@@ -8,7 +8,8 @@
  * model read as "working" for minutes. Four things raise an alert now:
  *
  *   failed       an agent ended `failed`
- *   budget       an agent stopped on its cap, or on its job's
+ *   budget       an agent the old ceiling paused (its own or its job's) before Amendment 180,
+ *                still paused: continue carries on, since no budget stops anything now
  *   connection   the model API can't be reached or refuses the login, or the retries ran out
  *   server_down  a dev server stopped answering and nobody asked it to stop
  *   blocked_dep  an agent waits on one that failed or was stopped (Amendments 85, 88)
@@ -19,7 +20,7 @@
  *   finished     a worktree job finished with its branch ahead of the target: merge it? (Amendment 144)
  *   merged       its agent's setting merged it and cleaned up: information (Amendment 144)
  *
- * Failures, budget stops and dead servers are DERIVED from what is stored: the agent's
+ * Failures, old budget pauses and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
  * can't lose one, and each clears itself when what it describes changes. Only dismissals
  * are stored. Connection alerts are held in memory, because they describe the present.
@@ -46,7 +47,7 @@ import { eventLog } from '../eventlog.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
-import { agentBudget, budgetStop, isRenewedNote, jobCap } from './budget.js';
+import { agentBudget, budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
 import { costToday, dueNotes, getAgent, heldHandoffs, listAgents, localDay } from './store.js';
 import { DAILY_KEY, dailyBudget, onCostChanged, startDayWatch } from '../daily.js';
@@ -57,8 +58,8 @@ import { finishAlerts, onFinishesChanged } from './finish.js';
 const NEEDS_A_PERSON: ReadonlySet<RetryCause> = new Set(['unreachable', 'auth']);
 
 /**
- * Where an agent past its budget is warned about it (Amendment 124). Not `paused` (a stop,
- * or a pause of yours: nothing is spending), not `stopped` (for good), not `failed` (that
+ * Where an agent past its budget is warned about it (Amendment 124). Not `paused` (a pause
+ * of yours, or one the old ceiling made: nothing is spending), not `stopped` (for good), not `failed` (that
  * has its own alert). `done` is in: a Claude agent's spend is known when its turn ends, so
  * going over is seen as it finishes, and a message to it spends on.
  */
@@ -434,7 +435,7 @@ export class Alerts {
       let cause: string;
       if (agent.status === 'failed') {
         cause = note ?? 'error';
-        // Before L9 a budget stop ended `failed`. It still needs a cap, not a diagnosis.
+        // Before L9 a budget stop ended `failed`. It is said as one, not as a diagnosis.
         kind = cause === 'budget_exhausted' ? 'budget' : 'failed';
       } else {
         const stop = budgetStop(note);
@@ -452,8 +453,6 @@ export class Alerts {
         agentIds: [agent.id],
         since: (matches ? last?.ts : undefined) ?? agent.endedAt ?? agent.startedAt ?? '',
         ...(kind === 'failed' && matches && status?.detail ? { detail: status.detail } : {}),
-        // A new day renewed the budget it stopped on, and it waits for a continue (Amendment 129).
-        ...(kind === 'budget' && isRenewedNote(note) ? { renewed: true } : {}),
       });
     }
     return out;
@@ -465,8 +464,8 @@ export class Alerts {
   #overSince = new Map<string, string>();
 
   /**
-   * Agents, and jobs, past their budget (Amendment 124). A warning: nothing is paused, the
-   * work goes on, and the agent stops only at twice the budget (then it is `budget`, above).
+   * Agents, and jobs, past their budget (Amendment 124). A warning, and only that: nothing is
+   * paused and the work goes on, however far past it is (Amendment 180).
    * Derived from what is stored, like the rest, so a reload or a restart keeps it. The budget
    * is per day (Amendment 129), so `spent` is today's, and the id carries the budget AND the
    * day: a dismissal lasts until the budget is raised and passed again, or until midnight.

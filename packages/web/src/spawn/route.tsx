@@ -71,7 +71,7 @@ import {
   type RoleModels,
 } from './presets.js';
 import { useIsRepo } from './browse.js';
-import { HELPERS_MAX, ceilingWords } from '@conductor/shared';
+import { HELPERS_MAX } from '@conductor/shared';
 import { launchDefaults } from './defaults.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -1160,7 +1160,7 @@ function Spawn() {
           <span
             className="sp-pill"
             aria-pressed={budgetPerAgent !== null}
-            title={`What each agent may spend per day. It warns when it has spent this much today, stops at ${ceilingWords()} that, and starts again at midnight. Empty for no cap.`}
+            title={`What each agent may spend per day. It warns when it has spent this much today, never stops it, and starts again at midnight. Empty for no cap.`}
           >
             ⏱ budget per agent per day $
             <input
@@ -1176,7 +1176,7 @@ function Spawn() {
             <span
               className="sp-pill"
               aria-pressed={tokenCap !== null}
-              title={`What each agent may use per day, input plus output tokens. It warns at this figure, stops at ${ceilingWords()} it, and starts again at midnight. Empty for no cap.`}
+              title={`What each agent may use per day, input plus output tokens. It warns at this figure, never stops it, and starts again at midnight. Empty for no cap.`}
             >
               ⏱ budget per agent per day
               <input

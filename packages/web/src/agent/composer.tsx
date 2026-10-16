@@ -20,7 +20,7 @@
 
 import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
-import { ceilingOf, spentOn, type Agent, type Autonomy, type EffortLevel } from '@conductor/shared';
+import { spentOn, type Agent, type Autonomy, type EffortLevel } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -398,26 +398,14 @@ export function Composer({ agent }: { agent: Agent }) {
       return;
     }
     setDraft({ ...autonomy, budgetUsd: cap });
-    const was = reported.budgetUsd;
     const ok = await policy.run(
       cap === null ? 'Removing the budget' : `Setting the budget to ${fmtMoney(cap)}`,
       () => setAutonomy(agent.id, { autonomy: { budgetUsd: cap } }),
       () => {
-        // A running query was started with what was left of the OLD cap, and the SDK
-        // cannot be told otherwise mid-run. Saying so beats a stop that looks like a bug.
-        if (agent.status === 'working' && was !== null) {
-          return `From the next run — this one still stops at ${fmtMoney(was)}.`;
-        }
-        // Against what it spent TODAY, which is what the budget counts (Amendment 129); it only
-        // stops at twice the figure, and between the two it is warned and works on.
-        if (cap !== null && todayUsd >= ceilingOf(cap)) {
-          return `Twice that is below the ${fmtMoney(todayUsd)} already spent today — it will not run again until raised, or tomorrow.`;
-        }
+        // Against what it spent TODAY, which is what the budget counts (Amendment 129). Past
+        // it is a warning and nothing more (Amendment 180), so it works on either way.
         if (cap !== null && todayUsd >= cap) {
-          return `That is below the ${fmtMoney(todayUsd)} already spent today — a warning only; it stops at ${fmtMoney(ceilingOf(cap))}.`;
-        }
-        if (agent.status === 'paused' && was !== null && todayUsd >= ceilingOf(was)) {
-          return 'Raised — resume or reply to carry on.';
+          return `That is below the ${fmtMoney(todayUsd)} already spent today — a warning only; it keeps working.`;
         }
         return '';
       },
@@ -452,13 +440,9 @@ export function Composer({ agent }: { agent: Agent }) {
       cap === null ? 'Removing the budget' : `Setting the budget to ${tokenWords(cap)} tokens`,
       () => setAutonomy(agent.id, { autonomy: { budgetTokens: cap } }),
       () => {
-        if (cap !== null && used >= ceilingOf(cap)) {
-          return `Twice that is below the ${tokenWords(used)} tokens already used today — it will not run again until raised, or tomorrow.`;
-        }
         if (cap !== null && used >= cap) {
-          return `That is below the ${tokenWords(used)} tokens already used today — a warning only; it stops at ${tokenWords(ceilingOf(cap))}.`;
+          return `That is below the ${tokenWords(used)} tokens already used today — a warning only; it keeps working.`;
         }
-        if (agent.status === 'paused' && was !== null && used >= ceilingOf(was)) return 'Raised — resume or reply to carry on.';
         return '';
       },
     );
@@ -469,8 +453,6 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const closed = agent.status === 'done' || agent.status === 'failed';
-  // Stopped on its ceiling, twice its daily budget (Amendments 124, 129); only over it, it still works.
-  const atCap = spend?.state === 'ceiling' && agent.status !== 'working';
   const current = MODES.find((m) => m.id === autonomy.mode) ?? null;
   const notice: Notice | null =
     send.notice ?? policy.notice ?? (budgetWhy ? { tone: 'warn', text: budgetWhy } : null);
@@ -479,11 +461,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const open = settingsShown(useSetting(SETTINGS_KEY));
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
-  // Past the budget it says so, and where that stops it (Amendment 124).
-  const pastBudget =
-    spend !== null && spend.state !== 'ok'
-      ? { state: spend.state, ceiling: spend.unit === 'tokens' ? tokenWords(spend.ceiling) : fmtMoney(spend.ceiling) }
-      : undefined;
+  // Past the budget it says so (Amendment 124), and nothing stops it (Amendment 180).
+  const pastBudget = spend !== null && spend.state !== 'ok';
   const summary = settingsSummary({
     mode: current?.label ?? autonomy.mode,
     effort: has.effort ? effortLabel : null,
@@ -497,12 +476,12 @@ export function Composer({ agent }: { agent: Agent }) {
           )
         : dollarsLine(fmtMoney(todayUsd), autonomy.budgetUsd === null ? null : fmtMoney(autonomy.budgetUsd), pastBudget),
   });
-  // The longer sentence, for the open composer: only a warning, and where it stops.
+  // The longer sentence, for the open composer: only a warning.
   const budgetSays =
     spend?.state === 'over'
       ? spend.unit === 'tokens'
-        ? overSays(tokenWords(spend.spent), tokenWords(spend.cap), tokenWords(spend.ceiling), true)
-        : overSays(fmtMoney(spend.spent), fmtMoney(spend.cap), fmtMoney(spend.ceiling))
+        ? overSays(tokenWords(spend.spent), tokenWords(spend.cap), true)
+        : overSays(fmtMoney(spend.spent), fmtMoney(spend.cap))
       : null;
   // The mode alone is the alarm now; the budget colours itself, green to red (Amendment 125).
   const summaryAlarm = current?.danger === true;
@@ -516,9 +495,7 @@ export function Composer({ agent }: { agent: Agent }) {
           value={text}
           rows={2}
           placeholder={
-            atCap
-              ? `${agent.role} has reached its budget for today — raise it below to continue`
-              : closed
+            closed
                 ? `${agent.role} has finished — a message will reopen the session`
                 : `Reply to ${agent.role} — it keeps working while you type…`
           }
