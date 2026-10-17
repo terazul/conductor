@@ -200,6 +200,24 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 183 — post-merge, applied. **An agent waiting on a build waits in the foreground, and its card no longer says "no recent tool calls" while it does.**
+
+Daemon (`session/background.ts`, `session/verify-background.ts`) and web (`shell/clock.ts`,
+`fleet/card.tsx`). Reported 13 Oct: Conductor sometimes lists no activity, no Working or
+Finished, while an agent waits for a GitHub build. Two causes:
+
+- **The agent ended its turn to wait.** Its process ended with it (Amendment 133), so nothing
+  could wake it and it read finished. `TURN_END_LINE` now says never to end the turn to wait for
+  something outside (a CI run, a deploy): block in the foreground first, with a command such
+  as `gh run watch --exit-status`, repeating the call if it times out.
+- **A long tool call outlived the activity window.** The Fleet card's bars count tool calls
+  started in the last 2 minutes, so a build being watched read "no recent tool calls", which
+  looks stuck. `Activity` now carries `running` (a `tool_start` with no `tool_end`), and a card
+  with an agent working says "a tool call is still running".
+
+**Verified:** `session/verify-background.ts` (18 checks, one new), typecheck, and the web
+`verify`, shell and agent suites. The card line has no check of its own.
+
 ### Amendment 182 — post-merge, applied. **This month's spend reads beside today's, and a monthly budget, the fleet's and each project's, sits beside the daily one. It only warns.**
 
 Daemon (`session/store.ts`, `daily.ts`, `session/alerts.ts`, `routes/session.ts`, `hub.ts`), shared

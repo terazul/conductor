@@ -17,6 +17,9 @@
  *   - a `Workflow`, which only ever runs in the background, is declined with the reason
  *     (`declinedHere`), so the model does the same work with foreground agents.
  *
+ * An agent that has to wait for something outside, such as a GitHub build, is told to block on it in the
+ * foreground (the same line). Ending the turn "to wait" leaves it finished, with nothing to wake it.
+ *
  * Background shell commands are left alone: a dev server started for this turn's tests is
  * meant to stop with it. The line says so.
  */
@@ -27,7 +30,9 @@ export const TURN_END_LINE =
   'background is killed with it: background subagents, workflows, background shell commands and scheduled ' +
   'wake-ups. Run subagents in the foreground (several Agent calls in one message still run in parallel) and ' +
   'wait for all of them before you end your turn. Conductor runs a background Agent call in the foreground ' +
-  'for you, and declines workflows.';
+  'for you, and declines workflows. Nothing can wake you once your turn has ended, so never end it to wait ' +
+  'for something outside (a CI run, a deploy): wait in the foreground first, with a blocking command such as ' +
+  '`gh run watch --exit-status`, repeating the call if it times out, and end your turn when it has finished.';
 
 /** The names Claude Code has given its subagent tool. */
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
