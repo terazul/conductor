@@ -748,7 +748,13 @@ export function ProjectCard({
             {diff.files === 1 ? '1 file' : `${diff.files} files`}
           </span>
         ) : (
-          <span>{activity.moving ? 'working' : 'no recent tool calls'}</span>
+          <span>
+            {activity.moving
+              ? 'working'
+              : working > 0 && activity.running
+                ? 'a tool call is still running'
+                : 'no recent tool calls'}
+          </span>
         )}
         <span
           className="fl-card-spend"

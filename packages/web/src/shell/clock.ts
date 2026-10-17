@@ -81,6 +81,22 @@ export interface Activity {
   bars: number[];
   /** False when nothing ran in the window — the "stuck, not working" signal. */
   moving: boolean;
+  /**
+   * A tool call has started and not ended. A long one (a build being watched) outlives
+   * the window, so `moving` goes false while the agent is waiting on it, not stuck.
+   */
+  running: boolean;
+}
+
+/** A tool_start with no tool_end yet. */
+function toolRunning(events: readonly Event[]): boolean {
+  const open = new Set<string>();
+  for (const e of events) {
+    const p = e.payload;
+    if (p.kind === 'tool_start') open.add(p.toolUseId);
+    else if (p.kind === 'tool_end') open.delete(p.toolUseId);
+  }
+  return open.size > 0;
 }
 
 /**
@@ -99,7 +115,7 @@ export function useActivity(agentId: string | null): Activity {
     [status, events],
   );
   const bars = useSparkline(agentId, anchor ?? undefined);
-  return { bars, moving: bars.some((n) => n > 0) };
+  return { bars, moving: bars.some((n) => n > 0), running: toolRunning(events) };
 }
 
 /**
@@ -121,5 +137,5 @@ export function useJobActivity(jobId: string | null): Activity {
     return sparkline(events, anchor ?? wall);
   }, [status, events, wall]);
 
-  return { bars, moving: bars.some((n) => n > 0) };
+  return { bars, moving: bars.some((n) => n > 0), running: toolRunning(events) };
 }
