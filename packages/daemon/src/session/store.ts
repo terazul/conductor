@@ -406,6 +406,7 @@ interface AgentRow {
   handoff_held?: number | null;
   helper_roles?: string | null;
   helper_role?: string | null;
+  name?: string | null;
   /** From `agent_spend_daily` for today (Amendment 129); null when it has spent nothing today. */
   spent_usd?: number | null;
   spent_tokens?: number | null;
@@ -460,6 +461,8 @@ const toAgent = (r: AgentRow, day: string): Agent => ({
   ...closingHeadingsField(r.system_prompt),
   // What it spent today, stamped with the day, which is what its budget is read against (Amendment 129).
   spentToday: { day, usd: r.spent_usd ?? 0, tokens: r.spent_tokens ?? 0 },
+  // Only when you gave it one (Amendment 184).
+  ...(r.name ? { name: r.name } : {}),
 });
 
 /**
@@ -773,6 +776,11 @@ export function setAgentAutonomy(db: Db, id: string, autonomy: Autonomy): void {
 
 export function setAgentModel(db: Db, id: string, model: string): void {
   db.prepare('UPDATE agents SET model = ? WHERE id = ?').run(model, id);
+}
+
+/** The name an agent is shown by, or with null none, so it reads as its role again (Amendment 184). */
+export function setAgentName(db: Db, id: string, name: string | null): void {
+  db.prepare('UPDATE agents SET name = ? WHERE id = ?').run(name, id);
 }
 
 /**

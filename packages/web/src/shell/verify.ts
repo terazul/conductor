@@ -636,9 +636,24 @@ console.log('\n14 · an ended orchestrator\'s ended helpers fold into one row (A
   check('arriving on a helper in a closed fold opens it, once', /const holder = foldOf\(tree, agentId\);/.test(nav) && /\}, \[holder, agentId\]\);/.test(nav));
 }
 
+console.log('\n15 · an agent and a project can be renamed from the navigator (Amendment 184)');
+{
+  const renamed = navTree(projects, agents.map((a) => (a.id === 'a3' ? { ...a, name: 'login fix' } : a)), [], [], jobs);
+  const rows = renamed.find((p) => p.id === 'web')!.agents;
+  check("a named agent's row reads as its name", rows.find((r) => r.id === 'a3')?.label === 'login fix', rows.map((r) => r.label).join());
+  check('and the other of its role loses its number', rows.find((r) => r.id === 'a1')?.label === 'builder', rows.map((r) => r.label).join());
+
+  const nav = src('./Navigator.tsx');
+  const css = src('./shell.css');
+  check("an agent's row has ✎ beside its button, and F2 on it renames", /<div className="sh-nav-dirrow">[\s\S]*?<RenameButton name=\{a\.label\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && (nav.match(/if \(e\.key !== 'F2'\) return;/g) ?? []).length === 2);
+  check('saving it sends the name, or null when emptied', /await renameAgent\(a\.id, name \|\| null\);/.test(nav));
+  check("a project's row has ✎ too, through the Fleet card's own editProject, and refuses an empty name", /<RenameButton name=\{project\.name\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && /if \(!name\) throw new Error\('A project needs a name\.'\);\s*await editProject\(project\.id, \{ name \}\);/.test(nav));
+  check("the project's ✎ shows on hover, as a folder's +", /\.sh-nav-prow:hover \.sh-nav-add,\s*\.sh-nav-prow:focus-within \.sh-nav-add,/.test(css));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it; and an agent or a project can be renamed from it.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

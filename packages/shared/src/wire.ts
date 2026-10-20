@@ -160,6 +160,12 @@ export interface Agent {
    * Absent reads as 0: an agent from before this, or a recording, has spent nothing today.
    */
   spentToday?: DaySpend;
+  /**
+   * Amendment 184. The name you gave it, which the navigator and the Agent tabs show in place
+   * of its role. Present only when you gave one, so every other agent's shape is what it was.
+   * Only a label: `role` is still what it is.
+   */
+  name?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

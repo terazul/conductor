@@ -8367,6 +8367,33 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n33 · an agent can be given a name, and a project renamed after it is set up (Amendment 184)');
+  {
+    type Named = { agent?: Agent; error?: string };
+    const npid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'name184' })).body.project.id;
+    insertJob(db, { id: 'job_n184', projectId: npid, prompt: 'the name prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    fixture('agt_n184', 'job_n184', { projectId: npid });
+    const eyes = await connect();
+    check('an agent from before has no name on the wire', getAgent(db, 'agt_n184')?.name === undefined);
+    const set = await send<Named>('PATCH', '/api/agents/agt_n184', { name: '  parser fix  ' });
+    check('PATCH sets it, trimmed', set.status === 200 && set.body.agent?.name === 'parser fix' && getAgent(db, 'agt_n184')?.name === 'parser fix', JSON.stringify(set.body));
+    check('and its role is untouched', getAgent(db, 'agt_n184')?.role === 'builder');
+    await settle();
+    check('every browser hears it', eyes.frames.some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'agt_n184' && a.name === 'parser fix')));
+    check('too long → 400, and nothing changes', (await send<Named>('PATCH', '/api/agents/agt_n184', { name: 'x'.repeat(61) })).status === 400 && getAgent(db, 'agt_n184')?.name === 'parser fix');
+    check('not a string → 400', (await send<Named>('PATCH', '/api/agents/agt_n184', { name: 7 })).status === 400);
+    check('an unknown agent → 404', (await send<Named>('PATCH', '/api/agents/agt_nope', { name: 'x' })).status === 404);
+    const cleared = await send<Named>('PATCH', '/api/agents/agt_n184', { name: '' });
+    check('empty takes it away, so it reads as its role again', cleared.status === 200 && cleared.body.agent?.name === undefined && getAgent(db, 'agt_n184')?.name === undefined);
+    check('so does null', (await send<Named>('PATCH', '/api/agents/agt_n184', { name: null })).status === 200);
+
+    const before = getProject(db, npid)!;
+    const renamed = await send<{ project?: Project }>('PATCH', `/api/projects/${npid}`, { name: 'renamed184' });
+    check('a project is renamed after it is set up, its folder kept', renamed.status === 200 && renamed.body.project?.name === 'renamed184' && renamed.body.project.path === before.path);
+    await send('PATCH', `/api/projects/${npid}`, { name: before.name });
+    eyes.close();
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();

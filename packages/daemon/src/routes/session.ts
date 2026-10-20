@@ -178,6 +178,8 @@ function parsePersona(role: string, e: Record<string, unknown>): Pick<AgentSpec,
 const HELPER_ROLE_ID = /^[a-z][a-z0-9-]{0,30}$/;
 const HELPER_TIERS: ModelTier[] = ['opus', 'sonnet', 'haiku'];
 const ROLE_BRIEF_MAX = 8_000;
+/** The longest name an agent may be given (Amendment 184): a navigator row's worth. */
+const AGENT_NAME_MAX = 60;
 
 /**
  * The roles an orchestrated stack's orchestrator may start (Amendment 128), checked as a spec's
@@ -804,6 +806,21 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       autonomy: agent.autonomy,
       events: eventLog().forAgent(agent.id),
     });
+  });
+
+  /**
+   * Rename an agent (Amendment 184): `{ name }`, trimmed, or null or empty to take the name
+   * away, so it reads as its role again. Only the label the navigator and its tab show. The
+   * body is one form's, so not in wire.ts (Amendment 2); `Agent.name` is the contract.
+   */
+  app.patch<{ Params: { agentId: string } }>('/api/agents/:agentId', async (req, reply) => {
+    const raw = asRecord(req.body)['name'];
+    if (raw !== null && typeof raw !== 'string') return fail(reply, 400, 'not a name', 'send a name, or null to take it away');
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (name.length > AGENT_NAME_MAX) return fail(reply, 400, 'not a name', `a name is at most ${AGENT_NAME_MAX} characters`);
+    const agent = sup.renameAgent(req.params.agentId, name || null);
+    if (!agent) return fail(reply, 404, 'no such agent');
+    return reply.send({ agent });
   });
 
   /** Transcript backfill for a deep link, before the feed takes over. */

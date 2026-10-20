@@ -242,6 +242,49 @@
   color: inherit;
 }
 
+/*
+ * A code block is what an agent hands you to paste elsewhere (Amendment 185): on white in
+ * both themes, since `data-theme='light'` on the box gives it the light tokens, with its
+ * ⧉ copy in the top right corner, over the block, so it never pushes the text down.
+ */
+.ag-md .ag-code {
+  position: relative;
+}
+
+.ag-md .ag-code pre {
+  background: var(--paper);
+  border-color: var(--line2);
+  color: var(--ink);
+  padding-right: 76px;
+}
+
+.ag-code-copy {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--ink2);
+  background: var(--paper);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.ag-code-copy:hover,
+.ag-code-copy:focus-visible {
+  outline: none;
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
+.ag-code-copy.is-failed {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
 .ag-md hr {
   border: 0;
   border-top: 1px solid var(--line);
@@ -310,6 +353,7 @@
 
 .ag-md li > p,
 .ag-md li > pre,
+.ag-md li > .ag-code,
 .ag-md li > ol,
 .ag-md li > ul,
 .ag-md blockquote > * + * {

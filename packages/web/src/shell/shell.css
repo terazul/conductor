@@ -693,6 +693,8 @@
 
 .sh-nav-dirrow:hover .sh-nav-add,
 .sh-nav-dirrow:focus-within .sh-nav-add,
+.sh-nav-prow:hover .sh-nav-add,
+.sh-nav-prow:focus-within .sh-nav-add,
 .sh-nav-add:focus-visible,
 .sh-nav-add[aria-pressed='true'] {
   opacity: 1;
@@ -719,6 +721,11 @@
 .sh-nav-del:focus-visible {
   color: var(--fail);
   border-color: var(--fail);
+}
+
+/* A project's ✎ (Amendment 184), at the end of its row as an agent's is. */
+.sh-nav-prow > .sh-nav-add {
+  align-self: center;
 }
 
 /* The Files tree's confirm (files.css .c5-delconfirm), under the row it is about. */
