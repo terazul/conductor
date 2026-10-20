@@ -140,6 +140,11 @@ export function setModel(agentId: string, body: SetModelRequest): Promise<SetMod
   return api(agentPath(agentId, 'model'), { method: 'POST', body });
 }
 
+/** The name its row and tab show, or null for none, so it reads as its role again (Amendment 184). */
+export function renameAgent(agentId: string, name: string | null): Promise<{ agent: Agent }> {
+  return api(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'PATCH', body: { name } });
+}
+
 /*
  * The error explainer lives in lib/errors.ts now, beside the `ApiError` it reads, so
  * every screen translates a failure the same way. Re-exported so the screens that

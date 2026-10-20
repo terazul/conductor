@@ -46,6 +46,7 @@
 import type { ReactNode } from 'react';
 import { isMermaid } from '../lib/mermaid.js';
 import { MermaidBlock } from './Mermaid.js';
+import { CodeBlock } from './CodeBlock.js';
 
 export function lineCount(text: string): number {
   return text.split('\n').length;
@@ -367,14 +368,13 @@ export function renderMarkdown(text: string, linkFile?: LinkFile, keyBase = ''):
         const lang = fence[2] ?? '';
         const body = lines.slice(i + 1, end).join('\n');
         const k = key('c');
-        // A diagram is drawn, in its own component (Amendment 60).
+        // A diagram is drawn, in its own component (Amendment 60); anything else is on white,
+        // with a copy for all of it (Amendment 185).
         out.push(
           isMermaid(lang) ? (
             <MermaidBlock key={k} source={body} />
           ) : (
-            <pre key={k} className={lang ? `lang-${lang}` : undefined}>
-              <code>{body}</code>
-            </pre>
+            <CodeBlock key={k} body={body} lang={lang} />
           ),
         );
         i = end + 1;

@@ -200,6 +200,58 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 185 — post-merge, applied. **A code block in an agent's reply is on white, with a ⧉ copy for all of it.**
+
+Web (`agent/CodeBlock.tsx`, new; `agent/markdown.tsx`, `agent/agent.css`, `agent/verify.ts`) and
+`docs/MANUAL.md`. Asked for 20 Oct: "when there is instructions or messages that I need to copy to
+paste somewhere else, make the background white and give me a copy icon so i can copy everything".
+
+- **Which.** Every fenced block `renderMarkdown` draws, in the transcript, but a mermaid one (Amendment
+  60), which is drawn as before. A fence is how an agent sets apart what is to be pasted. Inline code
+  is untouched.
+- **White.** `CodeBlock` marks its box `data-theme='light'`, so tokens.css gives it the light
+  theme's `--paper` (white) and inks in either theme, as the print copy does (files/print.ts). No
+  new colour.
+- **Copy.** **⧉ copy** in the box's top right copies the whole block through `lib/clipboard.ts`
+  (Amendment 83), then reads **✓ copied** for 1.5 s, or **couldn't copy** with the reason in its
+  title for 4 s, as a note's copy does (fleet/Notes.tsx).
+
+**Verified:** `agent/verify.ts` *Code blocks* (6 checks), one existing check updated for the box
+around a block in a list item, and typecheck. Not looked at in a browser.
+
+### Amendment 184 — post-merge, applied. **An agent can be given a name, and an agent or a project renamed from the navigator.**
+
+Daemon (`db/migrations/300_agent_name.sql`, `session/store.ts`, `session/supervisor.ts`,
+`routes/session.ts`, `session/verify.ts`), shared (`wire.ts`) and web (`agent/tabs.ts`,
+`agent/endpoints.ts`, `shell/Navigator.tsx`, `shell/shell.css`, `shell/verify.ts`, `agent/verify.ts`)
+and `docs/MANUAL.md`. Asked for 17 Oct: "give me the ability to change the name of the agent that
+gets displayed on the menu. also, let me change the name of the project after it is set up."
+
+- **An agent's name.** A new nullable `agents.name` column (migration 300). `Agent.name` is on the
+  wire only when set, so every other agent's shape is what it was. `PATCH /api/agents/:id` with
+  `{ name }` sets it, trimmed, at most 60 characters; empty or null takes it away. A string that is
+  not one is a 400, an unknown agent a 404. It goes through `renameAgent` (supervisor.ts), which
+  pushes the agent to every page. It is only a label: `role`, the lane name and the rules read by
+  role are untouched, and a live run carries on.
+- **Where it shows.** `agentTabs` (agent/tabs.ts) labels a named agent by its name, so its
+  navigator row, its Agent tab and the requests in Needs you that name it all read it. A named
+  agent is not counted in its role's numbering, so the one builder left reads `builder`, not
+  `builder 2`.
+- **Renaming from the navigator.** An agent's row and a project's row each have **✎** after the
+  row's button, shown on hover and focus as a folder's **+** is, and **F2** on the row does the
+  same. The box (`NameForm`) is the Files tree's look (`c5-newfile`): Enter saves, Escape cancels,
+  and Enter on the name it already has sends nothing. A project's goes through `editProject`, the
+  Fleet card's own `PATCH /api/projects/:id`, which already renamed projects; an empty project
+  name is refused before it is sent.
+
+**Verified:** `session/verify.ts` §33 (10 checks), `shell/verify.ts` §15 (6), `agent/verify.ts`
+Tabs (3 new), typecheck, and every other `make test` suite. `preview/verify.ts` (its real Vite server
+does not come up here, on a clean `main` too) and `terminal/verify.ts` (2 of 141, PTY checks) fail in
+this checkout; neither touches what changed.
+
+*Not done:* the Fleet lanes, the Project screen's lanes and the Agent screen's heading still show
+the role. The navigator's ✎ renames a project only; its folder is changed on the Fleet card.
+
 ### Amendment 183 — post-merge, applied. **An agent waiting on a build waits in the foreground, and its card no longer says "no recent tool calls" while it does.**
 
 Daemon (`session/background.ts`, `session/verify-background.ts`) and web (`shell/clock.ts`,

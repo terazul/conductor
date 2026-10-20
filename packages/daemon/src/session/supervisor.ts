@@ -127,6 +127,7 @@ import {
   newId,
   setAgentAutonomy,
   setAgentModel,
+  setAgentName,
   setAgentStatus,
   setJobStatus,
   updateProject,
@@ -2399,6 +2400,18 @@ export class Supervisor implements AgentControl {
     );
     this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     return now ? 'now' : 'next run';
+  }
+
+  /**
+   * Give an agent the name the navigator and its tab show, or with null take it away
+   * (Amendment 184). Only a label: a live run carries on, and its role is untouched.
+   */
+  renameAgent(agentId: string, name: string | null): Agent | undefined {
+    if (!getAgent(this.#db, agentId)) return undefined;
+    setAgentName(this.#db, agentId, name);
+    const agent = getAgent(this.#db, agentId)!;
+    this.#pushEntities({ agents: [agent] });
+    return agent;
   }
 
   /**

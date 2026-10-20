@@ -505,6 +505,15 @@ console.log('\nTabs · one per agent in the project (Amendment 49)');
   check('so does an alert about it', tabs.find((t) => t.id === 'b2')?.needs === 1 && tabs.find((t) => t.id === 'b2')?.status === 'blocked');
   check('the rest keep their own status', tabs.find((t) => t.id === 'b1')?.status === 'working' && tabs.find((t) => t.id === 'a1')?.needs === 0);
   check('the first agent of a later job starts a new group', tabs.map((t) => t.newJob).join() === 'false,false,true,false');
+  // Amendment 184: one you named reads as its name, and the others of its role are numbered without it.
+  const named = agentTabs(
+    [{ ...A('n1', 'j', 'builder'), name: 'parser fix' }, A('n2', 'j', 'builder'), A('n3', 'j', 'builder')],
+    'p', ['j'], [], [],
+  );
+  check('a named agent reads as its name (Amendment 184)', named[0]?.label === 'parser fix', named.map((t) => t.label).join());
+  check('and is not counted in its role', named[1]?.label === 'builder 1' && named[2]?.label === 'builder 2', named.map((t) => t.label).join());
+  const solo = agentTabs([{ ...A('s1', 'j', 'builder'), name: 'parser fix' }, A('s2', 'j', 'builder')], 'p', ['j'], [], []);
+  check('so the one left of its role has no number', solo[1]?.label === 'builder', solo.map((t) => t.label).join());
   const src = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the Agent screen shows them only with more than one', /tabs\.length > 1 &&/.test(src) && /openAgent\(target\)/.test(src));
   check(
@@ -562,6 +571,19 @@ console.log('\nTerminal · a command runner in the agent\'s folder (Amendment 58
   check('the Agent screen offers it beside reply, through the panel that falls back to it (Amendment 112)', /bottomTab === 'terminal' \? <TermPanel agent=\{agent\} \/>/.test(src));
 }
 
+console.log('\nCode blocks · on white, with a copy for all of it (Amendment 185)');
+{
+  const md = renderToStaticMarkup(createElement('div', null, renderMarkdown('Paste this:\n```sh\ngh auth login\nmake start\n```\nand `inline` stays as it was.')));
+  check('a fenced block is boxed in the light theme, so it is white in both', md.includes('<div class="ag-code" data-theme="light">'), md);
+  check('with a labelled ⧉ copy before the block', /<div class="ag-code" data-theme="light"><button type="button" class="ag-code-copy" aria-label="Copy this block" title="Copy all of it">⧉ copy<\/button><pre class="lang-sh"><code>gh auth login\nmake start<\/code><\/pre><\/div>/.test(md), md);
+  check('inline code gets no box and no copy', (md.match(/ag-code-copy/g) ?? []).length === 1 && md.includes('<code>inline</code>'));
+  const block = readFileSync(new URL('./CodeBlock.tsx', import.meta.url), 'utf8');
+  check('the copy is the whole block, through lib/clipboard', /void copyText\(body\)/.test(block) && /import \{ copyText \} from '\.\.\/lib\/clipboard\.js';/.test(block));
+  check('and says copied, or why it could not', /'✓ copied'/.test(block) && /Couldn't copy: \$\{said\.why\}/.test(block));
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  check('its block is painted --paper, in existing tokens only', /\.ag-md \.ag-code pre \{\s*background: var\(--paper\);/.test(css));
+}
+
 console.log('\nMermaid · a diagram in a reply is drawn, its source kept (Amendment 60)');
 {
   const md = renderToStaticMarkup(createElement('div', null, renderMarkdown('Here:\n```mermaid\ngraph TD; A-->B<img src=x onerror=alert(1)>\n```\nand code:\n```ts\nconst a = 1;\n```')));
@@ -599,7 +621,7 @@ console.log('\nFormatting · what models write, rendered as they meant it (Amend
   check('a blank line between items is still one list', (md('- a\n\n- b\n\n- c').match(/<ul>/g) ?? []).length === 1);
   check('bullets after numbers are a new list', md('1. a\n- b').includes('</ol><ul>'));
   check('a line that carries on an item stays in it', md('- first line\n  carries on\n- next').includes('<li>first line\ncarries on</li>'));
-  check('an item can hold a code block', md('- run:\n  ```sh\n  make test\n  ```\n- done').includes('<li>run:<pre class="lang-sh"><code>make test</code></pre></li>'));
+  check('an item can hold a code block', md('- run:\n  ```sh\n  make test\n  ```\n- done').includes('<li>run:<div class="ag-code" data-theme="light">') && md('- run:\n  ```sh\n  make test\n  ```\n- done').includes('<pre class="lang-sh"><code>make test</code></pre></div></li>'));
 
   const tasks = md('- [ ] todo\n- [x] done');
   check('task boxes are boxes, ticked or not', tasks.includes('<li class="md-task"><input type="checkbox" disabled="" readOnly="" aria-label="not done"/>todo</li>') && /md-task is-done.*checked=""/.test(tasks), tasks);

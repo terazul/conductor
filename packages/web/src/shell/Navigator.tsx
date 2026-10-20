@@ -39,8 +39,11 @@
  * puts it at the end.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FileNode } from '@conductor/shared';
+import { renameAgent } from '../agent/endpoints.js';
+import { editProject } from '../fleet/endpoints.js';
+import { errorText } from '../lib/errors.js';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects } from '../lib/store.js';
@@ -150,25 +153,149 @@ function NavMeter({ budget, whose }: { budget: Budget | null; whose: string }) {
   );
 }
 
-function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectId: string; selected: boolean }) {
+/**
+ * The box that renames an agent or a project (Amendment 184), in its row's place: the Files
+ * tree's look (`c5-newfile`), started on the name it has, all of it selected. Enter saves,
+ * Escape puts it away, and so does Enter on the name it already has. A refusal shows under
+ * it and leaves what was typed to be fixed.
+ */
+function NameForm({
+  value: start,
+  what,
+  onSave,
+  onCancel,
+}: {
+  value: string;
+  /** For "new name for …". */
+  what: string;
+  /** Rejects with the reason it could not. */
+  onSave: (name: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(start);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    box.current?.focus();
+    box.current?.select();
+  }, []);
+
+  const submit = async (): Promise<void> => {
+    if (busy) return;
+    if (value.trim() === start) {
+      onCancel();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(value.trim());
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+      requestAnimationFrame(() => box.current?.focus());
+    }
+  };
+
   return (
-    <button
-      type="button"
-      className={`sh-nav-row${selected ? ' is-sel' : ''}`}
-      onClick={() => openAgent({ id: a.id, jobId: a.jobId, projectId })}
-      title={`${a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}${a.orchestrator ? ' · orchestrator: starts the others' : ''}`}
+    <div
+      className="c5-newfile"
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          void submit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
     >
-      <Dot status={a.status} />
-      <span className="sh-nav-label">{a.label}</span>
-      {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
-      {a.orchestrator && <OrchestratorMark short />}
-      {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). Finished only until
-          you open the agent, and again when it finishes again (Amendment 105). */}
-      {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
-      {a.finished && <span className="sh-nav-tag is-done">finished</span>}
-      <NavMeter budget={a.budget} whose={`${a.label}'s daily budget`} />
-      {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
+      <div className="c5-newrow">
+        <input
+          ref={box}
+          className="c5-newinput"
+          value={value}
+          disabled={busy}
+          maxLength={60}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label={`new name for ${what}`}
+          aria-invalid={error !== null}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+        />
+        <button type="button" className="c5-iconbtn" onClick={() => void submit()} disabled={busy} title="Rename it (Enter)" aria-label="rename it">
+          {busy ? '…' : '↵'}
+        </button>
+        <button type="button" className="c5-iconbtn" onClick={onCancel} title="Cancel (Esc)" aria-label="cancel">
+          ✕
+        </button>
+      </div>
+      {error && (
+        <div className="c5-newerr" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ✎ beside a row: rename what it is (Amendment 184), as a file's ✎ does. */
+function RenameButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button type="button" className="sh-nav-add" onClick={onClick} title={`Rename ${name} (F2)`} aria-label={`Rename ${name}`}>
+      ✎
     </button>
+  );
+}
+
+function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectId: string; selected: boolean }) {
+  const [renaming, setRenaming] = useState(false);
+  if (renaming) {
+    // Emptied, it takes the name away, and the agent reads as its role again.
+    return (
+      <NameForm
+        value={a.label}
+        what={a.label}
+        onSave={async (name) => {
+          await renameAgent(a.id, name || null);
+          setRenaming(false);
+        }}
+        onCancel={() => setRenaming(false)}
+      />
+    );
+  }
+  return (
+    <div className="sh-nav-dirrow">
+      <button
+        type="button"
+        className={`sh-nav-row${selected ? ' is-sel' : ''}`}
+        onClick={() => openAgent({ id: a.id, jobId: a.jobId, projectId })}
+        onKeyDown={(e) => {
+          if (e.key !== 'F2') return;
+          e.preventDefault();
+          setRenaming(true);
+        }}
+        title={`${a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}${a.orchestrator ? ' · orchestrator: starts the others' : ''}`}
+      >
+        <Dot status={a.status} />
+        <span className="sh-nav-label">{a.label}</span>
+        {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
+        {a.orchestrator && <OrchestratorMark short />}
+        {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). Finished only until
+            you open the agent, and again when it finishes again (Amendment 105). */}
+        {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
+        {a.finished && <span className="sh-nav-tag is-done">finished</span>}
+        <NavMeter budget={a.budget} whose={`${a.label}'s daily budget`} />
+        {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
+      </button>
+      <RenameButton name={a.label} onClick={() => setRenaming(true)} />
+    </div>
   );
 }
 
@@ -613,6 +740,7 @@ function ProjectNode({
   const id = navId(project.id);
   const shown = isOpen(open, id);
   const needs = project.needs;
+  const [renaming, setRenaming] = useState(false);
   const moving = drag.dragging !== null && drag.dragging !== project.id;
 
   const cls = [
@@ -645,39 +773,58 @@ function ProjectNode({
         else drag.end();
       }}
     >
-      <div
-        className={`sh-nav-prow${selected ? ' is-sel' : ''}`}
-        draggable
-        onDragStart={(e) => {
-          drag.start(project.id);
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', project.id);
-        }}
-        onDragEnd={drag.end}
-      >
-        <button
-          type="button"
-          className="sh-nav-tog"
-          aria-expanded={shown}
-          aria-label={`${shown ? 'Close' : 'Open'} ${project.name}`}
-          onClick={() => toggle(id)}
+      {renaming ? (
+        <NameForm
+          value={project.name}
+          what={project.name}
+          onSave={async (name) => {
+            if (!name) throw new Error('A project needs a name.');
+            await editProject(project.id, { name });
+            setRenaming(false);
+          }}
+          onCancel={() => setRenaming(false)}
+        />
+      ) : (
+        <div
+          className={`sh-nav-prow${selected ? ' is-sel' : ''}`}
+          draggable
+          onDragStart={(e) => {
+            drag.start(project.id);
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', project.id);
+          }}
+          onDragEnd={drag.end}
         >
-          <Chevron open={shown} />
-        </button>
-        <button
-          type="button"
-          className="sh-nav-pname"
-          onClick={() => openProject(project.id)}
-          title={
-            needs > 0
-              ? `${project.name} — ${needs === 1 ? '1 thing needs' : `${needs} things need`} you`
-              : `Open ${project.name}`
-          }
-        >
-          <span className="sh-nav-label">{project.name}</span>
-          {needs > 0 && <span className="sh-nav-need">{needs}</span>}
-        </button>
-      </div>
+          <button
+            type="button"
+            className="sh-nav-tog"
+            aria-expanded={shown}
+            aria-label={`${shown ? 'Close' : 'Open'} ${project.name}`}
+            onClick={() => toggle(id)}
+          >
+            <Chevron open={shown} />
+          </button>
+          <button
+            type="button"
+            className="sh-nav-pname"
+            onClick={() => openProject(project.id)}
+            onKeyDown={(e) => {
+              if (e.key !== 'F2') return;
+              e.preventDefault();
+              setRenaming(true);
+            }}
+            title={
+              needs > 0
+                ? `${project.name} — ${needs === 1 ? '1 thing needs' : `${needs} things need`} you`
+                : `Open ${project.name}`
+            }
+          >
+            <span className="sh-nav-label">{project.name}</span>
+            {needs > 0 && <span className="sh-nav-need">{needs}</span>}
+          </button>
+          <RenameButton name={project.name} onClick={() => setRenaming(true)} />
+        </div>
+      )}
 
       {shown && (
         <div className="sh-nav-subs">

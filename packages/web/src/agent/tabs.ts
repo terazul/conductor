@@ -37,7 +37,7 @@ export interface AgentTab {
 
 export function agentTabs(
   agents: (Pick<Agent, 'id' | 'projectId' | 'jobId' | 'role' | 'status'> &
-    Partial<Pick<Agent, 'spentToday' | 'autonomy' | 'pipelineRoles' | 'parentId'>>)[],
+    Partial<Pick<Agent, 'spentToday' | 'autonomy' | 'pipelineRoles' | 'parentId' | 'name'>>)[],
   projectId: string,
   jobOrder: string[],
   pending: { agentId: string }[],
@@ -52,13 +52,14 @@ export function agentTabs(
   const ordered = mine.map((a, i) => ({ a, i })).sort((x, y) => rank(x.a.jobId) - rank(y.a.jobId) || x.i - y.i).map((x) => x.a);
 
   // A role that appears more than once is numbered, in order, so two builders read apart.
+  // One you named reads as its name, and is not counted (Amendment 184).
   const total = new Map<string, number>();
-  for (const a of ordered) total.set(a.role, (total.get(a.role) ?? 0) + 1);
+  for (const a of ordered) if (!a.name) total.set(a.role, (total.get(a.role) ?? 0) + 1);
   const seen = new Map<string, number>();
 
   return ordered.map((a, i) => {
     const n = (seen.get(a.role) ?? 0) + 1;
-    seen.set(a.role, n);
+    if (!a.name) seen.set(a.role, n);
     const mine = alerts.filter((x) => x.agentIds.includes(a.id));
     const needs = pending.filter((p) => p.agentId === a.id).length + mine.length;
     // What stops it, as opposed to a warning that it is over its budget.
@@ -67,7 +68,7 @@ export function agentTabs(
     const b = a.autonomy ? budgetOf({ spentToday: a.spentToday, autonomy: a.autonomy }) : null;
     return {
       id: a.id,
-      label: (total.get(a.role) ?? 1) > 1 ? `${a.role} ${n}` : a.role,
+      label: a.name ? a.name : (total.get(a.role) ?? 1) > 1 ? `${a.role} ${n}` : a.role,
       status: stops > 0 ? 'blocked' : a.status,
       needs,
       newJob: i > 0 && a.jobId !== ordered[i - 1]!.jobId,
