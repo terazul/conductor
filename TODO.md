@@ -394,3 +394,12 @@ stale comment in `lib/verify.ts`. The rest are as the lanes reported them.
 - [x] **Orchestrated stacks (128).** *Done 13 Oct: Amendment 142 (a Custom row can orchestrate and save its listed roles; the navigator marks orchestrators).* Custom setups can't save the listed roles and have no orchestrated
   row; only the preset does. Role briefs are edited only in Settings → Personas. The navigator tree has
   no orchestrator mark, only the plan row, the Project lane, the Fleet row and the Agent tab.
+
+- [x] **Add and remove agents in a job that is already running.** Done (Amendments 88 and 89, ADR 0002). Asked for (6 Oct).
+  A launched job is a set of agent rows, not a preset, so this works the same for a built-in or a custom stack. First the
+  bug it exposed: stopping an agent stranded the ones waiting on it. Now they pause with a note, and resume runs
+  without it. Then **+ agent** on each job's header on the Project screen (`POST /api/jobs/:jobId/agents`, with an
+  optional "also feeds"), and **remove from stack** in terminate's confirm on the Agent screen.
+  *Decided (6 Oct): `DELETE /api/agents/:id` always rewires, so there is no new route and no mode. Reading roles are
+  refused, not pinned, in the daemon too. Not built: editing an agent's dependencies in place, or reordering. Remove
+  and add again does the same job.*
