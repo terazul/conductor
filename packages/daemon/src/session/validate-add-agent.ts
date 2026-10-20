@@ -30,6 +30,7 @@ import {
 } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
+import { callTool } from '../routes/helpers.js';
 import { modelSources } from './models.js';
 import { jobCap } from './budget.js';
 import { sdk } from './runner.js';
@@ -319,6 +320,7 @@ async function main(): Promise<void> {
   check('developer done → tester starts', await until(() => runOf('tester') !== undefined));
   await settle(150);
   check('scribe still waits for tester (fed)', getAgent(db, 'e_scr')?.status === 'queued' && runOf('scribe') === undefined);
+  callTool(qid, 'hand_off', { summary: 'Tester finished.' });
   runOf('tester')?.finish();
   check('tester done → scribe starts', await until(() => getAgent(db, 'e_scr')?.status === 'working'));
   finishAll();
