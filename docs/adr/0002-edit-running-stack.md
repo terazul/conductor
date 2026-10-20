@@ -6,6 +6,8 @@
 
 ## Context
 
+*Line numbers below are from before these two commits; the functions have moved since.*
+
 **A job doesn't remember its preset.** After launch it is a set of agent rows, each with `dependsOn: string[]` (agent ids). So editing a running stack means editing those rows. Nothing here reads a preset or a saved setup.
 
 **How the graph runs today** (`packages/daemon/src/session/supervisor.ts`):
@@ -22,7 +24,7 @@
 
 Amendment 85 made one related decision that stays: an agent waiting on a **failed** one stays queued, because continuing the failed one is a real way forward.
 
-**Read-only roles** are enforced only in the browser today. `toAgentSpecs` (`web/src/spawn/presets.ts`) pins a reading role to plan or ask-me and denies the write tools. The daemon trusts the specs it's given.
+**Read-only roles** are enforced only in the browser today. `toAgentSpecs` (`web/src/spawn/presets.ts`) pins a reading role to `plan` or `default` (ask me) and denies the write tools. The daemon trusts the specs it's given.
 
 ## Options and decisions
 
@@ -47,7 +49,7 @@ Amendment 85 made one related decision that stays: an agent waiting on a **faile
 
 ### 2. Adding an agent
 
-**`POST /api/jobs/:jobId/agents`**, with an `AgentSpec` body plus an optional `feeds: string[]`. It returns `{ agent, fed }` (`AddAgentRequest` and `AddAgentResponse` in `wire.ts`).
+**`POST /api/jobs/:jobId/agents`**, with an `AgentSpec` body plus an optional `feeds: AgentRole[]` (roles, not ids). It returns `{ agent, fed }` (`AddAgentRequest` and `AddAgentResponse` in `wire.ts`).
 
 - **One row builder.** The per-spec code in `createJob` moves to `agentRow()`, which both `createJob` and `addAgent` call. The persona, system prompt, skills, provider and helper cap are copied the same way in both.
 - **The spec is parsed by the same code as a launch.** `parseAgentSpecs` is split so one entry can be parsed alone. The role, model, provider, autonomy, persona and helpers are checked exactly as they are at Spawn.
@@ -58,12 +60,12 @@ Amendment 85 made one related decision that stays: an agent waiting on a **faile
   - the engine is the same as the job's other agents';
   - a per-agent cap is set: dollars on Claude, tokens on an engine without dollars, as Spawn always sends;
   - a reading role is read-only;
-  - `feeds` names only `queued` agents with no session;
+  - `feeds` names only `queued` agents with no session, and not helpers (their orchestrator decides when they run);
   - no cycle.
-- **Read-only, in the daemon too.** `isReadOnlyRole` and the write-tool list move to `packages/shared/src/stack.ts`, so the daemon and the browser read one list. A reading role whose autonomy doesn't deny the write tools, or whose mode isn't plan or ask-me, is **refused, not pinned**. That is how the routes treat a bad persona: they don't trim it into shape. The browser builds a valid spec in the first place.
+- **Read-only, in the daemon too.** `isReadOnlyRole` and the write-tool list move to `packages/shared/src/stack.ts`, so the daemon and the browser read one list. A reading role whose autonomy doesn't deny the write tools, or whose mode isn't `plan` or `default` (`readOnlyRefusal`), is **refused, not pinned**. That is how the routes treat a bad persona: they don't trim it into shape. The browser builds a valid spec in the first place.
 - **Feeds** insert the new agent in the middle. Each named agent gains the new agent in its `dependsOn`, so it now waits for it, and hears it in its handoff.
 - **Cycles.** A cycle is possible only when a fed agent is also upstream of the new agent: it is one of its `dependsOn`, or something they wait on. That is the only case checked, and it is refused.
-- **Then** the new agent is emitted `queued`, the job reopens (`#reopenJob`, so a finished job comes back), the new row and the fed rows are pushed, and `pump()` runs. The job's cap grows by the new agent's cap through `jobCap`, unchanged.
+- **Then** the new agent is emitted `queued`, the job reopens (`#reopenJob`, so a finished job comes back), the new row and the fed rows are pushed, `pump()` runs, and the job rolls up again (an agent added behind a failed or paused one leaves the job settled). The job's cap grows by the new agent's cap through `jobCap`, unchanged.
 
 ### 3. Removing an agent from the stack
 
@@ -90,7 +92,7 @@ Amendment 85 made one related decision that stays: an agent waiting on a **faile
   - the **model** (the catalog picker on Claude, a model id on another engine);
   - a **cap** (dollars or tokens, as the job's engine reports).
 - **Its autonomy comes from the job.** The added agent takes the permissions of a sibling that writes (or reads, if it is a reading role), with its own cap and its persona's tool rules. A reading role, or a reading persona, is pinned read-only exactly as `toAgentSpecs` pins it. The rules live in `web/src/spawn/stack.ts` (`addAgentSpec`, `addAgentProblems`), which are pure and checked in `spawn/verify.ts`.
-- **Agent screen → remove from stack.** For a live or waiting agent, terminate's confirm offers **remove from stack** beside **✕ terminate**. A banner under the header says what moves, using `rewirePreview`: *"scribe will wait for architect instead."*, or *"developer will start, waiting for no one."* An ended agent's existing **remove** is the same call, and its banner says the same. Terminate and pause are unchanged.
+- **Agent screen → remove from stack.** For a live or waiting agent, terminate's confirm offers **remove from stack** beside **✕ terminate**. A banner under the header says what moves, using `rewirePreview`: *"scribe will wait for architect instead."*, *"validator will start: architect is done."*, *"developer will start, waiting for no one."*, or, for an agent paused for some other reason, *"developer stays paused, and will wait for no one."* An ended agent's existing **remove** is the same call, and its banner says the same. Terminate and pause are unchanged.
   - A fourth button in the idle header didn't fit beside the inspector at a normal window width. So the option sits in the confirm, where the decision is made.
   - While a confirm is armed, the header hides fold all, export and interrupt. The question shortens with an ellipsis rather than pushing its buttons under the inspector, which the old terminate confirm already did.
 - Every call goes through `api()` (`lib/feed.ts`). Every control is a button or input, reachable with Tab.

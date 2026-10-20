@@ -483,6 +483,15 @@ start, so picking one up doesn't begin with a search.
   *Decided (6 Oct): confirmed. It stays queued, so it starts if the failed one is continued and
   finishes, and Needs You shows a **Waiting** alert with continue and open for the failed one.*
 
+- [x] **Add and remove agents in a job that is already running.** Done (Amendments 88 and 89, ADR 0002). Asked for (6 Oct).
+  A launched job is a set of agent rows, not a preset, so this works the same for a built-in or a custom stack. First the
+  bug it exposed: stopping an agent stranded the ones waiting on it. Now they pause with a note, and resume runs
+  without it. Then **+ agent** on each job's header on the Project screen (`POST /api/jobs/:jobId/agents`, with an
+  optional "also feeds"), and **remove from stack** in terminate's confirm on the Agent screen.
+  *Decided (6 Oct): `DELETE /api/agents/:id` always rewires, so there is no new route and no mode. Reading roles are
+  refused, not pinned, in the daemon too. Not built: editing an agent's dependencies in place, or reordering. Remove
+  and add again does the same job.*
+
 ## Permissions
 
 - [x] **See and revoke "allow always" rules.** Done: Settings → Allowed always; the other copy is pointed at, never edited (Amendment 48). Clicking **allow always** on a request
