@@ -113,7 +113,7 @@ start: check-install $(RUN)
 			echo ' up'; break; \
 		fi; \
 		printf '.'; sleep 0.5; \
-		if [ $$i -eq 40 ]; then echo ' TIMED OUT — see make logs'; fi; \
+		if [ $$i -eq 40 ]; then echo ' TIMED OUT — see make logs'; exit 1; fi; \
 	done
 	@printf 'waiting for web    '
 	@for i in $$(seq 1 40); do \
@@ -121,7 +121,7 @@ start: check-install $(RUN)
 			echo ' up'; break; \
 		fi; \
 		printf '.'; sleep 0.5; \
-		if [ $$i -eq 40 ]; then echo ' TIMED OUT — see make logs'; fi; \
+		if [ $$i -eq 40 ]; then echo ' TIMED OUT — see make logs'; exit 1; fi; \
 	done
 	@echo ''
 	@echo "  ready → $(URL)"

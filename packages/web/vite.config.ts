@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [react(), tailwind()],
   server: {
     port: 5173,
+    watch: {
+      ignored: ['**/fixtures/scratch-repo', '**/fixtures/scratch-repo/**'],
+    },
     // Everything daemon-owned is proxied so the browser sees one origin.
     // Track D's /preview/* must go through here too, or iframes break.
     proxy: {
