@@ -105,7 +105,7 @@ export type NavRow = { kind: 'agent'; agent: NavAgent } | { kind: 'fold'; fold: 
 /** One job's agents in a project (Amendment 86). */
 export interface NavJob {
   id: string;
-  /** The job's prompt on one line; the job id when the job isn't known. */
+  /** The job's name, else its prompt on one line; the job id when it isn't known. */
   label: string;
   /** Every one of them, folded or not. */
   agents: NavAgent[];
@@ -243,14 +243,15 @@ export function navTree(
  */
 export function groupByJob(
   rows: readonly NavAgent[],
-  jobs: readonly Pick<Job, 'id' | 'prompt'>[],
+  jobs: readonly Pick<Job, 'id' | 'prompt' | 'name'>[],
   finished: ReadonlySet<string> = new Set(),
 ): NavJob[] {
   const out = new Map<string, NavJob>();
   for (const a of rows) {
     let g = out.get(a.jobId);
     if (!g) {
-      const prompt = jobLine(jobs.find((j) => j.id === a.jobId)?.prompt ?? '');
+      const job = jobs.find((j) => j.id === a.jobId);
+      const prompt = jobLine(job?.name ?? job?.prompt ?? '');
       g = {
         id: a.jobId,
         label: prompt || a.jobId,

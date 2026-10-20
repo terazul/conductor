@@ -315,6 +315,7 @@ interface JobRow {
   budget_usd: number | null;
   created_at: string;
   ended_at: string | null;
+  name: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -328,6 +329,7 @@ const toJob = (r: JobRow): Job => ({
   createdAt: r.created_at,
   endedAt: r.ended_at,
   budgetUsd: r.budget_usd,
+  ...(r.name ? { name: r.name } : {}),
 });
 
 export function listJobs(db: Db): Job[] {
@@ -349,8 +351,8 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
   const job: Job = { ...j, createdAt: nowIso(), endedAt: null };
   db.prepare(
     `INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch,
-                       status, budget_usd, created_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+                       status, budget_usd, created_at, ended_at, name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
   ).run(
     job.id,
     job.projectId,
@@ -361,8 +363,14 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
     job.status,
     job.budgetUsd,
     job.createdAt,
+    job.name ?? null,
   );
   return job;
+}
+
+/** The name a launched stack is shown by, or with null its original prompt again. */
+export function setJobName(db: Db, id: string, name: string | null): void {
+  db.prepare('UPDATE jobs SET name = ? WHERE id = ?').run(name, id);
 }
 
 export function setJobStatus(db: Db, id: string, status: AgentStatus): void {

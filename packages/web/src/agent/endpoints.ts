@@ -21,6 +21,7 @@ import { explain, type Notice } from '../lib/errors.js';
 import type {
   Agent,
   HandOffRequest,
+  Job,
   RemoveAgentResponse,
   RerunResponse,
   ScheduleMessageRequest,
@@ -128,6 +129,11 @@ export function removeAgent(agentId: string): Promise<RemoveAgentResponse> {
 /** The same for a job: its agents go with it. */
 export function removeJob(jobId: string): Promise<{ removed: string }> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+}
+
+/** The launched stack's display name, or null to show its original prompt again. */
+export function renameJob(jobId: string, name: string | null): Promise<{ job: Job }> {
+  return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'PATCH', body: { name } });
 }
 
 /** A live run takes the mode and effort now where it can — `appliesTo` says whether it did (Amendment 178). */

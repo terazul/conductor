@@ -90,6 +90,11 @@ export interface Job {
   endedAt: string | null;
   /** Pause the job when cumulative cost crosses this. null = uncapped. */
   budgetUsd: number | null;
+  /**
+   * The name its stack heading shows instead of the prompt. Present only when you gave
+   * one; clearing it restores the prompt. Only a label: the instruction is untouched.
+   */
+  name?: string;
 }
 
 export interface Agent {

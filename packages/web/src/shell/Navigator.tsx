@@ -41,7 +41,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FileNode } from '@conductor/shared';
-import { renameAgent } from '../agent/endpoints.js';
+import { renameAgent, renameJob } from '../agent/endpoints.js';
 import { editProject } from '../fleet/endpoints.js';
 import { errorText } from '../lib/errors.js';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
@@ -353,30 +353,51 @@ function JobGroup({
   open: ReadonlySet<string>;
   agentId: string | undefined;
 }) {
+  const [renaming, setRenaming] = useState(false);
   const id = navJobId(project.id, job.id);
   const shown = jobShown(open, id);
   const count = `${job.agents.length} ${job.agents.length === 1 ? 'agent' : 'agents'}`;
   return (
     <div className="sh-nav-job">
-      <button
-        type="button"
-        className="sh-nav-row sh-nav-jhead"
-        aria-expanded={shown}
-        onClick={() => toggle(id)}
-        title={`${job.label} — ${count}${job.needs > 0 ? `, ${job.needs} waiting on you` : ''}${job.finished ? ', finished' : ''}`}
-      >
-        <Chevron open={shown} />
-        <Dot status={job.status} />
-        <span className="sh-nav-label">{job.label}</span>
-        <span className="sh-nav-n">{job.agents.length}</span>
-        {job.finished ? (
-          <span className={`sh-nav-tag is-${job.status === 'failed' ? 'fail' : 'done'}`}>finished</span>
-        ) : (
-          job.status === 'working' && <span className="sh-nav-tag is-live">working</span>
-        )}
-        <NavMeter budget={job.budget} whose="its agents' daily budgets together" />
-        {job.needs > 0 && <span className="sh-nav-need">{job.needs}</span>}
-      </button>
+      {renaming ? (
+        <NameForm
+          value={job.label}
+          what={job.label}
+          onSave={async (name) => {
+            await renameJob(job.id, name || null);
+            setRenaming(false);
+          }}
+          onCancel={() => setRenaming(false)}
+        />
+      ) : (
+        <div className="sh-nav-dirrow">
+          <button
+            type="button"
+            className="sh-nav-row sh-nav-jhead"
+            aria-expanded={shown}
+            onClick={() => toggle(id)}
+            onKeyDown={(e) => {
+              if (e.key !== 'F2') return;
+              e.preventDefault();
+              setRenaming(true);
+            }}
+            title={`${job.label} — ${count}${job.needs > 0 ? `, ${job.needs} waiting on you` : ''}${job.finished ? ', finished' : ''}`}
+          >
+            <Chevron open={shown} />
+            <Dot status={job.status} />
+            <span className="sh-nav-label">{job.label}</span>
+            <span className="sh-nav-n">{job.agents.length}</span>
+            {job.finished ? (
+              <span className={`sh-nav-tag is-${job.status === 'failed' ? 'fail' : 'done'}`}>finished</span>
+            ) : (
+              job.status === 'working' && <span className="sh-nav-tag is-live">working</span>
+            )}
+            <NavMeter budget={job.budget} whose="its agents' daily budgets together" />
+            {job.needs > 0 && <span className="sh-nav-need">{job.needs}</span>}
+          </button>
+          <RenameButton name={job.label} onClick={() => setRenaming(true)} />
+        </div>
+      )}
       {shown && (
         <div className="sh-nav-items">
           {job.rows.map((r) =>

@@ -200,6 +200,34 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 186 — post-merge, applied. **A launched stack and a saved Custom stack can be renamed in place.**
+
+Daemon (`db/migrations/310_job_name.sql`, `session/store.ts`, `session/supervisor.ts`,
+`routes/session.ts`, `session/verify.ts`), shared (`wire.ts`), web (`agent/endpoints.ts`,
+`shell/navtree.ts`, `shell/Navigator.tsx`, `shell/verify.ts`, `fleet/project.tsx`,
+`files/useWorkspace.ts`, `spawn/custom.ts`, `spawn/route.tsx`, `spawn/spawn.css`,
+`spawn/verify.ts`) and `docs/MANUAL.md`. Asked for 20 Oct: "how do we make the stack change name
+work like the project or agent?" Clarified from the Fleet page: “stack” means the launched job
+heading such as **Full Stack**, not only a saved setup on Spawn.
+
+- **Launched stack.** A nullable `jobs.name` (migration 310) is the display label only. The
+  navigator’s job heading has **✎** and **F2**, with **Enter** to save and **Escape** to cancel.
+  Empty restores the original instruction as its heading. `PATCH /api/jobs/:jobId` validates,
+  persists and broadcasts it; the Project and Files screens follow it.
+- **Saved Custom stack.** Each saved stack beside the Spawn presets has the same **✎**, **F2**,
+  **Enter** and **Escape** flow.
+- **One stack, not a copy.** Renaming changes the saved setup's name in place and preserves its
+  position, roles, model choices and orchestrated-role list. If it is selected, its editor follows
+  the new name.
+- **Refusals.** A name is required, is capped at 60 characters like project and agent names, and
+  cannot replace another saved stack. The reason stays beside the field.
+- **Scope.** A launched job’s instruction and a built-in preset’s name never change. Only their
+  displayed launched-stack name, or a saved Custom stack’s name, changes.
+
+**Verified:** `session/verify.ts`, `shell/verify.ts`, `spawn/verify.ts`, typechecks, migration 310
+from an existing database, a saved-stack browser round trip, and the shared Fleet page’s launched
+stack heading.
+
 ### Amendment 185 — post-merge, applied. **A code block in an agent's reply is on white, with a ⧉ copy for all of it.**
 
 Web (`agent/CodeBlock.tsx`, new; `agent/markdown.tsx`, `agent/agent.css`, `agent/verify.ts`) and

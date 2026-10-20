@@ -352,6 +352,8 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
     web.jobs.flatMap((j) => j.agents.map((a) => a.id)).join() === web.agents.map((a) => a.id).join() && web.jobs[0]!.agents.map((a) => a.id).join() === 'a2,a3',
   );
   check('a group is headed by its prompt, on one line', web.jobs[0]!.label === 'Fix the login page on Safari' && web.jobs[1]!.label === 'Add dark mode', JSON.stringify(web.jobs[0]!.label));
+  const named = groupByJob(web.agents, jobs.map((j) => (j.id === 'jNew' ? { ...j, name: 'Full Stack' } : j)));
+  check('a launched stack name replaces its prompt as the group heading', named.find((j) => j.id === 'jNew')?.label === 'Full Stack');
   check('jobLine folds every run of whitespace, newlines too, and trims', jobLine(' a\n\tb  c \n') === 'a b c' && jobLine('') === '');
   check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
@@ -636,7 +638,7 @@ console.log('\n14 · an ended orchestrator\'s ended helpers fold into one row (A
   check('arriving on a helper in a closed fold opens it, once', /const holder = foldOf\(tree, agentId\);/.test(nav) && /\}, \[holder, agentId\]\);/.test(nav));
 }
 
-console.log('\n15 · an agent and a project can be renamed from the navigator (Amendment 184)');
+console.log('\n15 · an agent, launched stack and project can be renamed from the navigator (Amendments 184 and 186)');
 {
   const renamed = navTree(projects, agents.map((a) => (a.id === 'a3' ? { ...a, name: 'login fix' } : a)), [], [], jobs);
   const rows = renamed.find((p) => p.id === 'web')!.agents;
@@ -645,10 +647,13 @@ console.log('\n15 · an agent and a project can be renamed from the navigator (A
 
   const nav = src('./Navigator.tsx');
   const css = src('./shell.css');
-  check("an agent's row has ✎ beside its button, and F2 on it renames", /<div className="sh-nav-dirrow">[\s\S]*?<RenameButton name=\{a\.label\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && (nav.match(/if \(e\.key !== 'F2'\) return;/g) ?? []).length === 2);
+  check("an agent's row has ✎ beside its button, and F2 on it renames", /<div className="sh-nav-dirrow">[\s\S]*?<RenameButton name=\{a\.label\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && (nav.match(/if \(e\.key !== 'F2'\) return;/g) ?? []).length === 3);
   check('saving it sends the name, or null when emptied', /await renameAgent\(a\.id, name \|\| null\);/.test(nav));
+  check("a launched stack's heading has the same pencil and F2 rename", /<RenameButton name=\{job\.label\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && /await renameJob\(job\.id, name \|\| null\);/.test(nav));
   check("a project's row has ✎ too, through the Fleet card's own editProject, and refuses an empty name", /<RenameButton name=\{project\.name\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && /if \(!name\) throw new Error\('A project needs a name\.'\);\s*await editProject\(project\.id, \{ name \}\);/.test(nav));
   check("the project's ✎ shows on hover, as a folder's +", /\.sh-nav-prow:hover \.sh-nav-add,\s*\.sh-nav-prow:focus-within \.sh-nav-add,/.test(css));
+  const projectScreen = src('../fleet/project.tsx');
+  check('the Project screen follows a launched stack name too', /\{job\.name \?\? job\.prompt\}/.test(projectScreen));
 }
 
 console.log(

@@ -913,6 +913,23 @@
   gap: 2px;
 }
 
+.sp-saved-rename {
+  display: inline-grid;
+  grid-template-columns: minmax(10em, 18em) auto auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.sp-saved-rename .sp-input {
+  min-width: 0;
+}
+
+.sp-saved-problem {
+  grid-column: 1 / -1;
+  color: var(--fail);
+  font-size: var(--fs-sm);
+}
+
 /* Several agents on one role (Amendment 51). */
 .sp-helpers {
   flex: none;

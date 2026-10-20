@@ -178,8 +178,8 @@ function parsePersona(role: string, e: Record<string, unknown>): Pick<AgentSpec,
 const HELPER_ROLE_ID = /^[a-z][a-z0-9-]{0,30}$/;
 const HELPER_TIERS: ModelTier[] = ['opus', 'sonnet', 'haiku'];
 const ROLE_BRIEF_MAX = 8_000;
-/** The longest name an agent may be given (Amendment 184): a navigator row's worth. */
-const AGENT_NAME_MAX = 60;
+/** The longest display name a navigator row may be given. */
+const DISPLAY_NAME_MAX = 60;
 
 /**
  * The roles an orchestrated stack's orchestrator may start (Amendment 128), checked as a spec's
@@ -688,6 +688,17 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     });
   });
 
+  /** Rename a launched stack, or clear its name so its original prompt shows again. */
+  app.patch<{ Params: { jobId: string } }>('/api/jobs/:jobId', async (req, reply) => {
+    const raw = asRecord(req.body)['name'];
+    if (raw !== null && typeof raw !== 'string') return fail(reply, 400, 'not a name', 'send a name, or null to take it away');
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (name.length > DISPLAY_NAME_MAX) return fail(reply, 400, 'not a name', `a name is at most ${DISPLAY_NAME_MAX} characters`);
+    const job = sup.renameJob(req.params.jobId, name || null);
+    if (!job) return fail(reply, 404, 'no such job');
+    return reply.send({ job });
+  });
+
   app.post('/api/jobs', async (req, reply) => {
     const parsed = await parseCreateJob(req.body);
     if (!parsed.ok) return fail(reply, parsed.status, parsed.error, parsed.detail);
@@ -817,7 +828,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     const raw = asRecord(req.body)['name'];
     if (raw !== null && typeof raw !== 'string') return fail(reply, 400, 'not a name', 'send a name, or null to take it away');
     const name = typeof raw === 'string' ? raw.trim() : '';
-    if (name.length > AGENT_NAME_MAX) return fail(reply, 400, 'not a name', `a name is at most ${AGENT_NAME_MAX} characters`);
+    if (name.length > DISPLAY_NAME_MAX) return fail(reply, 400, 'not a name', `a name is at most ${DISPLAY_NAME_MAX} characters`);
     const agent = sup.renameAgent(req.params.agentId, name || null);
     if (!agent) return fail(reply, 404, 'no such agent');
     return reply.send({ agent });

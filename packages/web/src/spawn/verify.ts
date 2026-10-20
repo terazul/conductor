@@ -37,7 +37,7 @@ import {
 import { scopedRules, toolPolicy } from '../shell/autonomy.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch } from './defaults.js';
 import { BUILT_IN_PERSONAS, isEdited, newPersonaId, personaFor, personasFrom, resetPersona, withPersona, withoutPersona } from './personas.js';
-import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, orchestratorRow, parseSetups, personaPicks, removeRole, renameRole, roleFromName, rowPersona, setupOf, toPreset, withOrchestrator, withSetup, withoutSetup, type CustomRole, type SavedSetup } from './custom.js';
+import { FIRST_ROLE, KNOWN_ROLES, addRow, customProblems, nextRole, orchestratorRow, parseSetups, personaPicks, removeRole, renameRole, renameSetup, roleFromName, rowPersona, setupOf, toPreset, withOrchestrator, withSetup, withoutSetup, type CustomRole, type SavedSetup } from './custom.js';
 import { chain, moveRow, onDefault, recheckWaits, removeRow, rolesAbove, sameStack, toggleWait } from './order.js';
 import { DEFAULT_METHOD, METHODS, STACKS_KEY, TRACK, branchOptions, branchProblem, isolationOf, launchBody, launchRequest, methodFrom, methodReady, pickedNote, presetLabel, stacksBodies, stacksBudgetLine, stacksFrom, stacksNotes, stacksPreview, stacksRefusal, type LaunchInput } from './launch.js';
 import { execFileSync } from 'node:child_process';
@@ -583,10 +583,35 @@ console.log('\n8 · custom setups, built by hand and saved by name (Amendment 50
   check('a saved setup reads back whole, models and all', back.length === 1 && back[0]?.name === 'api+ui' && back[0]?.roles.length === 3 && back[0]?.models['reviewer'] === 'openai.gpt-5.5', one);
   const two = parseSetups(withSetup(back, { name: 'api+ui', roles: [FIRST_ROLE], models: {} }));
   check('saving the same name replaces it', two.length === 1 && two[0]?.roles.length === 1);
+  const beside = parseSetups(withSetup(back, { name: 'docs', roles: [FIRST_ROLE], models: {} }));
+  const renamedSetup = parseSetups(renameSetup(beside, 'api+ui', ' product '));
+  check('renaming a saved stack preserves its place and contents', renamedSetup.map((s) => s.name).join() === 'product,docs' && renamedSetup[0]?.roles.length === 3 && renamedSetup[0]?.models['reviewer'] === 'openai.gpt-5.5');
+  let renameProblem = '';
+  try {
+    renameSetup(beside, 'api+ui', 'docs');
+  } catch (err) {
+    renameProblem = (err as Error).message;
+  }
+  check('renaming over another saved stack is refused', /already exists/.test(renameProblem), renameProblem);
+  renameProblem = '';
+  try {
+    renameSetup(beside, 'api+ui', '  ');
+  } catch (err) {
+    renameProblem = (err as Error).message;
+  }
+  check('a saved stack still needs a name', /needs a name/.test(renameProblem), renameProblem);
+  renameProblem = '';
+  try {
+    renameSetup(beside, 'api+ui', 'x'.repeat(61));
+  } catch (err) {
+    renameProblem = (err as Error).message;
+  }
+  check('a saved stack name has the same 60-character ceiling', /at most 60/.test(renameProblem), renameProblem);
   check('forgetting the last one clears the setting', withoutSetup(two, 'api+ui') === null);
   check('anything malformed is left out, not fatal', parseSetups('{nope').length === 0 && parseSetups(JSON.stringify([{ name: 'bad', roles: [{ role: 'A B' }] }, { roles: [] }, { name: 'ok', roles: [{ role: 'builder' }] }])).map((x) => x.name).join() === 'ok');
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   check('Spawn launches it, and waits while it has a problem', /toPreset\(CUSTOM_ID/.test(src) && /!customBad/.test(src));
+  check('a saved stack has a pencil and F2 rename, with Enter save and Escape cancel', /aria-label=\{`Rename saved stack \$\{s\.name\}`\}/.test(src) && /e\.key !== 'F2'/.test(src) && /<form[\s\S]*?onSubmit=/.test(src) && /e\.key !== 'Escape'/.test(src));
 }
 
 console.log('\n9 · several agents on one role (Amendment 51)');

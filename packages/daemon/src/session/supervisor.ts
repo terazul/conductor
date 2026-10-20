@@ -129,6 +129,7 @@ import {
   setAgentModel,
   setAgentName,
   setAgentStatus,
+  setJobName,
   setJobStatus,
   updateProject,
   helpersOf,
@@ -2412,6 +2413,15 @@ export class Supervisor implements AgentControl {
     const agent = getAgent(this.#db, agentId)!;
     this.#pushEntities({ agents: [agent] });
     return agent;
+  }
+
+  /** Give a launched stack a display name, or with null show its original prompt again. */
+  renameJob(jobId: string, name: string | null): Job | undefined {
+    if (!getJob(this.#db, jobId)) return undefined;
+    setJobName(this.#db, jobId, name);
+    const job = getJob(this.#db, jobId)!;
+    this.#pushEntities({ jobs: [job] });
+    return job;
   }
 
   /**

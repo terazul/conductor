@@ -520,7 +520,9 @@ whose steps you already know.
 Each row gets its model in the plan preview, like the presets. Each role can appear only
 once, and a role that only reads (`reviewer`, `analyst`, …) stays read-only here too. Name
 the setup and **save** it, and it appears beside the presets, in every browser; a row that
-orchestrates is saved with the roles listed under it. **✕** then **forget it** removes a saved one.
+orchestrates is saved with the roles listed under it. A saved stack has **✎**, and **F2** on
+its focused name does the same: type the new name and press **Enter**, or **Escape** to
+cancel. The rows and model choices stay with it. **✕** then **forget it** removes a saved one.
 
 **analysis is not review under another name.** A reviewer judges a change and
 answers "is this right" — there's a diff, and the output is findings. An analyst is
@@ -1057,6 +1059,10 @@ project's name opens its Project screen, and its **▸** opens it to three subme
 
 Every project, submenu, job group and fold of helpers opens and closes on its own, and
 what's open is remembered.
+Each launched stack’s heading under **Agents** has **✎** when you point at it or tab to it,
+and **F2** on the focused heading does the same. Give the stack a short display name and
+press **Enter**, or **Escape** to cancel. Emptying it restores the original instruction as
+the heading. This changes only the label: the instruction, branch and agents stay as they are.
 Projects are listed in the Fleet's **Sort by** order and follow it when it changes.
 Dragging a project onto another in the navigator moves it there and switches the sort
 to **my order**, as dragging a Fleet card does; dropping below the last project puts it

@@ -46,6 +46,7 @@ import type {
   DiffResponse,
   FileContentResponse,
   FileTreeResponse,
+  Job,
   Project,
   ServerFrame,
   Snapshot,
@@ -8367,9 +8368,10 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
-  console.log('\n33 · an agent can be given a name, and a project renamed after it is set up (Amendment 184)');
+  console.log('\n33 · agents, launched stacks and projects can be renamed (Amendments 184 and 186)');
   {
     type Named = { agent?: Agent; error?: string };
+    type NamedJob = { job?: Job; error?: string };
     const npid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'name184' })).body.project.id;
     insertJob(db, { id: 'job_n184', projectId: npid, prompt: 'the name prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
     fixture('agt_n184', 'job_n184', { projectId: npid });
@@ -8387,11 +8389,35 @@ async function main(): Promise<void> {
     check('empty takes it away, so it reads as its role again', cleared.status === 200 && cleared.body.agent?.name === undefined && getAgent(db, 'agt_n184')?.name === undefined);
     check('so does null', (await send<Named>('PATCH', '/api/agents/agt_n184', { name: null })).status === 200);
 
+    check('a launched stack from before has no name on the wire', getJob(db, 'job_n184')?.name === undefined);
+    const stack = await send<NamedJob>('PATCH', '/api/jobs/job_n184', { name: '  parser stack  ' });
+    check('PATCH names a launched stack, trimmed, without changing its prompt', stack.status === 200 && stack.body.job?.name === 'parser stack' && stack.body.job.prompt === 'the name prompt' && getJob(db, 'job_n184')?.name === 'parser stack', JSON.stringify(stack.body));
+    await settle();
+    check('every browser hears the stack name', eyes.frames.some((f) => f.type === 'entities' && (f.jobs ?? []).some((j) => j.id === 'job_n184' && j.name === 'parser stack')));
+    check('a stack name over 60 characters is refused without changing it', (await send<NamedJob>('PATCH', '/api/jobs/job_n184', { name: 'x'.repeat(61) })).status === 400 && getJob(db, 'job_n184')?.name === 'parser stack');
+    check('a stack name that is not a string is refused', (await send<NamedJob>('PATCH', '/api/jobs/job_n184', { name: 7 })).status === 400);
+    check('an unknown stack is 404', (await send<NamedJob>('PATCH', '/api/jobs/job_nope', { name: 'x' })).status === 404);
+    const stackCleared = await send<NamedJob>('PATCH', '/api/jobs/job_n184', { name: '' });
+    check('empty takes the stack name away, so its prompt shows again', stackCleared.status === 200 && stackCleared.body.job?.name === undefined && getJob(db, 'job_n184')?.name === undefined);
+    check('null clears a stack name too', (await send<NamedJob>('PATCH', '/api/jobs/job_n184', { name: null })).status === 200);
+
     const before = getProject(db, npid)!;
     const renamed = await send<{ project?: Project }>('PATCH', `/api/projects/${npid}`, { name: 'renamed184' });
     check('a project is renamed after it is set up, its folder kept', renamed.status === 200 && renamed.body.project?.name === 'renamed184' && renamed.body.project.path === before.path);
     await send('PATCH', `/api/projects/${npid}`, { name: before.name });
     eyes.close();
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+    for (const f of files.filter((f) => f < '310')) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p310', 'old', '/tmp/p310', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j310', 'p310', 'old prompt', 'in_place', '/tmp/p310', 'main', 'done', 'x')`);
+    old.exec(readFileSync(new URL('310_job_name.sql', dir), 'utf8'));
+    const migrated = old.prepare("SELECT name FROM jobs WHERE id = 'j310'").get() as { name: string | null } | undefined;
+    check('migration 310 gives an existing launched stack no name, so it still shows its prompt', migrated?.name === null && getJob(old as unknown as Db, 'j310')?.name === undefined, JSON.stringify(migrated));
+    old.close();
   }
 
   // ───────────────────────────────────────────────────────────────────────────

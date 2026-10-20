@@ -296,6 +296,20 @@ export function withSetup(saved: SavedSetup[], setup: SavedSetup): string {
   return JSON.stringify([...saved.filter((s) => s.name !== setup.name), setup]);
 }
 
+/** Rename one saved stack in place, preserving its rows, model picks, list, and order. */
+export function renameSetup(saved: SavedSetup[], from: string, to: string): string {
+  const name = to.trim();
+  if (!name) throw new Error('A saved stack needs a name.');
+  if (name.length > 60) throw new Error('A saved stack name is at most 60 characters.');
+  if (name !== from && saved.some((s) => s.name === name)) {
+    throw new Error(`A saved stack named "${name}" already exists.`);
+  }
+  if (!saved.some((s) => s.name === from)) {
+    throw new Error(`The saved stack "${from}" no longer exists.`);
+  }
+  return JSON.stringify(saved.map((s) => (s.name === from ? { ...s, name } : s)));
+}
+
 /** The setting after forgetting one, or null when none are left. */
 export function withoutSetup(saved: SavedSetup[], name: string): string | null {
   const rest = saved.filter((s) => s.name !== name);

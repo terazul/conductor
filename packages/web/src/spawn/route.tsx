@@ -84,6 +84,7 @@ import {
   orchestratorRow,
   parseSetups,
   personaPicks,
+  renameSetup,
   roleFromName,
   rowPersona,
   setupOf,
@@ -92,6 +93,7 @@ import {
   withSetup,
   withoutSetup,
   type CustomRole,
+  type SavedSetup,
 } from './custom.js';
 import { CustomSetup } from './CustomSetup.js';
 import { moveRow, rolesAbove, sameStack, toggleWait } from './order.js';
@@ -133,6 +135,66 @@ import {
 import { DEFAULT_BUDGET_TOKENS, autonomyOn, jobBudgetUsd, modeOn, specsOn, type EngineLaunch } from './engine.js';
 
 const SCREEN_ID = 'spawn';
+
+function SavedStackName({
+  setup,
+  saved,
+  onSaved,
+  onCancel,
+}: {
+  setup: SavedSetup;
+  saved: SavedSetup[];
+  onSaved: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(setup.name);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const save = (): void => {
+    try {
+      const next = name.trim();
+      if (next === setup.name) return onCancel();
+      writeSetting(SETUPS_KEY, renameSetup(saved, setup.name, next));
+      onSaved(next);
+    } catch (err) {
+      setProblem(errorText(err));
+    }
+  };
+
+  return (
+    <form
+      className="sp-saved-rename"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        onCancel();
+      }}
+    >
+      <input
+        className="sp-input"
+        value={name}
+        autoFocus
+        maxLength={60}
+        spellCheck={false}
+        aria-label={`Rename saved stack ${setup.name}`}
+        aria-invalid={problem !== null}
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => {
+          setName(e.target.value);
+          setProblem(null);
+        }}
+      />
+      <button type="submit" className="sp-ghost">save</button>
+      <button type="button" className="sp-ghost" onClick={onCancel}>cancel</button>
+      {problem && <span className="sp-saved-problem">{problem}</span>}
+    </form>
+  );
+}
 
 /**
  * One row of the "where" picker: select it, or drop it.
@@ -321,6 +383,7 @@ function Spawn() {
   const [customName, setCustomName] = useState('');
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
+  const [renamingSetup, setRenamingSetup] = useState<string | null>(null);
   const saved = parseSetups(useSetting(SETUPS_KEY));
   /** Every persona, as Settings → Personas has them now (Amendment 68). */
   const personasRaw = useSetting(PERSONAS_KEY);
@@ -778,12 +841,26 @@ function Spawn() {
           >
             custom…
           </button>
-          {saved.map((s) => (
+          {saved.map((s) => renamingSetup === s.name ? (
+            <SavedStackName
+              key={s.name}
+              setup={s}
+              saved={saved}
+              onCancel={() => setRenamingSetup(null)}
+              onSaved={(name) => {
+                if (loadedFrom === s.name) {
+                  setLoadedFrom(name);
+                  setCustomName(name);
+                }
+                setRenamingSetup(null);
+              }}
+            />
+          ) : (
             <span key={s.name} className="sp-saved">
               <button
                 className="sp-pill is-saved"
                 aria-pressed={isCustom && loadedFrom === s.name}
-                title={`Your saved setup: ${s.roles.map((r) => r.role).join(', ')}`}
+                title={`Your saved setup: ${s.roles.map((r) => r.role).join(', ')}. Press F2 to rename.`}
                 onClick={() => {
                   setPresetId(CUSTOM_ID);
                   setCustom(s.roles);
@@ -794,9 +871,29 @@ function Spawn() {
                   setListedEdit(s.listed ? [...s.listed] : null);
                   setForgetting(null);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'F2') return;
+                  e.preventDefault();
+                  setForgetting(null);
+                  setRenamingSetup(s.name);
+                }}
               >
                 {s.name}
               </button>
+              {forgetting !== s.name && (
+                <button
+                  type="button"
+                  className="sp-ghost"
+                  aria-label={`Rename saved stack ${s.name}`}
+                  title={`Rename ${s.name} (F2)`}
+                  onClick={() => {
+                    setForgetting(null);
+                    setRenamingSetup(s.name);
+                  }}
+                >
+                  ✎
+                </button>
+              )}
               {forgetting === s.name ? (
                 <button
                   className="sp-ghost"
