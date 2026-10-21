@@ -289,7 +289,7 @@ export function useJobChoices(): { choices: JobChoice[]; error: string | null; r
         jobId: job.id,
         projectId: job.projectId,
         // A chosen name, else the prompt, is what a human recognises a job by; the path is not.
-        label: (job.name ?? job.prompt).slice(0, 48) || (existing?.label ?? job.id),
+        label: ((job.name ?? job.prompt) || 'waiting for instructions').slice(0, 48) || (existing?.label ?? job.id),
         branch: job.branch,
         path: job.worktreePath,
         isolation: job.isolation,

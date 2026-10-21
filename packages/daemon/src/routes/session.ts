@@ -362,12 +362,15 @@ async function parseCreateJob(raw: unknown): Promise<ParsedJob> {
   const body = asRecord(raw);
   const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
   const prompt = typeof body['prompt'] === 'string' ? body['prompt'] : '';
+  const name = typeof body['name'] === 'string' ? body['name'].trim() : '';
+  const waitForInstructions = body['waitForInstructions'] === true;
   const isolation = ISOLATIONS.includes(body['isolation'] as Isolation)
     ? (body['isolation'] as Isolation)
     : 'in_place';
 
   if (!projectId) return { ok: false, status: 400, error: 'projectId is required' };
-  if (!prompt.trim()) return { ok: false, status: 400, error: 'prompt is required' };
+  if (!prompt.trim() && !waitForInstructions) return { ok: false, status: 400, error: 'prompt is required' };
+  if (name.length > DISPLAY_NAME_MAX) return { ok: false, status: 400, error: 'not a title', detail: `a title is at most ${DISPLAY_NAME_MAX} characters` };
 
   let agents: AgentSpec[];
   try {
@@ -394,7 +397,9 @@ async function parseCreateJob(raw: unknown): Promise<ParsedJob> {
     ok: true,
     request: {
       projectId,
-      prompt,
+      prompt: waitForInstructions ? '' : prompt,
+      ...(name ? { name } : {}),
+      ...(waitForInstructions ? { waitForInstructions: true } : {}),
       isolation,
       agents,
       ...(typeof body['preset'] === 'string' ? { preset: body['preset'] } : {}),

@@ -121,7 +121,9 @@ export function presetLabel(label: string, changed: boolean): string {
 
 export interface LaunchInput {
   projectId: string;
+  title: string;
   prompt: string;
+  waitForInstructions: boolean;
   method: Method;
   /** (2)'s name; ignored for the others. */
   branch: string;
@@ -135,6 +137,8 @@ export function launchBody(i: LaunchInput): CreateJobRequest {
   return {
     projectId: i.projectId,
     prompt: i.prompt.trim(),
+    ...(i.title.trim() ? { name: i.title.trim() } : {}),
+    ...(i.waitForInstructions ? { waitForInstructions: true } : {}),
     isolation: isolationOf(i.method),
     ...(i.method === 'named' ? { branch: i.branch.trim() } : {}),
     preset: i.preset,
@@ -196,7 +200,12 @@ export function stacksRefusal(
 export function stacksBodies(input: LaunchInput, n: number): CreateJobRequest[] {
   if (n <= 1) return [launchBody(input)];
   return Array.from({ length: n }, (_, i) =>
-    launchBody({ ...input, prompt: withTrack(input.prompt, i + 1), branch: withTrack(input.branch, i + 1) }),
+    launchBody({
+      ...input,
+      title: withTrack(input.title, i + 1),
+      prompt: withTrack(input.prompt, i + 1),
+      branch: withTrack(input.branch, i + 1),
+    }),
   );
 }
 

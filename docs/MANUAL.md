@@ -265,10 +265,20 @@ Rules that matter:
 
 ### Describe the work
 
+Give the stack its own **title** if you want a short label in Fleet and workspace lists.
+The title is independent from the instruction below it, so it can stay useful even when
+the instruction is long.
+
 Write what you'd tell a colleague. Specific beats polite:
 
 > Refresh tokens aren't rotated — a replayed token stays valid until expiry.
 > Rotate on every exchange and revoke the ancestor chain. Tests first.
+
+If the work is not ready to describe, tick **wait for instructions**. The stack is created
+with its title but no initial instruction, and its agents remain queued instead of starting.
+Send the first message from the stack or agent view when you are ready; that message becomes
+the initial instruction and starts the waiting agent. If all agent slots are occupied, the
+message waits in the normal queue until a slot opens.
 
 ### Choose which branch the agents work on
 

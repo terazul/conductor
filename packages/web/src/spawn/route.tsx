@@ -299,7 +299,9 @@ function Spawn() {
   // Where every choice starts: the Settings tab's launch defaults (Amendment 47).
   const [start] = useState(() => launchDefaults(readSetting));
   // Outlives the screen: leaving Spawn or a reload keeps it (Amendment 64).
+  const [title, setTitle] = useDraft('spawn:title');
   const [prompt, setPrompt] = useDraft('spawn:prompt');
+  const [waitForInstructions, setWaitForInstructions] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   /** Which git methodology this launch uses (Amendment 115), and (2)'s branch name. */
   const [method, setMethod] = useState<Method>(start.method);
@@ -609,7 +611,14 @@ function Spawn() {
   const free = Math.max(0, slots.total - slots.used);
   const willQueue = Math.max(0, specs.length * stacks - free);
   const canLaunch =
-    prompt.trim().length > 0 && projectId !== null && !busy && modelsReady && !customBad && !singleBad && methodOk && stacksWhy === null;
+    (waitForInstructions || prompt.trim().length > 0) &&
+    projectId !== null &&
+    !busy &&
+    modelsReady &&
+    !customBad &&
+    !singleBad &&
+    methodOk &&
+    stacksWhy === null;
   /** This launch's rows are not the preset's own, so its label says so (Amendment 115). */
   const changed = !isCustom && !sameStack(preset.roles, base.roles);
 
@@ -623,7 +632,9 @@ function Spawn() {
       const request = launchRequest(
         {
           projectId,
+          title,
           prompt,
+          waitForInstructions,
           method,
           branch: branchName,
           preset: presetLabel(preset.label, changed),
@@ -639,7 +650,9 @@ function Spawn() {
         setLaunchedStacks(await api<CreateJobsResponse>(request.path, { method: 'POST', body: request.body }));
       }
       setStacks(1);
+      setTitle('');
       setPrompt('');
+      setWaitForInstructions(false);
       // The branch is taken now, by the job just launched: naming it again would be a 409.
       if (method === 'named') setBranchName('');
     } catch (err) {
@@ -647,7 +660,7 @@ function Spawn() {
     } finally {
       setBusy(false);
     }
-  }, [canLaunch, projectId, prompt, method, branchName, preset.label, changed, specs, jobBudget, stacks]);
+  }, [canLaunch, projectId, title, prompt, waitForInstructions, method, branchName, preset.label, changed, specs, jobBudget, stacks]);
 
   // ⌘⏎ / ctrl+⏎ launches from anywhere on the screen, per the mockup.
   useEffect(() => {
@@ -668,14 +681,39 @@ function Spawn() {
     <div className="sp-wrap">
       {/* ── 1 ─────────────────────────────────────────────────────────────── */}
       <div className="sp-section">
+        <span className="sp-lab">title</span>
+        <input
+          className="sp-input sp-title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="A short name for this stack"
+          spellCheck={false}
+          autoComplete="off"
+        />
         <span className="sp-lab">1 · what needs doing</span>
         <textarea
           className="sp-prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
+          disabled={waitForInstructions}
           placeholder="Rotate refresh tokens on every exchange and revoke the ancestor chain on reuse. Tests first."
           spellCheck={false}
         />
+        <label className="sp-wait">
+          <input
+            type="checkbox"
+            checked={waitForInstructions}
+            onChange={(e) => {
+              const waiting = e.target.checked;
+              setWaitForInstructions(waiting);
+              if (waiting) setPrompt('');
+            }}
+          />
+          wait for instructions
+        </label>
+        {waitForInstructions && (
+          <div className="sp-cf-note is-still">This stack will wait here until you send its first instruction.</div>
+        )}
         {/* Each stack's first line, its number filled in (Amendment 181), and why it can't launch. */}
         {stacks > 1 && (
           <div className="sp-stack-lines" aria-label="Each stack's first line">

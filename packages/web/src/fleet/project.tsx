@@ -113,7 +113,7 @@ function JobGroup({
           }}
         >
           <span className="pj-group-ch">{open ? '⌃' : '⌄'}</span>
-          <span className="pj-group-prompt">{job.name ?? job.prompt}</span>
+          <span className="pj-group-prompt">{(job.name ?? job.prompt) || 'waiting for instructions'}</span>
         </button>
 
         <span className="pj-group-meta">

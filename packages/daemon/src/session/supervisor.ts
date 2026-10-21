@@ -795,7 +795,7 @@ export class Supervisor implements AgentControl {
   async createJob(req: CreateJobRequest): Promise<CreateJobResponse> {
     const project = getProject(this.#db, req.projectId);
     if (!project) throw new Error(`no such project ${req.projectId}`);
-    if (!req.prompt?.trim()) throw new Error('prompt is required');
+    if (!req.prompt?.trim() && !req.waitForInstructions) throw new Error('prompt is required');
     if (!req.agents?.length) throw new Error('at least one agent is required');
 
     const jobId = newId('job');
@@ -838,6 +838,7 @@ export class Supervisor implements AgentControl {
       id: jobId,
       projectId: project.id,
       prompt: req.prompt.trim(),
+      ...(req.name ? { name: req.name.trim() } : {}),
       isolation: req.isolation,
       worktreePath,
       branch,
@@ -977,6 +978,8 @@ export class Supervisor implements AgentControl {
 
       const job = getJob(this.#db, agent.jobId);
       if (!job || job.status === 'paused' || job.status === 'failed') continue;
+      // An explicit wait-for-instructions launch has no prompt to run until a person sends one.
+      if (job.prompt === '' && agent.sdkSessionId === null) continue;
 
       /*
        * With its session, when it has one. A queued agent with a session is one that
@@ -2047,10 +2050,11 @@ export class Supervisor implements AgentControl {
     if (runner?.send(text, synthetic)) return 'sent';
 
     const agent = getAgent(this.#db, agentId);
-    if (!agent?.sdkSessionId) throw new Error(`agent ${agentId} cannot receive messages yet`);
+    if (!agent) throw new Error(`agent ${agentId} cannot receive messages yet`);
 
     // Refused, not launched: the status stays as it is and the sentence says why.
     const job = getJob(this.#db, agent.jobId);
+    if (!agent.sdkSessionId && job?.prompt !== '') throw new Error(`agent ${agentId} cannot receive messages yet`);
     if (job && !existsSync(job.worktreePath)) {
       throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
     }
@@ -2068,6 +2072,11 @@ export class Supervisor implements AgentControl {
       broadcastScheduled(this.#db);
       if (!this.#active.has(agentId) && agent.status !== 'queued') this.#waitForSlot(agent);
       return 'queued';
+    }
+
+    if (!agent.sdkSessionId) {
+      void this.#launchWithPrompt(agentId, null, text, synthetic).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
+      return 'resumed';
     }
 
     /*
@@ -2105,7 +2114,7 @@ export class Supervisor implements AgentControl {
    */
   #sendForSlot(agent: Agent, m: { id: string; text: string; synthetic: boolean }): void {
     const job = getJob(this.#db, agent.jobId);
-    if (!agent.sdkSessionId || !job || !existsSync(job.worktreePath)) {
+    if (!job || !existsSync(job.worktreePath)) {
       failScheduled(
         this.#db,
         m.id,
@@ -2283,7 +2292,7 @@ export class Supervisor implements AgentControl {
 
   async #launchWithPrompt(
     agentId: string,
-    resume: string,
+    resume: string | null,
     prompt: string,
     synthetic = false,
   ): Promise<void> {

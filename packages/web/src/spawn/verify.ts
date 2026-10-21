@@ -1060,15 +1060,17 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
 
   // The request body.
   const agents = toAgentSpecs(presetById('full'), defaultPills(), 5, undefined, {}, { sonnet: 'us.anthropic.claude-sonnet-5', opus: 'us.anthropic.claude-opus-4-1', haiku: 'h' });
-  const base = { projectId: 'prj_1', prompt: '  do it \n', branch: '', preset: 'Full pipeline', agents, budgetUsd: 20 };
+  const base = { projectId: 'prj_1', title: 'A separate title', prompt: '  do it \n', waitForInstructions: false, branch: '', preset: 'Full pipeline', agents, budgetUsd: 20 };
   const one = launchBody({ ...base, method: 'in_place' });
   check('(1) sends isolation in_place and no branch', one.isolation === 'in_place' && !('branch' in one), JSON.stringify(one).slice(0, 160));
   const two = launchBody({ ...base, method: 'named', branch: '  feature/refresh-tokens ' });
   check('(2) sends a worktree and the branch you named, trimmed', two.isolation === 'worktree' && two.branch === 'feature/refresh-tokens');
   const three = launchBody({ ...base, method: 'worktree', branch: 'left/over' });
   check('(3) sends a worktree and no branch, even with a name left in the field', three.isolation === 'worktree' && !('branch' in three));
-  check('the rest of the body is what it was: the project, the trimmed prompt, the preset, the agents and the cap', [one, two, three].every((b) => b.projectId === 'prj_1' && b.prompt === 'do it' && b.preset === 'Full pipeline' && b.agents === agents && b.budgetUsd === 20));
-  check('(1) and (3) are exactly the keys they were before this amendment', Object.keys(one).sort().join() === 'agents,budgetUsd,isolation,preset,projectId,prompt' && Object.keys(three).sort().join() === Object.keys(one).sort().join());
+  check('the body keeps title separate from the trimmed prompt', [one, two, three].every((b) => b.name === 'A separate title' && b.prompt === 'do it' && b.waitForInstructions === undefined && b.projectId === 'prj_1' && b.preset === 'Full pipeline' && b.agents === agents && b.budgetUsd === 20));
+  check('(1) and (3) include the optional title without changing the instruction field', one.name === 'A separate title' && three.name === 'A separate title');
+  const waiting = launchBody({ ...base, title: 'Wait for me', prompt: '', waitForInstructions: true, method: 'in_place' });
+  check('a waiting launch sends an explicit wait flag and no instruction', waiting.name === 'Wait for me' && waiting.prompt === '' && waiting.waitForInstructions === true);
 
   // (2) needs a name.
   check('(2) cannot launch without a name, or with a blank one', !methodReady('named', '') && !methodReady('named', '   '));
@@ -1309,7 +1311,7 @@ console.log('\n21 · orchestrated stacks: one agent runs the others, with the ro
   check('the orchestrator itself is not a reading role: it can write the plan', !o.autonomy.disallowedTools.includes('Write'));
 
   // The request body.
-  const body = launchBody({ projectId: 'p', prompt: 'Build it.', method: 'worktree', branch: '', preset: presetLabel(orch.label, false), agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) });
+  const body = launchBody({ projectId: 'p', title: 'Build stack', prompt: 'Build it.', waitForInstructions: false, method: 'worktree', branch: '', preset: presetLabel(orch.label, false), agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) });
   const wire = JSON.parse(JSON.stringify(body)) as { agents: { helpers?: number; helperRoles?: { id: string; model: string }[] }[]; preset: string };
   check('the launch request carries the roles and the helper cap', wire.preset === 'orchestrated pipeline' && wire.agents[0]!.helpers === 12 && wire.agents[0]!.helperRoles!.length === 4 && wire.agents[0]!.helperRoles![0]!.model === tiersNow.opus);
   check('an ordinary launch sends neither', ['full', 'bugfix', 'review', 'analysis', 'single'].every((id) => {
@@ -1468,7 +1470,7 @@ console.log('\n23 · a Custom setup can orchestrate, and saves the roles it list
   const fromPreset = specsOf(orch, defaults);
   const fromCustom = specsOf(mine, defaults);
   check("the launch request from Custom is the preset's, field for field, for the same row and roles", JSON.stringify(fromCustom) === JSON.stringify(fromPreset), JSON.stringify(fromCustom).slice(0, 200));
-  const bodyOf = (specs: AgentSpec[]) => JSON.parse(JSON.stringify(launchBody({ projectId: 'p', prompt: 'Build it.', method: 'worktree', branch: '', preset: 'x', agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) }))) as { agents: unknown[] };
+  const bodyOf = (specs: AgentSpec[]) => JSON.parse(JSON.stringify(launchBody({ projectId: 'p', title: 'Build stack', prompt: 'Build it.', waitForInstructions: false, method: 'worktree', branch: '', preset: 'x', agents: specs, budgetUsd: jobBudgetUsd(5, specs.length, ALL_ON) }))) as { agents: unknown[] };
   check('and so is the body sent to POST /api/jobs', JSON.stringify(bodyOf(fromCustom).agents) === JSON.stringify(bodyOf(fromPreset).agents));
   check('with the helper cap and the roles on that row', fromCustom[0]!.helpers === 12 && fromCustom[0]!.helperRoles?.map((r) => r.id).join() === 'developer,validator,reviewer,scribe');
   const lighter = withTier(withoutRole(defaults, 'scribe'), 'developer', 'haiku');
@@ -1801,7 +1803,9 @@ console.log('\n30 · an orchestrated launch starts several stacks from one plan,
   const agents = toAgentSpecs(orchestratedFor(presetById(ORCHESTRATED_ID), defaultListed(personasFrom(null))), defaultPills(), 5, undefined, {}, {}, {}, undefined, personasFrom(null), defaultListed(personasFrom(null)));
   const input: LaunchInput = {
     projectId: 'p1',
+    title: `Wave ${TRACK}`,
     prompt: `Run track **${TRACK}** of docs/plans/wave-13-tracks.md.\nStack ${TRACK}: your lanes are in §${TRACK}.`,
+    waitForInstructions: false,
     method: 'named',
     branch: `w13/t${TRACK}`,
     preset: 'orchestrated',

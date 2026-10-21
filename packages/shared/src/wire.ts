@@ -308,6 +308,10 @@ export interface ProviderInfo {
 export interface CreateJobRequest {
   projectId: string;
   prompt: string;
+  /** Optional stack title, kept separate from the instruction. */
+  name?: string;
+  /** Explicitly create the stack queued until a user sends its first instruction. */
+  waitForInstructions?: boolean;
   isolation: Isolation;
   /** Preset name for the UI's benefit; the daemon only reads `agents`. */
   preset?: string;

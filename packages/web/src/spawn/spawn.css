@@ -66,6 +66,25 @@
   color: var(--ink3);
 }
 
+.sp-title {
+  display: block;
+  width: min(100%, 60ch);
+  margin: 0 0 14px;
+}
+
+.sp-prompt:disabled {
+  opacity: 0.55;
+}
+
+.sp-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  color: var(--ink2);
+  font-size: var(--fs-sm);
+}
+
 /* ── 2 · project picker ─────────────────────────────────────────────────── */
 
 .sp-projects {
