@@ -633,8 +633,9 @@ never shown again. It is kept in `~/.conductor/secrets.json`, readable only by y
 never in `settings.json`. `OPENROUTER_API_KEY` in the daemon's environment wins over it.
 
 On Copilot or OpenRouter, **model** is one id for every agent in the launch, such as
-`anthropic/claude-sonnet-4.5`. The field lists what the engine offers, and you can type
-any id. An id the engine doesn't list is refused at launch.
+`anthropic/claude-sonnet-4.5`. The picker lists what the engine offers. If the engine
+cannot return a list, it becomes a field where you can type an id; an id the engine
+doesn't list is refused at launch.
 
 These agents work like Claude ones: the same transcript, the same Needs you and the same
 deny rules. Conductor itself refuses a tool on an agent's deny list, on every engine, even

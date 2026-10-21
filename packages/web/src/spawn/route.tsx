@@ -36,7 +36,7 @@ import type {
 } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { catalogLine, useModels } from '../lib/models.js';
-import { ModelSelect, OrchestratorMark } from '../shell/ui.js';
+import { ModelSelect, OrchestratorMark, ProviderModelSelect } from '../shell/ui.js';
 import { useCommand } from '../agent/endpoints.js';
 import { removeProject } from './endpoints.js';
 import { errorText } from '../lib/errors.js';
@@ -1000,41 +1000,40 @@ function Spawn() {
           />
         </div>
         ) : (
-          /*
-           * One id for every agent of the launch. Ids here are free-form
-           * (`anthropic/claude-sonnet-4.5`), so it is a field: what the engine lists is
-           * offered, and any id can be typed. The daemon checks it against the same list.
-           */
           <div className="sp-efforts">
             <span className="ui-lab">model</span>
-            <span className="ui-model">
-              <input
-                className="sp-input sp-engmodel"
-                list="sp-engine-models"
+            {(theirs.list?.models.length ?? 0) > 0 ? (
+              <ProviderModelSelect
+                models={theirs.list!.models}
                 value={engineModel}
-                spellCheck={false}
-                placeholder={theirs.list?.models[0]?.id ?? 'a model id'}
-                aria-label={`Model id on ${providerLabel(provider)}`}
-                onChange={(e) => setEngineModel(e.target.value)}
+                onChange={setEngineModel}
+                onRefresh={theirs.refresh}
+                loading={theirs.loading}
+                ariaLabel={`Model on ${providerLabel(provider)}`}
+                className="sp-engmodel"
               />
-              <datalist id="sp-engine-models">
-                {(theirs.list?.models ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName === m.id ? '' : m.displayName}
-                  </option>
-                ))}
-              </datalist>
-              <button
-                type="button"
-                className="ui-refresh"
-                onClick={theirs.refresh}
-                disabled={theirs.loading}
-                title={`Ask ${providerLabel(provider)} again for what it lists`}
-                aria-label="Refresh the model list"
-              >
-                {theirs.loading ? '…' : '↻'}
-              </button>
-            </span>
+            ) : (
+              <span className="ui-model">
+                <input
+                  className="sp-input sp-engmodel"
+                  value={engineModel}
+                  spellCheck={false}
+                  placeholder="a model id"
+                  aria-label={`Model id on ${providerLabel(provider)}`}
+                  onChange={(e) => setEngineModel(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="ui-refresh"
+                  onClick={theirs.refresh}
+                  disabled={theirs.loading}
+                  title={`Ask ${providerLabel(provider)} again for what it lists`}
+                  aria-label="Refresh the model list"
+                >
+                  {theirs.loading ? '…' : '↻'}
+                </button>
+              </span>
+            )}
           </div>
         )}
         {claude && models.error && (

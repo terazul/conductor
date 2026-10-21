@@ -668,7 +668,7 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('the composer asks the engine before it shows a control', /const caps = capabilitiesOf\(agent, useProviders\(\)\);/.test(comp) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps, autonomy\.mode\)\)/.test(comp) && /\{has\.effort && \(\s*<div className="ag-modes">\s*<span className="ui-lab">effort/.test(comp));
   check('its budget is tokens where the engine has no dollars, and the patch is { budgetTokens }', /has\.budget === 'tokens' \?/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetTokens: cap \} \}\)/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetUsd: cap \} \}\)/.test(comp));
-  check("its model comes from the engine's list, and Claude keeps the catalog picker", /\{claude \? \(\s*<ModelSelect\s*catalog=\{models\.catalog\}/.test(comp) && /useProviderModels\(claude \? null : providerOf\(agent\)\)/.test(comp) && /providerModelProblem\(theirs\.list, model\)/.test(comp));
+  check("its model comes from the engine's visible list, and Claude keeps the catalog picker", /\{claude \? \(\s*<ModelSelect\s*catalog=\{models\.catalog\}/.test(comp) && /useProviderModels\(claude \? null : providerOf\(agent\)\)/.test(comp) && /<ProviderModelSelect/.test(comp) && /providerModelProblem\(theirs\.list, model\)/.test(comp));
   const insp = readFileSync(new URL('./inspector.tsx', import.meta.url), 'utf8');
   // Since Amendment 146 the panel's spend is today and the lifetime side by side, in tokens where
   // the engine reports no dollars (`agentPairWords(agent, dollars)`), not "not reported".

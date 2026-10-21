@@ -16,7 +16,7 @@ import { useCommand } from '../agent/endpoints.js';
 import { resolveTier, useModels } from '../lib/models.js';
 import { CLAUDE, capabilitiesOf, providerLabel, useProviderModels, useProviders } from '../lib/providers.js';
 import { useSetting } from '../lib/settings.js';
-import { ModelSelect } from '../shell/ui.js';
+import { ModelSelect, ProviderModelSelect } from '../shell/ui.js';
 import { KNOWN_ROLES, nextRole, roleFromName, rowPersona, untouchedRole } from './custom.js';
 import { addAgent } from './endpoints.js';
 import { PERSONAS_KEY, personaFor, personasFrom } from './personas.js';
@@ -131,21 +131,23 @@ export function AddAgent({ job, agents, onClose }: { job: Job; agents: readonly 
                 title={draft.model}
               />
             ) : (
-              <>
+              (theirs.list?.models.length ?? 0) > 0 ? (
+                <ProviderModelSelect
+                  models={theirs.list!.models}
+                  value={draft.model}
+                  onChange={(model) => set({ model })}
+                  ariaLabel={`Model on ${providerLabel(engine)}`}
+                  className="pj-add-model"
+                />
+              ) : (
                 <input
                   className="sp-input pj-add-model"
-                  list={`pj-models-${job.id}`}
                   value={draft.model}
                   spellCheck={false}
                   aria-label={`Model id on ${providerLabel(engine)}`}
                   onChange={(e) => set({ model: e.target.value })}
                 />
-                <datalist id={`pj-models-${job.id}`}>
-                  {(theirs.list?.models ?? []).map((m) => (
-                    <option key={m.id} value={m.id} />
-                  ))}
-                </datalist>
-              </>
+              )
             )}
           </span>
           <span className="pj-add-field">

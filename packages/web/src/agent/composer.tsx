@@ -22,7 +22,7 @@ import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
 import { spentOn, type Agent, type Autonomy, type EffortLevel } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
-import { Chevron, ModelSelect, fmtMoney } from '../shell/ui.js';
+import { Chevron, ModelSelect, ProviderModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -669,47 +669,52 @@ export function Composer({ agent }: { agent: Agent }) {
               title={model}
             />
           ) : (
-            /* A free-form id (Amendment 78): what the engine lists is offered, any id can be typed. */
-            <span className="ui-model">
-              <input
-                className="ag-model-in"
-                list={`ag-models-${agent.id}`}
-                value={modelText ?? model}
-                spellCheck={false}
+            (theirs.list?.models.length ?? 0) > 0 ? (
+              <ProviderModelSelect
+                models={theirs.list!.models}
+                value={model}
+                onChange={(id) => void pickModel(id)}
+                onRefresh={theirs.refresh}
+                loading={theirs.loading}
                 disabled={policy.busy}
-                aria-label={`Model id on ${providerLabel(agent.provider)}`}
                 title={model}
-                onChange={(e) => setModelText(e.target.value)}
-                onBlur={() => {
-                  if (modelText !== null) void pickModel(modelText.trim());
-                  setModelText(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
+                ariaLabel={`Model on ${providerLabel(agent.provider)}`}
+                className="ag-model-in"
+              />
+            ) : (
+              <span className="ui-model">
+                <input
+                  className="ag-model-in"
+                  value={modelText ?? model}
+                  spellCheck={false}
+                  disabled={policy.busy}
+                  aria-label={`Model id on ${providerLabel(agent.provider)}`}
+                  title={model}
+                  onChange={(e) => setModelText(e.target.value)}
+                  onBlur={() => {
                     if (modelText !== null) void pickModel(modelText.trim());
                     setModelText(null);
-                  } else if (e.key === 'Escape') setModelText(null);
-                }}
-              />
-              <datalist id={`ag-models-${agent.id}`}>
-                {(theirs.list?.models ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName === m.id ? '' : m.displayName}
-                  </option>
-                ))}
-              </datalist>
-              <button
-                type="button"
-                className="ui-refresh"
-                onClick={theirs.refresh}
-                disabled={theirs.loading}
-                title={`Ask ${providerLabel(agent.provider)} again for what it lists`}
-                aria-label="Refresh the model list"
-              >
-                {theirs.loading ? '…' : '↻'}
-              </button>
-            </span>
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (modelText !== null) void pickModel(modelText.trim());
+                      setModelText(null);
+                    } else if (e.key === 'Escape') setModelText(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ui-refresh"
+                  onClick={theirs.refresh}
+                  disabled={theirs.loading}
+                  title={`Ask ${providerLabel(agent.provider)} again for what it lists`}
+                  aria-label="Refresh the model list"
+                >
+                  {theirs.loading ? '…' : '↻'}
+                </button>
+              </span>
+            )
           )}
 
           {has.budget === 'tokens' ? (

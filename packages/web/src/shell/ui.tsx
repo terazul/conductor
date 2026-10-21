@@ -9,7 +9,7 @@
  * without a human. Nothing else in this file may reach for it.
  */
 
-import type { AgentStatus, ModelCatalog } from '@conductor/shared';
+import type { AgentStatus, ModelCatalog, ProviderModelList } from '@conductor/shared';
 import { modelGroups } from '../lib/models.js';
 import { CLAUDE, providerLabel } from '../lib/providers.js';
 import type { Activity } from './clock.js';
@@ -258,6 +258,67 @@ export function ModelSelect({
           onClick={onRefresh}
           disabled={loading}
           title="Ask the model API again for what it serves"
+          aria-label="Refresh the model list"
+        >
+          {loading ? '…' : '↻'}
+        </button>
+      )}
+    </span>
+  );
+}
+
+/**
+ * An exact model from a non-Claude provider. Providers return a flat list rather than
+ * Claude's tiered catalog, but the control is deliberately the same visible popup.
+ * A current model that has since disappeared remains visible until another is chosen.
+ */
+export function ProviderModelSelect({
+  models,
+  value,
+  onChange,
+  onRefresh,
+  loading = false,
+  disabled = false,
+  title,
+  ariaLabel,
+  className,
+}: {
+  models: ProviderModelList['models'];
+  value: string;
+  onChange: (id: string) => void;
+  onRefresh?: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  title?: string;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const listed = models.some((m) => m.id === value);
+  return (
+    <span className="ui-model">
+      <select
+        className={className ? `ui-select ${className}` : 'ui-select'}
+        value={value}
+        disabled={disabled}
+        title={title}
+        aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {!value && <option value="">pick a model</option>}
+        {value && !listed && <option value={value}>{value} · not listed</option>}
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.displayName === m.id ? m.id : `${m.displayName} — ${m.id}`}
+          </option>
+        ))}
+      </select>
+      {onRefresh && (
+        <button
+          type="button"
+          className="ui-refresh"
+          onClick={onRefresh}
+          disabled={loading}
+          title="Ask the provider again for what it lists"
           aria-label="Refresh the model list"
         >
           {loading ? '…' : '↻'}
