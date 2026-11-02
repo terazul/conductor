@@ -281,10 +281,12 @@ the last of it on 12 Oct).
   - Metrics, key `8` (122).
   - Midnight (103, 129): a tab left open past midnight reads $0.00 on the status bar, and an agent's
     own budget (the composer's "$4.10 of $25 today") reads $0 again, with its over-budget warning
-    gone. Moving the system clock forward is enough to see both. An agent paused at its ceiling
-    stays paused, and the Budget reached card says its budget is renewed and offers **continue**.
+    gone. Moving the system clock forward is enough to see both.
   - The details panel's **today** and **lifetime** lines, and the wording "budget per agent per
     day" in Spawn (129).
+  - Since then: the Fleet card's fold (173); the monthly budget in Settings, on a project card's
+    **Edit**, and by provider (182, 188); Metrics' **By project** and **By provider** tables; and the
+    status bar's today, then the month (187).
 
 - [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-129 passes
   its tests on fakes; nothing has run on the real SDK, Copilot or OpenRouter. It costs money and needs
@@ -295,7 +297,8 @@ the last of it on 12 Oct).
     sending work back after two and ask you with the question tool?
   - A real outage, with the network unplugged mid-run: the banner counts down 5 s, 15 s, 30 s, 60 s,
     5 min; **retry now** and **stop retrying** work; a reply starts the count again (123).
-  - An agent with a $1 budget (124): the warning at $1, the stop at $2, **+$10** raising it.
+  - An agent with a $1 budget (124, 180): it warns at $1 and keeps going, past $2 too; **+$10**
+    raising it quiets the warning.
   - Metrics (122) after a resumed run: a resume adds only the difference. Also check that
     `duration_api_ms` is a running total; the SDK's types don't say, and `session/metrics.ts` assumes it.
 
