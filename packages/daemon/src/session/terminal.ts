@@ -1,9 +1,9 @@
 /**
- * A command runner in an agent's folder — the Agent screen's terminal.  TRACK A.
+ * A command runner for an agent — the Agent screen's terminal.  TRACK A.
  * (Amendment 58)
  *
  * Chosen over a real terminal by the user: no new dependency, and nothing interactive.
- * Each command runs in `$SHELL -c` in the agent's job folder, with no input (a prompt
+ * Each command runs in `$SHELL -c` at the project root (Amendment 191), with no input (a prompt
  * reads end-of-file), and its output streams to every tab as text, batched. It runs as
  * you, with your permissions, not an agent's: the localhost guard and CONDUCTOR_TOKEN
  * are what stand in front of it, and the panel says so.

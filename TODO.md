@@ -180,7 +180,7 @@ the last of it on 12 Oct).
   waiting one keeps its row; arriving on a folded helper opens its fold; the Project screen is not
   folded).*
 
-- [ ] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct).
+- [x] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct). *Done (2 Nov): Amendment 191 (every terminal opens at the project root, the agent's tab and the command runner too; a tab's title and note say the folder and branch, and for an agent in its own worktree a line says its changes are in `.conductor/wt/<jobId>`, with a copyable `cd`).*
   Today the agent screen's **›_ terminal** tab (`web/src/agent/agent.tsx:824-834`) starts its shell in
   the job's folder (`routes/term.ts:84-88`, and `routes/terminal.ts:30-34` for the old command
   runner): `jobs.worktree_path`. For a job in its own worktree, that is

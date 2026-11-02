@@ -9,6 +9,7 @@
 import type { ITheme } from '@xterm/xterm';
 import {
   TERM_WS_PREFIX,
+  type Job,
   type TermClientFrame,
   type TermCreateRequest,
   type TermCreateResponse,
@@ -89,7 +90,30 @@ export function tabLabel(t: Pick<TermInfo, 'exited'>, index: number): string {
 
 export function tabTitle(t: TermInfo): string {
   const code = t.exited ? `, exited${t.exitCode === null ? '' : ` with ${t.exitCode}`}` : '';
-  return `${t.cwd} · started ${t.startedAt}${code}`;
+  return `${t.cwd}${t.branch ? ` on ${t.branch}` : ''} · started ${t.startedAt}${code}`;
+}
+
+/** A path as one shell word: bare when nothing in it needs quoting, else in single quotes. */
+export function shellWord(path: string): string {
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Where an agent's own changes are, when that is not where its terminal starts (Amendment
+ * 191): its job's worktree, as a path from the project root, with the line that goes there.
+ * Null for a job that works in the project folder itself (a branch, or in place).
+ */
+export function worktreeNote(
+  job: Pick<Job, 'isolation' | 'worktreePath' | 'branch'>,
+  projectPath: string,
+): { where: string; branch: string; cd: string } | null {
+  if (job.isolation !== 'worktree' || job.worktreePath === projectPath) return null;
+  const inside = job.worktreePath.startsWith(`${projectPath}/`);
+  return {
+    where: inside ? job.worktreePath.slice(projectPath.length + 1) : job.worktreePath,
+    branch: job.branch,
+    cd: `cd ${shellWord(job.worktreePath)}`,
+  };
 }
 
 /** The tab to show: the one chosen if it is still there, else the newest, else none. */

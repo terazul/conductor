@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import type { ServerFrame, TermInfo, TermListResponse, TermShellsResponse } from '@conductor/shared';
 import { build } from '../index.js';
 import { openDb } from '../db/index.js';
-import { DEFAULT_AUTONOMY, insertAgent, insertJob } from '../session/store.js';
+import { DEFAULT_AUTONOMY, getJob, insertAgent, insertJob } from '../session/store.js';
 import { forcePtyUnavailable, ptyStatus } from './pty.js';
 import { forceMirrorUnavailable, mirrorStatus } from './mirror.js';
 import { REPLAY_BYTES, Ring } from './ring.js';
@@ -273,6 +273,8 @@ async function main(): Promise<void> {
       return false;
     })();
     check('and returns its output', ok && /runner-ok/.test(out), out);
+    const runner = await send<{ cwd: string }>('GET', '/api/agents/agt_t/terminal');
+    check('the runner runs at the project root too (191)', runner.body.cwd === ROOT, JSON.stringify(runner.body));
     forcePtyUnavailable(null);
   }
 
@@ -296,7 +298,10 @@ async function main(): Promise<void> {
   check('POST → 201 with an id', first.status === 201 && /^term_[0-9a-f]+$/.test(id), JSON.stringify(first));
   const l1 = await list('agt_t');
   const info = l1.terminals[0] as TermInfo | undefined;
-  check('GET lists it: available, its folder, when it started, not exited', l1.available === true && l1.terminals.length === 1 && info?.id === id && info.cwd === WT && !info.exited && !Number.isNaN(Date.parse(info.startedAt)), JSON.stringify(l1));
+  check('GET lists it: available, its folder, when it started, not exited', l1.available === true && l1.terminals.length === 1 && info?.id === id && info.cwd === ROOT && !info.exited && !Number.isNaN(Date.parse(info.startedAt)), JSON.stringify(l1));
+  // Amendment 191: the agent's job is in a worktree, and its terminal still starts at the root.
+  check("an agent in a worktree job gets a terminal at the project root, not the worktree (191)", getJob(db, 'job_t')?.worktreePath === WT && info?.cwd === ROOT, JSON.stringify(info));
+  check('and it names the branch checked out there, for its title (191)', info?.branch === 'main', JSON.stringify(info));
   check('another agent has none', (await list('agt_u')).terminals.length === 0);
 
   const p1 = attach(id);
@@ -306,7 +311,7 @@ async function main(): Promise<void> {
   p1.type('echo "T=$TERM C=$COLORTERM N=${NO_COLOR-unset} K=${CONDUCTOR_TOKEN-unset}"\n');
   check('TERM and COLORTERM are set; NO_COLOR and the token are not there', (await p1.waitFor(/T=xterm-256color C=truecolor N=unset K=unset/)) !== null, p1.text().slice(-300));
   p1.type('pwd -P\n');
-  check("it starts in the agent's folder", (await p1.waitFor(new RegExp(`\\r\\n${WT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r\\n`))) !== null, p1.text().slice(-300));
+  check("it starts in the project folder, as the dock's does (191)", (await p1.waitFor(new RegExp(`\\r\\n${ROOT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r\\n`))) !== null, p1.text().slice(-300));
   p1.type('stty size\n');
   check('and was created at the size the page asked for (20 rows, 90 columns)', (await p1.waitFor(/\r\n20 90\r\n/)) !== null, p1.text().slice(-200));
 

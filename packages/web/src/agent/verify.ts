@@ -62,11 +62,13 @@ import {
   nextSelected,
   reconnectDelay,
   resizeFrame,
+  shellWord,
   socketEnd,
   tabLabel,
   tabTitle,
   termSocketUrl,
   wantsCopy,
+  worktreeNote,
   xtermTheme,
   type Tokens,
 } from './term.js';
@@ -873,6 +875,25 @@ console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
   check('and in development /ws/term goes through the proxy that /ws does, upgraded', /'\/ws': \{ target: DAEMON, ws: true/.test(vite));
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { dependencies: Record<string, string> };
   check('the two packages are declared, pinned', pkg.dependencies['@xterm/xterm'] === '6.0.0' && pkg.dependencies['@xterm/addon-fit'] === '0.11.0');
+}
+
+console.log('\n· every terminal opens at the project root, and says where the agent\'s changes are (Amendment 191)');
+{
+  const at = { id: 't1', scope: { kind: 'agent' as const, agentId: 'a' }, cwd: '/p', shell: '/bin/zsh', startedAt: '2026-11-02T10:00:00Z', exited: false, exitCode: null };
+  check('a tab names its folder and the branch there', tabTitle({ ...at, branch: 'main' }) === '/p on main · started 2026-11-02T10:00:00Z', tabTitle({ ...at, branch: 'main' }));
+  check('and only the folder where the daemon gave no branch', tabTitle(at) === '/p · started 2026-11-02T10:00:00Z');
+  const wt = worktreeNote({ isolation: 'worktree', worktreePath: '/p/.conductor/wt/job_x', branch: 'conductor/job_x' }, '/p');
+  check("an agent in its own worktree: its changes are in .conductor/wt/<jobId>, on its branch, with the cd that goes there", wt?.where === '.conductor/wt/job_x' && wt.branch === 'conductor/job_x' && wt.cd === 'cd /p/.conductor/wt/job_x', JSON.stringify(wt));
+  check('one that works in the project folder (a branch, or in place) gets no line', worktreeNote({ isolation: 'branch', worktreePath: '/p', branch: 'b' }, '/p') === null && worktreeNote({ isolation: 'in_place', worktreePath: '/p', branch: 'main' }, '/p') === null);
+  check('a worktree outside the project is named by its whole path', worktreeNote({ isolation: 'worktree', worktreePath: '/elsewhere/wt', branch: 'b' }, '/p')?.where === '/elsewhere/wt');
+  check('the cd line quotes a path that needs it, a quote in it too', shellWord('/a/b-c_d.e') === '/a/b-c_d.e' && shellWord("/My Code/it's") === "'/My Code/it'\\''s'", shellWord("/My Code/it's"));
+
+  const panel = readFileSync(new URL('./TermPanel.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
+  check("the agent's panel finds its job and project, and its paths lead into the project root in Files, as the dock's do", /const project = useProjects\(\)\.find\(\(p\) => p\.id === agent\.projectId\)/.test(panel) && /const job = useJobs\(agent\.projectId\)\.find\(\(j\) => j\.id === agent\.jobId\)/.test(panel) && /filesRoot: dirRoot\(agent\.projectId, root\)/.test(panel) && !/filesRoot: agent\.jobId/.test(panel));
+  check('the line under its tabs says where the changes are, with a copy for the cd', /about=\{away \? <WorktreeLine where=\{away\.where\} branch=\{away\.branch\} cd=\{away\.cd\} \/> : undefined\}/.test(panel) && /This agent's changes are in <code>\{where\}<\/code>, on <code>\{branch\}<\/code>/.test(panel) && /copyText\(cd\)/.test(panel) && /\{about\}/.test(panel));
+  check('the note above names the folder and branch of the terminal shown', /in <code>\{tildePath\(shown\.cwd\)\}<\/code>/.test(panel) && /on <code>\{shown\.branch\}<\/code>/.test(panel));
+  check('its style is tokens only', /\.ag-termx-where \{[^}]*color: var\(--ink3\)/.test(css));
 }
 
 console.log('\n11 · the re-run button knows a held agent (Amendment 120)');

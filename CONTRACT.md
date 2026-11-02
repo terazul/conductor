@@ -200,6 +200,37 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 191 — post-merge, applied. **Every terminal opens at the project root, the agent's tab too; its title says the folder and branch, and where the agent's changes are.**
+
+Daemon (`routes/term.ts`, `routes/terminal.ts`, `terminal/service.ts`, `terminal/verify.ts`),
+shared (`wire.ts`), web (`agent/TermPanel.tsx`, `agent/term.ts`, `agent/agent.css`,
+`agent/verify.ts`) and `docs/MANUAL.md`. Asked for 14 Oct; planned as wave 13's T1, decided as
+"every terminal opens at the project root, the agent's tab too".
+
+- **Where it starts.** `agentAt` (`routes/term.ts`) and the command runner's `cwdOf`
+  (`routes/terminal.ts`) start at `project.path`, as the Terminal dock always has, not at the
+  job's `worktreePath`. The shell keeps its agent's scope and its job, so removing the agent or
+  the job still ends it.
+- **What it says.** `TermInfo` has an additive `branch`: the branch checked out where the shell
+  started, read with `git rev-parse --abbrev-ref HEAD` as it opens; absent outside a repo, before
+  the first commit, and from an older daemon. A tab's title is `<folder> on <branch> · started …`,
+  and the note beside the tabs, *Runs as you, in ~/code/app on main*, names the folder and branch
+  of the terminal shown. The dock gets both too.
+- **Where the agent's changes are.** For an agent whose job has its own worktree, a line under the
+  tabs says *This agent's changes are in `.conductor/wt/<jobId>`, on `conductor/<jobId>`. To go
+  there: `cd /…/.conductor/wt/<jobId>`*, with **⧉ copy** for the `cd` line (the path quoted when
+  it needs it). A job on a branch, or in place, works in the project folder, and gets no line.
+- **Links.** A path printed in the agent's terminal now leads into the project root in Files, as
+  the dock's do, rather than into the job's root.
+
+**Verified:** `terminal/verify.ts` §2-3: an agent in a worktree job (`job_t`, its
+`worktreePath` under `.conductor/wt/`) gets a terminal listed at the project root with
+`branch: 'main'`, its shell's `pwd -P` prints the root, and the command runner reports the root
+as its `cwd`. `agent/verify.ts`: the title with and without a branch; `worktreeNote` for a
+worktree inside the project, outside it, and none for a branch or in-place job; `shellWord`'s
+quoting; and from the source, the panel's job and project lookup, its Files root, the line with
+its copy, the note's folder and branch, and the tokens-only style. Not seen in a browser.
+
 ### Amendment 190 — post-merge, applied. **Spawn and the composer offer only the efforts the model takes, and Copilot is never sent one it doesn't.**
 
 Web (`spawn/autonomy.ts`, `spawn/route.tsx`, `agent/composer.tsx`, `spawn/verify.ts`,
