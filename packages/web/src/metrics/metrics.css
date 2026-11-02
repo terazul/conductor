@@ -221,6 +221,12 @@
   color: var(--ink3);
 }
 
+/* A Claude route under Claude, in By provider (Amendment 188). */
+.mt-table .mt-name.mt-sub {
+  padding-left: 18px;
+  color: var(--ink2);
+}
+
 .mt-model {
   font-weight: 600;
 }

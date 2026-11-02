@@ -22,11 +22,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MetricsRange, MetricsResponse } from '@conductor/shared';
+import { PROVIDER_BUDGETS_KEY, parseProviderBudgets, type MetricsRange, type MetricsResponse } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
 import { errorText } from '../lib/errors.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useProjectSpend, useProjects, useStatusBar } from '../lib/store.js';
+import { useAgents, useProjectSpend, useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
 import { CostChart } from './chart.js';
 import { getMetrics } from './endpoints.js';
 import {
@@ -36,6 +36,7 @@ import {
   MODEL_COLUMNS,
   PROJECT_KEY,
   PROJECT_SPEND_NOTE,
+  PROVIDER_SPEND_NOTE,
   RANGES,
   RANGE_KEY,
   asProject,
@@ -51,12 +52,14 @@ import {
   projectChoices,
   projectNote,
   projectSpendRows,
+  providerSpendRows,
   rangeLine,
   share,
   showDays,
   tiles,
   type Column,
   type ProjectSpendRow,
+  type ProviderSpendRow,
 } from './rules.js';
 import './metrics.css';
 
@@ -118,6 +121,7 @@ function Metrics() {
   const projectId = asProject(useSetting(PROJECT_KEY), projects);
   const { resp, error, loading, load } = useMetrics(range, projectId);
   const spendRows = projectSpendRows(projects, useProjectSpend(), projectId);
+  const providerRows = providerSpendRows(useProviderSpend(), parseProviderBudgets(useSetting(PROVIDER_BUDGETS_KEY)));
   // What the screen shows is the answer for the range and project it was asked for, never an older one.
   const shown = resp && resp.range === range && (resp.project?.id ?? null) === projectId ? resp : null;
 
@@ -173,6 +177,7 @@ function Metrics() {
           {!shown && !error && <div className="mt-note">Reading…</div>}
           {shown && <Report resp={shown} />}
           {shown && <ProjectSpendTable rows={spendRows} />}
+          {shown && <ProviderSpendTable rows={providerRows} />}
         </div>
       </div>
     </div>
@@ -339,6 +344,47 @@ export function ProjectSpendTable({ rows }: { rows: ReadonlyArray<ProjectSpendRo
         </tbody>
       </table>
       <p className="mt-quiet">{PROJECT_SPEND_NOTE}</p>
+    </section>
+  );
+}
+
+/** Amendment 188: each engine's today and this month in its unit, Claude's routes under it, beside its monthly budget. Exported for a check. */
+export function ProviderSpendTable({ rows }: { rows: ReadonlyArray<ProviderSpendRow> }) {
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label="by provider">
+      <h2 className="mt-h">By provider</h2>
+      <table className="mt-table">
+        <thead>
+          <tr>
+            <th scope="col" className="mt-name">
+              Provider
+            </th>
+            <th scope="col" title="Spent today, since local midnight: dollars for Claude, tokens for Copilot and OpenRouter">
+              Today
+            </th>
+            <th scope="col" title="Spent this month, from the 1st, in local time">
+              This month
+            </th>
+            <th scope="col" title="The engine's or route's monthly budget, set on Settings, and how much of it this month has used. It only warns.">
+              Monthly budget
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <th scope="row" className={r.route ? 'mt-name mt-sub' : 'mt-name'}>
+                {r.name}
+              </th>
+              <td>{r.today}</td>
+              <td>{r.month}</td>
+              <td>{r.budget}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-quiet">{PROVIDER_SPEND_NOTE}</p>
     </section>
   );
 }

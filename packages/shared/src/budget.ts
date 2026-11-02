@@ -101,3 +101,110 @@ export function budgetState(agent: Spend, today: string = localDayOf()): BudgetS
   const b = agentBudget(agent, today);
   return b === null ? 'ok' : capState(b.spent, b.budget);
 }
+
+// ── a monthly budget for each engine, and for each Claude route (Amendment 188) ──
+
+/**
+ * The setting that holds them: a JSON object of key → number. The keys are `claude`,
+ * `claude/<route>`, `copilot` and `openrouter`. A key that is missing, or an empty object, is no
+ * budget. Each is counted over the local month in its engine's unit, and, like every budget since
+ * Amendment 180, it only warns.
+ */
+export const PROVIDER_BUDGETS_KEY = 'conductor.monthlyBudget.providers';
+
+/**
+ * The engines a monthly budget can be set for, and what each one counts. Claude reports dollars;
+ * Copilot and OpenRouter report tokens only (input plus output), as their `costUsd: false`
+ * capability says.
+ */
+export const BUDGET_ENGINES = { claude: 'usd', copilot: 'tokens', openrouter: 'tokens' } as const satisfies Record<string, BudgetUnit>;
+export type BudgetEngine = keyof typeof BUDGET_ENGINES;
+
+/** The most a budget may be, in each unit. */
+export const PROVIDER_BUDGET_MAX: Readonly<Record<BudgetUnit, number>> = { usd: 1_000_000, tokens: 1e12 };
+
+/** A route as a key may name it: what `claudeRoute` can return. */
+const ROUTE = /^[a-z0-9_-]{1,40}$/;
+
+/**
+ * The route a Claude model goes by: the prefix before `.anthropic.` (`us`, `uk`, `eu`, `apac`,
+ * `global`…), or `direct` when there is none. A `[1m]` suffix (or any `[…]`) is ignored. The
+ * daemon groups spend by it and the browser names it with it, so this is the one place it's decided.
+ * What is stored is the model; the route is read from it.
+ */
+export function claudeRoute(model: string): string {
+  const m = model.trim().replace(/\[[^\]]*\]$/, '').toLowerCase();
+  const at = m.indexOf('.anthropic.');
+  // An inference-profile ARN ends in the model id: the route is the part after its last `/`.
+  const prefix = at > 0 ? (m.slice(0, at).split('/').pop() ?? '') : '';
+  return ROUTE.test(prefix) && prefix !== 'direct' ? prefix : 'direct';
+}
+
+/** The setting's key for an engine, or for one of Claude's routes. */
+export function providerBudgetKey(provider: BudgetEngine, route?: string): string {
+  return route === undefined ? provider : `${provider}/${route}`;
+}
+
+/** What a key's budget counts, or null when the key names no engine (or a route outside Claude). */
+export function providerBudgetUnit(key: string): BudgetUnit | null {
+  const [engine, route, more] = key.split('/');
+  if (more !== undefined || !engine || !Object.hasOwn(BUDGET_ENGINES, engine)) return null;
+  if (route !== undefined && (engine !== 'claude' || !ROUTE.test(route))) return null;
+  return BUDGET_ENGINES[engine as BudgetEngine];
+}
+
+const ENGINE_NAMES: Readonly<Record<BudgetEngine, string>> = { claude: 'Claude', copilot: 'Copilot', openrouter: 'OpenRouter' };
+
+/** A key as it is said: "Claude", "Claude · us", "Claude · no prefix", "Copilot", "OpenRouter". */
+export function providerBudgetLabel(key: string): string {
+  const [engine, route] = key.split('/');
+  const name = ENGINE_NAMES[engine as BudgetEngine] ?? engine ?? key;
+  return route === undefined ? name : `${name} · ${route === 'direct' ? 'no prefix' : route}`;
+}
+
+/** Why `n` can't be a budget in `unit`, or null when it can. */
+export function providerBudgetValueProblem(n: unknown, unit: BudgetUnit): string | null {
+  const max = PROVIDER_BUDGET_MAX[unit];
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= max
+    ? null
+    : `${unit === 'usd' ? 'dollars' : 'tokens'}, more than 0 and up to ${max.toLocaleString('en')}`;
+}
+
+/** Why the setting's value can't be stored, or null when it can: the daemon's rule, and the page's. */
+export function providerBudgetsProblem(raw: string): string | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    v = undefined;
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return 'a JSON object of budgets, such as {"claude": 100, "copilot": 5000000}';
+  for (const [key, n] of Object.entries(v)) {
+    const unit = providerBudgetUnit(key);
+    if (unit === null) return `${JSON.stringify(key).slice(0, 60)}: not an engine (claude, claude/<route>, copilot or openrouter)`;
+    const why = providerBudgetValueProblem(n, unit);
+    if (why) return `${key}: ${why}`;
+  }
+  return null;
+}
+
+/**
+ * The budgets the setting holds, key → number. Unreadable, missing or empty is none; an entry that
+ * isn't a budget is left out, so a value written by hand can't put a wrong one in front of you.
+ */
+export function parseProviderBudgets(raw: string | undefined | null): Record<string, number> {
+  if (!raw) return {};
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, n] of Object.entries(v)) {
+    const unit = providerBudgetUnit(key);
+    if (unit !== null && providerBudgetValueProblem(n, unit) === null) out[key] = n as number;
+  }
+  return out;
+}

@@ -41,6 +41,7 @@ import {
   type Event,
   type RetryCause,
   type StatusPayload,
+  PROVIDER_BUDGETS_KEY,
 } from '@conductor/shared';
 import { row, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -49,8 +50,8 @@ import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { agentBudget, budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
-import { costMonth, costToday, dueNotes, getAgent, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend } from './store.js';
-import { DAILY_KEY, MONTHLY_KEY, dailyBudget, monthlyBudget, onCostChanged, startDayWatch } from '../daily.js';
+import { costMonth, costToday, dueNotes, getAgent, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend, providerSpend } from './store.js';
+import { DAILY_KEY, MONTHLY_KEY, dailyBudget, monthlyBudget, onCostChanged, providerBudgets, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
 import { finishAlerts, onFinishesChanged } from './finish.js';
 
@@ -131,7 +132,13 @@ export class Alerts {
     // The daily budget (Amendment 59), and the monthly ones (Amendment 182): checked when the
     // spend grows or a budget moves. A project's is set by its PATCH, which refreshes.
     this.#off.push(onCostChanged(() => this.refresh()));
-    this.#off.push(onSettingsChanged((changed) => (changed.includes(DAILY_KEY) || changed.includes(MONTHLY_KEY)) && this.refresh()));
+    // An engine's or a route's (Amendment 188) too.
+    this.#off.push(
+      onSettingsChanged(
+        (changed) =>
+          (changed.includes(DAILY_KEY) || changed.includes(MONTHLY_KEY) || changed.includes(PROVIDER_BUDGETS_KEY)) && this.refresh(),
+      ),
+    );
     // An agent starts or stops waiting to be tried again (Amendment 123).
     this.#off.push(onRetryChanged(() => this.refresh()));
     // A job finished and was offered, or merged by itself (Amendment 144).
@@ -237,12 +244,15 @@ export class Alerts {
 
   /**
    * This local month's spend has reached a monthly budget (Amendment 182): the fleet's, from
-   * Settings, and each project's that has one. A warning only, as the daily one is: nothing is
-   * paused, held or refused. One per month for each — its id carries the month, and a project's its
-   * id too — so dismissing it lasts the month, and the next one starts clean.
+   * Settings, and each project's that has one, and each engine's and Claude route's (Amendment
+   * 188), in its own unit. A warning only, as the daily one is: nothing is paused, held or refused.
+   * One per month for each — its id carries the month, and a project's its id too, an engine's its
+   * key — so dismissing it lasts the month, and the next one starts clean.
    */
   #monthly(): Alert[] {
     const month = localMonth();
+    // Only this month's alerts can still be open: an earlier month's `since` is let go.
+    for (const id of this.#monthlySince.keys()) if (!id.startsWith(`monthly:${month}`)) this.#monthlySince.delete(id);
     const since = (id: string): string => {
       if (!this.#monthlySince.has(id)) this.#monthlySince.set(id, new Date().toISOString());
       return this.#monthlySince.get(id)!;
@@ -255,14 +265,40 @@ export class Alerts {
       out.push({ id, kind: 'monthly_budget', cause: 'monthly budget reached', projectId: null, jobId: null, agentIds: [], since: since(id), spent, budget: fleet });
     }
     const budgeted = listProjects(this.#db).filter((p) => p.monthlyBudgetUsd != null);
-    if (budgeted.length === 0) return out;
-    const months = new Map(projectSpend(this.#db).map((s) => [s.projectId, s.month]));
+    const months = new Map(budgeted.length === 0 ? [] : projectSpend(this.#db).map((s) => [s.projectId, s.month]));
     for (const p of budgeted) {
       const budget = p.monthlyBudgetUsd!;
       const spentP = months.get(p.id) ?? 0;
       if (spentP < budget) continue;
       const id = `monthly:${month}:${p.id}`;
       out.push({ id, kind: 'monthly_budget', cause: 'project monthly budget reached', projectId: p.id, jobId: null, agentIds: [], since: since(id), spent: spentP, budget });
+    }
+    return out.concat(this.#providerMonthly(month, since));
+  }
+
+  /** An engine's or a Claude route's month has reached its budget (Amendment 188): tokens against tokens, dollars against dollars. */
+  #providerMonthly(month: string, since: (id: string) => string): Alert[] {
+    const budgets = providerBudgets();
+    const keys = Object.keys(budgets);
+    if (keys.length === 0) return [];
+    const out: Alert[] = [];
+    for (const s of providerSpend(this.#db, keys)) {
+      const budget = budgets[s.key];
+      if (budget === undefined || s.month < budget) continue;
+      const id = `monthly:${month}:provider:${s.key}`;
+      out.push({
+        id,
+        kind: 'monthly_budget',
+        cause: 'provider monthly budget reached',
+        projectId: null,
+        jobId: null,
+        agentIds: [],
+        since: since(id),
+        spent: s.month,
+        budget,
+        provider: s.key,
+        unit: s.unit,
+      });
     }
     return out;
   }
@@ -340,8 +376,10 @@ export class Alerts {
     } else if (p.kind === 'usage') {
       // An agent crossing its budget, or one past it that spends on (Amendment 124). The
       // cost frame fires before the agent's row is written, so this is the one that sees it.
+      // Copilot's and OpenRouter's tokens raise no cost change, so an engine's token budget
+      // (Amendment 188) is checked here too, while one is set.
       const was = this.#overActive;
-      if (this.#budgetOver().length > 0 || was) this.refresh();
+      if (this.#budgetOver().length > 0 || was || Object.keys(providerBudgets()).length > 0) this.refresh();
     } else if (p.kind === 'status') {
       const r = e.agentId ? this.#retrying.get(e.agentId) : undefined;
       // Ending `failed` while still retrying is giving up. Anything else — a new run, a

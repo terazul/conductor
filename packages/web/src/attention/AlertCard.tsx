@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
+import { providerBudgetLabel, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { openBranches } from '../shell/nav.js';
@@ -248,8 +248,9 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         {alert.kind === 'daily_budget' && alert.spent !== undefined && alert.budget !== undefined && (
           <Kv k="today" v={`${fmtMoney(alert.spent)} of ${fmtMoney(alert.budget)}`} tone="var(--fail)" />
         )}
+        {alert.kind === 'monthly_budget' && alert.provider !== undefined && <Kv k="provider" v={providerBudgetLabel(alert.provider)} />}
         {alert.kind === 'monthly_budget' && alert.spent !== undefined && alert.budget !== undefined && (
-          <Kv k="this month" v={`${fmtMoney(alert.spent)} of ${fmtMoney(alert.budget)}`} tone="var(--fail)" />
+          <Kv k="this month" v={`${monthWord(alert.spent, alert.unit)} of ${monthWord(alert.budget, alert.unit)}`} tone="var(--fail)" />
         )}
 
         <div className="atn-actions">
@@ -348,7 +349,7 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             midnight.
           </div>
         )}
-        {alert.kind === 'monthly_budget' && <div className="atn-note">{monthlyNote(project)}</div>}
+        {alert.kind === 'monthly_budget' && <div className="atn-note">{monthlyNote(project, alert.provider)}</div>}
       </div>
 
       {cmd.busy ? (
@@ -374,6 +375,11 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
 /** A figure in the alert's unit: dollars, or tokens as people say them. */
 function said(n: number, unit: Alert['unit']): string {
   return budgetWords(unit === 'tokens' ? 'tokens' : 'usd', n);
+}
+
+/** A month's figure: dollars as money, or an engine's tokens (Amendment 188) as people say them. */
+function monthWord(n: number, unit: Alert['unit']): string {
+  return unit === 'tokens' ? `${tokenWords(n)} tokens` : fmtMoney(n);
 }
 
 /** What a stopped agent has spent against its budget, in its own unit. */

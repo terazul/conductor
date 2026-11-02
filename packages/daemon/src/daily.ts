@@ -4,6 +4,7 @@
  * stopped or paused. "Today" is local, midnight to midnight, as `cost_daily` counts it.
  */
 
+import { PROVIDER_BUDGETS_KEY, parseProviderBudgets, providerBudgetsProblem } from '@conductor/shared';
 import type { Db } from './db/index.js';
 import { hub } from './hub.js';
 import { localDay, spendFigures } from './session/store.js';
@@ -44,6 +45,19 @@ export function monthlyBudgetProblem(n: unknown): string | null {
 
 settingRule(MONTHLY_KEY, (v) => monthlyBudgetProblem(Number(v)));
 
+/**
+ * A monthly budget for each engine and each Claude route (Amendment 188), beside the fleet's: one
+ * setting, `conductor.monthlyBudget.providers`, a JSON object of key → number. Claude and its routes
+ * are in dollars, Copilot and OpenRouter in tokens; the rule (shared, so the page says the same)
+ * refuses an unknown engine, a route anywhere but under Claude, and a number out of range. It only
+ * warns, as every budget does. The budgets set, key → number; none set is an empty object.
+ */
+export function providerBudgets(): Record<string, number> {
+  return parseProviderBudgets(readSettings()[PROVIDER_BUDGETS_KEY]);
+}
+
+settingRule(PROVIDER_BUDGETS_KEY, providerBudgetsProblem);
+
 const listeners = new Set<() => void>();
 
 /** Told whenever today's spend grows. */
@@ -59,7 +73,7 @@ export function costChanged(): void {
 /**
  * Every open page is told what has been spent: today's figure (Amendment 59), the fleet's
  * all-time total and each project's today and total (Amendment 146), and the month's, the fleet's
- * and each project's (Amendment 182). Called whenever spend is
+ * and each project's (Amendment 182), and each engine's and Claude route's (Amendment 188). Called whenever spend is
  * credited, in either unit, and at the day change. No hub outside the daemon is not fatal.
  */
 export function broadcastSpend(db: Db): void {

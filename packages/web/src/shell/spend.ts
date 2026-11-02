@@ -11,8 +11,16 @@
  * over, which the line says in words.
  */
 
-import { localDayOf, spentOn, type Agent, type ProjectSpend } from '@conductor/shared';
-import { tokenWords } from '../lib/providers.js';
+import {
+  PROVIDER_BUDGET_MAX,
+  localDayOf,
+  parseProviderBudgets,
+  spentOn,
+  type Agent,
+  type BudgetUnit,
+  type ProjectSpend,
+} from '@conductor/shared';
+import { parseTokens, tokenWords } from '../lib/providers.js';
 
 export const DAILY_KEY = 'conductor.dailyBudget';
 /** The fleet's monthly budget (Amendment 182), beside the daily one and read the same way. */
@@ -94,15 +102,45 @@ export function monthlyDraft(draft: string, current: number | null | undefined):
   return { send: next === (current ?? null) ? undefined : next };
 }
 
-// ── today and in total (Amendment 146) ─────────────────────────────────────────
+// ── a monthly budget by provider (Amendment 188) ──────────────────────────────
 
-/** The status bar's total, after today's figure: `· $12.40 total`. */
-export function totalWords(total: number): string {
-  return `· $${total.toFixed(2)} total`;
+/**
+ * An engine's or a Claude route's monthly budget as its Settings row sends it: dollars as the
+ * fleet's field takes them (`budgetProblem`), tokens as an agent's token budget does (`500k`,
+ * `2M`, `parseTokens`). Null is none, from an emptied field; or why not.
+ */
+export function providerBudgetDraft(draft: string, unit: BudgetUnit): { value: number | null } | { problem: string } {
+  if (unit === 'usd') {
+    const problem = budgetProblem(draft);
+    return problem !== null ? { problem } : { value: draft.trim() === '' ? null : Number(draft.trim()) };
+  }
+  const t = parseTokens(draft);
+  if ('why' in t) return { problem: t.why };
+  if (t.cap !== null && t.cap > PROVIDER_BUDGET_MAX.tokens) return { problem: `Tokens, up to ${PROVIDER_BUDGET_MAX.tokens.toLocaleString('en-US')}.` };
+  return { value: t.cap };
 }
 
-/** What the status bar's total means, on hover. */
-export const TOTAL_TITLE = 'spent by every agent since Conductor started counting, kept when agents are removed';
+/** The setting after one row's change: the object with `key` set, or taken out; null when none is left. */
+export function withProviderBudget(raw: string | null, key: string, value: number | null): string | null {
+  const next = { ...parseProviderBudgets(raw) };
+  if (value === null) delete next[key];
+  else next[key] = value;
+  return Object.keys(next).length === 0 ? null : JSON.stringify(next);
+}
+
+/** A figure in a budget's unit: `$4.27`, `1.2M tokens`. */
+export function unitWords(n: number, unit: BudgetUnit): string {
+  return unit === 'usd' ? `$${n.toFixed(2)}` : `${tokenWords(n)} tokens`;
+}
+
+/** A row's month: `$4.27 this month`, or against its budget, `1.2M tokens of 5M tokens this month · 24%`. */
+export function providerMonthWords(spent: number, budget: number | null, unit: BudgetUnit): string {
+  if (budget === null) return `${unitWords(spent, unit)} this month`;
+  const pct = Math.floor((spent / budget) * 100);
+  return `${unitWords(spent, unit)} of ${unitWords(budget, unit)} this month · ${pct}%${spent >= budget ? ', over' : ''}`;
+}
+
+// ── today and in total (Amendment 146) ─────────────────────────────────────────
 
 /** One figure in its unit: dollars, or tokens where the engine reports no dollars. */
 function figure(usd: number, tokens: number, dollars: boolean): string {

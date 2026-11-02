@@ -239,6 +239,18 @@ the last of it on 12 Oct).
 
 - [x] **A cost-per-day chart on Metrics (wave 11, M1).** Found (14 Oct) for docs/plans/wave-11.md; it is the chart TODO's Metrics (122) left out. *Decided (14 Oct): cost per day.* *Done 15 Oct: Amendment 170 (a bar per day from `from` to `to` above the day table, empty days at no height, scaled to the highest day, in ink, with a caption in words; none for a single day).*
 
+- [x] **The status bar's total reads as this month's.** Reported (2 Nov): `· $222.83 total` follows
+  `· $0.97 this month`, so it was read as the month's. *Decided (2 Nov): take the total off the status
+  bar only; Fleet cards and Metrics keep their labelled total.* *Done (2 Nov): Amendment 187 (the bar
+  shows today, then the month; the daemon still sends `costTotal`).*
+
+- [x] **A monthly budget for each engine, and for each Claude route.** Asked for (2 Nov): Claude
+  in dollars, Copilot and OpenRouter in tokens; a route is the model's prefix before `.anthropic.`.
+  *Done (2 Nov): Amendment 188 (`provider_spend_daily`, by model, grown with `addSpendToday` and
+  backfilled; `conductor.monthlyBudget.providers`; a dismiss-only Needs You card per engine or
+  route; Settings' **monthly budget by provider**; Metrics' **By provider**; nothing on the status
+  bar).*
+
 ## Housekeeping
 
 - [x] **Clear out wave 9's worktrees and branches.** *Done 13 Oct: by hand; and Amendment 143 adds a safe clean-up to the Branches screen.* Found (10 Oct). The job `job_07af774e-eb6` is

@@ -114,6 +114,7 @@ export function buildSnapshot(): Snapshot {
     if (slice.costMonth !== undefined) snap.costMonth = slice.costMonth;
     if (slice.costTotal !== undefined) snap.costTotal = slice.costTotal;
     if (slice.projectSpend !== undefined) snap.projectSpend = slice.projectSpend;
+    if (slice.providerSpend !== undefined) snap.providerSpend = slice.providerSpend;
     if (slice.settings !== undefined) snap.settings = slice.settings;
     if (slice.scheduled !== undefined) snap.scheduled = slice.scheduled;
   }

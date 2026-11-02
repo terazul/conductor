@@ -24,10 +24,22 @@ import type {
   Project,
   ProjectNote,
   ProjectSpend,
+  ProviderSpend,
   Question,
 } from '@conductor/shared';
-import { closingHeadingsOf, helperSlug } from '@conductor/shared';
+import {
+  BUDGET_ENGINES,
+  PROVIDER_BUDGETS_KEY,
+  claudeRoute,
+  closingHeadingsOf,
+  helperSlug,
+  parseProviderBudgets,
+  providerBudgetKey,
+  providerBudgetUnit,
+  type BudgetUnit,
+} from '@conductor/shared';
 import { row, rows, type Db } from '../db/index.js';
+import { readSettings } from '../settings.js';
 
 export const nowIso = (): string => new Date().toISOString();
 export const newId = (prefix: string): string => `${prefix}_${randomUUID().slice(0, 12)}`;
@@ -887,15 +899,26 @@ export function spentToday(db: Db, agentId: string): DaySpend {
  * day the usage ARRIVES: a run that crosses midnight counts its later usage on the new day.
  * Nothing negative or empty is written. An agent that no longer exists records nothing, and reads
  * as zero.
+ *
+ * `run` is the engine and model the spend is credited to in `provider_spend_daily` (Amendment
+ * 188): a runner passes its scope's, the model the run was started with. That row is written even
+ * when the agent is gone, as `cost_daily` is, so an engine's month adds up to the fleet's. Without
+ * `run` (a check, a caller with no runner) the agent's own engine and model are used, when there is
+ * an agent.
  */
-export function addSpendToday(db: Db, agentId: string, delta: { usd?: number; tokens?: number }): DaySpend {
+export function addSpendToday(
+  db: Db,
+  agentId: string,
+  delta: { usd?: number; tokens?: number },
+  run?: { provider: string; model: string },
+): DaySpend {
   const usd = delta.usd && delta.usd > 0 ? delta.usd : 0;
   const tokens = delta.tokens && delta.tokens > 0 ? Math.round(delta.tokens) : 0;
   if (usd > 0 || tokens > 0) {
     const day = localDay();
-    // The agent's day and its project's day are one write (Amendment 146): a SAVEPOINT, so it
-    // nests inside a caller's transaction as well as standing alone, and neither is ever
-    // credited without the other.
+    // The agent's day, its project's day and its engine's (Amendment 188) are one write
+    // (Amendment 146): a SAVEPOINT, so it nests inside a caller's transaction as well as
+    // standing alone, and none is ever credited without the others.
     db.exec('SAVEPOINT spend');
     try {
       db.prepare(
@@ -913,6 +936,18 @@ export function addSpendToday(db: Db, agentId: string, delta: { usd?: number; to
            cost_usd = cost_usd + excluded.cost_usd,
            tokens = tokens + excluded.tokens`,
       ).run(day, usd, tokens, agentId);
+      // The engine's own record, by model, which outlives the agent too (320_provider_spend.sql).
+      const credit = run ?? row<{ provider: string; model: string }>(
+        db.prepare("SELECT COALESCE(provider, 'claude') AS provider, model FROM agents WHERE id = ?").get(agentId),
+      );
+      if (credit) {
+        db.prepare(
+          `INSERT INTO provider_spend_daily (day, provider, model, cost_usd, tokens) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(day, provider, model) DO UPDATE SET
+             cost_usd = cost_usd + excluded.cost_usd,
+             tokens = tokens + excluded.tokens`,
+        ).run(day, credit.provider, credit.model, usd, tokens);
+      }
       db.exec('RELEASE spend');
     } catch (err) {
       db.exec('ROLLBACK TO spend');
@@ -970,9 +1005,86 @@ export function projectSpend(db: Db): ProjectSpend[] {
   }));
 }
 
-/** The `cost` frame's figures, and the snapshot's: today, this month, the fleet's all-time total, each project's three. */
-export function spendFigures(db: Db): { costToday: number; costMonth: number; costTotal: number; projectSpend: ProjectSpend[] } {
-  return { costToday: costToday(db), costMonth: costMonth(db), costTotal: costTotal(db), projectSpend: projectSpend(db) };
+/**
+ * Each engine's spend today and this local month, in its unit (Amendment 188): Claude's dollars,
+ * Copilot's and OpenRouter's tokens, from `provider_spend_daily`. Every engine is listed, with
+ * zeros when it has spent nothing, and under Claude a row for each route (`claudeRoute`) that
+ * spent this month or is in `budgeted` (keys such as `claude/us`), in that order: the routes by
+ * name, `direct` last. Claude's month is `costMonth`'s, as both grow by the same deltas.
+ */
+export function providerSpend(db: Db, budgeted: Iterable<string> = []): ProviderSpend[] {
+  type Sums = { provider: string; model: string; today_usd: number; month_usd: number; today_tokens: number; month_tokens: number };
+  const day = localDay();
+  const month = localMonth();
+  const sums = rows<Sums>(
+    db
+      .prepare(
+        `SELECT provider, model,
+                COALESCE(SUM(CASE WHEN day = ? THEN cost_usd END), 0) AS today_usd,
+                COALESCE(SUM(cost_usd), 0)                             AS month_usd,
+                COALESCE(SUM(CASE WHEN day = ? THEN tokens END), 0)   AS today_tokens,
+                COALESCE(SUM(tokens), 0)                               AS month_tokens
+           FROM provider_spend_daily
+          WHERE substr(day, 1, 7) = ?
+          GROUP BY provider, model`,
+      )
+      .all(day, day, month),
+  );
+  const figure = (r: Sums, unit: BudgetUnit): { today: number; month: number } =>
+    unit === 'usd' ? { today: r.today_usd, month: r.month_usd } : { today: r.today_tokens, month: r.month_tokens };
+  const engines = new Map<string, ProviderSpend>();
+  const routes = new Map<string, ProviderSpend>();
+  for (const [provider, unit] of Object.entries(BUDGET_ENGINES)) {
+    engines.set(provider, { key: provider, provider, unit, today: 0, month: 0 });
+  }
+  const routeRow = (route: string): ProviderSpend => {
+    const key = providerBudgetKey('claude', route);
+    let r = routes.get(key);
+    if (!r) routes.set(key, (r = { key, provider: 'claude', route, unit: 'usd', today: 0, month: 0 }));
+    return r;
+  };
+  for (const r of sums) {
+    const e = engines.get(r.provider);
+    if (!e) continue;
+    const f = figure(r, e.unit);
+    e.today += f.today;
+    e.month += f.month;
+    if (r.provider === 'claude' && (f.today > 0 || f.month > 0)) {
+      const rr = routeRow(claudeRoute(r.model));
+      rr.today += f.today;
+      rr.month += f.month;
+    }
+  }
+  for (const key of budgeted) {
+    const [engine, route] = key.split('/');
+    if (engine === 'claude' && route !== undefined && providerBudgetUnit(key) !== null) routeRow(route);
+  }
+  const order = (r: ProviderSpend): string => (r.route === 'direct' ? '\uffff' : (r.route ?? ''));
+  const claudeRoutes = [...routes.values()].sort((a, b) => order(a).localeCompare(order(b)));
+  const out: ProviderSpend[] = [];
+  for (const e of engines.values()) {
+    out.push(e);
+    if (e.provider === 'claude') out.push(...claudeRoutes);
+  }
+  return out;
+}
+
+/** The `cost` frame's figures, and the snapshot's: today, this month, the fleet's all-time total, each project's three, each engine's two. */
+export function spendFigures(db: Db): {
+  costToday: number;
+  costMonth: number;
+  costTotal: number;
+  projectSpend: ProjectSpend[];
+  providerSpend: ProviderSpend[];
+} {
+  const budgeted = Object.keys(parseProviderBudgets(readSettings()[PROVIDER_BUDGETS_KEY]));
+  return {
+    costToday: costToday(db),
+    costMonth: costMonth(db),
+    costTotal: costTotal(db),
+    projectSpend: projectSpend(db),
+    providerSpend: providerSpend(db, budgeted),
+  };
 }
 
 /**

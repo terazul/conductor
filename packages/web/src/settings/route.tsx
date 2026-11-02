@@ -10,9 +10,19 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { EffortLevel, ModelTier, RuleView } from '@conductor/shared';
+import {
+  BUDGET_ENGINES,
+  PROVIDER_BUDGETS_KEY,
+  parseProviderBudgets,
+  providerBudgetLabel,
+  type BudgetUnit,
+  type EffortLevel,
+  type ModelTier,
+  type ProviderSpend,
+  type RuleView,
+} from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
-import { useProjects, useStatusBar } from '../lib/store.js';
+import { useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
 import { highlight, recall } from '../shell/nav.js';
 import { REVOKE_NOTE, copyLine, listRules, revokeRule, ruleOrigin, ruleTitle } from './rules.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
@@ -55,7 +65,19 @@ import {
   retryDelaysValue,
   retryDelaysWords,
 } from './budgets.js';
-import { DAILY_KEY, MONTHLY_KEY, OVER_AT, WARN_AT, budgetProblem, dailyMeter, monthMeter, parseBudget } from '../shell/spend.js';
+import {
+  DAILY_KEY,
+  MONTHLY_KEY,
+  OVER_AT,
+  WARN_AT,
+  budgetProblem,
+  dailyMeter,
+  monthMeter,
+  parseBudget,
+  providerBudgetDraft,
+  providerMonthWords,
+  withProviderBudget,
+} from '../shell/spend.js';
 import {
   keyLine,
   loginLine,
@@ -420,6 +442,7 @@ function SpendSection() {
         </p>
       )}
       <MonthlyField />
+      <ProviderBudgets />
     </>
   );
 }
@@ -467,6 +490,65 @@ function MonthlyField() {
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * A monthly budget for each engine, and under Claude for each route (Amendment 188), below the
+ * fleet's. Claude and its routes in dollars, Copilot and OpenRouter in tokens, as each reports.
+ * One row each: the month's spend in its unit and a field to set or clear. All of them are one
+ * setting, a JSON object, written whole through the same settings route as the others.
+ */
+function ProviderBudgets() {
+  const stored = useSetting(PROVIDER_BUDGETS_KEY);
+  const budgets = parseProviderBudgets(stored);
+  // A daemon from before it sends no figures: the engines alone, at nothing spent.
+  const rows: ProviderSpend[] =
+    useProviderSpend() ??
+    Object.entries(BUDGET_ENGINES).map(([provider, unit]) => ({ key: provider, provider, unit, today: 0, month: 0 }));
+  return (
+    <div className="st-field" role="group" aria-label="monthly budget by provider">
+      <span>monthly budget by provider — empty for none</span>
+      {rows.map((r) => (
+        <ProviderBudgetRow key={r.key} row={r} budget={budgets[r.key] ?? null} stored={stored} />
+      ))}
+      <p className="st-dim">
+        Claude and its routes are in dollars; a route is the prefix before <code>.anthropic.</code> in the model's name, and
+        no prefix is calling Anthropic directly. Copilot and OpenRouter are in tokens, input plus output: 500k, 2M. Reaching
+        one is a warning in Needs You; nothing is stopped. Each resets on the 1st.
+      </p>
+    </div>
+  );
+}
+
+function ProviderBudgetRow({ row, budget, stored }: { row: ProviderSpend; budget: number | null; stored: string | null }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const unit: BudgetUnit = row.unit;
+  const read = draft === null ? null : providerBudgetDraft(draft, unit);
+  const problem = read !== null && 'problem' in read ? read.problem : null;
+  const commit = (): void => {
+    if (read === null || !('value' in read)) return;
+    if (read.value !== budget) writeSetting(PROVIDER_BUDGETS_KEY, withProviderBudget(stored, row.key, read.value));
+    setDraft(null);
+  };
+  const name = providerBudgetLabel(row.key);
+  return (
+    <div className={row.route !== undefined ? 'st-row st-provider st-route' : 'st-row st-provider'}>
+      <span className="st-provider-name">{name}</span>
+      <input
+        inputMode={unit === 'usd' ? 'decimal' : 'text'}
+        aria-label={`${name} monthly budget, in ${unit === 'usd' ? 'dollars' : 'tokens'}`}
+        value={draft ?? (budget === null ? '' : String(budget))}
+        placeholder={unit === 'usd' ? '$ none' : 'tokens, none'}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          else if (e.key === 'Escape') setDraft(null);
+        }}
+      />
+      {problem ? <span className="st-err">{problem}</span> : <span className="st-dim">{providerMonthWords(row.month, budget, unit)}</span>}
+    </div>
   );
 }
 

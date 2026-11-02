@@ -200,6 +200,93 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 188 — post-merge, applied. **Each engine has a monthly budget, and under Claude each route, in the unit it reports. It only warns.**
+
+Daemon (`db/migrations/320_provider_spend.sql`, `session/store.ts`, `session/backends/claude.ts`,
+`session/backends/copilot.ts`, `session/alerts.ts`, `daily.ts`, `hub.ts`, `session/verify.ts`),
+shared (`budget.ts`, `wire.ts`), web (`lib/store.ts`, `settings/route.tsx`, `settings/settings.css`,
+`shell/spend.ts`, `shell/describe.ts`, `metrics/rules.ts`, `metrics/route.tsx`, `metrics/metrics.css`,
+`attention/alerts.ts`, `attention/AlertCard.tsx`, `lib/verify.ts`, `attention/verify.ts`) and
+`docs/MANUAL.md`. Asked for 2 Nov: a monthly budget per engine, and for Claude per route, beside
+the fleet's and each project's (Amendment 182).
+
+- **Engines and units.** `BUDGET_ENGINES` (shared `budget.ts`): `claude` in dollars, `copilot` and
+  `openrouter` in tokens, input plus output, as each reports (Amendment 129).
+- **A route** is the prefix before `.anthropic.` in the model's name, `direct` without one. A
+  `[1m]` suffix is ignored, and so is an ARN's path before the last `/`. The rule is one exported
+  `claudeRoute(model)` in shared `budget.ts`. Labels read **Claude · us** and **Claude · no prefix**,
+  and nothing names the cloud a route is on.
+- **Storage.** `provider_spend_daily (day, provider, model, cost_usd, tokens)`, migration 320. It
+  stores the model, not the route, so a changed rule needs no migration. It has no foreign key,
+  so removing an agent refunds nothing.
+  - **Growth.** By the same deltas, in the same `spend` savepoint, as `agent_spend_daily` and
+    `project_spend_daily` (`addSpendToday`). The engine and model come from the run's scope, the
+    one it was started on, not the agent row.
+  - **Why not `metrics_daily`.** It grows by each result's per-model figures against its own
+    baseline, so it does not match `cost_daily` (one day read $5.80 there against $4.27), and the
+    engines' months must add up to `costMonth`.
+  - **Backfill.** Once, from `agent_spend_daily JOIN agents`. What removed agents spent can't be
+    recovered. An agent whose model changed counts under the one it has now.
+- **The setting.** `conductor.monthlyBudget.providers` is a JSON object of key → number. The keys
+  are `claude`, `claude/<route>`, `copilot` and `openrouter`.
+  - **Values.** Dollars or tokens by the engine, more than 0, and up to 1,000,000 dollars or
+    10¹² tokens.
+  - **Refused.** `settingRule` refuses an unknown engine, a route under any engine but Claude, and
+    a bad value, with the reason.
+  - **None.** An empty object, a missing key or null is no budget.
+- **Wire.** `providerSpend(db)` (`session/store.ts`) gives each engine's today and month in its
+  unit, with each Claude route that spent or has a budget under it, and no prefix last. It is an
+  optional `providerSpend` on the snapshot and the `cost` frame. `Alert` gains `provider`, and
+  `unit` is set on these alerts.
+- **Alerts.** One per key at or over its budget this month.
+  - **Shape.** The id is `monthly:YYYY-MM:provider:<key>`, with kind `monthly_budget` and cause
+    `provider monthly budget reached`. It is dismiss-only.
+  - **Refresh.** On cost and settings changes, and on each usage event while any provider budget
+    is set, because a Copilot run calls no cost change. Dismissed ids from earlier months are
+    pruned.
+  - **The card** names the provider or route and gives a token budget in tokens.
+- **Settings.** **monthly budget by provider**, under the monthly budget: one row per engine and
+  route, with its month in its unit and a field. Dollars as the daily field takes them, tokens as
+  `500k` or `2M`. Empty is none.
+- **Metrics.** A **By provider** table after By project, with columns Provider, Today, This month
+  and Monthly budget (`$50.00 · 40%`, `5M tok · 104%, over`). It is every project's, whichever is
+  picked, because an engine's budget is the fleet's. The status bar shows no engine figures.
+
+**Verified:** `session/verify.ts` §34 checks:
+- the route rule, including us., uk., `[1m]`, no prefix and an ARN;
+- a Claude run's dollars kept under the model it started on, and a Copilot run's tokens;
+- a failed engine write taking the agent's and the project's with it;
+- routes adding up to Claude, and Claude to `costMonth`;
+- the snapshot and the `cost` frame;
+- ten refused settings and one taken;
+- a route alert at its budget and not under it, and a token budget against tokens (999 under,
+  1000 at);
+- dismissed for the month, and every figure 0 after the month turns (§32's clock);
+- the migration's backfill on a database from before it.
+
+Web: `lib/verify.ts` §40 checks the rows, cells, drafts, the setting, Settings and Metrics
+sources, and the alert's title, notice, note and card. `attention/verify.ts` follows the card's
+new `monthlyNote` call. Typecheck. Not looked at in a browser.
+
+### Amendment 187 — post-merge, applied. **The status bar ends with this month's spend: the fleet's all-time total is no longer shown there.**
+
+Web (`shell/shell.tsx`, `shell/spend.ts`, `lib/store.ts`, `lib/verify.ts`) and `docs/MANUAL.md`.
+Reported 2 Nov: the user read the status bar's `· $222.83 total` as this month's total, because it
+came right after `· $0.97 this month`. Decided by the user: take the all-time total off the status
+bar only.
+
+- **The bar.** `DailySpend` draws today (the meter, or the figure with no daily budget) and then
+  the month (`MonthSpend`, Amendment 182), and nothing after it. It no longer takes `costTotal`,
+  and `useStatusBar` no longer selects it. `totalWords` and `TOTAL_TITLE` (`shell/spend.ts`), which
+  only the bar used, are gone.
+- **Kept.** The daemon still sends `costTotal` in the snapshot and in every `cost` frame, and the
+  store still keeps it (Amendment 146). A Fleet card's footer, the Project screen and Metrics'
+  By project table keep their labelled **total**.
+
+**Verified:** `lib/verify.ts`: the Amendment 146 status bar check now asks for today then the month
+and no total, and §39's month check asks that the bar end with the month. Typecheck. Not looked
+at in a browser.
+
 ### Amendment 186 — post-merge, applied. **A launched stack and a saved Custom stack can be renamed in place.**
 
 Daemon (`db/migrations/310_job_name.sql`, `session/store.ts`, `session/supervisor.ts`,

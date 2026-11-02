@@ -640,7 +640,9 @@ export class ClaudeBackend implements AgentBackend {
         // The same growth is the agent's own spend today, which its budget is read against
         // (Amendment 129). Credited to the day this arrives, so a run that crosses midnight
         // counts its later spend on the new day, and a resume adds only the difference.
-        const today = addSpendToday(this.#db, this.#scope.agentId, { usd: grew });
+        // And Claude's, under the model this run was started with (the scope's), which its route
+        // is read from (Amendment 188).
+        const today = addSpendToday(this.#db, this.#scope.agentId, { usd: grew }, { provider: 'claude', model: this.#scope.model });
         // Every status bar shows today's spend as it grows, and the daily budget's alert
         // is checked against it (Amendment 59).
         if (costUsd > previous) {

@@ -18,8 +18,10 @@
  * is pure, so this is fast and has no jsdom dependency.
  */
 
-import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, ServerFrame, Snapshot } from '@conductor/shared';
-import { budgetState, diffstat, localDayOf, resolveFileEdits, sparkline } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
+import { PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, sparkline } from '@conductor/shared';
+import { PROVIDER_SPEND_NOTE, providerBudgetCell, providerSpendRows } from '../metrics/rules.js';
+import { alertNotice, monthlyNote } from '../attention/alerts.js';
 import { store } from './store.js';
 import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
@@ -76,7 +78,6 @@ import {
   MONTHLY_KEY,
   MONTH_TITLE,
   OVER_AT,
-  TOTAL_TITLE,
   WARN_AT,
   agentPairWords,
   budgetProblem,
@@ -85,10 +86,12 @@ import {
   monthWords,
   monthlyDraft,
   parseBudget,
+  providerBudgetDraft,
+  providerMonthWords,
+  withProviderBudget,
   projectPairWords,
   projectSpendOf,
   toneOf,
-  totalWords,
 } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
@@ -1828,13 +1831,12 @@ console.log('\n· today and all-time totals for each agent, project and the flee
   send({ type: 'hello', seq: 0, snapshot });
 
   // ── the status bar ──
-  check('the status bar says the total after today: "· $40.50 total"', totalWords(40.5) === '· $40.50 total' && totalWords(0) === '· $0.00 total');
-  check('and its hover says what it counts', TOTAL_TITLE === 'spent by every agent since Conductor started counting, kept when agents are removed');
   const shell = src('../shell/shell.tsx');
   check(
-    "the bar draws today's spend (with its meter) and then the total, which is absent from a daemon before it",
-    /const \{ slots, costToday, costMonth, costTotal, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costMonth=\{costMonth\} costTotal=\{costTotal\} \/>/.test(shell) &&
-      /costTotal === null \? null/.test(shell) && /title=\{TOTAL_TITLE\}/.test(shell) && /\{totalWords\(costTotal\)\}/.test(shell) && /\{m\.label\}\s*<\/span>\s*\{month\}\s*\{total\}/.test(shell),
+    "the bar draws today's spend (with its meter) and then the month, and no all-time total (Amendment 187)",
+    /const \{ slots, costToday, costMonth, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costMonth=\{costMonth\} \/>/.test(shell) &&
+      /\{m\.label\}\s*<\/span>\s*\{month\}\s*<\/span>/.test(shell) && /today<\/span>\s*\{month\}\s*<\/span>/.test(shell) &&
+      !/costTotal|TOTAL_TITLE|totalWords/.test(shell) && !/costTotal/.test(src('./store.ts').split('export function useStatusBar')[1]!.split('\n}')[0]!),
   );
 
   // ── a project's pair ──
@@ -1975,9 +1977,10 @@ console.log('\n39 · this month beside today, and a monthly budget beside the da
   check('and none from a daemon before it', projectPairWords({ today: 1, total: 2, tokensToday: 0, tokensTotal: 0 }).month === undefined);
   const shell = src('../shell/shell.tsx');
   check(
-    'the status bar draws the month between today and the total: the meter with a budget, the figure without, nothing from an older daemon',
+    'the status bar ends with the month, after today: the meter with a budget, the figure without, nothing from an older daemon; no total follows it (Amendment 187)',
     /function MonthSpend\(\{ costMonth \}/.test(shell) && /parseBudget\(useSetting\(MONTHLY_KEY\)\)/.test(shell) && /if \(costMonth === null\) return null/.test(shell) &&
-      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell),
+      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell) &&
+      /\{month\}\s*<\/span>/.test(shell) && !/\{month\}\s*\{total\}/.test(shell) && !/ total`/.test(src('../shell/spend.ts')),
   );
   const css = src('../shell/shell.css');
   const month = ['.sh-spend-month {', ".sh-spend-month[data-tone='warn'] {", ".sh-spend-month[data-tone='over'] {"].map((c) => css.split(c)[1]?.split('}')[0] ?? '');
@@ -1990,9 +1993,70 @@ console.log('\n39 · this month beside today, and a monthly budget beside the da
   check('Settings has the monthly budget beside the daily one', /function MonthlyField\(/.test(settings) && /writeSetting\(MONTHLY_KEY/.test(settings) && /<MonthlyField \/>/.test(settings));
 }
 
+console.log('\n40 · a monthly budget for each engine and each Claude route, in its own unit (Amendment 188)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  check('the labels name the engine and the route, never the cloud it is on', providerBudgetLabel('claude') === 'Claude' && providerBudgetLabel('claude/us') === 'Claude · us' && providerBudgetLabel('claude/direct') === 'Claude · no prefix' && providerBudgetLabel('copilot') === 'Copilot' && providerBudgetLabel('openrouter') === 'OpenRouter');
+  const spend: ProviderSpend[] = [
+    { key: 'claude', provider: 'claude', unit: 'usd', today: 1.5, month: 42.1 },
+    { key: 'claude/us', provider: 'claude', route: 'us', unit: 'usd', today: 0, month: 12 },
+    { key: 'copilot', provider: 'copilot', unit: 'tokens', today: 120_000, month: 5_200_000 },
+    { key: 'openrouter', provider: 'openrouter', unit: 'tokens', today: 0, month: 0 },
+  ];
+  const rows = providerSpendRows(spend, { claude: 100, copilot: 5_000_000 });
+  check('By provider has a row for each, in the order the daemon sent', rows.map((r) => r.name).join() === 'Claude,Claude · us,Copilot,OpenRouter', rows.map((r) => r.name).join());
+  check('Claude in dollars, Copilot in tokens', rows[0]!.today === '$1.50' && rows[0]!.month === '$42.10' && rows[2]!.today === '120k tok' && rows[2]!.month === '5.2M tok', JSON.stringify(rows));
+  check('a budget reads with its share, and over when reached; none is a dash', rows[0]!.budget === '$100.00 · 42%' && !rows[0]!.over && rows[2]!.budget === '5M tok · 104%, over' && rows[2]!.over && rows[3]!.budget === '—', JSON.stringify(rows.map((r) => r.budget)));
+  check('a route is marked as one, and nothing shows before the daemon sends figures', rows[1]!.route && !rows[0]!.route && providerSpendRows(null, {}).length === 0);
+  check("the cell's share is the month's against the budget", providerBudgetCell(50, 50, 'usd') === '$50.00 · 100%, over' && providerBudgetCell(1, null, 'tokens') === '—');
+  check('the note says it is every project, and how a route is read', /Every project’s/.test(PROVIDER_SPEND_NOTE) && /\.anthropic\./.test(PROVIDER_SPEND_NOTE) && !/bedrock/i.test(PROVIDER_SPEND_NOTE));
+  const metrics = src('../metrics/route.tsx');
+  check(
+    'Metrics draws By provider with Provider, Today, This month and Monthly budget, from the daemon and the setting',
+    /providerSpendRows\(useProviderSpend\(\), parseProviderBudgets\(useSetting\(PROVIDER_BUDGETS_KEY\)\)\)/.test(metrics) && /<ProviderSpendTable rows=\{providerRows\} \/>/.test(metrics) &&
+      /aria-label="by provider"/.test(metrics) && /<h2 className="mt-h">By provider<\/h2>/.test(metrics) &&
+      ['Provider', 'Today', 'This month', 'Monthly budget'].every((h) => new RegExp(`>\\s*${h}\\s*</th>`).test(metrics)),
+  );
+
+  // ── Settings: one row each, written as one setting ──
+  check('dollars as the daily field takes them; empty is none', JSON.stringify(providerBudgetDraft('25', 'usd')) === '{"value":25}' && JSON.stringify(providerBudgetDraft(' ', 'usd')) === '{"value":null}' && 'problem' in providerBudgetDraft('-1', 'usd') && 'problem' in providerBudgetDraft('lots', 'usd'));
+  check('tokens as people type them', JSON.stringify(providerBudgetDraft('500k', 'tokens')) === '{"value":500000}' && JSON.stringify(providerBudgetDraft('2M', 'tokens')) === '{"value":2000000}' && 'problem' in providerBudgetDraft('0', 'tokens') && 'problem' in providerBudgetDraft('lots', 'tokens') && 'problem' in providerBudgetDraft('2000000000000', 'tokens'));
+  check('one row sets its key and keeps the others', withProviderBudget('{"claude":50}', 'copilot', 1000) === '{"claude":50,"copilot":1000}' && withProviderBudget(null, 'claude/us', 10) === '{"claude/us":10}');
+  check('emptied takes it out, and the last one out clears the setting', withProviderBudget('{"claude":50,"copilot":1000}', 'claude', null) === '{"copilot":1000}' && withProviderBudget('{"claude":50}', 'claude', null) === null);
+  check("a row's month is in its unit, against its budget when there is one", providerMonthWords(4.27, null, 'usd') === '$4.27 this month' && providerMonthWords(1_200_000, 5_000_000, 'tokens') === '1.2M tokens of 5M tokens this month · 24%' && providerMonthWords(10, 10, 'usd') === '$10.00 of $10.00 this month · 100%, over');
+  const settings = src('../settings/route.tsx');
+  check(
+    'Settings has "monthly budget by provider" under the monthly budget, a row and a field each, named in its unit',
+    /<MonthlyField \/>\s*<ProviderBudgets \/>/.test(settings) && /aria-label="monthly budget by provider"/.test(settings) &&
+      /aria-label=\{`\$\{name\} monthly budget, in \$\{unit === 'usd' \? 'dollars' : 'tokens'\}`\}/.test(settings) &&
+      /writeSetting\(PROVIDER_BUDGETS_KEY, withProviderBudget\(stored, row\.key, read\.value\)\)/.test(settings) && /providerMonthWords\(row\.month, budget, unit\)/.test(settings),
+  );
+  const daemon = src('../../../daemon/src/daily.ts');
+  check("the setting is the daemon's, and it refuses what Settings would", PROVIDER_BUDGETS_KEY === 'conductor.monthlyBudget.providers' && /settingRule\(PROVIDER_BUDGETS_KEY, providerBudgetsProblem\)/.test(daemon));
+  check('the status bar shows no engine figures', !/providerSpend|ProviderSpend/.test(src('../shell/shell.tsx')));
+  const store = src('./store.ts');
+  check('a cost frame moves the figures, and an older daemon leaves none', /if \(frame\.providerSpend !== undefined\) s\.providerSpend = frame\.providerSpend/.test(store) && /s\.providerSpend = snap\.providerSpend \?\? null/.test(store), store.match(/.*providerSpend.*/g)?.join(' | '));
+
+  // ── the alert: named, and in its unit ──
+  const reached = (provider: string, unit: 'usd' | 'tokens', spent: number, budget: number): Alert => ({
+    id: `monthly:2036-05:provider:${provider}`, kind: 'monthly_budget', cause: 'provider monthly budget reached', projectId: null, jobId: null, agentIds: [], since: '2036-05-20T12:00:00Z', spent, budget, provider, unit,
+  });
+  const uk = reached('claude/uk', 'usd', 10, 10);
+  const cp = reached('copilot', 'tokens', 5_100_000, 5_000_000);
+  check('its title names the route or the engine', alertTitle(uk, []).head === 'Claude · uk' && alertTitle(cp, []).subject === 'reached its monthly budget');
+  check("its notice says whose month, not a project's", alertNotice(cp, [], []).title === `Copilot · ${alertNotice(reached('claude', 'usd', 1, 1), [], []).title.split(' · ').slice(1).join(' · ')}` && alertNotice(uk, [], []).title.startsWith('Claude · uk · '), alertNotice(cp, [], []).title);
+  check('its note says it only warns, and where to raise it', /A warning only: agents on Copilot keep going/.test(monthlyNote(null, 'copilot')) && /monthly budget by provider/.test(monthlyNote(null, 'copilot')) && monthlyNote(null) !== monthlyNote(null, 'copilot'));
+  const card = src('../attention/AlertCard.tsx');
+  check(
+    'the card names the provider and gives tokens in tokens',
+    /<Kv k="provider" v=\{providerBudgetLabel\(alert\.provider\)\} \/>/.test(card) && /monthWord\(alert\.spent, alert\.unit\)\} of \$\{monthWord\(alert\.budget, alert\.unit\)/.test(card) &&
+      /unit === 'tokens' \? `\$\{tokenWords\(n\)\} tokens` : fmtMoney\(n\)/.test(card) && /monthlyNote\(project, alert\.provider\)/.test(card),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
