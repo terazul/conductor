@@ -822,7 +822,7 @@ console.log('\n9 · a monthly budget only warns (Amendment 182)');
   check('the note says agents keep going, how to raise it, and that it resets on the 1st', monthlyNote(null) === 'A warning only: agents keep going. Raise the budget on Settings (9), or stop agents yourself. It resets on the 1st.');
   check('a project\'s says so of its agents, and its Fleet card\'s Edit', monthlyNote('demo') === "A warning only: demo's agents keep going. Raise its budget from its Fleet card's Edit, or stop agents yourself. It resets on the 1st.");
   const card = readFileSync(new URL('./AlertCard.tsx', import.meta.url), 'utf8');
-  check('the card shows spent of budget, this month, and the note', /monthly_budget: \{ label: 'Monthly budget'/.test(card) && /k="this month"/.test(card) && /monthlyNote\(project\)/.test(card));
+  check('the card shows spent of budget, this month, and the note', /monthly_budget: \{ label: 'Monthly budget'/.test(card) && /k="this month"/.test(card) && /monthlyNote\(project, alert\.provider\)/.test(card));
 }
 
 console.log(

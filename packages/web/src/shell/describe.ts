@@ -11,7 +11,7 @@
  * have never seen); a card must degrade to a plainer sentence, never throw.
  */
 
-import { HANDOFF_HELD_NOTE, RETRY_CARD_FROM } from '@conductor/shared';
+import { HANDOFF_HELD_NOTE, RETRY_CARD_FROM, providerBudgetLabel } from '@conductor/shared';
 import { tokenWords } from '../lib/providers.js';
 import type {
   Agent,
@@ -459,7 +459,9 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
     case 'daily_budget':
       return { head: "today's spend", subject: 'reached the daily budget' };
     case 'monthly_budget':
-      // A project's carries its name on the card's tag (Amendment 182).
+      // A project's carries its name on the card's tag (Amendment 182); an engine's or a route's
+      // says which (Amendment 188).
+      if (alert.provider !== undefined) return { head: providerBudgetLabel(alert.provider), subject: 'reached its monthly budget' };
       return alert.projectId === null
         ? { head: "this month's spend", subject: 'reached the monthly budget' }
         : { head: "this project's month", subject: 'reached its monthly budget' };

@@ -363,3 +363,25 @@
   outline: none;
   border-color: var(--live);
 }
+
+/* A monthly budget by provider (Amendment 188): a row per engine, Claude's routes under it. */
+.st-provider {
+  align-items: center;
+  margin: 2px 0;
+}
+
+.st-provider-name {
+  min-width: 9em;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
+.st-route .st-provider-name {
+  padding-left: 14px;
+}
+
+.st-provider .st-err,
+.st-provider .st-dim {
+  margin: 0;
+}

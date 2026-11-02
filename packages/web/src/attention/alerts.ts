@@ -8,7 +8,7 @@
  * when someone clicks it, which is the worst moment to find out.
  */
 
-import { HANDOFF_SUMMARY_MAX, missingHeadings, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
+import { HANDOFF_SUMMARY_MAX, missingHeadings, providerBudgetLabel, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
@@ -254,10 +254,14 @@ export function alertProject(alert: Pick<Alert, 'projectId'>, projects: readonly
 export const MONTHLY_TITLE = "This month's budget reached";
 
 /**
- * The note on a monthly budget's card (Amendment 182), the fleet's or a project's by name. A
- * warning only, so it says where the budget is raised, and there is nothing to press.
+ * The note on a monthly budget's card (Amendment 182), the fleet's or a project's by name, or an
+ * engine's or route's by its key (Amendment 188). A warning only, so it says where the budget is
+ * raised, and there is nothing to press.
  */
-export function monthlyNote(project: string | null): string {
+export function monthlyNote(project: string | null, provider?: string): string {
+  if (provider !== undefined) {
+    return `A warning only: agents on ${providerBudgetLabel(provider)} keep going. Raise its budget on Settings (9), under monthly budget by provider, or stop agents yourself. It resets on the 1st.`;
+  }
   return project === null
     ? 'A warning only: agents keep going. Raise the budget on Settings (9), or stop agents yourself. It resets on the 1st.'
     : `A warning only: ${project}'s agents keep going. Raise its budget from its Fleet card's Edit, or stop agents yourself. It resets on the 1st.`;
@@ -278,8 +282,11 @@ export function alertNotice(
   }
   // A warning (Amendment 124): the agent is still working, so it is not asking for you.
   if (alert.kind === 'budget_over') return { title: within(`${head} is over its daily budget`), body: `${head} ${subject}` };
-  // The fleet's month, or a project's under its name (Amendment 182).
-  if (alert.kind === 'monthly_budget') return { title: within(MONTHLY_TITLE), body: `${head} ${subject}` };
+  // The fleet's month, or a project's under its name (Amendment 182), or an engine's under its (Amendment 188).
+  if (alert.kind === 'monthly_budget') {
+    const title = alert.provider !== undefined ? `${providerBudgetLabel(alert.provider)} · ${MONTHLY_TITLE}` : within(MONTHLY_TITLE);
+    return { title, body: `${head} ${subject}` };
+  }
   return { title: within(head), body: subject };
 }
 

@@ -29,6 +29,7 @@ import {
   type PendingRequest,
   type Project,
   type ProjectSpend,
+  type ProviderSpend,
   type ScheduledMessage,
   type ServerFrame,
   type Snapshot,
@@ -63,6 +64,8 @@ interface State {
   costMonth: number | null;
   /** Each project's spend today and in total (Amendment 146); null when the daemon has not said. */
   projectSpend: ProjectSpend[] | null;
+  /** Each engine's and Claude route's spend today and this month (Amendment 188); null when the daemon has not said. */
+  providerSpend: ProviderSpend[] | null;
   /** Messages waiting for their time (Amendment 111), soonest first. */
   scheduled: ScheduledMessage[];
   eventsByAgent: Map<string, Event[]>;
@@ -85,6 +88,7 @@ function initialState(): State {
     costTotal: null,
     costMonth: null,
     projectSpend: null,
+    providerSpend: null,
     scheduled: [],
     eventsByAgent: new Map(),
     eventsByJob: new Map(),
@@ -192,6 +196,7 @@ class Store {
         if (frame.costTotal !== undefined) s.costTotal = frame.costTotal;
         if (frame.costMonth !== undefined) s.costMonth = frame.costMonth;
         if (frame.projectSpend !== undefined) s.projectSpend = frame.projectSpend;
+        if (frame.providerSpend !== undefined) s.providerSpend = frame.providerSpend;
         break;
 
       case 'settings':
@@ -240,6 +245,8 @@ class Store {
     // And one from before Amendment 182 no month: the status bar leaves it out.
     s.costMonth = snap.costMonth ?? null;
     s.projectSpend = snap.projectSpend ?? null;
+    // And one from before Amendment 188 no engine's: Settings and Metrics leave its figures out.
+    s.providerSpend = snap.providerSpend ?? null;
     // A daemon from before Amendment 111 sends none.
     s.scheduled = snap.scheduled ?? [];
     s.seq = snap.seq;
@@ -540,4 +547,9 @@ export function useStatusBar(): { slots: State['slots']; costToday: number; cost
  */
 export function useProjectSpend(): ProjectSpend[] | null {
   return useSelect('projectSpend', (s) => s.projectSpend);
+}
+
+/** Each engine's spend today and this month, and each Claude route's, as the daemon last said (Amendment 188), or null from a daemon before it. */
+export function useProviderSpend(): ProviderSpend[] | null {
+  return useSelect('providerSpend', (s) => s.providerSpend);
 }

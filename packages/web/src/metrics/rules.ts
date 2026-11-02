@@ -32,7 +32,9 @@ import type {
   MetricsResponse,
   Project,
   ProjectSpend,
+  ProviderSpend,
 } from '@conductor/shared';
+import { providerBudgetLabel } from '@conductor/shared';
 import { providerLabel, tokenWords } from '../lib/providers.js';
 
 export const RANGES: ReadonlyArray<{ id: MetricsRange; label: string; title: string }> = [
@@ -500,3 +502,52 @@ export function monthlyBudgetCell(month: number | undefined, budget: number | nu
 /** The note under the table. */
 export const PROJECT_SPEND_NOTE =
   'Spend since Conductor began counting, not the range above. A month is from the 1st, in local time. A monthly budget only warns: agents keep going.';
+
+/**
+ * Amendment 188. One engine's spend, or one Claude route's, for the By provider table: today and
+ * this local month in the unit it reports (Claude's dollars, Copilot's and OpenRouter's tokens),
+ * and its monthly budget. Every project's, whichever is picked: an engine's budget is the fleet's.
+ */
+export interface ProviderSpendRow {
+  key: string;
+  name: string;
+  /** A route, shown under Claude. */
+  route: boolean;
+  today: string;
+  month: string;
+  budget: string;
+  over: boolean;
+}
+
+/** A figure in its unit: `$4.27`, or `1.2M tok`. */
+function inUnit(n: number, unit: ProviderSpend['unit']): string {
+  return unit === 'usd' ? dollars(n) : `${tokenWords(n)} tok`;
+}
+
+/** The rows, in the daemon's order (each engine, Claude's routes under it); none until it has sent them. */
+export function providerSpendRows(spend: ReadonlyArray<ProviderSpend> | null, budgets: Readonly<Record<string, number>>): ProviderSpendRow[] {
+  if (!spend) return [];
+  return spend.map((s) => {
+    const cap = budgets[s.key] ?? null;
+    return {
+      key: s.key,
+      name: providerBudgetLabel(s.key),
+      route: s.route !== undefined,
+      today: inUnit(s.today, s.unit),
+      month: inUnit(s.month, s.unit),
+      budget: providerBudgetCell(s.month, cap, s.unit),
+      over: cap !== null && s.month >= cap,
+    };
+  });
+}
+
+/** `monthlyBudgetCell` in the engine's unit: `—`; `$50.00 · 40%`; `5M tok · 104%, over`. */
+export function providerBudgetCell(month: number, budget: number | null, unit: ProviderSpend['unit']): string {
+  if (budget === null) return '—';
+  const pct = Math.floor((month / budget) * 100);
+  return `${inUnit(budget, unit)} · ${pct}%${month >= budget ? ', over' : ''}`;
+}
+
+/** The note under the table. */
+export const PROVIDER_SPEND_NOTE =
+  'Every project’s, whichever is picked above, and not the range. Claude is in dollars, and its routes are the prefix before .anthropic. in the model’s name; Copilot and OpenRouter are in tokens, input plus output. A monthly budget only warns.';

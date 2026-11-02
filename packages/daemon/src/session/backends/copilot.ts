@@ -550,7 +550,9 @@ export class CopilotBackend implements AgentBackend {
     setAgentUsage(this.#db, this.#scope.agentId, { costUsd, inputTokens: this.#tokens.input, outputTokens: this.#tokens.output });
     // The token budget is per day (Amendment 129): this call's input plus output tokens are
     // the agent's spend today, the day the call arrives, whatever the lifetime totals say.
-    const today = addSpendToday(this.#db, this.#scope.agentId, { tokens: u.inputTokens + u.outputTokens });
+    // Credited to this engine (Copilot or OpenRouter) under the model the run was started with,
+    // the scope's (Amendment 188), as Claude's is.
+    const today = addSpendToday(this.#db, this.#scope.agentId, { tokens: u.inputTokens + u.outputTokens }, { provider: this.#provider, model: this.#scope.model });
     // Its project's tokens today and in total grow with it, and every page is told (Amendment 146).
     if (u.inputTokens + u.outputTokens > 0) broadcastSpend(this.#db);
     this.#emit({

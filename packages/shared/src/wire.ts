@@ -819,10 +819,12 @@ export interface Alert {
   late?: boolean;
   /**
    * daily_budget (Amendment 59): today's spend, and the budget it reached. monthly_budget
-   * (Amendment 182): this month's, the fleet's or the project's.
+   * (Amendment 182): this month's, the fleet's or the project's, or an engine's (Amendment 188).
    */
   spent?: number;
   budget?: number;
+  /** monthly_budget (Amendment 188): the engine or route whose budget it is, as its setting's key (`claude/us`). */
+  provider?: string;
   /** failed: what the SDK said, from the status event's `detail`. */
   detail?: string;
   /**
@@ -832,7 +834,7 @@ export interface Alert {
   blockedBy?: string;
   /** reconnecting (Amendment 123): when the next try starts, as an ISO time. */
   retryAt?: string;
-  /** budget_over (Amendment 124): what `spent` and `budget` count. Absent is dollars. */
+  /** budget_over (Amendment 124), and an engine's monthly_budget (Amendment 188): what `spent` and `budget` count. Absent is dollars. */
   unit?: 'usd' | 'tokens';
   /**
    * finished and merged (Amendment 144): the job's branch, the branch it goes into, and how
@@ -875,6 +877,8 @@ export interface Snapshot {
   projectSpend?: ProjectSpend[];
   /** Amendment 182: what the fleet has spent this local month. Optional for the same reason. */
   costMonth?: number;
+  /** Amendment 188: each engine's today and month, and each Claude route's. Optional for the same reason. */
+  providerSpend?: ProviderSpend[];
   /** Amendment 46. Optional so a recording made before it still replays. */
   settings?: Record<string, string>;
   /** Amendment 111: messages waiting for their time. Optional for the same reason. */
@@ -897,6 +901,23 @@ export interface ProjectSpend {
   /** The same in tokens. */
   tokensMonth?: number;
   tokensTotal: number;
+}
+
+/**
+ * Amendment 188. What one engine spent today and this local month, in the unit it reports:
+ * dollars for Claude, input plus output tokens for Copilot and OpenRouter. Under Claude, one row
+ * for each route (`claudeRoute`) seen this month or given a budget. Read from
+ * `provider_spend_daily`, which grows with `cost_daily`, so Claude's month is the fleet's.
+ */
+export interface ProviderSpend {
+  /** The budget setting's key: `claude`, `claude/<route>`, `copilot` or `openrouter`. */
+  key: string;
+  provider: string;
+  /** Under Claude only: the prefix before `.anthropic.`, or `direct` when there is none. */
+  route?: string;
+  unit: 'usd' | 'tokens';
+  today: number;
+  month: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1155,7 +1176,7 @@ export type ServerFrame =
    * Amendment 146 adds the fleet's all-time total and each project's today and total, optional
    * so a page from before reads the frame as it did.
    */
-  | { type: 'cost'; costToday: number; costMonth?: number; costTotal?: number; projectSpend?: ProjectSpend[] }
+  | { type: 'cost'; costToday: number; costMonth?: number; costTotal?: number; projectSpend?: ProjectSpend[]; providerSpend?: ProviderSpend[] }
   /** Slots in use and the limit, each time either changes (Amendment 47). */
   | { type: 'slots'; slots: { used: number; total: number } }
   /** A terminal command started, or ended (Amendment 58). */

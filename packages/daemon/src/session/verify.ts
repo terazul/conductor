@@ -53,6 +53,7 @@ import type {
   RuleView,
   ProjectNote,
   ProjectSpend,
+  ProviderSpend,
   TerminalRun,
   ProviderInfo,
   ProviderModelList,
@@ -79,6 +80,7 @@ import {
   costTotal,
   listProjects,
   projectSpend,
+  providerSpend,
   getAgent,
   getProject,
   jobCostToday,
@@ -134,7 +136,7 @@ import {
   retryNote,
   type Clock,
 } from './retry.js';
-import { RETRY_DELAYS_KEY, closingHeadingsOf, missingHeadings } from '@conductor/shared';
+import { BUDGET_ENGINES, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
 import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
@@ -157,7 +159,7 @@ import {
 import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, todoFromInput, toolLabel } from './translate.js';
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { readSettings } from '../settings.js';
-import { DayWatch, costChanged, dayWatch } from '../daily.js';
+import { DayWatch, broadcastSpend, costChanged, dayWatch } from '../daily.js';
 import { HANDOFF_ASK, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { ancestorsOf, createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
@@ -8364,6 +8366,7 @@ async function main(): Promise<void> {
     db.prepare("DELETE FROM cost_daily WHERE day >= '2035-01-01'").run();
     db.prepare("DELETE FROM project_spend_daily WHERE day >= '2035-01-01'").run();
     db.prepare("DELETE FROM agent_spend_daily WHERE day >= '2035-01-01'").run();
+    db.prepare("DELETE FROM provider_spend_daily WHERE day >= '2035-01-01'").run();
     eyes.close();
     sdk.query = realQuery;
   }
@@ -8420,6 +8423,212 @@ async function main(): Promise<void> {
     old.close();
   }
 
+  console.log('\n34 · a monthly budget for each engine and each Claude route, which only warns (Amendment 188)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const theirs = async () => (await get<Snapshot>('/api/snapshot')).body.alerts.filter((a) => a.kind === 'monthly_budget' && a.provider !== undefined);
+    const spend = (key: string): ProviderSpend | undefined => providerSpend(db, Object.keys(JSON.parse(readSettings()[PROVIDER_BUDGETS_KEY] ?? '{}') as object)).find((p) => p.key === key);
+    const kept = (provider: string, model: string) =>
+      db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens FROM provider_spend_daily WHERE day >= '2036-01-01' AND provider = ? AND model = ?").get(provider, model) as { usd: number; tokens: number };
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2036, 4, 20, 12, 0, 0); // May 2036: a month no section before has spent in
+    setDayClock(() => now);
+    watch?.check();
+
+    // ── the route is the model's prefix before `.anthropic.`, `direct` without one ──
+    const routes: Array<[string, string]> = [
+      ['opus', 'direct'],
+      ['claude-sonnet-4-5', 'direct'],
+      ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'us'],
+      ['uk.anthropic.claude-opus-4-1[1m]', 'uk'],
+      ['US.anthropic.claude-haiku-4-5', 'us'],
+      ['claude-opus-4-1[1m]', 'direct'],
+      ['arn:aws:bedrock:us-east-1:123:inference-profile/eu.anthropic.claude-sonnet-4', 'eu'],
+      ['', 'direct'],
+    ];
+    const wrong = routes.filter(([m, r]) => claudeRoute(m) !== r);
+    check('a route is the prefix before .anthropic., a [1m] suffix ignored, and none is direct', wrong.length === 0, JSON.stringify(wrong.map(([m]) => [m, claudeRoute(m)])));
+    check('the engines a budget can name are the ones there are, in the unit each reports', Object.keys(BUDGET_ENGINES).every((p) => backendFor(p as Parameters<typeof backendFor>[0]) !== undefined) && BUDGET_ENGINES.claude === 'usd' && BUDGET_ENGINES.copilot === 'tokens' && BUDGET_ENGINES.openrouter === 'tokens');
+
+    const ppid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'prov188' })).body.project.id;
+    insertJob(db, { id: 'job_p188', projectId: ppid, prompt: 'the provider prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+
+    // ── a Claude run credits its dollars to Claude, under the model it ran on ──
+    fixture('p_run', 'job_p188', { projectId: ppid, status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'opus' });
+    let at = runs.length;
+    sup.pump();
+    await until(() => runs.length === at + 1);
+    // The row's model changes mid-run; the run is credited under the one it was started on.
+    db.prepare("UPDATE agents SET model = 'us.anthropic.claude-sonnet-4-5' WHERE id = 'p_run'").run();
+    runs[at]!.finish({ cost: 3, reason: 'completed' });
+    await until(() => getAgent(db, 'p_run')?.status === 'done');
+    check("a Claude run's dollars are kept under Claude and the model it ran on", near(kept('claude', 'opus').usd, 3) && kept('claude', 'us.anthropic.claude-sonnet-4-5').usd === 0, JSON.stringify(kept('claude', 'opus')));
+    check('beside the agent, its project and the fleet', near(agentSpentToday(db, 'p_run').usd, 3) && near(projectSpend(db).find((p) => p.projectId === ppid)?.month, 3) && near(costMonth(db), 3));
+
+    // ── a Copilot run credits its tokens to Copilot ──
+    fixture('p_cp', 'job_p188', { projectId: ppid, status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    sup.pump();
+    await until(() => copilotSessions.some((x) => x.id === 'p_cp'));
+    const cps = copilotSessions.filter((x) => x.id === 'p_cp').at(-1)!;
+    cps.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 100, outputTokens: 20 });
+    cps.emit('session.idle', {});
+    await until(() => getAgent(db, 'p_cp')?.status === 'done');
+    check("a Copilot run's tokens, input plus output, are kept under Copilot and its model, with no dollars", kept('copilot', 'gpt-5-mini').tokens === 120 && kept('copilot', 'gpt-5-mini').usd === 0, JSON.stringify(kept('copilot', 'gpt-5-mini')));
+    check('and read as Copilot this month, in tokens', spend('copilot')?.unit === 'tokens' && spend('copilot')?.month === 120 && spend('copilot')?.today === 120, JSON.stringify(spend('copilot')));
+
+    // ── in the same write as the agent's and project's: when the engine's cannot be kept, neither is ──
+    const before = { agent: agentSpentToday(db, 'p_run').usd, project: projectSpend(db).find((p) => p.projectId === ppid)?.month ?? 0 };
+    db.exec("CREATE TEMP TRIGGER no_provider_188 BEFORE INSERT ON provider_spend_daily BEGIN SELECT RAISE(ABORT, 'verify refuses it'); END");
+    let threw = false;
+    try {
+      addSpendToday(db, 'p_run', { usd: 5 }, { provider: 'claude', model: 'opus' });
+    } catch {
+      threw = true;
+    }
+    db.exec('DROP TRIGGER no_provider_188');
+    check("an engine's figure that fails takes the agent's and the project's with it", threw && near(agentSpentToday(db, 'p_run').usd, before.agent) && near(projectSpend(db).find((p) => p.projectId === ppid)?.month, before.project) && near(kept('claude', 'opus').usd, 3));
+
+    // ── routes, grouped by prefix; Claude's month is the fleet's ──
+    const claudeOn = (model: string, usd: number): void => {
+      addCostToday(db, usd);
+      addSpendToday(db, 'p_run', { usd }, { provider: 'claude', model });
+      broadcastSpend(db); // as the Claude backend does after crediting
+    };
+    claudeOn('us.anthropic.claude-sonnet-4-5-20250929-v1:0', 2);
+    claudeOn('us.anthropic.claude-opus-4-1[1m]', 1);
+    claudeOn('uk.anthropic.claude-sonnet-4-5', 4);
+    claudeOn('claude-opus-4-1[1m]', 0.5);
+    check('models with the same prefix read as one route', near(spend('claude/us')?.month, 3) && near(spend('claude/uk')?.month, 4) && near(spend('claude/direct')?.month, 3.5), JSON.stringify(providerSpend(db)));
+    const all = providerSpend(db);
+    const routeSum = all.filter((p) => p.route !== undefined).reduce((s, p) => s + p.month, 0);
+    check("Claude's routes add up to Claude, and Claude's month is the fleet's", near(routeSum, spend('claude')?.month ?? -1) && near(spend('claude')?.month, costMonth(db)) && near(costMonth(db), 10.5), `${routeSum} ${spend('claude')?.month} ${costMonth(db)}`);
+    check('engines first, each Claude route under Claude, no prefix last', JSON.stringify(all.map((p) => p.key)) === '["claude","claude/uk","claude/us","claude/direct","copilot","openrouter"]', JSON.stringify(all.map((p) => p.key)));
+    check('an engine with nothing spent reads 0, not missing', spend('openrouter')?.month === 0 && spend('openrouter')?.unit === 'tokens');
+    const hello = (await get<Snapshot>('/api/snapshot')).body;
+    check("the snapshot carries each engine's figures", near(hello.providerSpend?.find((p) => p.key === 'claude/us')?.month, 3) && hello.providerSpend?.find((p) => p.key === 'copilot')?.month === 120, JSON.stringify(hello.providerSpend));
+
+    // ── the setting: known engines, routes only under Claude, more than 0 and within the most ──
+    const refused: Array<[string, string]> = [
+      ['not json', 'lots'],
+      ['a list', '[100]'],
+      ['an unknown engine', '{"gemini": 10}'],
+      ['a route under Copilot', '{"copilot/us": 10}'],
+      ['a route that is not a word', '{"claude/u s": 10}'],
+      ['0', '{"claude": 0}'],
+      ['a negative', '{"copilot": -5}'],
+      ['a string', '{"claude": "10"}'],
+      ['over a million dollars', '{"claude/us": 1000001}'],
+      ['over a trillion tokens', '{"openrouter": 2e12}'],
+    ];
+    for (const [why, value] of refused) {
+      const r = await send<{ error?: string }>('PATCH', '/api/settings', { settings: { [PROVIDER_BUDGETS_KEY]: value } });
+      check(`the setting refuses ${why}`, r.status === 400 && readSettings()[PROVIDER_BUDGETS_KEY] === undefined, `${r.status} ${JSON.stringify(r.body)}`);
+    }
+    const ok = await send('PATCH', '/api/settings', { settings: { [PROVIDER_BUDGETS_KEY]: '{"claude": 50, "claude/uk": 10, "claude/eu": 5, "copilot": 1000, "openrouter": 1e12}' } });
+    check('and takes known engines, a Claude route, and a token budget up to a trillion', ok.status === 200 && readSettings()[PROVIDER_BUDGETS_KEY] !== undefined, String(ok.status));
+    check('a route with a budget and no spend reads 0', spend('claude/eu')?.month === 0 && spend('claude/eu')?.route === 'eu');
+    check('under every budget, no provider alert', (await theirs()).length === 0, JSON.stringify(await theirs()));
+
+    // ── a route at its budget; a token budget, against tokens ──
+    const mark = eyes.frames.length;
+    claudeOn('uk.anthropic.claude-sonnet-4-5', 6);
+    costChanged();
+    const ukAlert = (await theirs()).filter((a) => a.provider === 'claude/uk');
+    check('a route at its budget raises one alert, in dollars, naming the route', ukAlert.length === 1 && ukAlert[0]!.id === 'monthly:2036-05:provider:claude/uk' && ukAlert[0]!.cause === 'provider monthly budget reached' && near(ukAlert[0]!.spent, 10) && ukAlert[0]!.budget === 10 && ukAlert[0]!.unit === 'usd' && ukAlert[0]!.projectId === null, JSON.stringify(ukAlert));
+    check("and not Claude's, which is under its own", (await theirs()).every((a) => a.provider !== 'claude'));
+    check('every tab hears it, and the cost frame carries the route', await until(() => eyes.frames.slice(mark).some((f) => f.type === 'alerts' && f.alerts.some((a) => a.provider === 'claude/uk')) && eyes.frames.slice(mark).some((f) => f.type === 'cost' && near(f.providerSpend?.find((p) => p.key === 'claude/uk')?.month, 10))));
+    check("Copilot's budget is read against its tokens, 120, so it has no alert", (await theirs()).every((a) => a.provider !== 'copilot'));
+    fixture('p_cp2', 'job_p188', { projectId: ppid, status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    sup.pump();
+    await until(() => copilotSessions.some((x) => x.id === 'p_cp2'));
+    const cps2 = copilotSessions.filter((x) => x.id === 'p_cp2').at(-1)!;
+    cps2.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 800, outputTokens: 79 });
+    check('999 tokens is under 1000: still no Copilot alert', await settle().then(async () => (await theirs()).every((a) => a.provider !== 'copilot')));
+    cps2.emit('assistant.usage', { model: 'gpt-5-mini', inputTokens: 1, outputTokens: 0 });
+    const cpAlert = async () => (await theirs()).filter((a) => a.provider === 'copilot');
+    let heard = false;
+    for (let i = 0; i < 30 && !heard; i++) heard = (await cpAlert()).length === 1 || (await settle(100), false);
+    check('at 1000 tokens, as the usage arrives, Copilot has one alert, in tokens', heard, JSON.stringify(spend('copilot')));
+    const one = (await cpAlert())[0];
+    check('its id, figures and unit are Copilot\'s', one?.id === 'monthly:2036-05:provider:copilot' && one.spent === 1000 && one.budget === 1000 && one.unit === 'tokens', JSON.stringify(one));
+    check('and the run goes on: a warning only', getAgent(db, 'p_cp2')?.status === 'working', getAgent(db, 'p_cp2')?.status);
+    cps2.emit('session.idle', {});
+    await until(() => getAgent(db, 'p_cp2')?.status === 'done');
+
+    // ── dismissed lasts the month; the month turns to 0 ──
+    for (const a of await theirs()) check(`dismissing ${a.id} → 204`, (await fetch(`${BASE}/api/alerts/${encodeURIComponent(a.id)}/dismiss`, { method: 'POST' })).status === 204);
+    claudeOn('uk.anthropic.claude-sonnet-4-5', 1);
+    costChanged();
+    check('more spend in the month does not bring them back', (await theirs()).length === 0);
+    const turn = eyes.frames.length;
+    now = new Date(2036, 5, 1, 0, 0, 20);
+    check('the month turns with the day', watch?.check() === true && localMonth() === '2036-06');
+    check('every engine and route reads 0 this month', providerSpend(db).every((p) => p.month === 0 && p.today === 0), JSON.stringify(providerSpend(db)));
+    check("and the turn's cost frame carries it", await until(() => eyes.frames.slice(turn).some((f) => f.type === 'cost' && f.providerSpend?.find((p) => p.key === 'copilot')?.month === 0)));
+    claudeOn('uk.anthropic.claude-sonnet-4-5', 10);
+    costChanged();
+    const june = await theirs();
+    check("June's spend raises June's alert, not May's dismissed one", june.length === 1 && june[0]!.id === 'monthly:2036-06:provider:claude/uk', JSON.stringify(june.map((a) => a.id)));
+    await send('PATCH', '/api/settings', { settings: { [PROVIDER_BUDGETS_KEY]: '{}' } });
+    check('an empty object is no budgets, and takes the alerts with it', (await theirs()).length === 0);
+    await send('PATCH', '/api/settings', { settings: { [PROVIDER_BUDGETS_KEY]: null } });
+    check('and null clears the setting', readSettings()[PROVIDER_BUDGETS_KEY] === undefined);
+
+    // ── migration 320, on a database from before it ──
+    {
+      const old = new DatabaseSync(':memory:');
+      old.exec('PRAGMA foreign_keys = ON');
+      const dir = new URL('../db/migrations/', import.meta.url);
+      const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+      for (const f of files.filter((f) => f < '320')) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+      old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p320', 'old', '/tmp/p320', 'x')`);
+      old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j320', 'p320', 'old', 'in_place', '/tmp/p320', 'main', 'done', 'x')`);
+      const agent = (id: string, provider: string, model: string): void => {
+        old.prepare(`INSERT INTO agents (id, job_id, project_id, role, model, status, provider) VALUES (?, 'j320', 'p320', 'builder', ?, 'done', ?)`).run(id, model, provider);
+      };
+      agent('a1', 'claude', 'opus');
+      agent('a2', 'claude', 'opus');
+      agent('a3', 'claude', 'us.anthropic.claude-sonnet-4-5');
+      agent('a4', 'copilot', 'gpt-5-mini');
+      const day = (id: string, d: string, usd: number, tokens: number): void => {
+        old.prepare('INSERT INTO agent_spend_daily (agent_id, day, cost_usd, tokens) VALUES (?, ?, ?, ?)').run(id, d, usd, tokens);
+      };
+      day('a1', '2036-06-01', 1, 0);
+      day('a2', '2036-06-01', 2, 0);
+      day('a1', '2036-05-31', 4, 0);
+      day('a3', '2036-06-01', 8, 0);
+      day('a4', '2036-06-01', 0, 300);
+      old.exec(readFileSync(new URL('320_provider_spend.sql', dir), 'utf8'));
+      const got = old.prepare('SELECT day, provider, model, cost_usd AS usd, tokens FROM provider_spend_daily ORDER BY day, provider, model').all();
+      check(
+        'migration 320 fills each day, engine and model from what the agents there are spent',
+        JSON.stringify(got) === JSON.stringify([
+          { day: '2036-05-31', provider: 'claude', model: 'opus', usd: 4, tokens: 0 },
+          { day: '2036-06-01', provider: 'claude', model: 'opus', usd: 3, tokens: 0 },
+          { day: '2036-06-01', provider: 'claude', model: 'us.anthropic.claude-sonnet-4-5', usd: 8, tokens: 0 },
+          { day: '2036-06-01', provider: 'copilot', model: 'gpt-5-mini', usd: 0, tokens: 300 },
+        ]),
+        JSON.stringify(got),
+      );
+      const read = providerSpend(old as unknown as Db);
+      check("and reads as this month's, by engine and route", near(read.find((p) => p.key === 'claude')?.month, 11) && near(read.find((p) => p.key === 'claude/us')?.month, 8) && read.find((p) => p.key === 'copilot')?.month === 300, JSON.stringify(read));
+      old.exec("DELETE FROM agents WHERE id = 'a3'");
+      check('the table has no foreign key: removing an agent afterwards refunds nothing', near(providerSpend(old as unknown as Db).find((p) => p.key === 'claude/us')?.month, 8));
+      old.close();
+    }
+
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    for (const t of ['cost_daily', 'project_spend_daily', 'agent_spend_daily', 'provider_spend_daily']) db.prepare(`DELETE FROM ${t} WHERE day >= '2036-01-01'`).run();
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -8427,7 +8636,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
