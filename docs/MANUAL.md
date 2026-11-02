@@ -657,7 +657,7 @@ screen names the engine. Some things are different:
   and counts input plus output tokens, per day. Like a dollar budget it warns at that figure and
   stops nothing (§6). The agent's details, its lane and its
   composer show its tokens, today and in total, where a Claude agent's show dollars.
-  The status bar's spend, today and in total, stays Claude's dollars only; a project's shows its
+  The status bar's spend, today and this month, stays Claude's dollars only; a project's shows its
   tokens beside its dollars. OpenRouter still bills you, so
   watch its dashboard.
 - **No plan mode.** **plan first** is hidden, and a preset that plans first asks you
@@ -1289,7 +1289,7 @@ who did it.
 Two things it deliberately keeps: the append-only event log, and the day's spend
 total. A removal isn't a refund, and the daily budget shouldn't reset because you tidied
 up. (An agent's own spend today goes with the agent: a removed agent has no budget left. Its
-project's spend, today, this month and in total, keeps what it spent, and so do the status bar's month and total.)
+project's spend, today, this month and in total, keeps what it spent, and so does the status bar's month.)
 
 If any agent in the project is still running, the removal is **refused** and names
 the ones in the way. Interrupt them on the Agent screen first — Conductor won't
@@ -1453,8 +1453,9 @@ once adds up quickly.
 - **Today's spend is in the status bar**, and in `make status`. It counts dollars only, so
   Copilot and OpenRouter agents, capped in tokens (§2, "Choose the engine"), add nothing
   to it. After it the status bar shows **· $X this month** (or **$X of $Y this month**, coloured,
-  when there is a monthly budget), then **· $X total**: everything every agent has spent since
-  Conductor started counting, kept when agents, jobs or projects are removed.
+  when there is a monthly budget), and that is its last figure. It shows no all-time total, which
+  was read as the month's. Each project's total is on its Fleet card and in Metrics' **By project**
+  table.
 - **Each project shows today $a · month $m · total $b**, on its Fleet card and in the Project screen's
   header and column, and Metrics' **By project** table has each one's monthly budget beside its month. Its total keeps what removed agents and jobs spent (from before this, it
   counts only the agents the project still had). An engine that reports no dollars adds its

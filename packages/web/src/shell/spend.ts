@@ -96,14 +96,6 @@ export function monthlyDraft(draft: string, current: number | null | undefined):
 
 // ── today and in total (Amendment 146) ─────────────────────────────────────────
 
-/** The status bar's total, after today's figure: `· $12.40 total`. */
-export function totalWords(total: number): string {
-  return `· $${total.toFixed(2)} total`;
-}
-
-/** What the status bar's total means, on hover. */
-export const TOTAL_TITLE = 'spent by every agent since Conductor started counting, kept when agents are removed';
-
 /** One figure in its unit: dollars, or tokens where the engine reports no dollars. */
 function figure(usd: number, tokens: number, dollars: boolean): string {
   return dollars ? `$${usd.toFixed(2)}` : `${tokenWords(tokens)} tok`;

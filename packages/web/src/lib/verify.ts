@@ -76,7 +76,6 @@ import {
   MONTHLY_KEY,
   MONTH_TITLE,
   OVER_AT,
-  TOTAL_TITLE,
   WARN_AT,
   agentPairWords,
   budgetProblem,
@@ -88,7 +87,6 @@ import {
   projectPairWords,
   projectSpendOf,
   toneOf,
-  totalWords,
 } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
@@ -1828,13 +1826,12 @@ console.log('\n· today and all-time totals for each agent, project and the flee
   send({ type: 'hello', seq: 0, snapshot });
 
   // ── the status bar ──
-  check('the status bar says the total after today: "· $40.50 total"', totalWords(40.5) === '· $40.50 total' && totalWords(0) === '· $0.00 total');
-  check('and its hover says what it counts', TOTAL_TITLE === 'spent by every agent since Conductor started counting, kept when agents are removed');
   const shell = src('../shell/shell.tsx');
   check(
-    "the bar draws today's spend (with its meter) and then the total, which is absent from a daemon before it",
-    /const \{ slots, costToday, costMonth, costTotal, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costMonth=\{costMonth\} costTotal=\{costTotal\} \/>/.test(shell) &&
-      /costTotal === null \? null/.test(shell) && /title=\{TOTAL_TITLE\}/.test(shell) && /\{totalWords\(costTotal\)\}/.test(shell) && /\{m\.label\}\s*<\/span>\s*\{month\}\s*\{total\}/.test(shell),
+    "the bar draws today's spend (with its meter) and then the month, and no all-time total (Amendment 187)",
+    /const \{ slots, costToday, costMonth, seq \} = useStatusBar\(\)/.test(shell) && /<DailySpend costToday=\{costToday\} costMonth=\{costMonth\} \/>/.test(shell) &&
+      /\{m\.label\}\s*<\/span>\s*\{month\}\s*<\/span>/.test(shell) && /today<\/span>\s*\{month\}\s*<\/span>/.test(shell) &&
+      !/costTotal|TOTAL_TITLE|totalWords/.test(shell) && !/costTotal/.test(src('./store.ts').split('export function useStatusBar')[1]!.split('\n}')[0]!),
   );
 
   // ── a project's pair ──
@@ -1975,9 +1972,10 @@ console.log('\n39 · this month beside today, and a monthly budget beside the da
   check('and none from a daemon before it', projectPairWords({ today: 1, total: 2, tokensToday: 0, tokensTotal: 0 }).month === undefined);
   const shell = src('../shell/shell.tsx');
   check(
-    'the status bar draws the month between today and the total: the meter with a budget, the figure without, nothing from an older daemon',
+    'the status bar ends with the month, after today: the meter with a budget, the figure without, nothing from an older daemon; no total follows it (Amendment 187)',
     /function MonthSpend\(\{ costMonth \}/.test(shell) && /parseBudget\(useSetting\(MONTHLY_KEY\)\)/.test(shell) && /if \(costMonth === null\) return null/.test(shell) &&
-      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell),
+      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell) &&
+      /\{month\}\s*<\/span>/.test(shell) && !/\{month\}\s*\{total\}/.test(shell) && !/ total`/.test(src('../shell/spend.ts')),
   );
   const css = src('../shell/shell.css');
   const month = ['.sh-spend-month {', ".sh-spend-month[data-tone='warn'] {", ".sh-spend-month[data-tone='over'] {"].map((c) => css.split(c)[1]?.split('}')[0] ?? '');

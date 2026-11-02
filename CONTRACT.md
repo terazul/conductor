@@ -200,6 +200,25 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 187 — post-merge, applied. **The status bar ends with this month's spend: the fleet's all-time total is no longer shown there.**
+
+Web (`shell/shell.tsx`, `shell/spend.ts`, `lib/store.ts`, `lib/verify.ts`) and `docs/MANUAL.md`.
+Reported 2 Nov: the user read the status bar's `· $222.83 total` as this month's total, because it
+came right after `· $0.97 this month`. Decided by the user: take the all-time total off the status
+bar only.
+
+- **The bar.** `DailySpend` draws today (the meter, or the figure with no daily budget) and then
+  the month (`MonthSpend`, Amendment 182), and nothing after it. It no longer takes `costTotal`,
+  and `useStatusBar` no longer selects it. `totalWords` and `TOTAL_TITLE` (`shell/spend.ts`), which
+  only the bar used, are gone.
+- **Kept.** The daemon still sends `costTotal` in the snapshot and in every `cost` frame, and the
+  store still keeps it (Amendment 146). A Fleet card's footer, the Project screen and Metrics'
+  By project table keep their labelled **total**.
+
+**Verified:** `lib/verify.ts`: the Amendment 146 status bar check now asks for today then the month
+and no total, and §39's month check asks that the bar end with the month. Typecheck. Not looked
+at in a browser.
+
 ### Amendment 186 — post-merge, applied. **A launched stack and a saved Custom stack can be renamed in place.**
 
 Daemon (`db/migrations/310_job_name.sql`, `session/store.ts`, `session/supervisor.ts`,

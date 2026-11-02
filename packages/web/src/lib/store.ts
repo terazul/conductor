@@ -525,12 +525,11 @@ export function useJobDiffstat(jobId: string | null): DiffStat {
   );
 }
 
-export function useStatusBar(): { slots: State['slots']; costToday: number; costMonth: number | null; costTotal: number | null; seq: number } {
+export function useStatusBar(): { slots: State['slots']; costToday: number; costMonth: number | null; seq: number } {
   return useSelect('statusbar', (s) => ({
     slots: s.slots,
     costToday: s.costToday,
     costMonth: s.costMonth,
-    costTotal: s.costTotal,
     seq: s.seq,
   }));
 }
