@@ -1106,9 +1106,9 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
   check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
   check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
-  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 181)', /!customBad && !singleBad && methodOk && stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 181)', /\(waitForInstructions \|\| prompt\.trim\(\)\.length > 0\) &&\s*projectId !== null &&\s*!busy &&\s*modelsReady &&\s*!customBad &&\s*!singleBad &&\s*methodOk &&\s*stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
   check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
-  check('what is sent is launchBody, by launchRequest, with the method and the name', /launchRequest\(\s*\{\s*projectId,\s*prompt,\s*method,\s*branch: branchName,/.test(route) && /return n <= 1 \? \{ path: '\/api\/jobs', body: bodies\[0\]! \}/.test(readFileSync(new URL('./launch.ts', import.meta.url), 'utf8')));
+  check('what is sent is launchBody, by launchRequest, with the method and the name', /launchRequest\(\s*\{\s*projectId,\s*title,\s*prompt,\s*waitForInstructions,\s*method,\s*branch: branchName,/.test(route) && /return n <= 1 \? \{ path: '\/api\/jobs', body: bodies\[0\]! \}/.test(readFileSync(new URL('./launch.ts', import.meta.url), 'utf8')));
   check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
   check('the name is cleared after a launch on it, as the prompt is: the branch is taken now', /if \(method === 'named'\) setBranchName\(''\);/.test(route));
   check('Settings offers the same three, and keeps the choice under the same key', /METHODS\.map\(\(m\) => \(/.test(settings) && /put\(\{ method: m\.id \}\)/.test(settings) && !/ISOLATION_WORDS/.test(settings));
@@ -1795,7 +1795,7 @@ console.log('\n29 · "one agent" launches the role and persona you pick, remembe
   const roleRow = readFileSync(new URL('./RoleRow.tsx', import.meta.url), 'utf8');
   check('Spawn shows a RoleRow for one agent, and for no other preset', /\{presetId === SINGLE_ID && \(\s*<div className="sp-single">[\s\S]*?<RoleRow/.test(route) && (route.match(/<RoleRow\b/g) ?? []).length === 1 && /const base = presetId === SINGLE_ID \? singlePreset\(singlePick\) : presetById\(presetId\)/.test(route));
   check('without a brief field, since the prompt is its brief', !/<RoleRow[^>]*onBrief/.test(route.slice(route.indexOf('<RoleRow'), route.indexOf('/>', route.indexOf('<RoleRow')))) && /\{onBrief && \(\s*<textarea/.test(roleRow));
-  check('it reads and writes the project\'s setting, and blocks a launch it cannot run', /useSetting\(projectId \? singleKey\(projectId\) : ''\)/.test(route) && /writeSetting\(singleKey\(projectId\), singleSetting\(next\)\)/.test(route) && /!customBad && !singleBad && methodOk/.test(route));
+  check('it reads and writes the project\'s setting, and blocks a launch it cannot run', /useSetting\(projectId \? singleKey\(projectId\) : ''\)/.test(route) && /writeSetting\(singleKey\(projectId\), singleSetting\(next\)\)/.test(route) && /!customBad &&\s*!singleBad &&\s*methodOk/.test(route));
 }
 
 console.log('\n30 · an orchestrated launch starts several stacks from one plan, each told its number (Amendment 181)');
@@ -1841,7 +1841,7 @@ console.log('\n30 · an orchestrated launch starts several stacks from one plan,
   const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
   check('the pills sit beside "helpers in all", one per number up to the setting', /aria-label="Stacks"/.test(picker) && /Array\.from\(\{ length: stacks\.max \}/.test(picker) && /stacks\.onChange\(k\)/.test(picker) && /const stacksMax = stacksFrom\(useSetting\(STACKS_KEY\)\);/.test(route));
   check('shown only where something orchestrates, and 1 otherwise', /const stacked = listsRoles && orchestrates\(listed\);/.test(route) && /const stacks = stacked \? Math\.min\(stacksAsked, stacksMax\) : 1;/.test(route));
-  check('the choice is the launch\'s: 1 to start, after a launch, and on a preset change', /useState\(1\);\s*const stacksMax/.test(route) && /setPipeHelpers\(null\);\s*setStacks\(1\);/.test(route) && /setStacks\(1\);\s*setPrompt\(''\);/.test(route));
+  check('the choice is the launch\'s: 1 to start, after a launch, and on a preset change', /useState\(1\);\s*const stacksMax/.test(route) && /setPipeHelpers\(null\);\s*setStacks\(1\);/.test(route) && /setStacks\(1\);\s*setTitle\(''\);\s*setPrompt\(''\);/.test(route));
   check('a 207 is shown per stack, not as "Launch failed"', /function LaunchedStacks/.test(route) && /not started: \{s\.error\}/.test(route) && /stacks launched/.test(route));
 }
 
