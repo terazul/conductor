@@ -31,6 +31,9 @@ import {
   PILLS,
   defaultPills,
   describeAutonomy,
+  effortMovedLine,
+  effortsFor,
+  nearestEffort,
   toAutonomy,
   type PillState,
 } from './autonomy.js';
@@ -327,6 +330,30 @@ check(
   'and every level the UI offers is one the SDK accepts',
   EFFORTS.every((e) => ['low', 'medium', 'high', 'xhigh', 'max'].includes(e.id)),
   EFFORTS.map((e) => e.id).join(','),
+);
+// Amendment 190: only the efforts the model's list names; all five where it names none.
+const ids = (es: typeof EFFORTS) => es.map((e) => e.id).join(',');
+check(
+  "a model's list narrows the efforts offered, in the scale's order",
+  ids(effortsFor(['high', 'low'])) === 'low,high' && effortsFor(['high']).every((e) => EFFORTS.includes(e)),
+  ids(effortsFor(['high', 'low'])),
+);
+check(
+  'a list that names none, or names none of ours, offers all five (Claude, OpenRouter, a typed id)',
+  ids(effortsFor(undefined)) === ids(EFFORTS) && ids(effortsFor([])) === ids(EFFORTS) && ids(effortsFor(['turbo'])) === ids(EFFORTS),
+);
+check(
+  'a choice the model takes stays; one it does not moves to the nearest, the lower of two as close',
+  nearestEffort('high', effortsFor(['low', 'high'])) === 'high' &&
+    nearestEffort('max', effortsFor(['low', 'medium', 'high'])) === 'high' &&
+    nearestEffort('low', effortsFor(['xhigh', 'max'])) === 'xhigh' &&
+    nearestEffort('medium', effortsFor(['low', 'high'])) === 'low' &&
+    nearestEffort('xhigh', effortsFor(['high', 'max'])) === 'high',
+);
+check(
+  'and it says so',
+  effortMovedLine('gpt-5-mini', 'max', 'high') === "gpt-5-mini doesn't take effort max, so it is high.",
+  effortMovedLine('gpt-5-mini', 'max', 'high'),
 );
 check(
   'it flows to every agent in a preset, not just the first',
@@ -789,6 +816,13 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's visible list or an id when it cannot list", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /<ProviderModelSelect/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd, its hint saying it warns and never stops (Amendment 180)', !/ceilingWords/.test(src) && /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title=\{`[^`]*per day[^`]*never stops it[^`]*`\}\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
+  check(
+    "Spawn offers the chosen model's efforts, and moves a choice it doesn't take, saying so (Amendment 190)",
+    /effortsFor\(claude \? undefined : theirs\.list\?\.models\.find\(\(m\) => m\.id === engineModel\.trim\(\)\)\?\.efforts\)/.test(src) &&
+      /\{offered\.map\(\(e\) => \(/.test(src) && !/\{EFFORTS\.map\(/.test(src) &&
+      /const to = nearestEffort\(effort, offered\);\s*if \(to === effort\) return;\s*setEffort\(to\);\s*setEffortMoved\(/.test(src) &&
+      /effortMoved\.model === engineModel\.trim\(\) && \(\s*<div className="sp-cf-note">\{effortMoved\.line\}<\/div>/.test(src),
+  );
   check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && r\.role !== listsUnder && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 

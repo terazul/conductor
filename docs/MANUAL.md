@@ -719,7 +719,14 @@ Whether file edits go ahead unattended is now set by the interaction mode above
 Separately, **effort** — `low` · `medium` · `high` · `xhigh` · `max` — is how hard the
 model thinks, not what it's allowed to do, which is why it has its own row. `high` is the
 default. You can change it per agent after launch from the Agent screen (`3`); like the
-permission mode, it applies from that agent's **next** run.
+permission mode, it applies from that agent's **next** run. Where the engine's model list says
+which efforts a model takes (Copilot does), Spawn and the Agent screen offer only those; where it
+says nothing (Claude, OpenRouter, an id you typed), all five. Pick a model that doesn't take the
+effort you chose and it moves to the nearest one the model does, the lower of two as close, and
+the line under it says so: **gpt-5-mini doesn't take effort max, so it is high.** An effort that
+reaches a Copilot model some other way (a saved default, a helper an orchestrator starts) and
+isn't one it takes is not sent: the model thinks at its own default, and the transcript says so
+in one line.
 
 See §5. The default is a reasonable middle: edits auto-accepted inside the
 worktree, shell commands run without asking (a reading role's only its read-only ones),

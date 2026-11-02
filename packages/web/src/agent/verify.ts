@@ -667,6 +667,13 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('the composer asks the engine before it shows a control', /const caps = capabilitiesOf\(agent, useProviders\(\)\);/.test(comp) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps, autonomy\.mode\)\)/.test(comp) && /\{has\.effort && \(\s*<div className="ag-modes">\s*<span className="ui-lab">effort/.test(comp));
+  check(
+    "the composer offers its model's efforts, and a model switched to that doesn't take the effort moves it, saying so (Amendment 190)",
+    /const effortsOn = \(id: string\) => effortsFor\(claude \? undefined : theirs\.list\?\.models\.find\(\(m\) => m\.id === id\)\?\.efforts\);/.test(comp) &&
+      /\{effortsOn\(model\)\.map\(\(e\) => \(/.test(comp) && !/\{EFFORTS\.map\(/.test(comp) &&
+      /const to = nearestEffort\(from, effortsOn\(next\)\);\s*if \(!has\.effort \|\| to === from\) return;/.test(comp) &&
+      /setAutonomy\(agent\.id, \{ autonomy: \{ effort: to \} \}\),\s*`\$\{said\} \$\{effortMovedLine\(next, from, to\)\}`/.test(comp),
+  );
   check('its budget is tokens where the engine has no dollars, and the patch is { budgetTokens }', /has\.budget === 'tokens' \?/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetTokens: cap \} \}\)/.test(comp) && /setAutonomy\(agent\.id, \{ autonomy: \{ budgetUsd: cap \} \}\)/.test(comp));
   check("its model comes from the engine's visible list, and Claude keeps the catalog picker", /\{claude \? \(\s*<ModelSelect\s*catalog=\{models\.catalog\}/.test(comp) && /useProviderModels\(claude \? null : providerOf\(agent\)\)/.test(comp) && /<ProviderModelSelect/.test(comp) && /providerModelProblem\(theirs\.list, model\)/.test(comp));
   const insp = readFileSync(new URL('./inspector.tsx', import.meta.url), 'utf8');

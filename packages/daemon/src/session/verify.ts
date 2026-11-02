@@ -57,6 +57,7 @@ import type {
   TerminalRun,
   ProviderInfo,
   ProviderModelList,
+  UserTextPayload,
 } from '@conductor/shared';
 import { allowedUnattended, arbiter, fallbackSuggestions, ruleCovers, toolRuleFor } from '../arbiter/index.js';
 import type { PermissionRequest, PermissionRequestResult, SessionConfig, SessionEvent } from '@github/copilot-sdk';
@@ -4287,6 +4288,45 @@ async function main(): Promise<void> {
     check('its capabilities are the findings: no defer, no dollars, no plan mode yet', JSON.stringify(caps) === JSON.stringify({ defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true }));
     check('one client per provider, started once each', fakeCopilot.clients === 2 && fakeCopilot.starts === 2, JSON.stringify(fakeCopilot));
     await until(() => sup.slots.used === 0);
+
+    // ── an effort the model doesn't list is not sent (Amendment 190) ──
+    const keptList = fakeCopilot.models;
+    fakeCopilot.models = [...keptList, { id: 'gpt-5-nano', name: 'GPT-5 nano', supportedReasoningEfforts: ['medium'] }];
+    const effortNotes = (id: string) =>
+      payloads(id).filter((p): p is UserTextPayload => p.kind === 'user_text' && p.synthetic === true && /^effort /.test(p.text));
+    cpAgent('agt_cp_max', { autonomy: { ...DEFAULT_AUTONOMY, effort: 'max' } });
+    sup.pump();
+    const sMax = await sessionOf('agt_cp_max');
+    check("an effort the model's list doesn't name is not sent: the session is made without one", sMax !== undefined && sMax.config.reasoningEffort === undefined && sMax.config.model === 'gpt-5-mini', JSON.stringify(sMax?.config.reasoningEffort));
+    check(
+      'and the transcript says so, in one line',
+      effortNotes('agt_cp_max').length === 1 && effortNotes('agt_cp_max')[0]!.text === 'effort max not sent: gpt-5-mini takes low, high, so it runs at its default',
+      JSON.stringify(effortNotes('agt_cp_max')),
+    );
+    check('and the agent keeps the effort it was given, for a model that takes it', getAgent(db, 'agt_cp_max')?.autonomy.effort === 'max');
+    sMax?.emit('session.idle', {});
+    await until(() => getAgent(db, 'agt_cp_max')?.status === 'done');
+    cpAgent('agt_cp_low', { autonomy: { ...DEFAULT_AUTONOMY, effort: 'low' } });
+    cpAgent('agt_cp_any', { model: 'gpt-unlisted', autonomy: { ...DEFAULT_AUTONOMY, effort: 'xhigh' } });
+    sup.pump();
+    const sLow = await sessionOf('agt_cp_low');
+    const sAny = await sessionOf('agt_cp_any');
+    check('one it names is sent, with nothing said', sLow?.config.reasoningEffort === 'low' && effortNotes('agt_cp_low').length === 0, JSON.stringify(sLow?.config.reasoningEffort));
+    check("and a model whose list names none is sent the effort as it is", sAny?.config.reasoningEffort === 'xhigh' && effortNotes('agt_cp_any').length === 0, JSON.stringify(sAny?.config.reasoningEffort));
+    await until(() => getAgent(db, 'agt_cp_low')?.status === 'working');
+    const toNano = await send<{ appliesTo?: string }>('POST', '/api/agents/agt_cp_low/model', { model: 'gpt-5-nano' });
+    check(
+      'a live switch to a model that does not take the effort goes without it, and says so',
+      toNano.body.appliesTo === 'now' && sLow?.models.at(-1) === 'gpt-5-nano' && sLow.efforts.at(-1) === undefined &&
+        effortNotes('agt_cp_low').map((p) => p.text).join() === 'effort low not sent: gpt-5-nano takes medium, so it runs at its default',
+      JSON.stringify([toNano.body, sLow?.models, sLow?.efforts, effortNotes('agt_cp_low')]),
+    );
+    sLow?.emit('session.idle', {});
+    sAny?.emit('session.idle', {});
+    await until(() => sup.slots.used === 0);
+    fakeCopilot.models = keptList;
+    // The switch read Copilot's list, gpt-5-nano and all, into the served cache; 17m's launches on gpt-5 need it gone.
+    forgetProviderModels();
   }
 
   console.log('\n17m · an engine that reports no dollars is capped in tokens (Amendment 77)');

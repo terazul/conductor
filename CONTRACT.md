@@ -200,6 +200,40 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 190 — post-merge, applied. **Spawn and the composer offer only the efforts the model takes, and Copilot is never sent one it doesn't.**
+
+Web (`spawn/autonomy.ts`, `spawn/route.tsx`, `agent/composer.tsx`, `spawn/verify.ts`,
+`agent/verify.ts`), daemon (`session/backends/copilot.ts`, `session/verify.ts`) and
+`docs/MANUAL.md`. Found 15 Oct by Amendment 156; planned as wave 13's E1, decided as "offer the
+model's listed efforts; all five where the list says nothing".
+
+- **What is offered.** `effortsFor(listed)` is the efforts a model's list names (`efforts` on
+  `GET /api/models?provider=`, which Copilot fills from `supportedReasoningEfforts`), in `EFFORTS`'
+  order, or all five where it names none: Claude, OpenRouter, an id typed rather than picked, or
+  a list naming none of ours. Spawn's effort row shows the chosen engine model's; the composer's,
+  the agent's model's. Claude keeps all five, as decided, though its catalog has `effortLevels`
+  (`xhigh` falls back to `high` there).
+- **A choice that moves.** On Spawn, a model picked that doesn't take the effort chosen moves it
+  to `nearestEffort`: the closest on the scale, the lower of two as close, so it never quietly
+  costs more. The line under the row says `effortMovedLine` (*gpt-5-mini doesn't take effort max,
+  so it is high.*) for that model, until you pick one. On the composer, switching the model does
+  the same as a second patch (`{ autonomy: { effort } }`), and its notice says both.
+- **Never sent.** The Copilot backend checks the effort against the model's list
+  (`copilotEfforts`, filled each time `copilotModels` reads it, and read once if the model isn't
+  known yet) when a session is made, on a live model switch, and on a live effort change. One the
+  model doesn't list is dropped: the model thinks at its default, and the transcript gets one
+  synthetic line, *effort max not sent: gpt-5-mini takes low, high, so it runs at its default*.
+  The agent keeps the effort it was given. A list that can't be read sends it as before.
+
+**Verified:** `spawn/verify.ts` §4: the narrowing, all five where the list names none, the
+nearest (and the lower on a tie), and the line; and that Spawn's row maps `offered`, not
+`EFFORTS`, and moves the choice. `agent/verify.ts`: the composer's row maps `effortsOn(model)`,
+and a model switch moves the effort with the line. `session/verify.ts` §17l: on the fake Copilot
+client, `max` on `gpt-5-mini` (`low`, `high`) makes a session with no `reasoningEffort` and one
+transcript line; `low` is sent with nothing said; `xhigh` on a model that lists none is sent; a
+live switch to `gpt-5-nano` (`medium`) goes without `low` and says so. Without the backend
+change, three of these fail.
+
 ### Amendment 189 — post-merge, applied. **A decision that lands while a run your message started is finishing runs the agent again, as after any other run.**
 
 Daemon (`session/supervisor.ts`, `session/verify.ts`) and `docs/MANUAL.md`. Found 15 Oct in wave
