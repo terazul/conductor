@@ -16,9 +16,9 @@ green, merging and pushing from the main checkout, and never force-pushing. Thes
 - **Two stacks.**
 - **Nothing to ask.** §3 answers every Decide. A stack asks the user only if it finds something
   §3 doesn't cover (a rebase conflict in the other track's code, a check it can't make pass).
-- **Fixed numbers.** Migration **310** is track 1's, only if W1's design note shows it needs one
+- **Fixed numbers.** Migration **330** is track 1's, only if W1's design note shows it needs one
   (§3 expects it not to). Nothing else may add one without asking. Check sections are numbered at
-  merge, after the top one on `main` (32 today, `session/verify.ts:8244`).
+  merge, after the top one on `main` (34 today, after Amendment 188; 310 and 320 were taken by `310_job_name.sql` and `320_provider_spend.sql`).
 - **Files both tracks edit:** `CONTRACT.md` (top), `docs/MANUAL.md`, `TODO.md`, and
   `session/supervisor.ts`. In supervisor.ts track 1 owns the retry branch of `#settle` (`:1290`),
   boot-time `reconcile` (`:494`), and `hold`/`release` (`:2520`, `:2532`); track 2 owns
@@ -32,7 +32,7 @@ green, merging and pushing from the main checkout, and never force-pushing. Thes
 
 | Track | Lanes, in order | Main files | Migration |
 |---|---|---|---|
-| 1 Never give up on the model | **W1** | `session/retry.ts`, new `session/outage.ts`, `#settle`/`reconcile`/`hold`/`release` in `supervisor.ts`, `session/alerts.ts`, `session/models.ts`, the backends' `listModels`, the job status rollup, `web/src/attention/`, the status bar | 310, if needed |
+| 1 Never give up on the model | **W1** | `session/retry.ts`, new `session/outage.ts`, `#settle`/`reconcile`/`hold`/`release` in `supervisor.ts`, `session/alerts.ts`, `session/models.ts`, the backends' `listModels`, the job status rollup, `web/src/attention/`, the status bar | 330, if needed |
 | 2 Small fixes | L1 → E1 → T1 → H1 | `#launchWithPrompt` in `supervisor.ts`; `web/src/spawn/` (`autonomy.ts`, `route.tsx`), `web/src/agent/composer.tsx`, `backends/copilot.ts`; `routes/term.ts`, `routes/terminal.ts`, `web/src/agent/TermPanel.tsx`; `session/verify.ts`, `session/alerts.ts` (`#dailySince`/`#monthlySince` only), `TODO.md` | — |
 
 **Why these cuts:** W1 is one large lane that touches how an agent fails, how it's resumed after a
@@ -55,7 +55,7 @@ items that the other lanes also tick.
   - how "waiting for the model" is stored: the agent `paused` with a status note, as Pause all
     stores `HOLD_NOTE` (`supervisor.ts:239`, read back with `lastStatusNote`, `:2536`); the provider
     from the agent's engine; "since" from that status event. This survives a restart, so
-    migration 310 should not be needed; if it is, say why.
+    migration 330 should not be needed; if it is, say why.
   - which agents wait: the ones whose short retries are spent (`decideRetry`, `retry.ts:169`, gains
     a third answer). `ACCOUNT_ERRORS` and `NEVER_BETTER` still don't wait. Since Amendment 180 no
     budget pauses anything, so the TODO's "Conductor's own budget pause" line is moot: a ⏸, Pause
