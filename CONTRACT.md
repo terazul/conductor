@@ -200,6 +200,29 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 189 — post-merge, applied. **A decision that lands while a run your message started is finishing runs the agent again, as after any other run.**
+
+Daemon (`session/supervisor.ts`, `session/verify.ts`) and `docs/MANUAL.md`. Found 15 Oct in wave
+11's A2 (Amendment 168); planned as wave 13's L1.
+
+- **The bug.** A decision that lands while the agent's run is still unwinding is remembered
+  (`#resumeWanted`) and run when the run lets go. Only `#launch` followed it. A run started by
+  `#launchWithPrompt` (your message, a `'slot'` message sent when a slot freed, the ask to hand
+  off) ended `done` and nothing ran again. It was so before Amendment 168.
+- **The fix.** `#launch`'s tail is now `#relaunchIfWanted(agentId)`, called after both
+  `#launch`'s and `#launchWithPrompt`'s settle. It runs the agent again in its session, or
+  queues it with `SLOT_RESUME_NOTE` when every slot is taken (Amendment 168), as before.
+- **One run at a time.** When the agent is already running again when its run's settle ends (the
+  ask to hand off, started from that settle after a restart), the decision is kept for that
+  run's end instead. Before, the decision and the ask both launched it, and two runs went at once.
+
+**Verified:** `session/verify.ts` §15, after the unwinding-relaunch check: a decision during a
+run your message started, and during one a `'slot'` message started, runs the agent again once,
+in its session, told `WAKE_NUDGE`, and then no more. §20, after Amendment 119's checks: a decision
+during the ask to hand off runs it again once when the ask ends; one during the restart run before
+the ask starts nothing beside the ask and runs once after it. Without the fix, seven of these fail;
+without the one-run guard, the restart case starts a third run beside the ask.
+
 ### Amendment 188 — post-merge, applied. **Each engine has a monthly budget, and under Claude each route, in the unit it reports. It only warns.**
 
 Daemon (`db/migrations/320_provider_spend.sql`, `session/store.ts`, `session/backends/claude.ts`,

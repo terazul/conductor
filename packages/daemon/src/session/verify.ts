@@ -2387,7 +2387,7 @@ async function main(): Promise<void> {
    */
   await setSlots('2');
   job('job_unwind', null);
-  // Through the queue: a run a message of yours started (`#launchWithPrompt`) is not relaunched this way.
+  // Through the queue; a run a message of yours started (`#launchWithPrompt`) is checked below.
   fixture('agt_unwind', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_unwind', autonomy: DEFAULT_AUTONOMY });
   fixture('agt_ubusy', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_ubusy', autonomy: DEFAULT_AUTONOMY });
   const unwindAt = runs.length;
@@ -2419,6 +2419,58 @@ async function main(): Promise<void> {
     runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length === 2 && sup.slots.used === 1 && getAgent(db, 'agt_unwind')?.status === 'working',
     `${runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length} run(s), ${sup.slots.used} of ${slotLimit()}`,
   );
+  for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === 0);
+
+  /*
+   * The same, for a run your message started (`#launchWithPrompt`, Amendment 189). It used to
+   * end `done` and nothing ran again: the decision was lost. Still at a limit of one, so the
+   * 'slot' message below has to wait for one.
+   */
+  const relaunches = (session: string, from: number) => runs.slice(from).filter((r) => r.options.resume === session);
+  job('job_unwind_said', null);
+  fixture('agt_usaid', 'job_unwind_said', { sdkSessionId: 'sess_usaid', autonomy: DEFAULT_AUTONOMY });
+  const saidAt = runs.length;
+  check('a message to an idle agent starts it', (await send<{ delivery?: string }>('POST', '/api/agents/agt_usaid/message', { text: 'one more thing' })).body.delivery === 'resumed' && (await until(() => runs.length === saidAt + 1)));
+  sup.resumeParked('agt_usaid'); // still running: remembered for when its run lets go
+  runs[saidAt]?.finish({ cost: 0, reason: 'completed' });
+  check(
+    'a decision that landed while a run your message started unwound: it runs again, in its own session',
+    (await until(() => relaunches('sess_usaid', saidAt).length === 2)) && getAgent(db, 'agt_usaid')?.status === 'working',
+    `${relaunches('sess_usaid', saidAt).length} run(s), ${getAgent(db, 'agt_usaid')?.status}`,
+  );
+  await until(() => (runs[saidAt + 1]?.prompts.length ?? 0) > 0);
+  check('told what any relaunch is told, not your message again', runs[saidAt + 1]?.prompts[0] === WAKE_NUDGE, JSON.stringify(runs[saidAt + 1]?.prompts));
+  runs[saidAt + 1]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_usaid')?.status === 'done');
+  await settle(150);
+  check('once: it ends done, with no third run', relaunches('sess_usaid', saidAt).length === 2 && sup.slots.used === 0, `${relaunches('sess_usaid', saidAt).length} run(s)`);
+
+  // Started by a 'slot' message (Amendment 168), sent when the slot it waited for freed.
+  fixture('agt_ufill', 'job_unwind_said', { status: 'queued', sdkSessionId: 'sess_ufill', autonomy: DEFAULT_AUTONOMY });
+  fixture('agt_uslot', 'job_unwind_said', { sdkSessionId: 'sess_uslot', autonomy: DEFAULT_AUTONOMY });
+  const slotAt = runs.length;
+  sup.pump();
+  await until(() => sup.slots.used === 1 && runs.length === slotAt + 1);
+  check(
+    "with the one slot taken, a message waits as a 'slot' row",
+    (await send<{ delivery?: string }>('POST', '/api/agents/agt_uslot/message', { text: 'when you can' })).body.delivery === 'queued' && listScheduled(db).some((m) => m.agentId === 'agt_uslot' && m.trigger === 'slot'),
+  );
+  runs[slotAt]?.finish({ cost: 0, reason: 'completed' });
+  check('a freed slot sends it', (await until(() => relaunches('sess_uslot', slotAt).length === 1)) && listScheduled(db).every((m) => m.agentId !== 'agt_uslot'));
+  const slotRun = relaunches('sess_uslot', slotAt)[0];
+  await until(() => (slotRun?.prompts.length ?? 0) > 0);
+  sup.resumeParked('agt_uslot');
+  slotRun?.finish({ cost: 0, reason: 'completed' });
+  check(
+    "a decision that landed while that run unwound: it runs again, once",
+    (await until(() => relaunches('sess_uslot', slotAt).length === 2)) && relaunches('sess_uslot', slotAt)[1] !== slotRun,
+    `${relaunches('sess_uslot', slotAt).length} run(s)`,
+  );
+  relaunches('sess_uslot', slotAt)[1]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_uslot')?.status === 'done');
+  await settle(150);
+  check('and no more', relaunches('sess_uslot', slotAt).length === 2 && sup.slots.used === 0, `${relaunches('sess_uslot', slotAt).length} run(s)`);
   for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
   await until(() => sup.slots.used === 0);
   await setSlots(null);
@@ -5429,6 +5481,58 @@ async function main(): Promise<void> {
       runs.length === before119 + 1 && getAgent(db, 'hr_b')?.status === 'queued' && held().some((a) => a.agentIds[0] === 'hr_a'),
       `${runs.length - before119} runs`,
     );
+
+    /*
+     * A decision that lands while the ask to hand off runs (`#launchWithPrompt`, Amendment 189)
+     * is run once that run lets go, as after any other. One that lands in the run before the
+     * ask waits for the ask's end too, rather than start a second run beside it.
+     */
+    const restartAsk = async (id: string, decideIn: 'restart' | 'ask'): Promise<{ at: number; mine: () => typeof runs }> => {
+      hjobRow(`job_${id}`);
+      hfix(`${id}_a`, `job_${id}`, { role: 'analyst', status: 'working', sdkSessionId: `sess_${id}_a`, autonomy: DEFAULT_AUTONOMY });
+      hfix(`${id}_b`, `job_${id}`, { role: 'developer', status: 'queued', dependsOn: [`${id}_a`], autonomy: DEFAULT_AUTONOMY });
+      const at = runs.length;
+      const mine = () => runs.slice(at).filter((r) => r.options.resume === `sess_${id}_a`);
+      sup.reconcile();
+      sup.pump();
+      await until(() => mine().length === 1 && mine()[0]!.prompts.length > 0);
+      if (decideIn === 'restart') sup.resumeParked(`${id}_a`);
+      mine()[0]?.finish({ cost: 0, reason: 'completed' });
+      await until(() => mine().length === 2 && mine()[1]!.prompts.length > 0);
+      if (decideIn === 'ask') sup.resumeParked(`${id}_a`);
+      return { at, mine };
+    };
+    const ask189 = await restartAsk('hd189', 'ask');
+    check('asked to hand off after a restart, as above', ask189.mine()[1]?.prompts[0] === HANDOFF_ASK, JSON.stringify(ask189.mine()[1]?.prompts));
+    await settle(100);
+    check('a decision that lands while it is asked starts nothing beside it', ask189.mine().length === 2, `${ask189.mine().length} runs`);
+    ask189.mine()[1]?.finish({ cost: 0, reason: 'completed' });
+    check(
+      'when the ask ends, the decision runs it again, in its session (Amendment 189)',
+      (await until(() => ask189.mine().length === 3)) && getAgent(db, 'hd189_a')?.status === 'working',
+      `${ask189.mine().length} runs, ${getAgent(db, 'hd189_a')?.status}`,
+    );
+    await until(() => (ask189.mine()[2]?.prompts.length ?? 0) > 0);
+    check('told what any relaunch is told, not to hand off again', ask189.mine()[2]?.prompts[0] === WAKE_NUDGE, JSON.stringify(ask189.mine()[2]?.prompts));
+    ask189.mine()[2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'hd189_a')?.status === 'done');
+    await settle(150);
+    check(
+      'once: it ends held, with no fourth run, and the developer waits',
+      ask189.mine().length === 3 && getHandoff(db, 'hd189_a').held && getAgent(db, 'hd189_b')?.status === 'queued',
+      `${ask189.mine().length} runs`,
+    );
+
+    const early189 = await restartAsk('he189', 'restart');
+    check('a decision in the restart run: the ask still goes, alone', early189.mine()[1]?.prompts[0] === HANDOFF_ASK && sup.isBusy('he189_a'), JSON.stringify(early189.mine()[1]?.prompts));
+    await settle(100);
+    check('and nothing runs beside it', early189.mine().length === 2, `${early189.mine().length} runs`);
+    early189.mine()[1]?.finish({ cost: 0, reason: 'completed' });
+    check('the ask over, the decision runs it again', await until(() => early189.mine().length === 3), `${early189.mine().length} runs`);
+    early189.mine()[2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'he189_a')?.status === 'done');
+    await settle(150);
+    check('once', early189.mine().length === 3, `${early189.mine().length} runs`);
 
     // One that does hand off after the restart is not asked, and what waits for it starts.
     hjobRow('job_handoff119_ok');

@@ -991,6 +991,11 @@ Two practical consequences:
 If no browser is connected, requests park immediately — there is no point pinning
 a process for someone who can't answer.
 
+An answer that lands while the agent's run is still stopping (you paused it, or put the
+question aside) isn't lost: the agent runs again, in its own session, as soon as that run
+lets go. That holds whatever started the run: a launch, a message of yours, one that waited
+for a slot, or the ask to hand off. With every slot taken by then, it waits for one, queued.
+
 While a call waits for you, the agent's other calls to the same tool wait with it,
 except MCP tools (Lucid, Jira…). Those are turned down with a note to try again once
 you've answered, because a parked MCP call can't be picked back up.

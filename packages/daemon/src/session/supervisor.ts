@@ -1214,26 +1214,38 @@ export class Supervisor implements AgentControl {
     // Counted for the Metrics tab (Amendment 122); whether it failed is `#settle`'s to say.
     recordRunEnd(this.#db, agentId, Date.now() - began);
     this.#settle(agentId, outcome);
-
-    // A decision that landed while this run was still unwinding.
-    if (this.#resumeWanted.delete(agentId)) {
-      const fresh = getAgent(this.#db, agentId);
-      if (fresh?.sdkSessionId && this.#slotsUsed() >= slotLimit()) {
-        // Its slot was taken while it unwound (Amendment 168): queued, as `resumeParked` queues
-        // one with no slot, and pump() resumes it — with the same prompt — when one frees.
-        this.#reopenJob(fresh.jobId);
-        setAgentStatus(this.#db, agentId, 'queued');
-        eventLog().emit(
-          { projectId: fresh.projectId, jobId: fresh.jobId, agentId },
-          { kind: 'status', status: 'queued', error: SLOT_RESUME_NOTE },
-        );
-        this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
-      } else if (fresh?.sdkSessionId) {
-        void this.#launch(agentId, fresh.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
-        return;
-      }
-    }
+    if (this.#relaunchIfWanted(agentId)) return;
     this.pump();
+  }
+
+  /**
+   * A decision that landed while this run was still unwinding (`#resumeWanted`): it runs
+   * again now, in its session, or waits queued for a slot. After every run, `#launch`'s and
+   * `#launchWithPrompt`'s alike (Amendment 189): one your message started used to end `done`
+   * and the decision was lost. True when it is running again, so the caller doesn't pump as well.
+   */
+  #relaunchIfWanted(agentId: string): boolean {
+    if (!this.#resumeWanted.has(agentId)) return false;
+    // Already going again (the ask to hand off, from its settle): that run's end follows the
+    // decision instead, or the two would run at once.
+    if (this.#active.has(agentId)) return true;
+    this.#resumeWanted.delete(agentId);
+    const fresh = getAgent(this.#db, agentId);
+    if (fresh?.sdkSessionId && this.#slotsUsed() >= slotLimit()) {
+      // Its slot was taken while it unwound (Amendment 168): queued, as `resumeParked` queues
+      // one with no slot, and pump() resumes it — with the same prompt — when one frees.
+      this.#reopenJob(fresh.jobId);
+      setAgentStatus(this.#db, agentId, 'queued');
+      eventLog().emit(
+        { projectId: fresh.projectId, jobId: fresh.jobId, agentId },
+        { kind: 'status', status: 'queued', error: SLOT_RESUME_NOTE },
+      );
+      this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    } else if (fresh?.sdkSessionId) {
+      void this.#launch(agentId, fresh.sdkSessionId).catch((err) => console.error(`[supervisor] ${agentId} launch threw`, err));
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -2358,6 +2370,8 @@ export class Supervisor implements AgentControl {
     }
     recordRunEnd(this.#db, agentId, Date.now() - began);
     this.#settle(agentId, outcome);
+    // As after `#launch`: a decision that landed while this run unwound is run now (Amendment 189).
+    if (this.#relaunchIfWanted(agentId)) return;
     this.pump();
   }
 
