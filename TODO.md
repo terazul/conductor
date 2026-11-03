@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **The browser tab's icon is hard to see.** Asked for (3 Nov): *"the browser tab icon is not very
+  distinct, it is hard to see."* It was a 4px grey bar on nothing.
+  *Done (3 Nov): Amendment 197 (the header's amber baton on a dark rounded tile, in `public/favicon.svg`
+  from the first load and painted the same by `notify.ts`; its count badge as before).*
+
 - [x] **One collapse/expand icon, in one place, bigger; a bigger Read it box.** Asked for (3 Nov): "the icon to
   collapse and expand is not always in the same location, make it consistent across the whole UI. Also make
   the icon bigger, it is hard to see. Make the Read it check mark bigger as well."

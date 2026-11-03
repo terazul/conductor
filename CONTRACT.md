@@ -200,6 +200,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 197 — post-merge, applied. **The browser tab's icon is a dark tile with the amber baton.**
+
+Web only (`public/favicon.svg` new, `index.html`, `attention/notify.ts`). Asked 3 Nov: *"the browser
+tab icon is not very distinct, it is hard to see."* The tab's icon was the header's baton as a 4px
+`--ink3` bar on a transparent 32px canvas (`paintFavicon`, the attention ladder's first rung), and there was no
+icon at all until the script first painted one.
+
+- **The icon** is the header's baton (`.sh-baton`), slanted 18°, 6.5px wide in the dark theme's amber
+  `#ffb03a`, on a rounded `#100f0e` tile with a `#4a443d` edge. It reads on a light tab strip and a dark
+  one, at 16px and 32px.
+- **Fixed colours, on purpose.** The icon sits in the browser's tab strip, not on the page, so the page's
+  theme says nothing about what is behind it. `ICON_TILE`, `ICON_EDGE` and `ICON_BATON` in `notify.ts`
+  match `public/favicon.svg`. The badge (the count of what needs you, amber or red when urgent) keeps
+  reading the page's tokens, as it did.
+- **Before the script runs**, `index.html` links `/favicon.svg`, so a tab that is loading, or a bookmark,
+  shows the same icon. `paintFavicon` still adds its own `<link id="atn-favicon">`, which the browser
+  prefers, as the latest icon link.
+
+**Verified:** `attention/verify.ts` and `web verify` pass; the SVG rendered in Chrome at 16px and 32px on
+light (`#dee1e6`) and dark (`#202124`) strips. The canvas copy was not looked at in a browser tab.
+
 ### Amendment 196 — post-merge, applied. **One chevron for every fold, on its left, and bigger; the Read it box is bigger.**
 
 Web only (`shell/chevron.tsx` new, `shell/ui.tsx`, `shell/shell.css`, `agent/transcript.tsx`,
