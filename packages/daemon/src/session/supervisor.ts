@@ -130,6 +130,7 @@ import {
   setAgentAutonomy,
   setAgentModel,
   setAgentName,
+  markReply,
   setAgentStatus,
   setJobName,
   setJobStatus,
@@ -1341,6 +1342,12 @@ export class Supervisor implements AgentControl {
   ): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return;
+    /*
+     * Whichever way it ended, prose after its last tool call or ask is its latest reply, which
+     * the navigator and the tabs say is **to read** (Amendment 193). Pushed at once, because
+     * not every way out below pushes the agent: a stop or a pause is pushed by whoever did it.
+     */
+    if (markReply(this.#db, agentId)) this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     // Whether this run began as a restart resume, which is over now whichever way it ended.
     const afterRestart = this.#restartRuns.delete(agentId);
     // And whether it began after a wait for the model (Amendment 123): over too.

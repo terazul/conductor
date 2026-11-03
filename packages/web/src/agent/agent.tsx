@@ -20,7 +20,7 @@ import {
 import { useNavParams } from '../lib/nav.js';
 import { SCREEN, highlight, openAgent, openProject, recall } from '../shell/nav.js';
 import { agentTabs } from './tabs.js';
-import { useUnseenAgents } from '../lib/seen.js';
+import { useReplyAcks, useToRead } from '../lib/replies.js';
 import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
@@ -28,8 +28,20 @@ import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
 import { useFileTree } from '../files/useWorkspace.js';
-import { foldEvery, shownFolded, unfoldEvery, updateFoldState, useFolds, useUnfolds } from './folds.js';
-import { Transcript, buildTranscript, replyKeys, startFoldedKeys } from './transcript.js';
+import {
+  foldAll,
+  foldEvery,
+  isFolded,
+  shownFolded,
+  unfoldAll,
+  unfoldEvery,
+  updateActivityOpen,
+  updateFoldState,
+  useActivityOpen,
+  useFolds,
+  useUnfolds,
+} from './folds.js';
+import { Transcript, buildTranscript, replyKeys, replyStates, startFoldedKeys } from './transcript.js';
 import { Composer } from './composer.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
@@ -464,7 +476,8 @@ export function AgentScreen() {
   const job = jobs.find((j) => j.id === agent?.jobId) ?? null;
   const allPending = usePending();
   const allAlerts = useAlerts();
-  const unseenAgents = useUnseenAgents();
+  // The agents whose latest reply you haven't ticked read; their tabs say so (Amendment 193).
+  const toRead = useToRead();
   // Switching to an agent with nothing waiting closes the panel; answering the last one doesn't.
   // The same count its tab shows (agent/tabs.ts): its requests, and the alerts that name it.
   const needsHere =
@@ -517,8 +530,26 @@ export function AgentScreen() {
   const startFolded = useMemo(() => startFoldedKeys(turns, orchestrator), [turns, orchestrator]);
   const folds = useFolds();
   const unfolds = useUnfolds();
+  const activityOpen = useActivityOpen();
+  /*
+   * A reply you haven't ticked read stays open, "fold all" or not, and one you ticked starts
+   * folded (Amendment 193); so "fold all" folds the rest, and back to the fold is where a read
+   * one goes. It folds every turn's activity too, and "unfold all" opens it.
+   */
+  const acks = useReplyAcks();
+  const streaming = agent?.status === 'working';
+  const read = useMemo(
+    () => (active === null ? { read: [], unread: [] } : replyStates(turns, streaming, active, acks)),
+    [turns, streaming, active, acks],
+  );
+  const foldable = useMemo(() => replies.filter((k) => !read.unread.includes(k)), [replies, read]);
+  const byDefault = useMemo(() => [...startFolded, ...read.read], [startFolded, read]);
+  const agentTurns = useMemo(() => turns.filter((t) => t.who === 'agent').map((t) => t.key), [turns]);
+  const shownOpen = (k: string): boolean =>
+    active !== null && (read.unread.includes(k) || !shownFolded({ folds, unfolds }, active, k, byDefault.includes(k)));
   const anyOpen =
-    active !== null && replies.some((k) => !shownFolded({ folds, unfolds }, active, k, startFolded.includes(k)));
+    active !== null &&
+    (foldable.some(shownOpen) || agentTurns.some((k) => shownOpen(k) && isFolded(activityOpen, active, k)));
 
   /*
    * Where to scroll (F15; the decision is `scrollIntent` in scroll.ts). Arriving lands on
@@ -640,9 +671,9 @@ export function AgentScreen() {
                 {/* The orchestrator of an orchestrated stack (Amendment 128). */}
                 {t.orchestrator && <OrchestratorMark short />}
                 {/* Filled, the same look as the status Tag (Amendment 94); working
-                    already pulses via the Dot above. Finished only until you open that
-                    agent, and again when it finishes again (Amendment 105). */}
-                {t.status === 'done' && unseenAgents.has(t.id) && <span className="ag-tab-tag">finished</span>}
+                    already pulses via the Dot above. Its latest reply, until you tick it
+                    read, whatever it is doing now (Amendment 193, of 105's finished). */}
+                {toRead.has(t.id) && <span className="ag-tab-tag">to read</span>}
                 {/* How full its budget is, along the foot of the tab, in the daily meter's colours (Amendment 125). */}
                 {t.budget && (
                   <span className="ag-tab-bar" data-tone={t.budget.tone} aria-hidden="true">
@@ -733,12 +764,13 @@ export function AgentScreen() {
               <button
                 type="button"
                 className="fl-btn is-ghost"
-                title={anyOpen ? 'Fold every reply to one line' : 'Unfold every reply'}
-                onClick={() =>
+                title={anyOpen ? 'Fold every reply you have read to one line, and every turn to its latest step' : 'Unfold every reply, and every step'}
+                onClick={() => {
                   updateFoldState((s) =>
-                    anyOpen ? foldEvery(s, agent.id, replies, startFolded) : unfoldEvery(s, agent.id, startFolded),
-                  )
-                }
+                    anyOpen ? foldEvery(s, agent.id, foldable, byDefault) : unfoldEvery(s, agent.id, byDefault),
+                  );
+                  updateActivityOpen((f) => (anyOpen ? unfoldAll(f, agent.id) : foldAll(f, agent.id, agentTurns)));
+                }}
               >
                 {anyOpen ? '⌃ fold all' : '⌄ unfold all'}
               </button>
@@ -793,7 +825,7 @@ export function AgentScreen() {
             turns={turns}
             agentId={agent.id}
             role={agent.role}
-            streaming={agent.status === 'working'}
+            streaming={streaming}
             links={links}
             startFolded={startFolded}
           />

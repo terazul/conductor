@@ -9259,6 +9259,87 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n36 · an agent\'s latest reply is kept by its seq when its run ends, for "to read" (Amendment 193)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    db.prepare("UPDATE agents SET status = 'done' WHERE status IN ('working', 'queued')").run();
+    const rpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'reply193' })).body.project.id;
+    insertJob(db, { id: 'job_r193', projectId: rpid, prompt: 'the job_r193 prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    fixture('agt_r193', 'job_r193', { projectId: rpid, status: 'queued' });
+    const log = (payload: Parameters<ReturnType<typeof eventLog>['emit']>[1]) => eventLog().emit({ projectId: rpid, jobId: 'job_r193', agentId: 'agt_r193' }, payload);
+    const said = (text: string): void => void runOf()?.say({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+    const texts = (): number => (db.prepare("SELECT COUNT(*) AS n FROM events WHERE agent_id = 'agt_r193' AND kind = 'text'").get() as { n: number }).n;
+    const lastText = (): number | undefined => (db.prepare("SELECT MAX(seq) AS s FROM events WHERE agent_id = 'agt_r193' AND kind = 'text'").get() as { s: number | null }).s ?? undefined;
+    let nth = 0;
+    const runOf = (): FakeRun | undefined => runs.filter((r) => r.prompts.some((p) => p.includes('job_r193') || p.includes('r193 again')))[nth - 1];
+    const next = async (start: () => Promise<unknown> | void): Promise<FakeRun | undefined> => {
+      nth += 1;
+      await start();
+      await until(() => runOf() !== undefined && getAgent(db, 'agt_r193')?.status === 'working');
+      return runOf();
+    };
+    const end = async (run: FakeRun | undefined): Promise<void> => {
+      run?.finish({ cost: 0, reason: 'completed' });
+      await until(() => getAgent(db, 'agt_r193')?.status !== 'working');
+      await settle(50);
+    };
+    const again = (text: string) => next(() => send('POST', '/api/agents/agt_r193/message', { text: `r193 again: ${text}` }));
+    const eyes = await connect();
+
+    check('an agent from before has no reply on the wire', getAgent(db, 'agt_r193')?.replySeq === undefined);
+    const r1 = await next(() => sup.pump());
+    said('Looking at it.');
+    await until(() => texts() === 1);
+    log({ kind: 'tool_start', toolUseId: 'tu_r193a', tool: 'Read', input: {}, label: 'Read a.ts' });
+    said('REPLY ONE: it is fixed.');
+    await until(() => texts() === 2);
+    check('while it works, what it said is not a reply yet', getAgent(db, 'agt_r193')?.replySeq === undefined);
+    const one = lastText();
+    await end(r1);
+    check('a run that ends on prose keeps the seq of its last text, the transcript\'s p-key', one !== undefined && getAgent(db, 'agt_r193')?.replySeq === one, `${getAgent(db, 'agt_r193')?.replySeq} vs ${one}`);
+    check('and every browser hears it at once', eyes.frames.some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'agt_r193' && a.replySeq === one)));
+
+    const r2 = await again('read b');
+    said('Reading b.');
+    await until(() => texts() === 3);
+    log({ kind: 'tool_start', toolUseId: 'tu_r193b', tool: 'Read', input: {}, label: 'Read b.ts' });
+    await end(r2);
+    check('a run that ends on a tool call leaves it where it was', getAgent(db, 'agt_r193')?.replySeq === one);
+
+    const r3 = await again('ask me');
+    said('I need to know one thing.');
+    await until(() => texts() === 4);
+    log({ kind: 'request', requestId: 'rq_r193', requestKind: 'question', blockMode: 'parked', label: 'Which branch?' });
+    await end(r3);
+    check('so does one that ends on an ask', getAgent(db, 'agt_r193')?.replySeq === one);
+
+    const r4 = await again('say it');
+    said('REPLY TWO: done, and here is why.');
+    await until(() => texts() === 5);
+    const two = lastText();
+    await end(r4);
+    check('each new reply moves it on', two !== undefined && two > one! && getAgent(db, 'agt_r193')?.replySeq === two, `${getAgent(db, 'agt_r193')?.replySeq} vs ${two}`);
+    eyes.close();
+
+    const reopened = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    check('a daemon that opens the file afresh has the same reply', getAgent(reopened as unknown as Db, 'agt_r193')?.replySeq === two);
+    reopened.close();
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '330').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p330', 'old', '/tmp/p330', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j330', 'p330', 'old prompt', 'in_place', '/tmp/p330', 'main', 'done', 'x')`);
+    insertAgent(old as unknown as Db, { id: 'a330', jobId: 'j330', projectId: 'p330', role: 'builder', model: 'opus', sdkSessionId: null, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: capped });
+    old.exec(readFileSync(new URL('330_reply_seq.sql', dir), 'utf8'));
+    check('migration 330 gives an existing agent no reply, so nothing from before is to read', getAgent(old as unknown as Db, 'a330') !== null && getAgent(old as unknown as Db, 'a330')?.replySeq === undefined);
+    old.close();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -9266,7 +9347,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

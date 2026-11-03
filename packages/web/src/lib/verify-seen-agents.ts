@@ -1,5 +1,6 @@
 /**
- * Validator checks for Amendment 105 (an agent's "finished" clears once you've opened it).
+ * Validator checks for Amendment 105 (an agent's "finished" clears once you've opened it),
+ * and for what replaced that tag in the navigator and the tabs: **to read** (Amendment 193).
  *
  * lib/verify.ts section 34 covers the pure rules and source shapes. This file drives the
  * LIVE path the way the app does — settings arriving, the Notifier marking the open
@@ -154,7 +155,11 @@ console.log('\nF · a broken stored value');
   writeSetting(SEEN_AGENTS_KEY, null);
 }
 
-console.log('\nG · navTree: only a done AND unseen agent row says finished');
+// Amendment 193 replaced the agent's **finished** with **to read**: its latest reply, until you
+// tick it. G and H check that the navigator and the tabs read that now, and the job's own
+// finished, which is still this file's, is untouched by it. The seen agents above are still
+// written, for a tab on an older bundle; nothing on this one reads them.
+console.log('\nG · navTree: an agent row says to read for the ids it is given, whatever its status');
 {
   const proj = [{ id: 'p1', name: 'P', path: '/p', extraDirs: [] }];
   const agents = [
@@ -164,44 +169,44 @@ console.log('\nG · navTree: only a done AND unseen agent row says finished');
     ag('w1', 'working', null),
   ];
   const jobs = [{ id: 'j1', createdAt: T(0), prompt: 'x' }];
-  const rows = (unseen: string[], finishedJobs: string[] = []) =>
-    Object.fromEntries(navTree(proj, agents, [], [], jobs, new Set(finishedJobs), new Set(unseen))[0]!.agents.map((r) => [r.id, r.finished]));
+  const rows = (toRead: string[], finishedJobs: string[] = []) =>
+    Object.fromEntries(navTree(proj, agents, [], [], jobs, new Set(finishedJobs), new Set(toRead))[0]!.agents.map((r) => [r.id, r.toRead]));
 
   let r = rows(['d1', 'f1', 'w1', 'nope']);
-  check('d1 (done, unseen) is finished', r['d1'] === true);
-  check('d2 (done, seen) is not', r['d2'] === false);
-  check('f1 and w1 are not even if their ids are in the set', r['f1'] === false && r['w1'] === false);
+  check('d1 (done, to read) says to read', r['d1'] === true);
+  check('d2 (done, read) does not', r['d2'] === false);
+  check('f1 and w1 do too: a failed or working agent can have a reply you have not ticked', r['f1'] === true && r['w1'] === true);
 
-  r = Object.fromEntries(navTree(proj, agents, [], [], jobs)[0]!.agents.map((x) => [x.id, x.finished]));
-  check('omitting the sets: nothing is finished (old callers)', Object.values(r).every((v) => v === false));
+  r = Object.fromEntries(navTree(proj, agents, [], [], jobs)[0]!.agents.map((x) => [x.id, x.toRead]));
+  check('omitting the sets: nothing is to read (old callers)', Object.values(r).every((v) => v === false));
 
   const t = navTree(proj, agents, [], [], jobs, new Set(['j1']), new Set())[0]!;
-  check('the job group keeps its own finished flag, independent of its agents', t.jobs[0]!.finished === true && t.jobs[0]!.agents.every((a) => !a.finished));
+  check('the job group keeps its own finished flag, independent of its agents', t.jobs[0]!.finished === true && t.jobs[0]!.agents.every((a) => !a.toRead));
   const t2 = navTree(proj, agents, [], [], jobs, new Set(), new Set(['d1', 'd2']))[0]!;
-  check('and agents finished does not light the job group', t2.jobs[0]!.finished === false);
+  check('and agents to read do not light the job group', t2.jobs[0]!.finished === false);
 
-  // A done agent that something waits on shows blocked, not done: no finished tag.
+  // A done agent that something waits on shows blocked; its reply is still to read.
   const pend = [{ requestId: 'r1', agentId: 'd1', agentRole: 'builder', projectId: 'p1', createdAt: T(23) }] as never;
   const t3 = navTree(proj, agents, pend, [], jobs, new Set(), new Set(['d1']))[0]!;
   const d1 = t3.agents.find((x) => x.id === 'd1')!;
-  check('a done agent that something waits on carries its status honestly', d1.finished === (d1.status === 'done'), `status=${d1.status}`);
+  check('an agent that something waits on carries its status honestly, and its reply to read', d1.status === 'blocked' && d1.toRead, `status=${d1.status}`);
 }
 
 console.log('\nH · the sources apply the same condition in both places');
 {
   const nav = readFileSync(new URL('../shell/Navigator.tsx', import.meta.url), 'utf8');
   const agent = readFileSync(new URL('../agent/agent.tsx', import.meta.url), 'utf8');
-  check('the navigator tag follows a.finished only', /\{a\.finished && <span className="sh-nav-tag is-done">finished<\/span>\}/.test(nav) && !/a\.status === 'done' && <span className="sh-nav-tag/.test(nav));
-  check('the tab tag follows done AND unseen', /t\.status === 'done' && unseenAgents\.has\(t\.id\) && <span className="ag-tab-tag">finished<\/span>/.test(agent));
+  check('the navigator tag follows a.toRead only', /\{a\.toRead && <span className="sh-nav-tag is-done">to read<\/span>\}/.test(nav) && !/a\.status === 'done' && <span className="sh-nav-tag/.test(nav));
+  check('the tab tag follows to read only, not done AND unseen', /\{toRead\.has\(t\.id\) && <span className="ag-tab-tag">to read<\/span>\}/.test(agent) && !/unseenAgents/.test(agent));
   const head = agent.slice(agent.indexOf('<Tag tone={key}>'), agent.indexOf('<Tag tone={key}>') + 120);
-  check('the Agent header Tag is unchanged: still driven by status, not by seen', head.length > 0 && !/unseenAgents/.test(head));
-  // Hook order: AgentScreen has an early return; the new hook must come before it.
-  const hook = agent.indexOf('useUnseenAgents()');
-  const early = agent.indexOf('return', agent.indexOf('const unseenAgents = useUnseenAgents()'));
+  check('the Agent header Tag is unchanged: still driven by status, not by to read', head.length > 0 && !/toRead/.test(head));
+  // Hook order: AgentScreen has an early return; the hook must come before it.
+  const hook = agent.indexOf('useToRead()');
+  const early = agent.indexOf('return', agent.indexOf('const toRead = useToRead()'));
   check('the hook sits before AgentScreen\'s first return (rules of hooks)', hook > 0 && hook < early);
   const fn = agent.slice(agent.indexOf('export function AgentScreen'));
   const firstEarly = fn.search(/\n {2}if \([^)]*\) return/);
-  check('…and before any conditional early return in AgentScreen', firstEarly === -1 || fn.indexOf('useUnseenAgents()') < firstEarly, `early@${firstEarly} hook@${fn.indexOf('useUnseenAgents()')}`);
+  check('…and before any conditional early return in AgentScreen', firstEarly === -1 || fn.indexOf('useToRead()') < firstEarly, `early@${firstEarly} hook@${fn.indexOf('useToRead()')}`);
 }
 
 console.log(failures === 0 ? '\nseen-agents verify: PASS\n' : `\nseen-agents verify: FAIL — ${failures} check(s) failed.\n`);

@@ -430,6 +430,101 @@
   color: var(--ink);
 }
 
+/*
+ * A reply you haven't ticked read can't fold (Amendment 193): its label stays a label, and
+ * says why on hover.
+ */
+.ag-who-fold[aria-disabled="true"] {
+  cursor: default;
+}
+
+.ag-who-fold[aria-disabled="true"] .ag-fold-ch {
+  opacity: 0.25;
+}
+
+.ag-folded-read {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--done);
+}
+
+/* ── a turn's activity, folded to its latest step (Amendment 193) ──────────── */
+
+/*
+ * The toggle is a quiet mono line, as a tool row's count is: it is how much is hidden, not
+ * something to read. Open, the steps sit under it as they always did.
+ */
+.ag-act-tog {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: var(--ink3);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.14s;
+}
+
+.ag-act-tog:hover,
+.ag-act-tog:focus-visible {
+  color: var(--ink2);
+}
+
+/* Prose as the latest step: its last line, one line, as a folded reply's first is. */
+.ag-act-last {
+  color: var(--ink2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 0;
+}
+
+/* ── the reply, and ticking it read (Amendment 193) ────────────────────────── */
+
+/*
+ * What it said once it was done, set off from its activity by a hairline, so the eye finds
+ * where the steps stop and the answer starts.
+ */
+.ag-act + .ag-reply {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 8px;
+}
+
+/* Unread, the reply carries a bar in --done down its left, as a finished tag is filled. */
+.ag-msg.is-unread .ag-reply {
+  box-shadow: inset 2px 0 0 var(--done);
+  padding-left: 10px;
+}
+
+.ag-ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ag-ack input {
+  accent-color: var(--done);
+  margin: 0;
+  cursor: inherit;
+}
+
+.ag-ack.is-read {
+  color: var(--done);
+}
+
+.ag-ack:has(input:disabled) {
+  cursor: default;
+}
+
 /* ── what you last asked ───────────────────────────────────────────────────── */
 
 /*

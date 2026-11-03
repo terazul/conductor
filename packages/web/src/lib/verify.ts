@@ -108,6 +108,11 @@ import {
 import { readdirSync, statSync } from 'node:fs';
 import type { StorageState } from '@conductor/shared';
 import { keyLine, keyStateFrom, loginLine, providerLabel, readCopilotLogin, readKeyState, saveKey } from './providers.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Transcript, buildTranscript, replyStates, splitTurn, type Turn } from '../agent/transcript.js';
+import { foldEvery, foldLine, lastLine, shownFolded, type FoldState } from '../agent/folds.js';
+import { MAX_ACKS, REPLY_ACKS_KEY, canUntick, isRead, parseAcks, serializeAcks, setAck, startAcks, toRead, type ReplyAcks } from './replies.js';
 
 let failures = 0;
 
@@ -2170,9 +2175,115 @@ console.log('\n41 · an agent whose tries are spent waits for the model to come 
   check('…in the warning colour', /\.sh-down\s*\{[^}]*color: var\(--need\)/.test(src('../shell/shell.css')));
 }
 
+console.log('\n42 · an agent\'s activity folds to its latest step, and a reply stays open until you tick it read (Amendment 193)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const AG = 'agt_reply';
+  const e = (n: number, payload: EventPayload): Event => ({ seq: n, ts: new Date(Date.UTC(2026, 10, 3, 9, 0, n)).toISOString(), projectId: P, jobId: J, agentId: AG, payload });
+  const say = (n: number, text: string): Event => e(n, { kind: 'text', text });
+  const tool = (n: number, label = 'Read a.ts'): Event => e(n, { kind: 'tool_start', toolUseId: `tu${n}`, tool: 'Read', input: { file_path: 'a.ts' }, label });
+  const ask = (n: number): Event => e(n, { kind: 'request', requestId: `rq${n}`, requestKind: 'question', blockMode: 'parked', label: 'Which branch?' });
+  const done = (n: number): Event => e(n, { kind: 'status', status: 'done' });
+  const fail = (n: number): Event => e(n, { kind: 'status', status: 'failed', error: 'boom' });
+  const only = (events: Event[]): Turn => buildTranscript(events).filter((t) => t.who === 'agent').at(-1)!;
+  const keys = (bs: readonly { key: string }[]): string => bs.map((b) => b.key).join(' ');
+
+  // splitTurn: where the activity ends and the reply begins.
+  const ran = only([e(1, { kind: 'user_text', text: 'go' }), say(2, 'Looking.'), tool(3), say(4, 'Found it.'), say(5, 'REPLY: it is fixed.'), done(6)]);
+  const sp = splitTurn(ran, false);
+  check('a reply is what follows the last tool call, its finished note included', keys(sp.activity) === 'p2 t3' && keys(sp.reply) === 'p4 p5 s6' && sp.replySeq === 5, JSON.stringify([keys(sp.activity), keys(sp.reply), sp.replySeq]));
+  check('…named by its last prose, the p-key the daemon\'s replySeq names', sp.replySeq === 5);
+  check('a turn still going has no reply: all of it is activity', splitTurn(ran, true).replySeq === null && keys(splitTurn(ran, true).activity) === keys(ran.blocks) && splitTurn(ran, true).reply.length === 0);
+  const onTool = only([say(1, 'Reading.'), tool(2), done(3)]);
+  check('a turn that ended on a tool call, with only its finished note after, has no reply', splitTurn(onTool, false).replySeq === null && splitTurn(onTool, false).reply.length === 0);
+  const onAsk = only([say(1, 'I need to know.'), ask(2)]);
+  check('nor one that ended on an ask', splitTurn(onAsk, false).replySeq === null);
+  const talk = only([say(1, 'Hello.'), say(2, 'All of this is the reply.'), done(3)]);
+  check('a turn of prose only is all reply, with no activity', splitTurn(talk, false).activity.length === 0 && keys(splitTurn(talk, false).reply) === 'p1 p2 s3' && splitTurn(talk, false).replySeq === 2);
+  const afterAsk = only([ask(1), say(2, 'Thanks, done.'), done(3)]);
+  check('an answered ask ends the activity as a tool call does', keys(splitTurn(afterAsk, false).activity) === 'r1' && splitTurn(afterAsk, false).replySeq === 2);
+
+  // The one line folded activity shows of its latest prose: the last line, without markdown.
+  check('folded activity shows the last line of what it said last, without its markdown', lastLine('First I read it.\n\n- **then** I [ran](x) `tests`\n\n---\n') === 'then I ran tests' && foldLine('First I read it.\n\nthen') === 'First I read it.' && lastLine('') === '' && lastLine('```\n') === '');
+
+  // The acks: parsed robustly, read from before they were kept, ticked and unticked, bounded.
+  check('acks not kept, or kept broken, are "not kept": nothing is unread', ['', 'null', '[]', '{"sinceSeq":"7"}', '{"agents":{}}', '{', '{"sinceSeq":null}'].every((r) => parseAcks(r).sinceSeq === null) && parseAcks(null).sinceSeq === null && isRead(parseAcks(null), AG, 999));
+  const kept = parseAcks('{"sinceSeq":10,"agents":{"a":[11,"x",12,null],"b":"no","c":[]}}');
+  check('a kept value keeps only its seqs, and drops what is not one', kept.sinceSeq === 10 && JSON.stringify(kept.agents) === '{"a":[11,12]}', JSON.stringify(kept));
+  check('it round-trips', serializeAcks(parseAcks(serializeAcks(kept))) === serializeAcks(kept));
+  const s0: ReplyAcks = startAcks(10);
+  check('kept from the hub\'s seq: every reply at or below it is read, and one after is not', isRead(s0, AG, 10) && isRead(s0, AG, 3) && !isRead(s0, AG, 11));
+  const t1 = setAck(s0, AG, 11, true)!;
+  check('ticking a reply reads it, for that agent only', t1 !== null && isRead(t1, AG, 11) && !isRead(t1, 'agt_other', 11) && !isRead(t1, AG, 12));
+  check('ticking it again changes nothing, so nothing is written', setAck(t1, AG, 11, true) === null);
+  const u1 = setAck(t1, AG, 11, false)!;
+  check('unticking makes it unread again, and leaves no empty agent behind', u1 !== null && !isRead(u1, AG, 11) && !(AG in u1.agents));
+  check('a reply from before can\'t be ticked or unticked: it is read whatever you do', setAck(s0, AG, 9, false) === null && setAck(s0, AG, 10, true) === null && !canUntick(s0, 10) && canUntick(s0, 11) && !canUntick(parseAcks(null), 11));
+  check('nothing is ticked before they are kept', setAck(parseAcks(null), AG, 11, true) === null);
+  const two = setAck(setAck(s0, 'agt_gone', 12, true)!, AG, 13, true)!;
+  const pruned = setAck(two, AG, 14, true, new Set([AG]))!;
+  check('agents the hub no longer has drop out as it is written, the one ticked kept', 'agt_gone' in two.agents && !('agt_gone' in pruned.agents) && JSON.stringify(pruned.agents[AG]) === '[13,14]');
+  let many: ReplyAcks = s0;
+  for (let n = 11; n <= 11 + MAX_ACKS + 5; n++) many = setAck(many, AG, n, true)!;
+  check(`each agent keeps its newest ${MAX_ACKS} ticks`, many.agents[AG]!.length === MAX_ACKS && many.agents[AG]![0] === 17 && isRead(many, AG, 11 + MAX_ACKS + 5), String(many.agents[AG]?.length));
+  check(
+    'to read: the agents whose latest reply (replySeq) is not ticked, whatever their status',
+    [...toRead([{ id: 'x', replySeq: 11 }, { id: 'y', replySeq: 13 }, { id: 'z' }, { id: 'o', replySeq: 4 }], { sinceSeq: 10, agents: { y: [13] } })].join() === 'x' &&
+      toRead([{ id: 'x', replySeq: 11 }], parseAcks(null)).size === 0,
+  );
+
+  // replyStates and fold all: read replies start folded, unread ones are left out.
+  const run = buildTranscript([
+    e(20, { kind: 'user_text', text: 'one' }), tool(21), say(22, 'FIRST_REPLY'), done(23),
+    e(24, { kind: 'user_text', text: 'two' }), tool(25), say(26, 'SECOND_REPLY'), done(27),
+    e(28, { kind: 'user_text', text: 'three' }), say(29, 'Working on it.'), tool(30),
+  ]);
+  const acks: ReplyAcks = { sinceSeq: 20, agents: { [AG]: [22] } };
+  const st = replyStates(run, true, AG, acks);
+  check('the ticked reply is read, the other unread, and the turn still going is neither', st.read.join() === 'a21' && st.unread.join() === 'a25', JSON.stringify(st));
+  check('before acks are kept there are neither, and every reply is as it was', replyStates(run, true, AG, parseAcks(null)).read.length === 0 && replyStates(run, true, AG, parseAcks(null)).unread.length === 0);
+  check('an older reply, from before they were kept, is read', replyStates(run, false, AG, { sinceSeq: 26, agents: {} }).read.join() === 'a21,a25');
+  const none: FoldState = { folds: {}, unfolds: {} };
+  const foldable = ['a21', 'a25', 'a29'].filter((k) => !st.unread.includes(k));
+  const all = foldEvery(none, AG, foldable, st.read);
+  check('fold all folds the read reply and the turn going on, and leaves the unread one open', shownFolded(all, AG, 'a21', true) && shownFolded(all, AG, 'a29', false) && !shownFolded(all, AG, 'a25', false));
+
+  // Rendered: the box, the disabled label, the folded read reply, the folded activity.
+  writeSetting(REPLY_ACKS_KEY, serializeAcks(acks));
+  const html = renderToStaticMarkup(createElement(Transcript, { turns: run, agentId: AG, role: 'developer', streaming: true, links: null }));
+  const turnOf = (k: string, next: string): string => html.slice(html.indexOf(`id="t-${k}"`), next ? html.indexOf(`id="t-${next}"`) : undefined);
+  const unreadT = turnOf('a25', 'u28');
+  const readT = turnOf('a21', 'u24');
+  const live = turnOf('a29', '');
+  check('an unread reply is open, with its Read it box, and its label can\'t fold it', /is-unread/.test(html.slice(html.indexOf('id="t-a25"') - 60, html.indexOf('id="t-a25"'))) && unreadT.includes('SECOND_REPLY') && unreadT.includes('class="ag-ack"') && unreadT.includes('Read it') && unreadT.includes('aria-disabled="true"') && unreadT.includes('class="ag-reply"'), unreadT);
+  check('a reply you ticked is folded to one line, marked read', readT.includes('aria-expanded="false"') && readT.includes('class="ag-folded-read"') && readT.includes('✓ read') && readT.includes('FIRST_REPLY') && !readT.includes('class="ag-ack'), readT);
+  check('a turn still going has no box, and its activity folds to its latest step', !live.includes('ag-ack') && live.includes('class="ag-act-tog"') && live.includes('▸ 1 earlier step') && live.includes('aria-expanded="false"') && !live.includes('Working on it.'), live);
+  const pin = buildTranscript([e(40, { kind: 'user_text', text: 'x' }), ask(41), say(42, 'Meanwhile, more.'), tool(43), say(44, 'Still going.\nLAST_LINE')]);
+  const pinned = renderToStaticMarkup(createElement(Transcript, { turns: pin, agentId: AG, role: 'developer', streaming: true, links: null }));
+  check('folded activity keeps an ask you haven\'t answered, and shows what it said last as its last line', pinned.includes('Which branch?') && pinned.includes('class="ag-act-last">LAST_LINE<') && !pinned.includes('Meanwhile, more.') && pinned.includes('▸ 3 earlier steps'), pinned);
+  const failed = buildTranscript([e(50, { kind: 'user_text', text: 'x' }), tool(51, 'Bash ls'), fail(52), tool(53, 'Read later.ts'), say(54, 'Next.')]);
+  const failHtml = renderToStaticMarkup(createElement(Transcript, { turns: failed, agentId: AG, role: 'developer', streaming: true, links: null }));
+  check('…and a failure, while the steps before it fold', failHtml.includes('failed — boom') && !failHtml.includes('Bash ls'), failHtml);
+  writeSetting(REPLY_ACKS_KEY, null);
+  const before = renderToStaticMarkup(createElement(Transcript, { turns: run, agentId: AG, role: 'developer', streaming: true, links: null }));
+  check('before acks are kept a reply is open and foldable, with no box', !before.includes('ag-ack') && before.includes('FIRST_REPLY') && before.includes('SECOND_REPLY') && !before.includes('aria-disabled="true"'));
+
+  // Where it is wired.
+  const always = src('../attention/always.tsx');
+  const folds = src('../agent/folds.ts');
+  const css = src('../agent/agent.css');
+  check('the acks are kept from the hub\'s seq, once, from the always-on layer', /useEffect\(\(\) => startAcksOnce\(seq\), \[seq\]\)/.test(always) && /if \(!settingsLoaded\(\) \|\| readSetting\(REPLY_ACKS_KEY\) !== null\) return;/.test(src('./replies.ts')));
+  check('the activity\'s opened set is kept beside the folds', /kept\('conductor\.agentActivityOpen'\)/.test(folds) && REPLY_ACKS_KEY === 'conductor.replyAcks');
+  const rule = (sel: string): string => css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
+  check(
+    'its styles exist and use the theme\'s tokens only, so both themes have them',
+    ['.ag-folded-read', '.ag-act-tog', '.ag-act-last', '.ag-act + .ag-reply', '.ag-msg.is-unread .ag-reply', '.ag-ack', '.ag-ack.is-read'].every((sel) => css.includes(`${sel} {`) && !/#[0-9a-f]{3,8}\b|rgb/i.test(rule(sel))),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

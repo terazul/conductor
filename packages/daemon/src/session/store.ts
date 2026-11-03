@@ -427,6 +427,7 @@ interface AgentRow {
   helper_roles?: string | null;
   helper_role?: string | null;
   name?: string | null;
+  reply_seq?: number | null;
   /** From `agent_spend_daily` for today (Amendment 129); null when it has spent nothing today. */
   spent_usd?: number | null;
   spent_tokens?: number | null;
@@ -483,6 +484,8 @@ const toAgent = (r: AgentRow, day: string): Agent => ({
   spentToday: { day, usd: r.spent_usd ?? 0, tokens: r.spent_tokens ?? 0 },
   // Only when you gave it one (Amendment 184).
   ...(r.name ? { name: r.name } : {}),
+  // Only once it has replied (Amendment 193).
+  ...(r.reply_seq ? { replySeq: r.reply_seq } : {}),
 });
 
 /**
@@ -801,6 +804,25 @@ export function setAgentModel(db: Db, id: string, model: string): void {
 /** The name an agent is shown by, or with null none, so it reads as its role again (Amendment 184). */
 export function setAgentName(db: Db, id: string, name: string | null): void {
   db.prepare('UPDATE agents SET name = ? WHERE id = ?').run(name, id);
+}
+
+/**
+ * A run ended: if it ended on prose, that prose is the agent's latest reply (Amendment 193), and
+ * `reply_seq` is its last `text` event. On prose means no `tool_start` or `request` after that
+ * text, which is the transcript's rule (`splitTurn`): what follows the last tool call or ask.
+ * Status events don't count, as the transcript's notes don't: every run ends with one. A run that
+ * ended on a tool or an ask leaves it where it was. True when it moved.
+ */
+export function markReply(db: Db, id: string): boolean {
+  const text = row<{ seq: number }>(
+    db.prepare(`SELECT seq FROM events WHERE agent_id = ? AND kind = 'text' ORDER BY seq DESC LIMIT 1`).get(id),
+  );
+  if (!text) return false;
+  const after = db
+    .prepare(`SELECT 1 FROM events WHERE agent_id = ? AND seq > ? AND kind IN ('tool_start', 'request') LIMIT 1`)
+    .get(id, text.seq);
+  if (after) return false;
+  return Number(db.prepare('UPDATE agents SET reply_seq = ? WHERE id = ? AND reply_seq IS NOT ?').run(text.seq, id, text.seq).changes) > 0;
 }
 
 /**

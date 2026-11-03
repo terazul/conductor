@@ -11,11 +11,15 @@
  *
  *  2. EVERY TOOL CALL COLLAPSES TO ONE LINE, diffs included (Amendment 25). A
  *     turn with a dozen edits otherwise pushes the agent's own prose off the
- *     screen, which is the thing you were reading. A reply folds to one line too,
- *     from its role label, but starts open (Amendment 18) — mechanics hide
- *     themselves, output waits for you to fold it (Amendment 33). A turn Conductor
- *     sent ("auto") folds too, and in an orchestrator's transcript starts folded: its
- *     helpers' report is theirs, and its own reply is what you read (Amendment 164).
+ *     screen, which is the thing you were reading. And a turn's whole ACTIVITY, its
+ *     tool calls and what it said between them, folds to its latest step, with the
+ *     rest a click away (Amendment 193). What it says after its last tool call, once
+ *     the turn is over, is its REPLY (`splitTurn`): that stays open, with a **Read it**
+ *     box, until you tick it, and then folds to one line (Amendments 18, 33, 193) —
+ *     mechanics hide themselves, output waits for you to say you've read it. A turn
+ *     Conductor sent ("auto") folds too, and in an orchestrator's transcript starts
+ *     folded: its helpers' report is theirs, and its own reply is what you read
+ *     (Amendment 164).
  *
  *  3. A BLOCKED ASK STAYS IN THE TRANSCRIPT after it is answered. The pending
  *     queue clears, but "it asked, I chose this" is the most valuable line in
@@ -31,7 +35,20 @@ import type {
 } from '@conductor/shared';
 import { counts, countingSource, pickString } from '../shell/describe.js';
 import { OUTSIDE, linkablePath, type FileLinks } from './links.js';
-import { foldLine, shownFolded, toggleFold, updateFoldState, useFolds, useUnfolds } from './folds.js';
+import {
+  foldLine,
+  isFolded,
+  lastLine,
+  setFold,
+  shownFolded,
+  toggleFold,
+  updateActivityOpen,
+  updateFoldState,
+  useActivityOpen,
+  useFolds,
+  useUnfolds,
+} from './folds.js';
+import { canUntick, isRead, markReply, useReplyAcks, type ReplyAcks } from '../lib/replies.js';
 import { lineCount, renderMarkdown } from './markdown.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
@@ -220,6 +237,63 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
 export function helpersRemovedNote(count: number, names: readonly string[]): string {
   const what = `${count} finished ${count === 1 ? 'helper' : 'helpers'} removed`;
   return names.length > 0 ? `${what}: ${names.join(', ')}` : what;
+}
+
+/** A turn, split into what it did and what it said at the end of it (Amendment 193). */
+export interface SplitTurn {
+  /** Its tool calls and asks, and what it said and noted up to the last of them. */
+  activity: Block[];
+  /** What came after its last tool call or ask: its reply, notes included. Empty when it has none. */
+  reply: Block[];
+  /** The seq of the reply's last prose, which is what ticking it read marks; null without one. */
+  replySeq: number | null;
+}
+
+/**
+ * Where a turn's activity ends and its reply begins. The reply is what follows its last tool
+ * call or ask, once the turn is over (`live` false) and only if some of that is prose: a turn
+ * that ended on a tool, or that only noted how it ended, has no reply, and everything in a
+ * turn still going is activity. Status notes don't end the activity, since every run that
+ * finishes notes so after what it said; the daemon's `replySeq` (session/store.ts
+ * `markReply`) follows the same rule, so the two name the same reply.
+ */
+export function splitTurn(turn: Turn, live: boolean): SplitTurn {
+  let cut = -1;
+  turn.blocks.forEach((b, i) => {
+    if (b.kind === 'tool' || b.kind === 'ask') cut = i;
+  });
+  const tail = turn.blocks.slice(cut + 1);
+  const last = live ? undefined : tail.filter((b) => b.kind === 'prose').at(-1);
+  if (!last) return { activity: turn.blocks, reply: [], replySeq: null };
+  return { activity: turn.blocks.slice(0, cut + 1), reply: tail, replySeq: Number(last.key.slice(1)) };
+}
+
+/**
+ * The reply turns, by key, that you have ticked read and that you haven't. `streaming` is
+ * whether the last turn is still going, as the transcript's cursor says. "Fold all" leaves the
+ * unread ones open, and a read one starts folded.
+ */
+export function replyStates(
+  turns: readonly Turn[],
+  streaming: boolean,
+  agentId: string,
+  acks: ReplyAcks,
+): { read: string[]; unread: string[] } {
+  const read: string[] = [];
+  const unread: string[] = [];
+  // Not kept yet (no settings, or a daemon before them): replies are as they were, open and foldable.
+  if (acks.sinceSeq === null) return { read, unread };
+  turns.forEach((t, i) => {
+    if (t.who !== 'agent') return;
+    const seq = splitTurn(t, streaming && i === turns.length - 1).replySeq;
+    if (seq !== null) (isRead(acks, agentId, seq) ? read : unread).push(t.key);
+  });
+  return { read, unread };
+}
+
+/** What folded activity keeps showing besides its latest step: an ask still open, and a need or a failure. */
+function pinned(b: Block): boolean {
+  return (b.kind === 'ask' && b.answered === null) || (b.kind === 'note' && (b.tone === 'need' || b.tone === 'fail'));
 }
 
 function statusNote(
@@ -447,9 +521,9 @@ function Blocks({ blocks, links }: { blocks: Block[]; links: FileLinks | null })
   );
 }
 
-/** A turn's prose, as the agent wrote it — what a folded reply summarises. */
-function proseOf(turn: Turn): string {
-  return turn.blocks
+/** Prose, as the agent wrote it — what a folded reply summarises. */
+function proseOf(blocks: readonly Block[]): string {
+  return blocks
     .filter((b): b is ProseBlock => b.kind === 'prose')
     .map((b) => b.text)
     .join('\n\n');
@@ -468,12 +542,71 @@ function carried(turn: Turn): string {
 }
 
 /**
+ * A turn's activity (Amendment 193): FOLDED to its latest step, with a toggle for the steps
+ * before it. A long run is a screenful of tool rows and asides, and what you look for is where
+ * it has got to. Prose that is the latest step shows its last line, which is where it is now.
+ *
+ * Folded, it still shows an ask waiting for you and a need or a failure, wherever they are:
+ * hiding the thing that is stuck on you, under a count, is how it gets missed. Opening it is
+ * kept per agent and turn (folds.ts), as a fold is.
+ */
+function Activity({
+  blocks,
+  agentId,
+  turnKey,
+  links,
+}: {
+  blocks: Block[];
+  agentId: string;
+  turnKey: string;
+  links: FileLinks | null;
+}) {
+  const opened = useActivityOpen();
+  if (blocks.length < 2) return <Blocks blocks={blocks} links={links} />;
+  const open = isFolded(opened, agentId, turnKey);
+  const toggle = (): void => updateActivityOpen((f) => setFold(f, agentId, turnKey, !open));
+  const earlier = blocks.length - 1;
+  const latest = blocks[blocks.length - 1]!;
+  const kept = blocks.slice(0, -1).filter(pinned);
+
+  return (
+    <div className={`ag-act${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="ag-act-tog"
+        aria-expanded={open}
+        title={open ? 'Fold these steps to the latest' : 'Show every step'}
+        onClick={toggle}
+      >
+        {open ? `▾ hide ${earlier} earlier step${earlier === 1 ? '' : 's'}` : `▸ ${earlier} earlier step${earlier === 1 ? '' : 's'}`}
+      </button>
+      {open ? (
+        <Blocks blocks={blocks} links={links} />
+      ) : (
+        <>
+          <Blocks blocks={kept} links={links} />
+          {latest.kind === 'prose' ? (
+            <div className="ag-act-last">{lastLine(latest.text)}</div>
+          ) : (
+            <Blocks blocks={[latest]} links={links} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * One agent turn. Its role label folds it to one line, as a tool call's row does
  * (Amendment 33).
  *
- * DEFAULT OPEN, deliberately. A transcript that hides output you have not read yet is
- * worse than one you have to scroll: the report is the thing you asked for. Folding is
- * for after you have read it, when it is just occupying the screen — so a fold is kept
+ * A REPLY YOU HAVEN'T READ STAYS OPEN (Amendment 193). A transcript that hides output you have
+ * not read is worse than one you have to scroll, and people missed what an agent said: so a
+ * reply carries a **Read it** box, its label can't fold it until you tick it, and "fold all"
+ * leaves it open. Ticked, it folds to one line marked read; it opens again from that line, and
+ * unticking it makes it unread again. Only the box marks it: answering it doesn't, since an
+ * answer can leave half of what it said unread. A turn without a reply, still going or ended
+ * on a tool, starts open and folds as every reply did (Amendment 18); a fold is kept
  * (folds.ts), per agent, and survives a reload.
  *
  * Folded, the turn is its first line of prose and a count; nothing is truncated inside
@@ -494,19 +627,35 @@ function AgentTurn({
 }) {
   const folds = useFolds();
   const unfolds = useUnfolds();
-  const folded = shownFolded({ folds, unfolds }, agentId, turn.key, false);
-  const prose = useMemo(() => proseOf(turn), [turn]);
-  const toggle = (): void => updateFoldState((s) => toggleFold(s, agentId, turn.key, false));
+  const acks = useReplyAcks();
+  const split = useMemo(() => splitTurn(turn, cursor), [turn, cursor]);
+  // Until the acks are kept, a reply is as it was before them: open, foldable, and no box.
+  const seq = acks.sinceSeq === null ? null : split.replySeq;
+  const unread = seq !== null && !isRead(acks, agentId, seq);
+  // A reply you ticked starts folded; one you haven't can't fold.
+  const read = seq !== null && !unread;
+  const folded = !unread && shownFolded({ folds, unfolds }, agentId, turn.key, read);
+  const toggle = (): void => {
+    if (!unread) updateFoldState((s) => toggleFold(s, agentId, turn.key, read));
+  };
+  const tick = (on: boolean): void => {
+    if (seq === null) return;
+    markReply(agentId, seq, on);
+    // Ticked, it folds: back to its default, should you have opened it before.
+    if (on) updateFoldState((s) => (isFolded(s.unfolds, agentId, turn.key) ? { ...s, unfolds: setFold(s.unfolds, agentId, turn.key, false) } : s));
+  };
+  const prose = useMemo(() => proseOf(split.reply.length > 0 ? split.reply : turn.blocks), [split, turn]);
   const lines = prose.length > 0 ? lineCount(prose) : 0;
   const extra = carried(turn);
 
   return (
-    <div className={`ag-msg${folded ? ' is-folded' : ''}`} id={`t-${turn.key}`}>
+    <div className={`ag-msg${folded ? ' is-folded' : ''}${unread ? ' is-unread' : ''}`} id={`t-${turn.key}`}>
       <button
         type="button"
         className="ag-who ag-who-fold"
         aria-expanded={!folded}
-        title={folded ? 'Unfold this reply' : 'Fold this reply to one line'}
+        aria-disabled={unread}
+        title={unread ? 'Tick Read it first: a reply you haven\'t read stays open' : folded ? 'Unfold this reply' : 'Fold this reply to one line'}
         onClick={toggle}
       >
         {role}
@@ -523,11 +672,37 @@ function AgentTurn({
                 .filter(Boolean)
                 .join(' · ')}
             </span>
+            {read && <span className="ag-folded-read">✓ read</span>}
             {cursor && <span className="ag-cursor" />}
           </button>
         ) : (
           <>
-            <Blocks blocks={turn.blocks} links={links} />
+            <Activity blocks={split.activity} agentId={agentId} turnKey={turn.key} links={links} />
+            {split.reply.length > 0 && (
+              <div className="ag-reply">
+                <Blocks blocks={split.reply} links={links} />
+              </div>
+            )}
+            {seq !== null && (
+              <label
+                className={`ag-ack${read ? ' is-read' : ''}`}
+                title={
+                  read && !canUntick(acks, seq)
+                    ? 'From before replies were ticked, so it counts as read'
+                    : read
+                      ? 'Untick to mark it unread again'
+                      : 'Tick once you have read it: it folds, and its agent stops saying to read'
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={read}
+                  disabled={read && !canUntick(acks, seq)}
+                  onChange={(e) => tick(e.target.checked)}
+                />
+                {read ? 'read' : 'Read it'}
+              </label>
+            )}
             {cursor && <span className="ag-cursor" />}
           </>
         )}

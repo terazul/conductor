@@ -72,8 +72,11 @@ export interface NavAgent {
   /** Blocked when something waits on you, whatever the agent's own status says. */
   status: AgentStatus;
   needs: number;
-  /** Done, and you haven't opened it since (Amendment 105). */
-  finished: boolean;
+  /**
+   * Its latest reply, which you haven't ticked read (Amendment 193). It was "finished" until you
+   * opened it (Amendment 105), which a glance at the agent cleared without your reading it.
+   */
+  toRead: boolean;
   /**
    * The orchestrator of an orchestrated stack (Amendment 142): the Agent tab's own answer,
    * `marksOrchestrator` (agent/tabs.ts:76), so the two can't disagree.
@@ -95,8 +98,8 @@ export interface NavFold {
   label: string;
   /** The worst inside, by the Fleet's SORT_RANK, as a job's is. */
   status: AgentStatus;
-  /** One of them finished and you haven't opened it (Amendment 105). */
-  finished: boolean;
+  /** One of them has a reply you haven't ticked read (Amendment 193). */
+  toRead: boolean;
 }
 
 /** What a job's group draws, in order: an agent's row, or a fold of helpers. */
@@ -177,8 +180,8 @@ export function projectFolders(project: Pick<Project, 'id' | 'path' | 'extraDirs
  * `jobs` orders the agents, newest job first as on the Agent screen's tabs, and heads
  * their groups with its prompt. Without it the agents keep the order they were given in,
  * and each group is headed by its job id. `finished` is the jobs that finished and you
- * haven't seen (lib/seen.ts); their groups say so. `finishedAgents` is the done agents you
- * haven't opened since they ended (Amendment 105); their rows say so.
+ * haven't seen (lib/seen.ts); their groups say so. `toRead` is the agents whose latest reply
+ * you haven't ticked read (lib/replies.ts, Amendment 193); their rows say so.
  */
 export function navTree(
   projects: Pick<Project, 'id' | 'name' | 'path' | 'extraDirs'>[],
@@ -187,7 +190,7 @@ export function navTree(
   alerts: Alert[],
   jobs: Pick<Job, 'id' | 'createdAt' | 'prompt'>[] = [],
   finished: ReadonlySet<string> = new Set(),
-  finishedAgents: ReadonlySet<string> = new Set(),
+  toRead: ReadonlySet<string> = new Set(),
   /** The day the meters read; this browser's unless a check says. */
   today?: string,
 ): NavProject[] {
@@ -219,7 +222,7 @@ export function navTree(
         label: t.label,
         status: t.status,
         needs: t.needs,
-        finished: t.status === 'done' && finishedAgents.has(t.id),
+        toRead: toRead.has(t.id),
         orchestrator: t.orchestrator,
         budget: agent ? budgetOf(agent, today) : null,
       };
@@ -321,7 +324,7 @@ export function foldHelpers(rows: readonly NavAgent[], agents: readonly Agent[])
     for (const h of helpers) if (SORT_RANK[h.status] < SORT_RANK[status]) status = h.status;
     out.push({
       kind: 'fold',
-      fold: { orchestratorId: r.id, helpers, label: foldLabel(helpers.map((h) => h.status)), status, finished: helpers.some((h) => h.finished) },
+      fold: { orchestratorId: r.id, helpers, label: foldLabel(helpers.map((h) => h.status)), status, toRead: helpers.some((h) => h.toRead) },
     });
   }
   return out;
