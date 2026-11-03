@@ -42,6 +42,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import type {
@@ -1936,6 +1937,118 @@ async function main(): Promise<void> {
     const probe = readFileSync(new URL('../preview/probe.ts', import.meta.url), 'utf8');
     const fn = probe.slice(probe.indexOf('export function pidForPort'), probe.indexOf('/**', probe.indexOf('export function pidForPort')));
     check('pidForPort catches a spawn that throws, and answers null (Amendment 171)', /try \{\s*execFile\(/.test(fn) && /\} catch \{\s*resolve\(null\);/.test(fn));
+  }
+
+  console.log('\n18 · an HTML page and the files beside it, sandboxed (Amendment 198)');
+  {
+    const PAGE = join(realpathSync(tmpdir()), `conductor-198-page-${process.pid}`);
+    const OUT = `${PAGE}-outside`;
+    rmSync(PAGE, { recursive: true, force: true });
+    rmSync(OUT, { recursive: true, force: true });
+    mkdirSync(join(PAGE, 'report', 'img'), { recursive: true });
+    mkdirSync(OUT, { recursive: true });
+    mkdirSync(join(PAGE, 'report', 'old.html'));
+    writeFileSync(join(PAGE, 'report', 'index.html'), '<link rel="stylesheet" href="style.css"><script src="app.js"></script><img src="img/dot.png">');
+    writeFileSync(join(PAGE, 'report', 'style.css'), 'body { color: teal }');
+    writeFileSync(join(PAGE, 'report', 'app.js'), 'document.title = "x";');
+    writeFileSync(join(PAGE, 'report', 'data.json'), '{}');
+    writeFileSync(join(PAGE, 'report', 'img', 'dot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(PAGE, 'report', 'notes.env'), 'SECRET=1');
+    writeFileSync(join(PAGE, 'big.json'), Buffer.alloc(12 * 1024 * 1024 + 1, 0x20));
+    writeFileSync(join(OUT, 'secret.html'), '<p>outside</p>');
+    symlinkSync(join(OUT, 'secret.html'), join(PAGE, 'report', 'out.html'));
+    symlinkSync(OUT, join(PAGE, 'outdir'));
+    project('prj_page', PAGE);
+    const opened = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
+      jobId: 'job_page', projectId: 'prj_page', repoPath: PAGE, isolation: 'in_place',
+    });
+    check('a folder with a page in it opens as a workspace', opened.status === 201, `${opened.status}`);
+
+    const CSP =
+      "sandbox allow-scripts; default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; " +
+      "style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; font-src 'self' https: data:; " +
+      "connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'self'";
+    /** A request sent exactly as written: fetch() would fold `..` and `%2e%2e` away first. */
+    const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') =>
+      new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((done, reject) => {
+        const req = httpRequest({ host: '127.0.0.1', port: PORT, path, method, headers: { host: `127.0.0.1:${PORT}`, ...headers } });
+        req.on('response', (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => done({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+        });
+        req.on('error', reject);
+        req.end();
+      });
+    const headersExact = (h: Record<string, string | string[] | undefined>): boolean =>
+      h['x-content-type-options'] === 'nosniff' &&
+      h['cache-control'] === 'no-store' &&
+      h['referrer-policy'] === 'no-referrer' &&
+      h['content-security-policy'] === CSP;
+
+    const served: Array<[string, string]> = [
+      ['report/index.html', 'text/html; charset=utf-8'],
+      ['report/style.css', 'text/css; charset=utf-8'],
+      ['report/app.js', 'text/javascript; charset=utf-8'],
+      ['report/data.json', 'application/json; charset=utf-8'],
+      ['report/img/dot.png', 'image/png'],
+    ];
+    for (const [path, type] of served) {
+      const res = await raw(`/api/jobs/job_page/page/${path}`);
+      check(`${path} is served as ${type}`, res.status === 200 && res.headers['content-type'] === type, `${res.status} ${String(res.headers['content-type'])}`);
+      check(`and carries every header, exactly`, headersExact(res.headers), JSON.stringify(res.headers));
+    }
+    const page = await raw('/api/jobs/job_page/page/report/index.html');
+    check('the page is the bytes on disk', page.body.toString() === readFileSync(join(PAGE, 'report', 'index.html'), 'utf8'));
+    check('the CSP the route sends is the one the contract spells out', (await import('../routes/workspace.js')).PAGE_CSP === CSP);
+
+    const refused: Array<[string, string, number]> = [
+      ['`..` out of the root', '/api/jobs/job_page/page/../../../../etc/passwd', 400],
+      ['`..` behind a real folder', '/api/jobs/job_page/page/report/../../conductor-198-outside/secret.html', 400],
+      ['an encoded `..`', '/api/jobs/job_page/page/%2e%2e/%2e%2e/etc/hosts', 400],
+      ['an absolute path', '/api/jobs/job_page/page//etc/hosts', 400],
+      ['an encoded absolute path', '/api/jobs/job_page/page/%2Fetc%2Fhosts', 400],
+      ['a link to a file outside', '/api/jobs/job_page/page/report/out.html', 400],
+      ['a file under a linked folder outside', '/api/jobs/job_page/page/outdir/secret.html', 400],
+      ['.git', '/api/jobs/job_page/page/.git/config', 400],
+      ['a type not on the list', '/api/jobs/job_page/page/report/notes.env', 415],
+      ['a missing file', '/api/jobs/job_page/page/report/gone.html', 404],
+      ['a folder with no type', '/api/jobs/job_page/page/report', 415],
+      ['a folder named like a page', '/api/jobs/job_page/page/report/old.html', 400],
+      ['no path at all', '/api/jobs/job_page/page/', 400],
+      ['a file past the 12 MB ceiling', '/api/jobs/job_page/page/big.json', 413],
+      ['a job with no workspace', '/api/jobs/job_nope/page/index.html', 404],
+    ];
+    for (const [label, path, code] of refused) {
+      const res = await raw(path);
+      check(`refused: ${label} → ${code}`, res.status === code, `${res.status} ${res.body.toString().slice(0, 120)}`);
+    }
+    check('and nothing from outside was sent', !(await raw('/api/jobs/job_page/page/report/out.html')).body.toString().includes('outside'));
+
+    // The guard (guard.ts) is what keeps a page's scripts off the API: a sandboxed page has an
+    // opaque origin, so whatever it sends says `Origin: null`. A plain GET has no Origin.
+    const nullPost = await raw('/api/jobs', { origin: 'null', 'content-type': 'application/json' }, 'POST');
+    check('a POST to /api/jobs with Origin: null is refused by the guard', nullPost.status === 403, `${nullPost.status}`);
+    check('so is a read of the snapshot', (await raw('/api/snapshot', { origin: 'null' })).status === 403);
+    check('and a CORS read of the page route itself', (await raw('/api/jobs/job_page/page/report/data.json', { origin: 'null' })).status === 403);
+    check('while a GET with no Origin, the frame and its <link>/<script>/<img>, passes', page.status === 200);
+
+    // The same for a project's folder, named by its path in one encoded segment.
+    const dirSeg = encodeURIComponent(PAGE);
+    const dirPage = await raw(`/api/projects/prj_page/page/${dirSeg}/report/index.html`);
+    check('a project folder serves its page', dirPage.status === 200 && dirPage.headers['content-type'] === 'text/html; charset=utf-8', `${dirPage.status}`);
+    check('with every header, exactly', headersExact(dirPage.headers));
+    const dirCss = await raw(`/api/projects/prj_page/page/${dirSeg}/report/style.css`);
+    check('and the CSS beside it, which is what `href="style.css"` resolves to', dirCss.status === 200 && dirCss.body.toString() === 'body { color: teal }');
+    check('a folder that is not the project\'s → 404', (await raw(`/api/projects/prj_page/page/${encodeURIComponent(OUT)}/secret.html`)).status === 404);
+    check('a project that does not exist → 404', (await raw(`/api/projects/prj_nope/page/${dirSeg}/report/index.html`)).status === 404);
+    check('`..` out of a project folder → 400', (await raw(`/api/projects/prj_page/page/${dirSeg}/report/../../conductor-198-page-x/a.html`)).status === 400);
+    check('a link out of a project folder → 400', (await raw(`/api/projects/prj_page/page/${dirSeg}/report/out.html`)).status === 400);
+    check('a project folder caps size the same', (await raw(`/api/projects/prj_page/page/${dirSeg}/big.json`)).status === 413);
+
+    await send('DELETE', '/api/workspaces/job_page?force=true');
+    rmSync(PAGE, { recursive: true, force: true });
+    rmSync(OUT, { recursive: true, force: true });
   }
 
   // ───────────────────────────────────────────────────────────────────────────

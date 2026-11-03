@@ -81,6 +81,39 @@ const IMAGE_TYPES: Record<string, string> = {
 /** Images get a larger ceiling than text: a screenshot is legitimately big. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
+/**
+ * What an HTML page in a worktree may load from beside it (Amendment 198): the page, its
+ * styles, scripts, data, images and fonts. The same kind of boundary as `IMAGE_TYPES`, and
+ * an unknown extension is a 415 for the same reason: a page route that served whatever bytes
+ * a path holds would be "download any file", one `<a href>` away.
+ */
+const PAGE_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
+
+/**
+ * A page's files share the image ceiling, not the text one: a report with its data inlined,
+ * or a charting library's bundle, is past 2 MB and still a page.
+ */
+const MAX_PAGE_BYTES = MAX_IMAGE_BYTES;
+
 /** Carries the HTTP status so the route layer stays a thin translation. */
 export class WorkspaceError extends Error {
   readonly status: number;
@@ -351,43 +384,26 @@ export class WorkspaceService {
     return buildTree(ws.path, basename(ws.path) || ws.branch, changes);
   }
 
-  /**
-   * An image's bytes and its MIME type.
-   *
-   * Containment is `resolveForRead`, exactly as for text — this route reaches the
-   * filesystem, so it gets the same gate and no second implementation of it.
-   *
-   * The extension decides the type, and an unknown extension is a 415 rather than
-   * `application/octet-stream`. Sniffing content to decide would mean this route
-   * could serve anything with the right leading bytes, which is how a "view images"
-   * feature quietly becomes "download any file".
-   */
+  /** An image's bytes and its MIME type, by `served`'s rules (below). */
   async image(jobId: string, relPath: string): Promise<{ buf: Buffer; mime: string }> {
     return this.imageOf(this.resolve(jobId), relPath);
   }
 
   async imageOf(ws: WorkspaceRecord, relPath: string): Promise<{ buf: Buffer; mime: string }> {
-    const abs = resolveForRead(ws.path, relPath);
-    const mime = IMAGE_TYPES[extname(abs).toLowerCase()];
-    if (!mime) {
-      throw new WorkspaceError(415, `${relPath} is not an image this pane can show`);
-    }
+    return served(ws, relPath, IMAGE_TYPES, MAX_IMAGE_BYTES, 'an image this pane can show');
+  }
 
-    let st;
-    try {
-      st = statSync(abs);
-    } catch {
-      throw new WorkspaceError(404, `${relPath} does not exist in this worktree`);
-    }
-    if (st.isDirectory()) throw new WorkspaceError(400, `${relPath} is a directory`);
-    if (st.size > MAX_IMAGE_BYTES) {
-      throw new WorkspaceError(
-        413,
-        `${relPath} is ${(st.size / 1024 / 1024).toFixed(1)} MB — too large to show in the pane`,
-      );
-    }
+  /**
+   * A file of an HTML page, for the Files pane's sandboxed frame (Amendment 198): the page
+   * itself, or something it loads by a relative URL. `image`'s rules exactly, with
+   * `PAGE_TYPES` for its list; the route adds the headers that keep the page in its box.
+   */
+  async page(jobId: string, relPath: string): Promise<{ buf: Buffer; mime: string }> {
+    return this.pageOf(this.resolve(jobId), relPath);
+  }
 
-    return { buf: readFileSync(abs), mime };
+  async pageOf(ws: WorkspaceRecord, relPath: string): Promise<{ buf: Buffer; mime: string }> {
+    return served(ws, relPath, PAGE_TYPES, MAX_PAGE_BYTES, 'a file a page can load');
   }
 
   async file(jobId: string, relPath: string): Promise<FileContentResponse> {
@@ -975,6 +991,42 @@ function filesUnder(
 const plural = (n: number, word: string): string => `${n.toLocaleString('en')} ${word}${n === 1 ? '' : 's'}`;
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * A file's bytes and its type, by an extension list: `image` and `page`.
+ *
+ * Containment is `resolveForRead`, exactly as for text — these routes reach the filesystem,
+ * so they get the same gate and no second implementation of it. The extension decides the
+ * type, and an unknown one is a 415 rather than `application/octet-stream`. Sniffing content
+ * to decide would mean a route could serve anything with the right leading bytes, which is
+ * how a "view images" feature quietly becomes "download any file".
+ */
+function served(
+  ws: WorkspaceRecord,
+  relPath: string,
+  types: Record<string, string>,
+  cap: number,
+  what: string,
+): { buf: Buffer; mime: string } {
+  const abs = resolveForRead(ws.path, relPath);
+  const mime = types[extname(abs).toLowerCase()];
+  if (!mime) throw new WorkspaceError(415, `${relPath} is not ${what}`);
+
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    throw new WorkspaceError(404, `${relPath} does not exist in this worktree`);
+  }
+  if (st.isDirectory()) throw new WorkspaceError(400, `${relPath} is a directory`);
+  if (st.size > cap) {
+    throw new WorkspaceError(
+      413,
+      `${relPath} is ${(st.size / 1024 / 1024).toFixed(1)} MB — too large to show in the pane`,
+    );
+  }
+  return { buf: readFileSync(abs), mime };
+}
 
 /** Where a symlink points when nothing is there. Null for anything that isn't a link. */
 function danglingTarget(abs: string): string | null {

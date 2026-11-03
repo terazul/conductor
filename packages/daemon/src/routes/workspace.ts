@@ -17,6 +17,13 @@
  *   GET  /api/projects/:projectId/dir/{tree,file,image,diff}?dir=…[&path=…]
  *   PUT  /api/projects/:projectId/dir/file?dir=…
  *
+ * An HTML page and the files it loads by relative URL (Amendment 198), the file's path in the
+ * URL's path rather than a query, because a relative `href="style.css"` drops the query. A
+ * project folder is named by its absolute path as one encoded segment, the same way `dir=`
+ * names it, so `dirRoot` does the naming:
+ *   GET  /api/jobs/:jobId/page/<path>
+ *   GET  /api/projects/:projectId/page/<encodeURIComponent(dir)>/<path>
+ *
  * New folders, renames and deletes (Amendment 138), for either kind of root, through the
  * same gate and lock as a write (service.ts, "folders, renames and deletes"):
  *   POST   …/folders  ← CreateFolderRequest → CreateFolderResponse (201)
@@ -175,6 +182,48 @@ function sendImage(reply: FastifyReply, img: { buf: Buffer; mime: string }): Fas
     .send(img.buf);
 }
 
+/**
+ * The policy every response from the page route carries (Amendment 198). The page's scripts
+ * run, so charts and interactive reports work, and what keeps them from Conductor is this,
+ * with the iframe's own `sandbox` attribute (files/FilePane.tsx) and the guard (guard.ts):
+ *
+ *  - `sandbox allow-scripts` — sandboxed even when the URL is opened in a tab of its own, not
+ *    only inside the pane's frame. No `allow-same-origin`, so the page's origin is opaque: it
+ *    can't read the app's storage or DOM, and anything it does send carries `Origin: null`,
+ *    which the guard refuses. No `allow-forms`, `allow-top-navigation` or `allow-popups`: a
+ *    window it opened could escape the sandbox at the app's own origin, so `target=_blank`
+ *    and `window.open` do nothing, and the frame's attribute leaves popups out to match.
+ *  - `default-src 'self' https: data: blob:` — files beside it, and CDN assets.
+ *  - `script-src … 'unsafe-inline' 'unsafe-eval'` — a report's inline script, and the libraries
+ *    that compile templates; they run inside the sandbox, which is what makes that safe.
+ *  - `style-src`, `img-src`, `font-src` — the same sources for each, plus inline styles and
+ *    `data:` images and fonts, which exported reports inline.
+ *  - `connect-src 'none'` — no `fetch`, XHR, WebSocket or EventSource, to us or anywhere.
+ *  - `form-action 'none'` — no form submits, even if a sandbox flag were added later.
+ *  - `frame-ancestors 'self'` — only the app may frame it.
+ *  - `base-uri 'self'` — a `<base>` can't point its relative URLs at another host.
+ */
+export const PAGE_CSP =
+  "sandbox allow-scripts; default-src 'self' https: data: blob:; " +
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; " +
+  "style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; " +
+  "font-src 'self' https: data:; connect-src 'none'; form-action 'none'; " +
+  "frame-ancestors 'self'; base-uri 'self'";
+
+/** `page` and its headers, for either kind of root. */
+function sendPage(reply: FastifyReply, file: { buf: Buffer; mime: string }): FastifyReply {
+  return reply
+    .type(file.mime)
+    // The declared type is the only one: a .txt can't be sniffed into a script.
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Content-Security-Policy', PAGE_CSP)
+    // An agent rewrites the page; the pane reloads it and must not get the old one.
+    .header('Cache-Control', 'no-store')
+    // A link out of the page doesn't tell the site which job's file it came from.
+    .header('Referrer-Policy', 'no-referrer')
+    .send(file.buf);
+}
+
 export default async function workspaceRoutes(app: FastifyInstance): Promise<void> {
   // Boot the service here rather than in daemon/src/index.ts, which is W0's.
   const svc = initWorkspace();
@@ -232,6 +281,22 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       }
     },
   );
+
+  /**
+   * A page's files (Amendment 198). A GET with no Origin, which is how the frame loads the
+   * page and how its `<link>`, `<script>` and `<img>` load the rest, passes the guard as any
+   * GET does. A `type="module"` script or an `@font-face` from beside the page is a CORS
+   * request, sent with `Origin: null`, and the guard refuses it: CDN copies of both work.
+   */
+  app.get<{ Params: JobParams & { '*': string } }>('/api/jobs/:jobId/page/*', async (req, reply) => {
+    const path = req.params['*'];
+    if (!path) return reply.code(400).send({ error: 'a file path is required after /page/' });
+    try {
+      return sendPage(reply, await workspace().page(req.params.jobId, path));
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
 
   app.put<{ Params: JobParams; Body: WriteFileRequest }>(
     '/api/jobs/:jobId/file',
@@ -391,6 +456,22 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
         if (!ws) return reply;
         const path = req.query.path;
         return needPath(path, reply) ? sendImage(reply, await workspace().imageOf(ws, path)) : reply;
+      } catch (err) {
+        return fail(reply, err);
+      }
+    },
+  );
+
+  // `:dir` is the folder's absolute path, encoded as one segment; `dirRoot` takes it by path,
+  // so a folder removed from the project can't shift a page onto the next one.
+  app.get<{ Params: DirParams & { dir: string; '*': string } }>(
+    '/api/projects/:projectId/page/:dir/*',
+    async (req, reply) => {
+      const path = req.params['*'];
+      if (!path) return reply.code(400).send({ error: 'a file path is required after the folder' });
+      try {
+        const ws = workspace().dirRoot(req.params.projectId, req.params.dir);
+        return sendPage(reply, await workspace().pageOf(ws, path));
       } catch (err) {
         return fail(reply, err);
       }
