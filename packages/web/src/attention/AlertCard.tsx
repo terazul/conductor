@@ -14,10 +14,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { providerBudgetLabel, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
-import { retryNowAgent, stopRetryingAgent, useCommand } from '../agent/endpoints.js';
+import { checkOutageNow, retryNowAgent, stopRetryingAgent, stopWaitingOutage, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { openBranches } from '../shell/nav.js';
-import { alertTitle, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
+import { alertTitle, isOutage, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
 import { tokenWords } from '../lib/providers.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { useNow } from './useNow.js';
@@ -161,6 +161,14 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         return;
       case 'stop_retrying':
         void cmd.run('Stopping the retries', () => stopRetryingAgent(a.agentId), 'stopped retrying — it is failed');
+        return;
+      case 'check_now':
+        void cmd.run('Checking now', () => checkOutageNow(a.provider), 'checking now — the first agent goes if it answers');
+        return;
+      case 'stop_waiting':
+        void cmd.run('Stopping the wait', () => stopWaitingOutage(a.provider), (r: { agents: readonly unknown[] }) =>
+          r.agents.length === 1 ? 'stopped waiting — its agent is failed' : `stopped waiting — ${r.agents.length} agents are failed`,
+        );
     }
   };
 
@@ -310,7 +318,15 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             It is waiting, not working: its slot is free. Retry now tries at once; stop retrying ends it as failed.
           </div>
         )}
-        {alert.kind === 'connection' && (
+        {isOutage(alert) && (
+          <div className="atn-note">
+            <b>{retryHint(alert.cause, false)}</b>
+            <br />
+            They are paused, waiting for the model to come back: their slots are free and their jobs still running. It is
+            checked by itself, and they carry on when it answers. Retry now checks at once; stop waiting ends them as failed.
+          </div>
+        )}
+        {alert.kind === 'connection' && !isOutage(alert) && (
           <div className="atn-note">
             <b>{retryHint(alert.cause, alert.gaveUp === true)}</b>
             <br />
@@ -397,6 +413,7 @@ function isFix(a: AlertAction): boolean {
     a.id === 'hand_off' ||
     a.id === 'restore' ||
     a.id === 'retry_now' ||
+    a.id === 'check_now' ||
     a.id === 'merge_clean'
   );
 }
@@ -428,6 +445,10 @@ function labelOf(a: AlertAction): string {
       return 'retry now';
     case 'stop_retrying':
       return 'stop retrying';
+    case 'check_now':
+      return 'retry now';
+    case 'stop_waiting':
+      return 'stop waiting';
     case 'merge_clean':
       return 'merge and clean up';
     case 'merge':
@@ -453,6 +474,10 @@ function titleOf(a: AlertAction): string | undefined {
       return 'Try the model again now instead of waiting';
     case 'stop_retrying':
       return 'Give up: the agent ends failed, as it would have before retries';
+    case 'check_now':
+      return 'Check the model now instead of at the next check; the agent that has waited longest goes if it answers';
+    case 'stop_waiting':
+      return a.agents === 1 ? 'Give up: its agent ends failed' : `Give up: all ${a.agents} agents end failed`;
     case 'merge_clean':
       return `Merge ${a.branch} into ${a.into}, then remove its job, folder and branch (asks first)`;
     case 'merge':

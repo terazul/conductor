@@ -134,11 +134,13 @@ import {
   resetRetryBook,
   retryBook,
   retryDelaysMs,
+  modelWaitNote,
   retryNote,
   type Clock,
 } from './retry.js';
+import { HEARTBEAT_MS, OUTAGE_CHECKS_MS, OUTAGE_EVERY_MS, OutageBook, STAGGER_MS, onOutageResume, outages, probes, resetOutages, type ResumeAnswer } from './outage.js';
 import { BUDGET_ENGINES, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
-import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, providerModels, refusal } from './models.js';
+import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, probeGateway, providerModels, refusal } from './models.js';
 import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
   HAND_OFF_LINE,
@@ -161,7 +163,7 @@ import { fileEditFromTool, isWriteTool, normaliseTool, relPath, reversibility, t
 import { describeRule, fileHolds, ruleEntry, settingsFileFor } from './rules.js';
 import { readSettings } from '../settings.js';
 import { DayWatch, broadcastSpend, costChanged, dayWatch } from '../daily.js';
-import { HANDOFF_ASK, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
+import { HANDOFF_ASK, OUTAGE_RESUME_NOTE, RESTART_NUDGE, RETRY_NUDGE, SLOTS_KEY, Supervisor, WAKE_NUDGE, slotLimit, strandNote, supervisor, type ProjectRemoval } from './supervisor.js';
 import { ancestorsOf, createsCycle, isStuck, rewireOnRemoval, waitersOf, type AddAgentResponse, type RemoveAgentResponse, type StackNode } from '@conductor/shared';
 import { heldRefusal, rerunPlan, type RerunNode, type RerunResponse } from '@conductor/shared';
 import { rerunNote, rerunStatusNote } from './rerun.js';
@@ -6560,12 +6562,13 @@ async function main(): Promise<void> {
     const delays = [0, 1, 2, 3, 4].map((used) => ended({ used }));
     check(
       'five waits, in turn: 5 s, 15 s, 30 s, 60 s, 5 min',
-      delays.every((v, i) => v.retry && v.delayMs === RETRY_DELAYS_MS[i] && v.attempt === i + 1 && v.of === 5) &&
+      delays.every((v, i) => v.retry === true && v.delayMs === RETRY_DELAYS_MS[i] && v.attempt === i + 1 && v.of === 5) &&
         RETRY_DELAYS_MS.join() === '5000,15000,30000,60000,300000' && MAX_RETRIES === 5,
       JSON.stringify(delays),
     );
     check('and they read as 5 s, 15 s, 30 s, 60 s, 5 min', RETRY_DELAYS_MS.map(fmtDelay).join() === '5 s,15 s,30 s,60 s,5 min');
-    check('the sixth failure is not retried: that is `failed`, as before', JSON.stringify(ended({ used: 5 })) === '{"retry":false,"why":"out_of_tries"}');
+    // Amendment 192: it was `{"retry":false,"why":"out_of_tries"}`, and the agent failed.
+    check('the sixth failure is not retried: it waits for the model to come back (Amendment 192)', JSON.stringify(ended({ used: 5 })) === '{"retry":"outage","cause":"unreachable"}', JSON.stringify(ended({ used: 5 })));
     check(
       'a login problem is not retried: a person has to fix it',
       ['authentication_failed', 'billing_error', 'account_on_hold'].every((e) => JSON.stringify(ended({ failure: failed(null, e) })) === '{"retry":false,"why":"needs_a_person"}') &&
@@ -6665,6 +6668,11 @@ async function main(): Promise<void> {
     const rfix = (id: string, jobId: string, a: Partial<Agent> = {}): void => fixture(id, jobId, { projectId: rpid, status: 'queued', autonomy: DEFAULT_AUTONOMY, ...a });
     const clock = makeClock();
     resetRetryBook(clock);
+    // The outage an agent whose tries are spent waits in (Amendment 192), on a clock of its own
+    // that this section never turns, and a provider that doesn't answer: §35 is its check.
+    resetOutages(makeClock());
+    const realClaudeProbe = probes['claude'];
+    probes['claude'] = async () => ({ up: false });
     const statusOf = (id: string) => eventLog().forAgent(id).map((e) => e.payload).filter((p) => p.kind === 'status').at(-1);
     const retryOf = (id: string) => {
       const p = statusOf(id);
@@ -6733,23 +6741,26 @@ async function main(): Promise<void> {
       check('…and the card is gone', reconnecting('rt_a') === undefined);
     }
     failWith(run, null, 'unknown');
-    check('the sixth failure is failed, as it always was', await until(() => getAgent(db, 'rt_a')?.status === 'failed'), String(getAgent(db, 'rt_a')?.status));
-    check('…with no wait left, and the job failed', retryBook().waiting('rt_a') === undefined && clock.pending() === 0 && getJob(db, 'job_retry_a')?.status === 'failed');
+    // Amendment 192: the sixth failure was `failed`, with the job failed and a gave-up card.
+    check('the sixth failure is paused, waiting for the model to come back (Amendment 192)', await until(() => getAgent(db, 'rt_a')?.status === 'paused'), String(getAgent(db, 'rt_a')?.status));
+    check('…with no short wait left, in its provider\'s outage, and the job still live', retryBook().waiting('rt_a') === undefined && clock.pending() === 0 && outages().of('rt_a') === 'claude' && getJob(db, 'job_retry_a')?.status === 'working', String(getJob(db, 'job_retry_a')?.status));
     const gave = alerts().list().filter((a) => a.agentIds.includes('rt_a'));
-    check('…and Needs You says so, as it did: the outage gave up', gave.length === 1 && gave[0]?.kind === 'connection' && gave[0].gaveUp === true && gave[0].cause === 'unreachable', JSON.stringify(gave));
+    check('…and Needs You has the outage\'s card, with one waiting, not a gave-up one', gave.length === 1 && gave[0]?.kind === 'connection' && gave[0].waiting === 1 && gave[0].gaveUp !== true && gave[0].cause === 'unreachable', JSON.stringify(gave));
     check(
-      '…and the transcript is told five times, then the failure',
-      eventLog().forAgent('rt_a').filter((e) => e.payload.kind === 'status' && e.payload.retry).length === 5 && statusOf('rt_a')?.kind === 'status' && statusOf('rt_a')?.status === 'failed',
+      '…and the transcript is told five times, then that it waits',
+      eventLog().forAgent('rt_a').filter((e) => e.payload.kind === 'status' && e.payload.retry).length === 5 && statusOf('rt_a')?.kind === 'status' && statusOf('rt_a')?.status === 'paused' &&
+        statusOf('rt_a')?.error === modelWaitNote('unreachable'),
+      JSON.stringify(statusOf('rt_a')),
     );
     bell.close();
 
-    // Continuing a failed one starts five tries again.
+    // Continuing one that waits starts five tries again, as continuing a failed one did.
     const atA2 = runs.length;
     await send('POST', '/api/agents/rt_a/message', { text: 'try once more' });
     await until(() => runs.length === atA2 + 1);
     failWith(runs[atA2], null, 'unknown');
     await until(() => isWaiting('rt_a'));
-    check('a person continuing a failed agent gets five tries again: the first wait, 5 s', retryOf('rt_a')?.attempt === 1 && retryOf('rt_a')?.delayMs === 5_000, JSON.stringify(retryOf('rt_a')));
+    check('a person continuing an agent that waits for the model gets five tries again: the first wait, 5 s', retryOf('rt_a')?.attempt === 1 && retryOf('rt_a')?.delayMs === 5_000 && outages().of('rt_a') === undefined, JSON.stringify(retryOf('rt_a')));
     await send('POST', '/api/agents/rt_a/pause');
     await until(() => getAgent(db, 'rt_a')?.status === 'paused');
 
@@ -7053,10 +7064,10 @@ async function main(): Promise<void> {
     check('the longest it takes is 30 min, and five of them', (await setDelays('1800, 1800, 1800, 1800, 1800')).status === 200 && retryDelaysMs().join() === '1800000,1800000,1800000,1800000,1800000');
     check('a good one is taken, spaces or none', (await setDelays('2,7')).status === 200 && (await setDelays('2, 7')).status === 200 && retryDelaysMs().join() === '2000,7000', retryDelaysMs().join());
     check(
-      'the rule reads it: two tries, 2 s then 7 s, and the third failure is out of tries',
+      'the rule reads it: two tries, 2 s then 7 s, and the third failure waits for the model (Amendment 192)',
       JSON.stringify(ended({ used: 0 })) === '{"retry":true,"cause":"unreachable","attempt":1,"of":2,"delayMs":2000}' &&
         JSON.stringify(ended({ used: 1 })) === '{"retry":true,"cause":"unreachable","attempt":2,"of":2,"delayMs":7000}' &&
-        JSON.stringify(ended({ used: 2 })) === '{"retry":false,"why":"out_of_tries"}',
+        JSON.stringify(ended({ used: 2 })) === '{"retry":"outage","cause":"unreachable"}',
       JSON.stringify([ended({ used: 0 }), ended({ used: 1 }), ended({ used: 2 })]),
     );
     rjob('job_retry_set');
@@ -7087,12 +7098,20 @@ async function main(): Promise<void> {
     clock.advance(7_000);
     await until(() => runs.length === atSet + 3);
     failWith(runs[atSet + 2], null, 'unknown');
-    check('…and the third failure is failed: two tries were all it had', await until(() => getAgent(db, 'rt_set')?.status === 'failed') && retryBook().waiting('rt_set') === undefined && reconnecting('rt_set') === undefined);
+    // Amendment 192: the third failure was `failed`.
+    check(
+      '…and after the third failure it waits for the model: two short tries were all it had',
+      (await until(() => getAgent(db, 'rt_set')?.status === 'paused')) && retryBook().waiting('rt_set') === undefined && reconnecting('rt_set') === undefined && outages().of('rt_set') === 'claude',
+    );
+    const stopSet = await send<{ agent?: Agent }>('POST', '/api/agents/rt_set/stop-retrying');
+    check('…and stop retrying on it stops the wait: failed, out of the outage', stopSet.status === 200 && stopSet.body.agent?.status === 'failed' && outages().list().length === 0, JSON.stringify(stopSet.body));
     check('removing the setting puts the default back', (await setDelays(null)).status === 200 && retryDelaysMs().join() === RETRY_DELAYS_MS.join() && JSON.stringify(ended({ used: 0 })).includes('"of":5'));
 
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
     resetRetryBook();
+    resetOutages();
+    if (realClaudeProbe) probes['claude'] = realClaudeProbe;
     sdk.query = realQuery;
   }
 
@@ -8773,6 +8792,473 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n35 · an agent whose tries are spent waits for the model, checked on a schedule, and resumes when it answers (Amendment 192)');
+  {
+    // Section 21 built extra Supervisors, each pointing the handlers at itself: point them back at the live one.
+    onRetryDue(() => sup.pump());
+    onOutageResume((id) => sup.fromOutage(id));
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    // Earlier sections leave agents queued or marked working with no run: the pump below would start them, and Pause all pause them.
+    db.prepare("UPDATE agents SET status = 'done' WHERE status IN ('working', 'queued')").run();
+
+    /**
+     * A clock a check turns, starting now: a restart below dates a wait from its event, on the
+     * real clock. `advance` fires what falls due in order, each at its own time, and lets the
+     * check it starts answer before the next. `sleep` is a laptop asleep: time passes, and no
+     * timer counts it.
+     */
+    const stepClock = () => {
+      let t = Date.now();
+      let next = 1;
+      let timers: { id: number; at: number; fn: () => void }[] = [];
+      const flush = () => new Promise<void>((r) => setImmediate(r));
+      return {
+        now: () => t,
+        setTimer: (fn: () => void, ms: number): unknown => {
+          const id = next++;
+          timers.push({ id, at: t + ms, fn });
+          return id;
+        },
+        clearTimer: (h: unknown): void => void (timers = timers.filter((x) => x.id !== h)),
+        async advance(ms: number): Promise<void> {
+          const end = t + ms;
+          await flush();
+          for (;;) {
+            const due = timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at || a.id - b.id)[0];
+            if (!due) break;
+            timers = timers.filter((x) => x !== due);
+            t = Math.max(t, due.at);
+            due.fn();
+            await flush();
+          }
+          t = end;
+        },
+        sleep(ms: number): void {
+          t += ms;
+          for (const x of timers) x.at += ms;
+        },
+        pending: () => timers.length,
+      };
+    };
+
+    // ── the book alone, for a provider the check answers for ──
+    {
+      const c = stepClock();
+      const t0 = c.now();
+      let up = false;
+      let saysRetryAt: number | undefined;
+      const probedAt: number[] = [];
+      probes['tp'] = async () => {
+        probedAt.push(c.now());
+        return { up, ...(saysRetryAt !== undefined ? { retryAt: saysRetryAt } : {}) };
+      };
+      const answers: Record<string, ResumeAnswer> = {};
+      const resumed: string[] = [];
+      let changes = 0;
+      const book: OutageBook = new OutageBook(
+        c,
+        (id) => {
+          const a = answers[id] ?? 'resumed';
+          if (a === 'resumed') {
+            resumed.push(id);
+            // As the supervisor's launch does.
+            book.started(id);
+          }
+          return a;
+        },
+        () => (changes += 1),
+      );
+      const join = (id: string, more: { retryAt?: number } = {}): void =>
+        book.join({ provider: 'tp', agentId: id, projectId: 'p', jobId: 'j', cause: 'unreachable', ...more });
+      const o = () => book.get('tp');
+      const who = () => o()?.agents.map((a) => a.agentId).join();
+
+      join('a1');
+      await c.advance(1_000);
+      join('a2');
+      await c.advance(1_000);
+      join('a3');
+      check(
+        'one outage for the provider, oldest first, its first check 30 s after it began',
+        who() === 'a1,a2,a3' && o()?.since === t0 && o()?.nextCheckAt === t0 + 30_000 && o()?.state === 'probing' && book.of('a2') === 'tp' && book.list().length === 1 && changes > 0,
+        JSON.stringify(o()),
+      );
+      await c.advance(t0 + 3_210_000 - c.now());
+      const gaps = probedAt.map((at, i) => at - (i === 0 ? t0 : probedAt[i - 1]!));
+      check(
+        'checked at 30 s, then 1, 2, 5 and 15 min on, then every 15 min, with no limit',
+        gaps.join() === [...OUTAGE_CHECKS_MS, OUTAGE_EVERY_MS, OUTAGE_EVERY_MS].join() && o()?.checks === 7 && o()?.nextCheckAt === probedAt.at(-1)! + OUTAGE_EVERY_MS,
+        gaps.join(),
+      );
+      check('…and while it does not answer nobody is resumed', resumed.length === 0 && who() === 'a1,a2,a3');
+      up = true;
+      const askedNow = book.checkNow('tp');
+      await c.advance(0);
+      check(
+        'check now asks at once; it answers, and the agent that waited longest is resumed alone: the canary',
+        askedNow && probedAt.length === 8 && resumed.join() === 'a1' && o()?.state === 'canary' && o()?.canary === 'a1' && o()?.nextCheckAt === null && book.of('a1') === 'tp' && who() === 'a2,a3',
+        JSON.stringify(o()),
+      );
+      await c.advance(30 * 60_000);
+      check('…and nothing else goes, nor is asked, until the model answers it', resumed.join() === 'a1' && probedAt.length === 8 && who() === 'a2,a3');
+      book.answered('a1');
+      check('the model answers the canary: the next goes at once', resumed.join() === 'a1,a2' && o()?.state === 'releasing' && book.of('a1') === undefined);
+      await c.advance(STAGGER_MS - 1);
+      check('…the one after it not a moment early', resumed.join() === 'a1,a2');
+      await c.advance(1);
+      check(
+        `…but ${STAGGER_MS / 1000} s after; with nobody left the outage is over, and every timer with it`,
+        resumed.join() === 'a1,a2,a3' && book.get('tp') === undefined && book.list().length === 0 && c.pending() === 0 && !book.checkNow('tp'),
+      );
+
+      resumed.length = 0;
+      join('b1');
+      await c.advance(1_000);
+      join('b2');
+      await c.advance(30_000);
+      check('a new outage whose first check answers resumes its canary', resumed.join() === 'b1' && o()?.canary === 'b1' && o()?.checks === 1);
+      join('b1');
+      check(
+        'the canary fails again: it waits again, behind the rest, and the next check is a step on, in 1 min, not 30 s',
+        o()?.state === 'probing' && o()?.canary === null && who() === 'b2,b1' && o()?.nextCheckAt === c.now() + OUTAGE_CHECKS_MS[1]!,
+        JSON.stringify(o()),
+      );
+      await c.advance(OUTAGE_CHECKS_MS[1]!);
+      check('…and when that answers, the canary is the one that has waited longest now', resumed.join() === 'b1,b2' && o()?.canary === 'b2');
+      book.leave('b2');
+      check('the canary stopped before the model answered it: back to checking, with the rest still waiting', o()?.state === 'probing' && o()?.canary === null && who() === 'b1' && o()?.nextCheckAt !== null);
+      book.leave('b1');
+      check('the last to leave ends it', book.get('tp') === undefined && c.pending() === 0);
+
+      resumed.length = 0;
+      answers['g0'] = 'gone';
+      answers['h1'] = 'held';
+      const n1 = probedAt.length;
+      join('g0');
+      await c.advance(1);
+      join('h1');
+      await c.advance(30_000);
+      check(
+        'a check answers while everything is paused until a time: one no longer waiting is passed over, the held one stays, checked again a step on',
+        probedAt.length === n1 + 1 && resumed.length === 0 && book.of('g0') === undefined && who() === 'h1' && o()?.state === 'probing' && o()?.nextCheckAt === probedAt.at(-1)! + OUTAGE_CHECKS_MS[1]!,
+        JSON.stringify(o()),
+      );
+      answers['h1'] = 'resumed';
+      book.checkNow('tp');
+      await c.advance(0);
+      check('…and released, a check now resumes it', probedAt.length === n1 + 2 && resumed.join() === 'h1' && o()?.canary === 'h1');
+      book.clear();
+
+      up = false;
+      const later = c.now() + 3_600_000;
+      join('r1', { retryAt: later });
+      check('the API said when to come back: no check before then', o()?.notBefore === later && o()?.nextCheckAt === later, JSON.stringify(o()));
+      const n2 = probedAt.length;
+      await c.advance(3_600_000 - 1_000);
+      check('…none in the hour, the clock looked at each minute all the while', probedAt.length === n2);
+      book.checkNow('tp');
+      await c.advance(0);
+      check('…but check now still asks', probedAt.length === n2 + 1 && o()?.notBefore === later);
+      saysRetryAt = c.now() + 2 * 3_600_000;
+      book.checkNow('tp');
+      await c.advance(0);
+      check("a check's own Retry-After holds the next one off as long", o()?.notBefore === saysRetryAt && o()?.nextCheckAt === saysRetryAt, JSON.stringify(o()));
+      saysRetryAt = undefined;
+      book.clear();
+
+      join('s1');
+      const n3 = probedAt.length;
+      await c.advance(510_000);
+      const due = o()?.nextCheckAt ?? 0;
+      check('(four checks, and the next in 15 min)', probedAt.length === n3 + 4 && due === c.now() + OUTAGE_EVERY_MS);
+      c.sleep(20 * 60_000);
+      const woke = c.now();
+      await c.advance(HEARTBEAT_MS);
+      check(
+        'a laptop that slept through the schedule: the clock jumped, so it checks within a minute of waking, not when the timer it slept through says',
+        probedAt.length === n3 + 5 && probedAt.at(-1)! - woke <= HEARTBEAT_MS && probedAt.at(-1)! < due + 20 * 60_000,
+        `${probedAt.at(-1)! - woke} ms after waking`,
+      );
+      book.clear();
+      check('cleared (the daemon stopping), no timer is left', c.pending() === 0 && book.list().length === 0);
+
+      delete probes['tp'];
+      book.join({ provider: 'unchecked', agentId: 'n1', projectId: 'p', jobId: 'j', cause: 'server' });
+      await c.advance(30_000);
+      check('a provider with no check of its own is taken as up: its first agent is the check', resumed.at(-1) === 'n1' && book.get('unchecked')?.canary === 'n1');
+      book.clear();
+    }
+
+    // ── through the real supervisor and runner, on the fake SDK and a clock the check turns ──
+    const oc = stepClock();
+    resetRetryBook(oc);
+    resetOutages(oc);
+    const realClaudeProbe = probes['claude'];
+    let claudeUp = false;
+    let claudeProbes = 0;
+    probes['claude'] = async () => {
+      claudeProbes += 1;
+      return { up: claudeUp };
+    };
+    // One short try, of a second, so each agent gets to the wait quickly: section 23 checks all five.
+    await send('PATCH', '/api/settings', { settings: { [RETRY_DELAYS_KEY]: '1' } });
+    const opid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'outage' })).body.project.id;
+    const ojob = (id: string): void => {
+      insertJob(db, { id, projectId: opid, prompt: `the ${id} prompt`, isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    };
+    const ofix = (id: string, jobId: string): void => fixture(id, jobId, { projectId: opid, status: 'queued', autonomy: DEFAULT_AUTONOMY });
+    const failRun = (run: FakeRun | undefined, status: number | null, error: string): void => {
+      run?.say({ type: 'system', subtype: 'api_retry', attempt: 10, max_retries: 10, retry_delay_ms: 500, error_status: status, error });
+      run?.finish({ cost: 0, isError: true, reason: 'api_error' });
+    };
+    const replied = { type: 'assistant', message: { content: [{ type: 'text', text: 'back again' }] } };
+    const lastStatus = (id: string) => eventLog().forAgent(id).map((e) => e.payload).filter((p) => p.kind === 'status').at(-1);
+    const waitsForClaude = (id: string): boolean => getAgent(db, id)?.status === 'paused' && outages().of(id) === 'claude';
+    const outageCards = () => alerts().list().filter((a) => a.kind === 'connection' && a.waiting !== undefined);
+    /** Start the agent, fail its run, let its one short try go and fail that too: it waits. True when the first failure was a short try. */
+    const toTheWait = async (id: string): Promise<boolean> => {
+      const at = runs.length;
+      sup.pump();
+      await until(() => runs.length === at + 1);
+      failRun(runs[at], null, 'unknown');
+      await until(() => retryBook().waiting(id) !== undefined);
+      const shortFirst = retryBook().waiting(id) !== undefined && outages().of(id) === undefined && getAgent(db, id)?.status === 'queued';
+      await oc.advance(1_000);
+      await until(() => runs.length === at + 2);
+      failRun(runs[at + 1], null, 'unknown');
+      await until(() => waitsForClaude(id));
+      return shortFirst;
+    };
+
+    // Earlier sections' runs that never end hold slots of their own.
+    const slotsBefore = sup.slots.used;
+    ojob('job_o35');
+    ofix('o_1', 'job_o35');
+    await toTheWait('o_1');
+    const w1 = lastStatus('o_1');
+    check(
+      'its tries spent, the agent is paused with the note, the provider and how its run ended: not failed',
+      getAgent(db, 'o_1')?.status === 'paused' && w1?.kind === 'status' && w1.error === modelWaitNote('unreachable') && JSON.stringify(w1.outage) === '{"provider":"claude","cause":"unreachable","reason":"api_error"}',
+      JSON.stringify(w1),
+    );
+    check('…its slot is free, nothing is checked yet, and its job is running', (await until(() => sup.slots.used === slotsBefore)) && claudeProbes === 0 && getJob(db, 'job_o35')?.status === 'working', `${sup.slots.used} ${claudeProbes} ${getJob(db, 'job_o35')?.status}`);
+    const since = outages().get('claude')?.since ?? 0;
+    let cards = outageCards();
+    check(
+      "Needs You has the provider's card, and only that: who waits, since when, and the next check",
+      cards.length === 1 && cards[0]!.id === `connection:outage:claude:${new Date(since).toISOString()}` && cards[0]!.provider === 'claude' && cards[0]!.waiting === 1 &&
+        cards[0]!.agentIds.join() === 'o_1' && cards[0]!.jobId === 'job_o35' && cards[0]!.cause === 'unreachable' && cards[0]!.nextCheckAt === new Date(since + 30_000).toISOString() &&
+        alerts().list().filter((a) => a.agentIds.includes('o_1')).length === 1,
+      JSON.stringify(alerts().list().filter((a) => a.agentIds.includes('o_1'))),
+    );
+    ofix('o_2', 'job_o35');
+    check('a new launch while the outage lasts makes its short tries first, then joins it', (await toTheWait('o_2')) && waitsForClaude('o_2'));
+    ofix('o_3', 'job_o35');
+    await toTheWait('o_3');
+    cards = outageCards();
+    check('…one card still, three waiting, the oldest first', cards.length === 1 && cards[0]!.waiting === 3 && cards[0]!.agentIds.join() === 'o_1,o_2,o_3', JSON.stringify(cards));
+
+    await oc.advance(since + 30_000 - oc.now());
+    await settle(60);
+    check(
+      'at 30 s it checks; the model does not answer, so nobody goes, and the next check is in 1 min',
+      claudeProbes === 1 && ['o_1', 'o_2', 'o_3'].every(waitsForClaude) && outageCards()[0]?.nextCheckAt === new Date(since + 90_000).toISOString(),
+      `${claudeProbes} ${JSON.stringify(outageCards()[0])}`,
+    );
+    const agentRetry = await send<{ detail?: string }>('POST', '/api/agents/o_2/retry-now');
+    await oc.advance(0);
+    check('retry now on a waiting agent checks its provider now', agentRetry.status === 200 && claudeProbes === 2 && waitsForClaude('o_2'), JSON.stringify(agentRetry.body));
+
+    claudeUp = true;
+    const atC = runs.length;
+    const cardRetry = await send('POST', '/api/outages/claude/retry-now');
+    await oc.advance(0);
+    check(
+      "retry now on the card: the model answers, and the agent that waited longest goes first, alone",
+      cardRetry.status === 200 && claudeProbes === 3 && (await until(() => runs.length === atC + 1 && getAgent(db, 'o_1')?.status === 'working')) && waitsForClaude('o_2') && waitsForClaude('o_3'),
+      `${cardRetry.status} ${claudeProbes} ${getAgent(db, 'o_1')?.status}`,
+    );
+    await until(() => runs[atC]!.prompts.length > 0);
+    check(
+      '…in its own session, told what happened, as after any wait',
+      runs[atC]?.options.resume === getAgent(db, 'o_1')?.sdkSessionId && runs[atC]?.prompts[0] === RETRY_NUDGE &&
+        eventLog().forAgent('o_1').some((e) => e.payload.kind === 'status' && e.payload.status === 'queued' && e.payload.error === OUTAGE_RESUME_NOTE),
+      JSON.stringify(runs[atC]?.prompts),
+    );
+    check('…and the job is running', getJob(db, 'job_o35')?.status === 'working');
+    await oc.advance(30 * 60_000);
+    await settle(60);
+    check('nothing else goes, nor is checked, until the model answers it', runs.length === atC + 1 && claudeProbes === 3 && outageCards()[0]?.waiting === 2, `${runs.length - atC} ${claudeProbes}`);
+    failRun(runs[atC], null, 'unknown');
+    check('the canary fails again: back in the wait at once, with no short tries this time', (await until(() => waitsForClaude('o_1'))) && retryBook().waiting('o_1') === undefined && runs.length === atC + 1);
+    const again = outages().get('claude');
+    check(
+      '…and the next check is a step on, in 5 min, not from 30 s again',
+      again?.state === 'probing' && again.nextCheckAt === oc.now() + OUTAGE_CHECKS_MS[3]! && again.agents.map((a) => a.agentId).join() === 'o_2,o_3,o_1',
+      JSON.stringify(again),
+    );
+
+    const atR = runs.length;
+    await oc.advance(OUTAGE_CHECKS_MS[3]!);
+    check('it answers at 5 min: the canary now is the one that has waited longest', (await until(() => runs.length === atR + 1 && getAgent(db, 'o_2')?.status === 'working')) && waitsForClaude('o_3') && waitsForClaude('o_1'));
+    runs[atR]?.say(replied);
+    check('the model answers it: the next goes at once…', (await until(() => runs.length === atR + 2 && getAgent(db, 'o_3')?.status === 'working')) && waitsForClaude('o_1'));
+    await oc.advance(STAGGER_MS - 1);
+    await settle(60);
+    check('…the last not a moment early…', runs.length === atR + 2 && waitsForClaude('o_1'));
+    await oc.advance(1);
+    check(
+      `…but ${STAGGER_MS / 1000} s after; the outage is over, and its card with it`,
+      (await until(() => runs.length === atR + 3 && getAgent(db, 'o_1')?.status === 'working')) && outages().get('claude') === undefined && outageCards().length === 0,
+    );
+    for (const r of runs.slice(atR)) r.finish({ cost: 0, reason: 'completed' });
+    check('they finish, and so does the job, which was running all along', await until(() => getJob(db, 'job_o35')?.status === 'done'), String(getJob(db, 'job_o35')?.status));
+
+    // Everything paused until a time.
+    claudeUp = false;
+    ojob('job_o35h');
+    ofix('o_h', 'job_o35h');
+    await toTheWait('o_h');
+    const pausedNone = await sup.hold();
+    claudeUp = true;
+    const atH = runs.length;
+    const pH = claudeProbes;
+    await oc.advance((outages().get('claude')?.since ?? 0) + 30_000 - oc.now());
+    await settle(60);
+    check(
+      'everything paused until a time leaves a waiting agent as it is; a check answers and nobody goes',
+      pausedNone === 0 && claudeProbes === pH + 1 && runs.length === atH && waitsForClaude('o_h') && lastStatus('o_h')?.kind === 'status' && (lastStatus('o_h') as { error?: string }).error === modelWaitNote('unreachable'),
+    );
+    const heldRetry = await send<{ detail?: string }>('POST', '/api/outages/claude/retry-now');
+    check('…retry now is refused, with why', heldRetry.status === 409 && /paused until/.test(heldRetry.body.detail ?? ''), JSON.stringify(heldRetry.body));
+    sup.release();
+    await oc.advance(0);
+    check('released, it checks at once, and the agent goes', (await until(() => runs.length === atH + 1 && getAgent(db, 'o_h')?.status === 'working')) && claudeProbes === pH + 2);
+    runs[atH]?.say(replied);
+    runs[atH]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'o_h')?.status === 'done' && outages().get('claude') === undefined);
+
+    // A restart while it waits.
+    claudeUp = false;
+    ojob('job_o35r');
+    ofix('o_r', 'job_o35r');
+    await toTheWait('o_r');
+    const waitedAt = Date.parse(eventLog().forAgent('o_r').filter((e) => e.payload.kind === 'status').at(-1)!.ts);
+    resetOutages(oc); // the process is gone, and with it every outage
+    check('a restart forgets the outage', outages().of('o_r') === undefined && outageCards().length === 0);
+    const atRs = runs.length;
+    sup.reconcile();
+    const back = outages().get('claude');
+    check(
+      'reconcile puts it back in the wait, from when it began, so the first check is at once',
+      waitsForClaude('o_r') && back?.since === waitedAt && back.agents.map((a) => a.agentId).join() === 'o_r' && back.nextCheckAt === oc.now() && outageCards()[0]?.waiting === 1,
+      JSON.stringify(back),
+    );
+    claudeUp = true;
+    await oc.advance(0);
+    check('…it answers and the agent goes', (await until(() => runs.length === atRs + 1 && getAgent(db, 'o_r')?.status === 'working')) && (await until(() => runs[atRs]!.prompts.length > 0)));
+    check('…told the model is back, not that a restart stopped it', runs[atRs]?.prompts[0] === RETRY_NUDGE, JSON.stringify(runs[atRs]?.prompts));
+    runs[atRs]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'o_r')?.status === 'done' && outages().get('claude') === undefined);
+
+    // A usage limit that says when it resets.
+    claudeUp = false;
+    ojob('job_o35l');
+    ofix('o_l', 'job_o35l');
+    const resets = Math.floor(oc.now() / 1000) + 3_600;
+    const atL = runs.length;
+    sup.pump();
+    await until(() => runs.length === atL + 1);
+    runs[atL]?.say({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: resets } });
+    failRun(runs[atL], 429, 'rate_limit');
+    check(
+      'a usage limit that says when it resets: straight to the wait, with no short tries',
+      (await until(() => waitsForClaude('o_l'))) && runs.length === atL + 1 && !eventLog().forAgent('o_l').some((e) => e.payload.kind === 'status' && e.payload.retry),
+      String(getAgent(db, 'o_l')?.status),
+    );
+    const lc = outageCards()[0];
+    check('…the card says when it resets, and the next check is no sooner', lc?.limitResetsAt === new Date(resets * 1000).toISOString() && lc.nextCheckAt === lc.limitResetsAt && lc.cause === 'throttled', JSON.stringify(lc));
+    const pL = claudeProbes;
+    await oc.advance(resets * 1000 - oc.now() - 1_000);
+    check('…none in the hour before', claudeProbes === pL);
+    const limitRetry = await send('POST', '/api/outages/claude/retry-now');
+    await oc.advance(0);
+    check('…but retry now still asks', limitRetry.status === 200 && claudeProbes === pL + 1 && waitsForClaude('o_l'));
+    const stopped = await send<{ agents: Agent[] }>('POST', '/api/outages/claude/stop-waiting');
+    const lf = lastStatus('o_l');
+    check(
+      'stop waiting: every agent in it ends failed, as its run would have',
+      stopped.status === 200 && stopped.body.agents.map((a) => a.id).join() === 'o_l' && stopped.body.agents[0]?.status === 'failed' && getAgent(db, 'o_l')?.status === 'failed' &&
+        lf?.kind === 'status' && lf.status === 'failed' && lf.error === 'api_error',
+      JSON.stringify(stopped.body),
+    );
+    check('…the outage and its card are gone, and the job is failed', outages().get('claude') === undefined && outageCards().length === 0 && getJob(db, 'job_o35l')?.status === 'failed', String(getJob(db, 'job_o35l')?.status));
+    const noneRetry = await send<{ detail?: string }>('POST', '/api/outages/claude/retry-now');
+    const noneStop = await send<{ detail?: string }>('POST', '/api/outages/claude/stop-waiting');
+    check('with nobody waiting, retry now and stop waiting on the card are refused, with why', noneRetry.status === 409 && noneStop.status === 409 && /No agent is waiting/.test(noneStop.body.detail ?? ''), JSON.stringify(noneStop.body));
+
+    // A login the model refuses.
+    ojob('job_o35x');
+    ofix('o_x', 'job_o35x');
+    const atX = runs.length;
+    sup.pump();
+    await until(() => runs.length === atX + 1);
+    failRun(runs[atX], 401, 'authentication_failed');
+    check(
+      'a login the model refuses still fails at once, for a person to fix',
+      (await until(() => getAgent(db, 'o_x')?.status === 'failed')) && outages().of('o_x') === undefined && outageCards().length === 0 && retryBook().waiting('o_x') === undefined,
+      String(getAgent(db, 'o_x')?.status),
+    );
+
+    // ── the Claude check, against a server here ──
+    let answer = 401;
+    let retryAfter: string | null = null;
+    const asked: { url: string; key: string | undefined }[] = [];
+    const gw = createServer((req, res) => {
+      asked.push({ url: `${req.method} ${req.url}`, key: req.headers['x-api-key'] as string | undefined });
+      res.writeHead(answer, retryAfter === null ? {} : { 'retry-after': retryAfter });
+      res.end('{}');
+    });
+    await new Promise<void>((r) => gw.listen(0, '127.0.0.1', r));
+    // An empty Claude config, and no token from the environment: only the key set here is sent.
+    const envWas = { base: process.env['ANTHROPIC_BASE_URL'], key: process.env['ANTHROPIC_API_KEY'], token: process.env['ANTHROPIC_AUTH_TOKEN'], dir: process.env['CLAUDE_CONFIG_DIR'] };
+    const emptyConfig = mkdtempSync(join(tmpdir(), 'conductor-verify-192-'));
+    process.env['CLAUDE_CONFIG_DIR'] = emptyConfig;
+    delete process.env['ANTHROPIC_AUTH_TOKEN'];
+    process.env['ANTHROPIC_BASE_URL'] = `http://127.0.0.1:${(gw.address() as { port: number }).port}`;
+    process.env['ANTHROPIC_API_KEY'] = 'verify-key-192';
+    const p401 = await probeGateway();
+    answer = 200;
+    const p200 = await probeGateway();
+    answer = 503;
+    const p503 = await probeGateway();
+    answer = 529;
+    const p529 = await probeGateway();
+    answer = 429;
+    retryAfter = '120';
+    const before429 = Date.now();
+    const p429 = await probeGateway();
+    await new Promise<void>((r) => gw.close(() => r()));
+    const pGone = await probeGateway();
+    if (envWas.base === undefined) delete process.env['ANTHROPIC_BASE_URL']; else process.env['ANTHROPIC_BASE_URL'] = envWas.base;
+    if (envWas.key === undefined) delete process.env['ANTHROPIC_API_KEY']; else process.env['ANTHROPIC_API_KEY'] = envWas.key;
+    if (envWas.token !== undefined) process.env['ANTHROPIC_AUTH_TOKEN'] = envWas.token;
+    if (envWas.dir === undefined) delete process.env['CLAUDE_CONFIG_DIR']; else process.env['CLAUDE_CONFIG_DIR'] = envWas.dir;
+    rmSync(emptyConfig, { recursive: true, force: true });
+    check('the Claude check asks for one model, with the credential', asked[0]?.url === 'GET /v1/models?limit=1' && asked[0].key === 'verify-key-192', JSON.stringify(asked[0]));
+    check('any answer but a throttle or a server error is up: 200, and 401, a login it refuses', p200.up && p401.up, JSON.stringify([p200, p401]));
+    check('503, 529 and 429 are down', !p503.up && !p529.up && !p429.up);
+    check("a 429's Retry-After is passed on", (p429.retryAt ?? 0) >= before429 + 120_000 && (p429.retryAt ?? Infinity) <= Date.now() + 120_000, JSON.stringify(p429));
+    check('no server at all is down', !pGone.up);
+
+    await send('PATCH', '/api/settings', { settings: { [RETRY_DELAYS_KEY]: null } });
+    if (realClaudeProbe) probes['claude'] = realClaudeProbe;
+    resetOutages();
+    resetRetryBook();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -8780,7 +9266,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again, five times at most, then fails as it did; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

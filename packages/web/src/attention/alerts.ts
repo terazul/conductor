@@ -12,7 +12,7 @@ import { HANDOFF_SUMMARY_MAX, missingHeadings, providerBudgetLabel, waitersOf, t
 import { api } from '../lib/feed.js';
 import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
-import { alertTitle } from '../shell/describe.js';
+import { alertTitle, isOutage } from '../shell/describe.js';
 import { branchAction, previewMerge } from '../branches/endpoints.js';
 import { errorText } from '../lib/errors.js';
 
@@ -48,6 +48,12 @@ export type AlertAction =
    */
   | { id: 'retry_now'; agentId: string }
   | { id: 'stop_retrying'; agentId: string }
+  /**
+   * A provider's outage, its agents waiting for the model to come back (Amendment 192): check
+   * it now, or stop waiting and let every agent in it fail.
+   */
+  | { id: 'check_now'; provider: string }
+  | { id: 'stop_waiting'; provider: string; agents: number }
   /**
    * A job finished ahead of its target (Amendment 144). `merge_clean`: the merge, then Lane
    * J's delete with `forgetJob`, after a confirm. `merge`: the merge alone; the job, its
@@ -132,6 +138,15 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
     }
 
     case 'connection': {
+      // A provider's outage (Amendment 192): its agents carry on by themselves when it answers.
+      if (isOutage(alert)) {
+        const provider = alert.provider ?? 'claude';
+        return [
+          { id: 'check_now', provider },
+          { id: 'stop_waiting', provider, agents: alert.waiting ?? alert.agentIds.length },
+          ...open,
+        ];
+      }
       // While the SDK is still retrying there is nothing to press: the fix is the
       // network or the login, and the alert clears itself once the model answers.
       const stuck = alert.gaveUp ? mine.filter(resumable).map((a) => a.id) : [];

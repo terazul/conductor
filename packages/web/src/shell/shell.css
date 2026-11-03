@@ -776,6 +776,21 @@
   color: var(--need);
 }
 
+/* A provider down (Amendment 192): its agents wait for it. A click opens Needs You. */
+.sh-down {
+  font: inherit;
+  color: var(--need);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 5px;
+  cursor: pointer;
+}
+
+.sh-down:hover {
+  border-color: var(--need);
+}
+
 .sh-theme {
   font: inherit;
   color: var(--ink3);

@@ -50,6 +50,7 @@ import { preview } from '../preview/index.js';
 import { onServersChanged } from '../preview/registry.js';
 import { agentBudget, budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
+import { onOutageChanged, outages } from './outage.js';
 import { costMonth, costToday, dueNotes, getAgent, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend, providerSpend } from './store.js';
 import { DAILY_KEY, MONTHLY_KEY, dailyBudget, monthlyBudget, onCostChanged, providerBudgets, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
@@ -141,6 +142,8 @@ export class Alerts {
     );
     // An agent starts or stops waiting to be tried again (Amendment 123).
     this.#off.push(onRetryChanged(() => this.refresh()));
+    // An outage starts, is checked, lets an agent go or ends (Amendment 192).
+    this.#off.push(onOutageChanged(() => this.refresh()));
     // A job finished and was offered, or merged by itself (Amendment 144).
     this.#off.push(onFinishesChanged(() => this.refresh()));
     // A note due tomorrow is due today after midnight, with nothing else changing.
@@ -169,7 +172,7 @@ export class Alerts {
       ...this.#serversDown(),
       ...finishAlerts(this.#db),
     ].sort((a, b) => a.since.localeCompare(b.since));
-    return [...this.#daily(), ...this.#monthly(), ...this.#notesDue(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
+    return [...this.#daily(), ...this.#monthly(), ...this.#notesDue(), ...this.#outages(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
       (a) => !this.#dismissed(a.id),
     );
   }
@@ -448,6 +451,37 @@ export class Alerts {
         gaveUp,
       };
     });
+  }
+
+  /**
+   * Agents waiting for the model to come back (Amendment 192): one alert per provider, kind
+   * `connection`, for as long as anyone waits. Its id carries when the outage began, so a new
+   * outage is news again after one is dismissed. The card reads "can't reach the model since
+   * 14:02 — 6 agents waiting, next check 14:47", with retry now and stop waiting.
+   */
+  #outages(): Alert[] {
+    const endpoint = endpointHost();
+    const out: Alert[] = [];
+    for (const o of outages().list()) {
+      const group = o.agents.filter((a) => getAgent(this.#db, a.agentId));
+      if (group.length === 0) continue;
+      const since = new Date(o.since).toISOString();
+      out.push({
+        id: `connection:outage:${o.provider}:${since}`,
+        kind: 'connection',
+        cause: o.cause,
+        projectId: onlyOne(group.map((a) => a.projectId)),
+        jobId: onlyOne(group.map((a) => a.jobId)),
+        agentIds: group.map((a) => a.agentId),
+        since,
+        ...(endpoint && o.provider === 'claude' ? { endpoint } : {}),
+        provider: o.provider,
+        waiting: group.length,
+        ...(o.nextCheckAt !== null ? { nextCheckAt: new Date(o.nextCheckAt).toISOString() } : {}),
+        ...(o.notBefore !== null ? { limitResetsAt: new Date(o.notBefore).toISOString() } : {}),
+      });
+    }
+    return out;
   }
 
   /**
@@ -742,6 +776,8 @@ export function alerts(): Alerts {
 export function modelAnswered(agentId: string): void {
   // A real reply also starts the count of tries again from the first (Amendment 123).
   retryBook().answered(agentId);
+  // And, if it was the first an outage let go, the rest of it follow (Amendment 192).
+  outages().answered(agentId);
   instance?.modelAnswered(agentId);
 }
 

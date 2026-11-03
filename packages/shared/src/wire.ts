@@ -742,6 +742,8 @@ export interface SendConsoleToAgentResponse {
  *                   continue carries on, since no budget refuses anything now.
  *  - 'connection':  the model API is unreachable or refusing the login, or the retries
  *                   ran out. `cause` is a RetryCause. One alert per outage, not per agent.
+ *                   Since Amendment 192 also one per provider whose agents wait for it to
+ *                   come back (`provider`, `waiting`, `nextCheckAt`, `limitResetsAt`).
  *  - 'server_down': a dev server stopped answering and nobody asked it to stop.
  *  - 'blocked_dep': a queued agent is waiting on one that failed or was stopped
  *                   (Amendment 85). `agentIds` is the waiting agent, `blockedBy` the one
@@ -823,7 +825,11 @@ export interface Alert {
    */
   spent?: number;
   budget?: number;
-  /** monthly_budget (Amendment 188): the engine or route whose budget it is, as its setting's key (`claude/us`). */
+  /**
+   * monthly_budget (Amendment 188): the engine or route whose budget it is, as its setting's key
+   * (`claude/us`). connection, for an outage (Amendment 192): the engine it is, `claude`,
+   * `copilot` or `openrouter`.
+   */
   provider?: string;
   /** failed: what the SDK said, from the status event's `detail`. */
   detail?: string;
@@ -834,6 +840,14 @@ export interface Alert {
   blockedBy?: string;
   /** reconnecting (Amendment 123): when the next try starts, as an ISO time. */
   retryAt?: string;
+  /**
+   * connection, for a provider's outage (Amendment 192; `provider` says which, as the engine's
+   * key): how many agents wait in it, when the next check is (ISO), and, when the API said when
+   * to come back (a Retry-After, a usage limit's reset), that time (ISO). No check is before it.
+   */
+  waiting?: number;
+  nextCheckAt?: string;
+  limitResetsAt?: string;
   /** budget_over (Amendment 124), and an engine's monthly_budget (Amendment 188): what `spent` and `budget` count. Absent is dollars. */
   unit?: 'usd' | 'tokens';
   /**
@@ -1508,4 +1522,17 @@ export interface MetricsProject {
  */
 export interface StopRetryingResponse {
   agent: Agent;
+}
+
+/**
+ * A provider's outage (Amendment 192), keyed by its engine (`claude`, `copilot`, `openrouter`):
+ *  - POST /api/outages/:provider/retry-now: check now whether it answers, and resume one agent if
+ *    it does. `{ ok: true }`. 409, with the sentence in `detail`, when no agent waits for it, or
+ *    while everything is paused until a time.
+ *  - POST /api/outages/:provider/stop-waiting: every agent waiting for it ends `failed`, as its
+ *    run would have before the wait. 409 likewise when none waits.
+ * Each agent's own retry-now and stop-retrying (above) also answer for one that waits in an outage.
+ */
+export interface StopWaitingResponse {
+  agents: Agent[];
 }

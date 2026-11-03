@@ -49,3 +49,16 @@ export function retryDelaysText(seconds: readonly number[]): string {
  * The daemon's alert (daemon/src/session/retry.ts) and the page's line read this one figure.
  */
 export const RETRY_CARD_FROM = 1;
+
+/**
+ * The end of the note an agent is paused with while it waits for the model to come back
+ * (Amendment 192): its short tries are spent, and its provider's outage resumes it when a check
+ * answers. "can't reach the model — waiting for it to come back; it carries on by itself then".
+ * The daemon writes it (daemon/src/session/retry.ts `modelWaitNote`); the daemon and the page read it.
+ */
+export const MODEL_WAIT_SUFFIX = ' — waiting for it to come back; it carries on by itself then';
+
+/** Whether a paused agent's note says it is waiting for the model (Amendment 192). */
+export function isModelWaitNote(note: string | null | undefined): boolean {
+  return typeof note === 'string' && note.endsWith(MODEL_WAIT_SUFFIX);
+}

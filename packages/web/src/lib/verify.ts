@@ -19,10 +19,11 @@
  */
 
 import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
-import { PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, sparkline } from '@conductor/shared';
+import { MODEL_WAIT_SUFFIX, PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, rollupStatus, sparkline } from '@conductor/shared';
 import { PROVIDER_SPEND_NOTE, providerBudgetCell, providerSpendRows } from '../metrics/rules.js';
-import { alertNotice, monthlyNote } from '../attention/alerts.js';
-import { store } from './store.js';
+import { alertActions, alertNotice, monthlyNote } from '../attention/alerts.js';
+import { reconnectBar } from '../agent/reconnecting.js';
+import { rollupStatuses, store } from './store.js';
 import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
 import { readFileSync } from 'node:fs';
@@ -46,7 +47,9 @@ import {
   alertWord,
   currentAction,
   failureSentence,
+  isOutage,
   leftIn,
+  outageLine,
   projectNeeds,
   reconnectLine,
   reconnectTail,
@@ -54,6 +57,7 @@ import {
   retryHead,
   retryTail,
   retryingNow,
+  waitingForModel,
 } from '../shell/describe.js';
 import { confirmLine, doneLine, fmtBytes, storageLine } from '../diagnostics/storage.js';
 import { behindLine, buildTag, buildTitle, fmtWhen, type Build } from '../diagnostics/build.js';
@@ -1752,8 +1756,8 @@ console.log('\n37 · only a project you have not looked at since it finished say
   const project = src('../fleet/project.tsx');
   check('the Fleet card reads the rest and draws its stripe from it', /restOf\(status, agents\.length, unseen\.length > 0\)/.test(card) && /rest === 'status' \? key : 'idle'/.test(card));
   check('and its headline is the loud tag when unseen, else the quiet word', /\(finished \?\? \(\s*<Tag tone=\{rest === 'status' \? key : 'idle'\}>\{restWord\(rest\) \?\? STATUS_WORD\[status\]\}<\/Tag>/.test(card));
-  check('the Project screen does the same in its header and on each job group, and the group never says finished twice', /restOf\(status, agents\.length, jobs\.some\(finishedHere\)\)/.test(project) && /restOf\(worstOf\(agents\), agents\.length, finished\)/.test(project) && /\) : finished \? null : \(/.test(project));
-  check('no project-level tag draws STATUS_WORD for a done project without going through the rest', !/<Tag tone=\{STATUS_KEY\[(status|worstOf\(agents\))\]\}>\{STATUS_WORD/.test(card + project));
+  check('the Project screen does the same in its header and on each job group, and the group never says finished twice', /restOf\(status, agents\.length, jobs\.some\(finishedHere\)\)/.test(project) && /restOf\(worstOf\(agents, alerts\), agents\.length, finished\)/.test(project) && /\) : finished \? null : \(/.test(project));
+  check('no project-level tag draws STATUS_WORD for a done project without going through the rest', !/<Tag tone=\{STATUS_KEY\[(status|worstOf\(agents, alerts\))\]\}>\{STATUS_WORD/.test(card + project));
   check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
@@ -2054,9 +2058,121 @@ console.log('\n40 · a monthly budget for each engine and each Claude route, in 
   );
 }
 
+console.log('\n41 · an agent whose tries are spent waits for the model to come back, and says so (Amendment 192)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const T0 = Date.UTC(2026, 10, 2, 14, 2, 0);
+  const at = (ms: number): string => new Date(ms).toISOString();
+  const hm = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const ag = (id: string, status: AgentStatus): Agent => ({
+    id,
+    jobId: J,
+    projectId: P,
+    role: `role ${id}`,
+    model: 'claude-opus-5',
+    sdkSessionId: 'sess',
+    status,
+    blockMode: null,
+    costUsd: 1,
+    inputTokens: 10,
+    outputTokens: 10,
+    dependsOn: [],
+    autonomy: { mode: 'acceptEdits', allowedTools: [], disallowedTools: [], budgetUsd: 5 },
+    startedAt: null,
+    endedAt: null,
+  });
+  const waitNote = `can't reach the model${MODEL_WAIT_SUFFIX}`;
+  const waitEv = (provider = 'claude', cause: 'unreachable' | 'throttled' | 'server' = 'unreachable'): Event =>
+    ev({ kind: 'status', status: 'paused', error: waitNote, outage: { provider, cause, reason: 'api_error' } }, T0);
+  const outage = (over: Partial<Alert> = {}): Alert => ({
+    id: `connection:outage:claude:${at(T0)}`,
+    kind: 'connection',
+    cause: 'unreachable',
+    projectId: P,
+    jobId: J,
+    agentIds: ['o_1', 'o_2'],
+    since: at(T0),
+    provider: 'claude',
+    waiting: 2,
+    nextCheckAt: at(T0 + 45 * 60_000),
+    ...over,
+  });
+
+  check(
+    "the card's line: why, since when, who waits and the next check",
+    outageLine(outage()) === `can't reach the model since ${hm(T0)} — 2 agents waiting, next check ${hm(T0 + 45 * 60_000)}`,
+    outageLine(outage()),
+  );
+  check(
+    '"checking now" while a check runs, one agent in the singular, and a usage limit\'s reset',
+    outageLine(outage({ nextCheckAt: undefined, waiting: 1, cause: 'throttled', limitResetsAt: at(T0 + 3_600_000) })) ===
+      `the model is busy since ${hm(T0)} — 1 agent waiting, checking now, the limit resets at ${hm(T0 + 3_600_000)}`,
+    outageLine(outage({ nextCheckAt: undefined, waiting: 1, cause: 'throttled', limitResetsAt: at(T0 + 3_600_000) })),
+  );
+  check('a time it cannot read is a dash, not a throw', /since — /.test(outageLine(outage({ since: 'not a time' }))));
+  const agents = [ag('o_1', 'paused'), ag('o_2', 'paused')];
+  const title = alertTitle(outage(), agents);
+  check('its title is that line, then who waits', title.head === outageLine(outage()) && title.subject === 'role o_1 · role o_2', JSON.stringify(title));
+  check(
+    'the top bar says the provider is down; the SDK\'s own retries still read as before',
+    alertWord(outage()) === 'Claude down' && alertWord(outage({ provider: 'copilot' })) === 'Copilot down' &&
+      alertWord({ kind: 'connection', cause: 'unreachable' }) === 'no model API' && alertWord({ kind: 'connection', cause: 'unreachable', gaveUp: true }) === 'model API gave up',
+  );
+  check('an outage card is one that counts who waits', isOutage(outage()) && !isOutage({ kind: 'connection' }) && !isOutage({ kind: 'reconnecting', waiting: 1 }));
+  const acts = alertActions(outage(), agents);
+  check(
+    'its buttons: retry now and stop waiting, for the provider, then open; no dismiss, as it clears itself',
+    JSON.stringify(acts) === JSON.stringify([{ id: 'check_now', provider: 'claude' }, { id: 'stop_waiting', provider: 'claude', agents: 2 }, { id: 'open', agentId: 'o_1' }]),
+    JSON.stringify(acts),
+  );
+  const card = src('../attention/AlertCard.tsx');
+  check(
+    'the card runs them on the outage routes, says what each does, and has its own note',
+    /checkOutageNow\(a\.provider\)/.test(card) && /stopWaitingOutage\(a\.provider\)/.test(card) && /case 'check_now':\s*return 'retry now'/.test(card) && /case 'stop_waiting':\s*return 'stop waiting'/.test(card) &&
+      /a\.id === 'check_now' \|\|/.test(card) && /isOutage\(alert\) && \(/.test(card) && /alert\.kind === 'connection' && !isOutage\(alert\)/.test(card),
+  );
+  const ends = src('../agent/endpoints.ts');
+  check('…which are the daemon\'s', /`\/api\/outages\/\$\{encodeURIComponent\(provider\)\}\/retry-now`/.test(ends) && /`\/api\/outages\/\$\{encodeURIComponent\(provider\)\}\/stop-waiting`/.test(ends));
+
+  check('a paused agent whose last status is the wait is waiting for its provider', JSON.stringify(waitingForModel([waitEv()])) === '{"provider":"claude","cause":"unreachable"}');
+  check(
+    'a later status ends it, and a pause of yours is not it',
+    waitingForModel([waitEv(), ev({ kind: 'status', status: 'queued', error: 'the model answered a check — trying again' }, T0 + 1)]) === null &&
+      waitingForModel([ev({ kind: 'status', status: 'paused' }, T0)]) === null && waitingForModel([]) === null &&
+      waitingForModel([waitEv(), ev({ kind: 'text', text: 'hi' }, T0 + 1)])?.provider === 'claude',
+  );
+  const line = currentAction(ag(A, 'paused'), [waitEv()], [], [], T0 + 1_000);
+  check('the agent line says it waits for the model, and that it carries on by itself; amber', line.head === 'waiting for the model' && line.subject === 'Claude — it carries on by itself' && line.tone === 'need', JSON.stringify(line));
+  check('a paused agent that is not waiting still reads paused', currentAction(ag(A, 'paused'), [], [], [], T0).head === 'paused');
+  const bar = reconnectBar(ag(A, 'paused'), [waitEv('copilot', 'server')], T0);
+  check(
+    "the agent screen's bar: waiting for the provider to come back, and why",
+    bar !== null && bar.waiting && bar.needs && bar.text === 'Waiting for Copilot to come back' && bar.why.startsWith('the model API is failing — ') && /it carries on by itself when it answers$/.test(bar.why),
+    JSON.stringify(bar),
+  );
+  check('…none for a paused agent that is not waiting, and the retry bar is as it was', reconnectBar(ag(A, 'paused'), [], T0) === null && reconnectBar(ag(A, 'queued'), [ev({ kind: 'status', status: 'queued', error: 'x', retry: { cause: 'unreachable', attempt: 1, of: 5, delayMs: 5_000 } }, T0)], T0)?.waiting === false);
+  const rc = src('../agent/Reconnect.tsx');
+  check('its buttons say retry now and stop waiting, on the agent\'s own routes', /bar\.waiting \?/.test(rc) && />\s*stop waiting\s*</.test(rc) && /retryNowAgent\(agent\.id\)/.test(rc) && /stopRetryingAgent\(agent\.id\), 'stopped waiting — it is failed'/.test(rc));
+
+  const mixed = [ag('o_1', 'paused'), ag('o_2', 'paused'), ag('p_mine', 'paused'), ag('d_1', 'done')];
+  const rolled = rollupStatuses(mixed, [outage()]);
+  check('an agent waiting in an outage counts as at work for its job and project; a pause of yours does not', rolled.join() === 'working,working,paused,done' && rollupStatus(rollupStatuses([ag('o_1', 'paused'), ag('d_1', 'done')], [outage()])) === 'working', rolled.join());
+  check('…and once the card is gone it reads paused again', rollupStatuses(mixed, []).join() === 'paused,paused,paused,done' && rollupStatuses(mixed, [outage({ waiting: undefined })]).join() === 'paused,paused,paused,done');
+  const store = src('./store.ts');
+  const project = src('../fleet/project.tsx');
+  check(
+    'the Fleet card, the job and the project read through it',
+    /rollupStatus\(rollupStatuses\(s\.agents\.filter\(\(a\) => a\.projectId === projectId\), s\.alerts\)\)/.test(store) && /rollupStatus\(rollupStatuses\(s\.agents\.filter\(\(a\) => a\.jobId === jobId\), s\.alerts\)\)/.test(store) &&
+      /rollupStatus\(rollupStatuses\(agents, alerts\)\)/.test(project),
+  );
+  const shell = src('../shell/shell.tsx');
+  check('the status bar says a provider is down on every screen, and opens Needs You', /useAlerts\(\)\.filter\(isOutage\)/.test(shell) && /className="sh-down"/.test(shell) && /⚠ \{providerLabel\(a\.provider\)\} down/.test(shell) && /onClick=\{\(\) => openAttention\(\)\}/.test(shell));
+  check('…in the warning colour', /\.sh-down\s*\{[^}]*color: var\(--need\)/.test(src('../shell/shell.css')));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

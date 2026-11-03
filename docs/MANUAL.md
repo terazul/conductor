@@ -894,6 +894,7 @@ below the requests, one card each, and each card's first button is the one that 
 | **Paused by its budget** | An agent a budget paused, or held for its job's budget, before budgets only warned. Nothing pauses for a budget now, so you only see this for an agent that was already paused then. | **continue**, which carries it on as it is, with no raise first, or open it. Nothing continues it by itself, at midnight or at any other time. |
 | **Model API** | The model API isn't answering: the network, your login, or an outage. | Nothing while Claude Code is still retrying. The alert clears itself once the model answers. If it gives up, **retry** wakes the agents it stopped. |
 | **Reconnecting** | The model couldn't be reached and Conductor is going to try again for you: *Reconnecting in 30 s (3 of 5)*. It appears from the first try, and chimes like any alert (see "When the model can't be reached", §7). | **retry now** tries at once. **stop retrying** gives up and the agent ends failed. Open the agent. It goes away by itself when the try starts. |
+| **Claude down** (or **Copilot down**, **OpenRouter down**) | Agents whose short tries are spent are waiting for the model to come back: one card for the provider, however many wait, *can't reach the model since 14:02 — 6 agents waiting, next check 14:47*. When the API said when it would answer again (a usage limit's reset), the card says that too, and nothing is checked before then. The status bar says **⚠ Claude down** on every screen while it lasts (see "When the model stays down", §7). | **retry now** checks the model at once; if it answers, the agent that has waited longest goes. **stop waiting** gives up: every agent in it ends failed. Open the first agent. There is no dismiss: it goes away by itself once they are all running again. |
 | **Dev server down** | A dev server an agent started has stopped answering. | Open its preview, or dismiss. |
 | **Daily budget** | Today's spend reached the daily budget set in Settings. | A warning only: nothing is stopped. Change the budget in Settings. |
 | **Monthly budget** | This month's spend reached the monthly budget set in Settings, or a project's own, set from its Fleet card's **Edit** (that card names the project), or an engine's or a Claude route's, from Settings' **monthly budget by provider** (the card names it: **Copilot**, **Claude · us**). The card says what was spent this month and the budget, in tokens for Copilot and OpenRouter. | A warning only: agents keep going. Raise the budget, or stop agents yourself, or dismiss it. Dismissing lasts the month; on the 1st a new month starts clean. |
@@ -1584,11 +1585,45 @@ Claude, GitHub Copilot and OpenRouter agents.
   delay (5 s by default). An
   error message that the SDK writes in the model's place is not a reply. What a retry spends
   counts against the agent's budget like any run.
-- After the last try fails (the fifth, by default), the agent is **failed**, as it always was, and
-  Needs You says so. **stop retrying** does the same at once. Continuing a failed agent gives it
-  its tries again.
-- **Retries do not survive a restart.** The daemon forgets the waits, and an agent that was
-  waiting resumes on its own like one the restart interrupted, with all its tries again.
+- After the last try fails (the fifth, by default), the agent is **not failed**: it waits for the
+  model to come back (below). **stop retrying** gives up at once, and the agent ends failed.
+  Continuing a failed agent gives it its tries again.
+- **Short tries do not survive a restart.** The daemon forgets them, and an agent that was
+  waiting for one resumes on its own like one the restart interrupted, with all its tries again.
+  An agent waiting for the model does survive one: see below.
+
+**When the model stays down.** Conductor never gives up on the model by itself. Once an agent's
+short tries are spent it is **paused**, and its transcript says *can't reach the model — waiting
+for it to come back; it carries on by itself then*. Every agent on that provider that gets this
+far waits in one outage, and Conductor checks the provider itself, without starting the agents:
+**30 s, 1, 2, 5 and 15 min** after the outage began, then **every 15 min**, for as long as it
+takes. The check asks the provider for its list of models, which costs nothing and starts no
+agent.
+
+- When a check answers, the agent that has waited longest goes first, alone, in its own session,
+  told the model couldn't be reached. Once the model answers it, the rest follow, 5 s apart, so a
+  fleet doesn't land on a provider that has only just come back. If that first agent fails
+  again, they all keep waiting, and the next check is a step further on the schedule, not back
+  at 30 s.
+- While it waits, the agent holds **no slot** and spends nothing. Its **job stays running**, on
+  Fleet, the Project screen and its own header, and its own line says *waiting for the model*.
+  Needs You has one card for the provider (above), and the status bar says **⚠ Claude down**.
+- **A throttle says when.** When the API said when it will answer again (a `Retry-After`, or
+  Claude's usage limit and its reset time), nothing is checked before then, and the card says
+  *the limit resets at 15:00*. A throttle that ends later than the next short try would come
+  goes straight to the wait, without the short tries.
+- A new agent launched while the outage lasts makes its short tries first, in case the trouble
+  has cleared, then joins the wait.
+- The Agent screen shows *Waiting for Claude to come back* above the transcript, with **retry
+  now** (check now) and **stop waiting** (this agent alone ends failed). **▶ resume**, or a
+  message you send it, starts it at once, out of the wait.
+- A laptop that slept through the schedule checks within a minute of waking. **Pause all until**
+  leaves waiting agents as they are and starts none of them before its time; when it ends, the
+  model is checked at once.
+- **It survives a restart.** The daemon puts every agent that was waiting back in the wait, from
+  when it began, and checks at once.
+- What still fails at once, for you to fix: a login or billing problem, and an error the model
+  would give the same way every time, such as a bad request or a model that no longer exists.
 
 **Stopping an agent**, in increasing order of finality, all on the Agent screen (`3`):
 

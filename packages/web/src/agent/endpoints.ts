@@ -32,6 +32,7 @@ import type {
   SetAutonomyResponse,
   SetModelRequest,
   SetModelResponse,
+  StopWaitingResponse,
 } from '@conductor/shared';
 
 const agentPath = (agentId: string, verb: string) =>
@@ -97,6 +98,19 @@ export function retryNowAgent(agentId: string): Promise<unknown> {
 /** Give up waiting: the agent ends `failed`, as it did before retries (Amendment 123). */
 export function stopRetryingAgent(agentId: string): Promise<{ agent: Agent }> {
   return api(agentPath(agentId, 'stop-retrying'), { method: 'POST', body: {} });
+}
+
+/**
+ * A provider's outage (Amendment 192): check it now, and resume the agent that has waited
+ * longest if it answers.
+ */
+export function checkOutageNow(provider: string): Promise<unknown> {
+  return api(`/api/outages/${encodeURIComponent(provider)}/retry-now`, { method: 'POST', body: {} });
+}
+
+/** Stop waiting for it: every agent in the outage ends `failed` (Amendment 192). */
+export function stopWaitingOutage(provider: string): Promise<StopWaitingResponse> {
+  return api(`/api/outages/${encodeURIComponent(provider)}/stop-waiting`, { method: 'POST', body: {} });
 }
 
 /**

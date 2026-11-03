@@ -19,7 +19,7 @@
  */
 
 import { onSettingsChanged, readSettings } from '../settings.js';
-import { PERSONAS_KEY, branchTargetKey, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
+import { PERSONAS_KEY, branchTargetKey, isModelWaitNote, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
 import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
 import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
@@ -39,6 +39,7 @@ import type {
   Project,
   Rewired,
   RerunResponse,
+  RetryCause,
   Snapshot,
 } from '@conductor/shared';
 import {
@@ -94,7 +95,8 @@ import { rerunNote, rerunStatusNote } from './rerun.js';
 import { recordRunEnd } from './metrics.js';
 import type { AgentBackend } from './backend.js';
 import { createBackend } from './backends/index.js';
-import { decideRetry, onRetryDue, retryBook, retryNote, type ApiFailure } from './retry.js';
+import { decideRetry, modelWaitNote, onRetryDue, retryBook, retryNote, type ApiFailure } from './retry.js';
+import { onOutageResume, outages, type ResumeAnswer } from './outage.js';
 import {
   agentsForJob,
   agentsThatSpentOn,
@@ -253,6 +255,9 @@ export const SLOT_WAIT_NOTE = 'waiting for a slot — your message goes when one
  * cancelling one sent after it must not undo this.
  */
 export const SLOT_RESUME_NOTE = 'waiting for a slot — it carries on when one frees';
+
+/** Why an agent that waited for the model is queued again (Amendment 192): its provider answered. */
+export const OUTAGE_RESUME_NOTE = 'the model answered a check — trying again';
 
 /**
  * Why an agent can't run: the folder its job works in is gone (Amendment 114). Removed by
@@ -461,6 +466,8 @@ export class Supervisor implements AgentControl {
     // A wait for the model is over, by its time or by `retry now` (Amendment 123): the agent is
     // queued, so pump starts it when there is a slot, as it starts any queued agent.
     onRetryDue(() => this.pump());
+    // Its provider answered a check, or the canary was answered (Amendment 192): resume it.
+    onOutageResume((agentId) => this.fromOutage(agentId));
   }
 
   // ── snapshot ──────────────────────────────────────────────────────────────
@@ -514,6 +521,23 @@ export class Supervisor implements AgentControl {
       if (last?.payload.kind === 'status' && last.payload.status === 'queued' && last.payload.retry) {
         this.#restarted.add(agent.id);
       }
+    }
+    // One that was waiting for the model to come back (Amendment 192) waits again, in its
+    // provider's outage, since when it began, so the first check is at once. Not told RESTART_NUDGE: it was not
+    // mid-run. When the outage resumes it, it is told RETRY_NUDGE, as after any wait.
+    for (const agent of listAgents(this.#db)) {
+      if (agent.status !== 'paused' || !getJob(this.#db, agent.jobId)) continue;
+      const wait = this.#modelWait(agent.id);
+      if (!wait) continue;
+      const since = Date.parse(wait.ts);
+      outages().join({
+        provider: wait.provider,
+        agentId: agent.id,
+        projectId: agent.projectId,
+        jobId: agent.jobId,
+        cause: wait.cause,
+        ...(Number.isFinite(since) ? { since } : {}),
+      });
     }
     if (fixed > 0) {
       console.log(`[supervisor] reconciled ${fixed} agent(s) left working by a hard stop`);
@@ -1148,6 +1172,7 @@ export class Supervisor implements AgentControl {
 
     // Started by pump when its wait ended, or by something else first: either way no longer waiting.
     retryBook().cancel(agentId);
+    outages().started(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
 
@@ -1455,6 +1480,8 @@ export class Supervisor implements AgentControl {
   /** Its waits and its count both go, and the nudge it would have been told. */
   #forgetRetries(agentId: string): void {
     retryBook().forget(agentId);
+    // And its wait for the model to come back, if it was in an outage (Amendment 192).
+    outages().leave(agentId);
     this.#retryRuns.delete(agentId);
   }
 
@@ -1481,10 +1508,15 @@ export class Supervisor implements AgentControl {
       // A run you ended returned before this.
       userStopped: false,
       used: retryBook().used(agent.id),
+      now: Date.now(),
     });
     if (!verdict.retry) return false;
     // A job being stopped starts nothing by itself.
     if (this.#halting.has(agent.jobId) || !getJob(this.#db, agent.jobId)) return false;
+    if (verdict.retry === 'outage') {
+      this.#waitForModel(agent, verdict.cause, outcome, verdict.retryAt);
+      return true;
+    }
 
     const wait = retryBook().wait(verdict, {
       agentId: agent.id,
@@ -1508,6 +1540,126 @@ export class Supervisor implements AgentControl {
     return true;
   }
 
+  // ── waiting for the model to come back (Amendment 192) ──────────────────
+
+  /**
+   * The short tries are spent, or the API said to come back later than the next one: the agent
+   * is paused with `modelWaitNote` and joins its provider's outage (./outage.ts), which checks
+   * the provider and resumes it (`fromOutage`) when it answers. Its slot is free and its job
+   * stays running (`#waitsForModel`). The status event carries the provider, the cause and how
+   * the run ended, so `stop waiting` fails it as the run would have, and `reconcile` rejoins it
+   * after a restart.
+   */
+  #waitForModel(
+    agent: Agent,
+    cause: RetryCause,
+    outcome: { terminalReason: string | null; errorDetail?: string | null },
+    retryAt: number | undefined,
+  ): void {
+    retryBook().cancel(agent.id);
+    this.#retryRuns.delete(agent.id);
+    const provider = getAgentProvider(this.#db, agent.id) ?? 'claude';
+    setAgentStatus(this.#db, agent.id, 'paused');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
+      {
+        kind: 'status',
+        status: 'paused',
+        error: modelWaitNote(cause),
+        outage: { provider, cause, reason: outcome.terminalReason },
+        ...(outcome.errorDetail ? { detail: outcome.errorDetail } : {}),
+      },
+    );
+    outages().join({
+      provider,
+      agentId: agent.id,
+      projectId: agent.projectId,
+      jobId: agent.jobId,
+      cause,
+      ...(retryAt !== undefined ? { retryAt } : {}),
+    });
+    this.#pushEntities({ agents: [getAgent(this.#db, agent.id)!] });
+  }
+
+  /**
+   * Its outage let it go: a check answered, or the canary was answered. It is queued with its
+   * session and told RETRY_NUDGE, as after any wait; its short tries stay spent, so failing
+   * again puts it straight back in the outage. 'held' while everything is paused until a time,
+   * 'gone' when it is no longer waiting (you resumed, stopped or removed it). Public, as `pump`
+   * is, so a check that built a second Supervisor can point the outage's handler back.
+   */
+  fromOutage(agentId: string): ResumeAnswer {
+    if (this.#hold) return 'held';
+    const agent = getAgent(this.#db, agentId);
+    if (!agent || !this.#waitsForModel(agent) || !getJob(this.#db, agent.jobId)) return 'gone';
+    retryBook().spent(agentId);
+    this.#retryRuns.add(agentId);
+    this.#reopenJob(agent.jobId);
+    setAgentStatus(this.#db, agentId, 'queued');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId },
+      { kind: 'status', status: 'queued', error: OUTAGE_RESUME_NOTE },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    this.pump();
+    return 'resumed';
+  }
+
+  /** The last status event of an agent waiting for the model: what it waits for, and how its run ended. */
+  #modelWait(agentId: string): { provider: string; cause: RetryCause; reason: string | null; detail: string | null; ts: string } | null {
+    const last = eventLog().forAgent(agentId).filter((e) => e.payload.kind === 'status').at(-1);
+    if (last?.payload.kind !== 'status' || last.payload.status !== 'paused' || !last.payload.outage) return null;
+    return { ...last.payload.outage, detail: last.payload.detail ?? null, ts: last.ts };
+  }
+
+  /** `stop waiting` for one agent: it ends `failed`, as the run that failed would have ended it. */
+  #stopWaiting(agent: Agent): void {
+    const wait = this.#modelWait(agent.id);
+    outages().leave(agent.id);
+    this.#forgetRetries(agent.id);
+    setAgentStatus(this.#db, agent.id, 'failed');
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
+      {
+        kind: 'status',
+        status: 'failed',
+        error: wait?.reason ?? 'error',
+        ...(wait?.detail ? { detail: wait.detail } : {}),
+      },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agent.id)!] });
+  }
+
+  /**
+   * `retry now` on an outage's card: check the provider at once, and resume the first agent if
+   * it answers. Refused when nobody waits for it, or while everything is paused until a time.
+   */
+  checkProvider(provider: string): void {
+    if (outages().get(provider) === undefined) throw new RetryRefusedError(`No agent is waiting for ${provider}.`);
+    if (this.#hold) throw new RetryRefusedError('Everything is paused until the scheduled time, so nothing starts yet.');
+    outages().checkNow(provider);
+  }
+
+  /** `stop waiting` on an outage's card: every agent in it ends `failed`. Refused when nobody waits. */
+  stopWaiting(provider: string): Agent[] {
+    const o = outages().get(provider);
+    if (!o) throw new RetryRefusedError(`No agent is waiting for ${provider}.`);
+    const jobs = new Set<string>();
+    const ended: Agent[] = [];
+    for (const a of o.agents) {
+      const agent = getAgent(this.#db, a.agentId);
+      if (!agent) {
+        outages().leave(a.agentId);
+        continue;
+      }
+      this.#stopWaiting(agent);
+      jobs.add(agent.jobId);
+      ended.push(getAgent(this.#db, agent.id)!);
+    }
+    for (const id of jobs) this.#rollUpJob(id);
+    return ended;
+  }
+
   /**
    * `retry now`: stop waiting and try again at once. The agent is queued, so it starts when a
    * slot is free. Refused, with a sentence, when it is not waiting, or while everything is
@@ -1516,6 +1668,9 @@ export class Supervisor implements AgentControl {
   retryNow(agentId: string): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) throw new Error('no such agent');
+    // Waiting for the model to come back (Amendment 192): its provider is checked now.
+    const provider = outages().of(agentId);
+    if (provider !== undefined && this.#waitsForModel(agent)) return this.checkProvider(provider);
     if (!retryBook().waiting(agentId)) throw new RetryRefusedError(`${agent.role} is not waiting to retry.`);
     if (this.#hold) throw new RetryRefusedError('Everything is paused until the scheduled time, so nothing starts yet.');
     // Fires the same handler as its timer: pump().
@@ -1530,6 +1685,12 @@ export class Supervisor implements AgentControl {
   stopRetrying(agentId: string): Agent {
     const agent = getAgent(this.#db, agentId);
     if (!agent) throw new Error('no such agent');
+    // Waiting for the model to come back (Amendment 192): stop waiting, for this agent alone.
+    if (this.#waitsForModel(agent)) {
+      this.#stopWaiting(agent);
+      this.#rollUpJob(agent.jobId);
+      return getAgent(this.#db, agentId)!;
+    }
     const wait = retryBook().waiting(agentId);
     if (!wait) throw new RetryRefusedError(`${agent.role} is not waiting to retry.`);
     this.#forgetRetries(agentId);
@@ -1932,6 +2093,14 @@ export class Supervisor implements AgentControl {
     hub().broadcast({ type: 'resync' });
   }
 
+  /**
+   * Paused waiting for the model to come back (Amendment 192): not settled, since it carries on
+   * by itself, so its job reads as running while it waits.
+   */
+  #waitsForModel(agent: Agent): boolean {
+    return agent.status === 'paused' && isModelWaitNote(lastStatusNote(this.#db, agent.id));
+  }
+
   /** A job is done when none of its agents can still make progress. */
   #rollUpJob(jobId: string): void {
     const agents = agentsForJob(this.#db, jobId);
@@ -1950,7 +2119,7 @@ export class Supervisor implements AgentControl {
       (a) =>
         a.status === 'done' ||
         a.status === 'failed' ||
-        a.status === 'paused' ||
+        (a.status === 'paused' && !this.#waitsForModel(a)) ||
         a.status === 'stopped' ||
         isStuck(a, agents),
     );
@@ -2072,6 +2241,8 @@ export class Supervisor implements AgentControl {
     }
     // Yours, not ours: a new task, so the helpers of the last one go (Amendment 167).
     if (!synthetic) this.#clearFinishedHelpers(agent);
+    // Waiting for the model to come back, it is yours now: out of the wait, with its short tries again (Amendment 192).
+    if (this.#waitsForModel(agent)) this.#forgetRetries(agentId);
 
     /*
      * Every slot taken, or one of yours already waiting, which goes first (Amendment 168): it
@@ -2315,6 +2486,7 @@ export class Supervisor implements AgentControl {
 
     // You wrote to an agent that was waiting for the model: that is its try, with your words (Amendment 123).
     retryBook().cancel(agentId);
+    outages().started(agentId);
     this.#active.add(agentId);
     this.#pushSlots();
 
@@ -2590,6 +2762,8 @@ export class Supervisor implements AgentControl {
       if (a?.status === 'done') this.#sendWhenDone(a);
     }
     this.pump();
+    // An outage may have answered while everything was paused, and resumed nobody: check now (Amendment 192).
+    for (const o of outages().list()) outages().checkNow(o.provider);
     return woke;
   }
 
@@ -2600,6 +2774,8 @@ export class Supervisor implements AgentControl {
   resumeAgent(agentId: string): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent || agent.status !== 'paused') return;
+    // ▶ on an agent waiting for the model (Amendment 192): it goes now, out of the outage.
+    outages().leave(agentId);
 
     this.#goWithout(agent);
 
@@ -2867,6 +3043,8 @@ export class Supervisor implements AgentControl {
   async shutdown(): Promise<void> {
     // Waits for the model are not saved: a restart resumes those agents as any other (Amendment 123).
     retryBook().clear();
+    // Nor the outages (Amendment 192): `reconcile` rejoins their agents from the event log.
+    outages().clear();
     for (const id of this.#runners.keys()) this.#userStopped.add(id);
     await Promise.allSettled([...this.#runners.values()].map((r) => r.stop()));
   }

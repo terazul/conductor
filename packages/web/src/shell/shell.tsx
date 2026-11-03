@@ -35,7 +35,8 @@ import {
   useProjects,
   useStatusBar,
 } from '../lib/store.js';
-import { alertWord } from './describe.js';
+import { alertWord, isOutage } from './describe.js';
+import { providerLabel } from '../lib/providers.js';
 import { openAttention } from './nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { Navigator, useRoute } from './Navigator.js';
@@ -251,6 +252,8 @@ function StatusBar() {
   const build = useBuild();
   const status = useFeedStatus();
   const { slots, costToday, costMonth, seq } = useStatusBar();
+  // A provider no agent can reach (Amendment 192): its agents wait, and this says so on every screen.
+  const down = useAlerts().filter(isOutage);
   return (
     <footer className="sh-statusbar">
       <span>
@@ -268,6 +271,11 @@ function StatusBar() {
       <DockButton />
       <span className="sh-right">
         <PauseAll />
+        {down.map((a) => (
+          <button key={a.id} type="button" className="sh-down" title={`${a.waiting ?? 0} waiting — open Needs You`} onClick={() => openAttention()}>
+            ⚠ {providerLabel(a.provider)} down
+          </button>
+        ))}
         <span>seq {seq}</span>
         <span>
           {slots.used}/{slots.total} agent slots
