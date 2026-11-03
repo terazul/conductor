@@ -22,11 +22,14 @@ the last of it on 12 Oct).
 
 - [x] **View files that are HTML pages.** Asked for (3 Nov): *"add support for viewing files that are html
   pages."* Decided with the user: the page's scripts run, sandboxed.
-  *Done (3 Nov): Amendment 198 (`.html` and `.htm` open rendered in a sandboxed frame from
-  `/api/jobs/:jobId/page/*` and its project-folder twin; the page's CSS, images, classic scripts and CDN
-  libraries load, but it has an opaque origin, `connect-src 'none'`, no forms, popups or top navigation, and
-  the guard refuses its `Origin: null`; raw and diff as before). Not done: a module script or font file
-  beside the page is refused (CDN copies work); a change to only its CSS or JS reloads on ↻.*
+  *Done (3 Nov): Amendment 198 (`.html` and `.htm` open rendered in a sandboxed frame, under a random token
+  the pane mints for the page's root (`POST /api/pages`, then `/api/pages/<token>/*`). The page's CSS, images,
+  classic scripts and CDN libraries load. It has an opaque origin, `connect-src 'none'`, no forms, popups or
+  top navigation, and a policy that lets it load nothing else from Conductor's origin: not another job's
+  files, `/preview` or Vite's `/@fs`. The guard refuses its `Origin: null`. Raw and diff work as before).
+  Sent back once: the first routes named the job, so a page could run another job's script. Not done: a
+  module script or font file beside the page is refused (CDN copies work); a change to only its CSS or JS
+  reloads on ↻; a page doesn't load with `CONDUCTOR_TOKEN` set.*
 
 - [x] **The browser tab's icon is hard to see.** Asked for (3 Nov): *"the browser tab icon is not very
   distinct, it is hard to see."* It was a 4px grey bar on nothing.

@@ -51,6 +51,7 @@ import { Watcher } from './watcher.js';
 import { canonicalRoot, relativePosix, resolveEntry, resolveForRead, resolveForWrite } from './paths.js';
 import { MAX_TEXT_BYTES, looksBinary, ownerOf, scanChanges } from './changes.js';
 import { buildTree } from './tree.js';
+import { PageTokens, type PageRoot } from './pages.js';
 import { isMarkdown, renderMarkdown } from './markdown.js';
 import { diff as gitDiff, diffUntracked, isRepo, readBlob, status, storedCopy, trackedCount } from './git.js';
 
@@ -114,6 +115,12 @@ const PAGE_TYPES: Record<string, string> = {
  */
 const MAX_PAGE_BYTES = MAX_IMAGE_BYTES;
 
+/** What a page's token can be minted for: the page itself, not what it loads. */
+const HTML_TYPES: Record<string, string> = {
+  '.html': PAGE_TYPES['.html']!,
+  '.htm': PAGE_TYPES['.htm']!,
+};
+
 /** Carries the HTTP status so the route layer stays a thin translation. */
 export class WorkspaceError extends Error {
   readonly status: number;
@@ -137,6 +144,7 @@ export class WorkspaceService {
   #db: Db;
   #store: WorkspaceStore;
   #lock = new KeyedLock();
+  #pages = new PageTokens();
   #mgr: WorktreeMgr;
   #watchers = new Map<string, Watcher>();
   #unsubscribe: (() => void) | null = null;
@@ -394,16 +402,38 @@ export class WorkspaceService {
   }
 
   /**
-   * A file of an HTML page, for the Files pane's sandboxed frame (Amendment 198): the page
-   * itself, or something it loads by a relative URL. `image`'s rules exactly, with
-   * `PAGE_TYPES` for its list; the route adds the headers that keep the page in its box.
+   * Mint the token an HTML page is served under (Amendment 198, pages.ts): the root by the
+   * same gate as every read (`resolve`, or `dirRoot` for a project's folder), and the page by
+   * `served`'s rules with only `.html` and `.htm` on the list, so a token is never minted for a
+   * file the pane wouldn't frame. Returns the token and the URL the frame loads.
    */
-  async page(jobId: string, relPath: string): Promise<{ buf: Buffer; mime: string }> {
-    return this.pageOf(this.resolve(jobId), relPath);
+  mintPage(root: PageRoot, relPath: string): { token: string; url: string } {
+    checkServable(this.#pageRoot(root), relPath, HTML_TYPES, MAX_PAGE_BYTES, 'an HTML page');
+    const token = this.#pages.mint(root);
+    const at = relPath.split('/').map(encodeURIComponent).join('/');
+    return { token, url: `/api/pages/${token}/${at}` };
   }
 
-  async pageOf(ws: WorkspaceRecord, relPath: string): Promise<{ buf: Buffer; mime: string }> {
-    return served(ws, relPath, PAGE_TYPES, MAX_PAGE_BYTES, 'a file a page can load');
+  /**
+   * A file of a page, for the Files pane's sandboxed frame: the page itself, or something it
+   * loads by a relative URL, under the token's root and nowhere else. `image`'s rules exactly,
+   * with `PAGE_TYPES` for its list; the route adds the headers that keep the page in its box.
+   * An unknown or expired token is a 404, as a missing file is. The root is resolved again each
+   * time, so a workspace removed since is a 410 and a folder taken off the project a 404.
+   */
+  pageByToken(token: string, relPath: string): { buf: Buffer; mime: string } {
+    const root = this.#pages.lookup(token);
+    if (!root) throw new WorkspaceError(404, 'no such page — open it again from the Files pane');
+    return served(this.#pageRoot(root), relPath, PAGE_TYPES, MAX_PAGE_BYTES, 'a file a page can load');
+  }
+
+  /** For the verify script: the token store, to check its bound and expiry. */
+  get pages(): PageTokens {
+    return this.#pages;
+  }
+
+  #pageRoot(root: PageRoot): WorkspaceRecord {
+    return root.kind === 'job' ? this.resolve(root.jobId) : this.dirRoot(root.projectId, root.dir);
   }
 
   async file(jobId: string, relPath: string): Promise<FileContentResponse> {
@@ -993,7 +1023,7 @@ const plural = (n: number, word: string): string => `${n.toLocaleString('en')} $
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * A file's bytes and its type, by an extension list: `image` and `page`.
+ * A file's bytes and its type, by an extension list: `image` and a page's files.
  *
  * Containment is `resolveForRead`, exactly as for text — these routes reach the filesystem,
  * so they get the same gate and no second implementation of it. The extension decides the
@@ -1008,6 +1038,18 @@ function served(
   cap: number,
   what: string,
 ): { buf: Buffer; mime: string } {
+  const { abs, mime } = checkServable(ws, relPath, types, cap, what);
+  return { buf: readFileSync(abs), mime };
+}
+
+/** `served`'s checks without the read: what minting a page's token asks of it. */
+function checkServable(
+  ws: WorkspaceRecord,
+  relPath: string,
+  types: Record<string, string>,
+  cap: number,
+  what: string,
+): { abs: string; mime: string } {
   const abs = resolveForRead(ws.path, relPath);
   const mime = types[extname(abs).toLowerCase()];
   if (!mime) throw new WorkspaceError(415, `${relPath} is not ${what}`);
@@ -1025,7 +1067,7 @@ function served(
       `${relPath} is ${(st.size / 1024 / 1024).toFixed(1)} MB — too large to show in the pane`,
     );
   }
-  return { buf: readFileSync(abs), mime };
+  return { abs, mime };
 }
 
 /** Where a symlink points when nothing is there. Null for anything that isn't a link. */

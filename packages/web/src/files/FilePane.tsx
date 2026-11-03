@@ -33,8 +33,10 @@
  *
  * An HTML file renders too (Amendment 198), as the page it is, in a frame whose scripts
  * run sandboxed: `PAGE_SANDBOX` below, and the policy the daemon sends with it
- * (routes/workspace.ts, `PAGE_CSP`). Its own links and loads are its own, so nothing above
- * rewrites them; the column and the PDF stay markdown's.
+ * (routes/workspace.ts, `pageCsp`). Its URL is a token the daemon mints for its root
+ * (`usePageSrc`), so what it loads beside it is its own folder's and no other's. Its own
+ * links and loads are its own, so nothing above rewrites them; the column and the PDF stay
+ * markdown's.
  */
 
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
@@ -45,7 +47,7 @@ import { headingSlugs, rawAround, resolveDocLink } from './links.js';
 import { printRendered } from './print.js';
 import type { View } from './tabs.js';
 import { lineShown, putEdit, takeFocus, useEdit, useScrollMemory, useWantedLine } from './useTabs.js';
-import { imageUrl, isImagePath, isPagePath, pageUrl, since, useFileRevision, writeFile } from './useWorkspace.js';
+import { imageUrl, isImagePath, isPagePath, since, useFileRevision, usePageSrc, writeFile } from './useWorkspace.js';
 import { errorText } from '../lib/errors.js';
 import { hrefFor, navigate } from '../lib/nav.js';
 import { SCREEN } from '../shell/nav.js';
@@ -135,6 +137,8 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
   // project folder, which has no events, still reloads.
   const pageRev = useFileRevision(jobId, file.path);
   const framed = page && shown === 'rendered' && !editing && file.raw.length > 0;
+  // Its token's URL (Amendment 198), minted for this page and asked again as the revision moves.
+  const framedAt = usePageSrc(jobId, file.path, framed ? `${pageRev}.${digest(file.raw)}` : '', framed);
 
   useScrollMemory(body, tabKey, editing ? null : shown);
 
@@ -443,13 +447,17 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
               Runs sandboxed: its scripts run, but it can&rsquo;t reach Conductor, send
               requests, submit forms or open windows.
             </div>
-            <iframe
-              className="c5-page"
-              src={pageUrl(jobId, file.path, `${pageRev}.${digest(file.raw)}`)}
-              sandbox={PAGE_SANDBOX}
-              referrerPolicy="no-referrer"
-              title={`${file.path}, rendered`}
-            />
+            {framedAt.src ? (
+              <iframe
+                className="c5-page"
+                src={framedAt.src}
+                sandbox={PAGE_SANDBOX}
+                referrerPolicy="no-referrer"
+                title={`${file.path}, rendered`}
+              />
+            ) : (
+              <div className="c5-note">{framedAt.error ? `Couldn’t open the page: ${framedAt.error}` : 'Opening the page…'}</div>
+            )}
           </>
         ) : shown === 'rendered' && file.html !== undefined ? (
           // Sanitized server-side — see the note at the top of this file.

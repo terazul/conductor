@@ -983,7 +983,7 @@ console.log('\nmove by drag or Move to… (Amendment 165)');
 
 console.log('\nan HTML page, rendered in a sandbox (Amendment 198)');
 {
-  const { isPagePath, isImagePath, pageUrl } = await import('./useWorkspace.js');
+  const { isPagePath, isImagePath, pageSrc, knownPageSrc, pageMintBody, daemonPages } = await import('./useWorkspace.js');
   const { FilePane, PAGE_SANDBOX } = await import('./FilePane.js');
   const { fileLinks } = await import('../agent/links.js');
   const { hrefFor } = await import('../lib/nav.js');
@@ -993,21 +993,58 @@ console.log('\nan HTML page, rendered in a sandbox (Amendment 198)');
   check('and nothing else is', !isPagePath('notes.html.md') && !isPagePath('html') && !isPagePath('a.xhtml') && !isPagePath('a.md'));
   check('a page is not an image, so it is fetched as text and its source can be shown', !isImagePath('a.html'));
 
+  // The frame's URL is minted by the daemon (POST /api/pages), bound to the page's root.
+  check("a job's page is minted by the job's id", JSON.stringify(pageMintBody('job_1', 'report/index.html')) === '{"jobId":"job_1","path":"report/index.html"}');
   check(
-    "a job's page is in the URL's path, so what it loads by a relative URL is the file beside it",
-    pageUrl('job_1', 'report/index.html', 3) === '/api/jobs/job_1/page/report/index.html?r=3',
-    pageUrl('job_1', 'report/index.html', 3),
+    "a project folder's by the project and the folder",
+    JSON.stringify(pageMintBody(dirRoot('prj_1', '/home/me/site'), 'index.html')) === '{"projectId":"prj_1","dir":"/home/me/site","path":"index.html"}',
+    JSON.stringify(pageMintBody(dirRoot('prj_1', '/home/me/site'), 'index.html')),
   );
-  check(
-    'each segment is encoded, the slashes between them are not',
-    pageUrl('j', 'my report/a#b.html', '1.x') === '/api/jobs/j/page/my%20report/a%23b.html?r=1.x',
-    pageUrl('j', 'my report/a#b.html', '1.x'),
-  );
-  check(
-    "a project folder's page names the folder by its path, in one segment",
-    pageUrl(dirRoot('prj_1', '/home/me/site'), 'index.html', 0) === '/api/projects/prj_1/page/%2Fhome%2Fme%2Fsite/index.html?r=0',
-    pageUrl(dirRoot('prj_1', '/home/me/site'), 'index.html', 0),
-  );
+  {
+    const calls: string[] = [];
+    let n = 0;
+    let alive = true;
+    const fake = {
+      mint: async (root: string, path: string) => (calls.push(`mint ${root} ${path}`), `/api/pages/tok${++n}/${path}`),
+      holds: async (url: string) => (calls.push(`holds ${url}`), alive),
+    };
+    check('nothing is known before a page is minted', knownPageSrc('jm', 'a/p.html', '1') === null);
+    const one = await pageSrc('jm', 'a/p.html', '1', fake);
+    check('a page shown the first time mints, then its src is the token url and the revision', one === '/api/pages/tok1/a/p.html?r=1' && calls.join('|') === 'mint jm a/p.html', `${one} ${calls.join('|')}`);
+    check('…and the token is kept for the session', knownPageSrc('jm', 'a/p.html', '2') === '/api/pages/tok1/a/p.html?r=2');
+    calls.length = 0;
+    const two = await pageSrc('jm', 'a/p.html', '2.x y', fake);
+    check('a new revision asks whether the token holds, and keeps it', two === '/api/pages/tok1/a/p.html?r=2.x%20y' && calls.join('|') === 'holds /api/pages/tok1/a/p.html', `${two} ${calls.join('|')}`);
+    alive = false;
+    calls.length = 0;
+    const three = await pageSrc('jm', 'a/p.html', '3', fake);
+    check('a token the daemon answers 404 for (a restart) is minted again', three === '/api/pages/tok2/a/p.html?r=3' && calls.join('|') === 'holds /api/pages/tok1/a/p.html|mint jm a/p.html', `${three} ${calls.join('|')}`);
+    check('each page has its own token', (await pageSrc('jm', 'b.html', '1', fake)) === '/api/pages/tok3/b.html?r=1');
+  }
+  {
+    // The daemon's minter, with fetch stood in: a POST to mint, a HEAD to ask, a 404 to mint again.
+    const real = globalThis.fetch;
+    const sent: string[] = [];
+    let headStatus = 200;
+    let minted = 0;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      sent.push(`${init?.method ?? 'GET'} ${url}${init?.body ? ` ${String(init.body)}` : ''}`);
+      if (init?.method === 'HEAD') return new Response(null, { status: headStatus });
+      minted += 1;
+      return new Response(JSON.stringify({ token: `T${minted}`, url: `/api/pages/T${minted}/x.html` }), { status: 201 });
+    }) as typeof fetch;
+    try {
+      const first = await pageSrc('jd', 'x.html', '1', daemonPages);
+      check('the pane mints with a POST to /api/pages', first === '/api/pages/T1/x.html?r=1' && sent[0] === 'POST /api/pages {"jobId":"jd","path":"x.html"}', `${first} ${sent.join(' | ')}`);
+      const kept = await pageSrc('jd', 'x.html', '2', daemonPages);
+      check('asks with a HEAD of the token url', kept === '/api/pages/T1/x.html?r=2' && sent[1] === 'HEAD /api/pages/T1/x.html' && sent.length === 2, sent.join(' | '));
+      headStatus = 404;
+      const again = await pageSrc('jd', 'x.html', '3', daemonPages);
+      check('and mints again when the daemon answers 404', again === '/api/pages/T2/x.html?r=3' && sent[2] === 'HEAD /api/pages/T1/x.html' && sent[3]?.startsWith('POST /api/pages') === true, sent.join(' | '));
+    } finally {
+      globalThis.fetch = real;
+    }
+  }
 
   const html = openTab(EMPTY, 'j', 'report/index.html', 1);
   const htm = openTab(EMPTY, 'j', 'old.htm', 1);
@@ -1024,6 +1061,12 @@ console.log('\nan HTML page, rendered in a sandbox (Amendment 198)');
       }),
     );
 
+  const unminted = pane(fileOf('report/index.html'), 'rendered');
+  check('a page with no token yet frames nothing, and says it is opening', !unminted.includes('<iframe') && unminted.includes('Opening the page'), unminted.slice(-400));
+  // Mint as the pane's effect would, for the revision it renders with (0 events, and the text's digest).
+  const fakeMint = { mint: async (_r: string, p: string) => `/api/pages/TOKEN_j/${p.split('/').map(encodeURIComponent).join('/')}`, holds: async () => true };
+  await pageSrc('j', 'report/index.html', 'r', fakeMint);
+  await pageSrc(dirRoot('prj_1', '/home/me/site'), 'index.html', 'r', { ...fakeMint, mint: async () => '/api/pages/TOKEN_d/index.html' });
   const shown = pane(fileOf('report/index.html'), 'rendered');
   const frame = /<iframe[^>]*>/.exec(shown)?.[0] ?? '';
   check('rendered, a page is a frame', frame !== '', shown.slice(0, 400));
@@ -1035,14 +1078,14 @@ console.log('\nan HTML page, rendered in a sandbox (Amendment 198)');
   check('it sends no referrer', frame.includes('referrerPolicy="no-referrer"') || frame.includes('referrerpolicy="no-referrer"'), frame);
   check('it has a title', frame.includes('title="report/index.html, rendered"'), frame);
   const src = /src="([^"]*)"/.exec(frame)?.[1]?.replace(/&amp;/g, '&') ?? '';
-  check('its src is the page route, with the revision as a cache-buster', /^\/api\/jobs\/j\/page\/report\/index\.html\?r=0\.[0-9a-z]+$/.test(src), src);
+  check('its src is the minted token url, with the revision as a cache-buster', /^\/api\/pages\/TOKEN_j\/report\/index\.html\?r=0\.[0-9a-z]+$/.test(src), src);
   const changed = /src="([^"]*)"/.exec(pane(fileOf('report/index.html', { raw: `${SOURCE} ` }), 'rendered'))?.[1] ?? '';
   check('new text is a new src, so a page saved in a folder with no events still reloads', changed !== '' && changed.replace(/&amp;/g, '&') !== src, changed);
   check('the line above it says it runs sandboxed', shown.includes('c5-pagenote') && shown.includes('Runs sandboxed'));
   check('the source is not in the pane, only the frame', !shown.includes('hi &amp; bye'));
   check('rendered is on offer, the column and the PDF are not: they are markdown\'s', shown.includes('>rendered</button>') && !shown.includes('¶ column') && !shown.includes('⎙ PDF'));
   const dirShown = pane(fileOf('index.html'), 'rendered', dirRoot('prj_1', '/home/me/site'));
-  check("a project folder's page frames the folder's route", dirShown.includes('src="/api/projects/prj_1/page/%2Fhome%2Fme%2Fsite/index.html?r=0.'), dirShown.slice(0, 600));
+  check("a project folder's page frames its own token's url", dirShown.includes('src="/api/pages/TOKEN_d/index.html?r=0.') && dirShown.includes('sandbox="allow-scripts"'), dirShown.slice(0, 600));
 
   const raw = pane(fileOf('report/index.html'), 'raw');
   check('raw shows the source, as text', !raw.includes('<iframe') && raw.includes('c5-raw') && raw.includes('document.body.textContent = &quot;hi &amp; bye&quot;'), raw.slice(-400));

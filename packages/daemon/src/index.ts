@@ -104,6 +104,9 @@ export async function build(): Promise<FastifyInstance> {
 
   // Before the token check, and unconditional: a token is opt-in, this is not.
   app.addHook('onRequest', async (req, reply) => {
+    // Every API answer's declared type is the only one (Amendment 198): a page that names one
+    // in a `<script src>` gets it refused as a script, not run as whatever it sniffs like.
+    if (req.url.startsWith('/api/')) reply.header('X-Content-Type-Options', 'nosniff');
     const refused = refuseNonLocal(req.headers.host, req.headers.origin);
     if (!refused) return;
     if (req.headers.upgrade) {
