@@ -957,7 +957,7 @@ and in the Agent screen's header, plainly — not just the job it belongs to.
 
 The same filled look reaches the navigator and the Agent screen's own tabs: an agent's
 row in the navigator reads filled **working**, and a job group there reads filled
-**working** or **finished**. An agent whose latest reply you haven't ticked **Read it**
+**N working** or **finished**. An agent whose latest reply you haven't ticked **Read it**
 (see the Agent screen, below) says **to read** on its row, on the folded line of the
 helpers it is among, and on its tab on the Agent screen. Opening the agent doesn't clear it,
 and neither does answering it: only the box does, so a reply you skimmed past still shows.
@@ -1049,13 +1049,19 @@ them is a status colour or your violet. The colours are `--here`, `--here-projec
 `--here-agent` in `packages/shared/src/tokens.css`, and `make test` fails if a change brings two
 of them too close.
 
-**The navigator**, the panel down the left of every screen, lists your projects. A
+**The navigator**, the panel down the left of every screen, lists your projects. Beside each
+project's name is its status, the same as on its Fleet card: **N working**, **finished** when a
+job in it has finished and you haven't seen it, both when both are true, or the quiet **done** or
+**no agents**. When something waits on you, its amber count says so (and the words **needs you**
+are left out beside it). Pointing at the name says it all in words. A
 project's name opens its Project screen, and its **▸** opens it to three submenus:
 
 - **Agents**: grouped by job, newest first. Each group is headed by the job's prompt on
-  one line, with its agent count, the dot of its unhappiest agent and, in amber, how
-  many things in it need you. A job that finished and you haven't seen says **finished**
-  there, never in amber. Under it is one row per agent, each with its status dot,
+  one line, with its agent count, the dot of its unhappiest agent, its status and, in amber, how
+  many things in it need you. Its status is what a Fleet card would say of that job alone:
+  **N working**, **finished** if it finished and you haven't seen it (never in amber), or
+  **done**, **failed**, **paused** and the like. Where the amber count shows, it says that
+  something needs you, and how many, so the words **needs you** are left out beside it. Under it is one row per agent, each with its status dot,
   the ◆ when it is an orchestrator (as on its Agent tab), plus a count when one needs you. A
   click opens the agent, and the navigator stays
   where it is. Groups start open; click a group's heading to close it. A project with

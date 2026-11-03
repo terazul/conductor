@@ -200,6 +200,55 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 194 — post-merge, applied. **A project's and a stack's status show in the navigator, by the Fleet card's own rule.**
+
+Web only (`fleet/rest.ts`, `fleet/card.tsx`, `shell/status.ts` new, `shell/ui.tsx`,
+`lib/rollup.ts` new, `lib/store.ts`, `shell/navtree.ts`, `shell/navtags.tsx` new,
+`shell/Navigator.tsx`, `shell/shell.css`, `lib/verify.ts`, `shell/verify.ts`) and
+`docs/MANUAL.md`. Asked 3 Nov: *"the status of the project shows up in the Fleet page but it does
+not show in the left menu bar with the project name and does not show up in the agent stack name,
+fix that."* *Amends Amendment 94*: a stack's row in the navigator says what its Fleet card would,
+**N working** with its count where it said **working**, and **needs you**, **done**, **failed** or
+**paused** where it said nothing.
+
+- **One rule** (`headlineTags(statuses, blocked, unseen)`, `fleet/rest.ts`, pure): **needs you**
+  (amber) when something waits on you, else **N working** (filled), then **finished** (filled,
+  red when an unseen job failed) beside either when a job is unseen; with neither, the quiet word
+  of Amendment 130 (**done**, **no agents**), or the status in its own tone. The card's headline is
+  now this, where its JSX had it inline. Its statuses are `rollupStatuses` (Amendment 192), so an
+  agent waiting for the model counts in **N working** on the card too, as its stripe already did.
+- **Moved where Node loads them**, so the navigator's tree stays pure: `STATUS_KEY` and
+  `STATUS_WORD` to `shell/status.ts`, re-exported by `shell/ui.tsx`; `rollupStatuses` to
+  `lib/rollup.ts`, re-exported by `lib/store.ts`. Nothing else in either changed.
+- **The navigator** (`navTree`): `NavProject.tags` and `NavJob.tags`. A project's are its card's,
+  from its agents, its requests and its unseen jobs, so one tag plus **finished** at most. A
+  stack's are from its own agents, a request on one of them and whether it is the unseen job;
+  **finished** takes the job's own status, else the group's worst. The jobs `navTree` takes may now
+  carry their status.
+- **Drawn as `sh-nav-tag` chips** (`NavTags`, `shell/navtags.tsx`, no stylesheet so it renders under
+  Node) after the name and before the amber count, in the card's tones: `.is-need` and `.is-queue`
+  are new, tonal, in `--need`/`--queue`; idle is the plain tag. **Needs you** is left out where the
+  row has its amber `sh-nav-need` count, which says it and how many; it is kept, amber, on a row
+  with no count. The rows' titles add the same words: *web-app — 2 things need you; finished*,
+  *Fix the login — 2 agents, 1 working*.
+
+**Verified:** `lib/verify.ts` §43: the rule's cases (no agents, working, needs you over working,
+done seen, failed, paused, queued, stopped, finished unseen and failed, working and finished, needs
+you and finished, a blocked agent with no request), an agent waiting for the model counted as
+working through `rollupStatuses`, and the card, the tree and the store's re-export calling it.
+`shell/verify.ts` §16: the project and stack tags from the shared fixtures, with nothing waiting,
+with an unseen job and a failed one, no agents, one headline plus finished at most; needs you left
+out beside a count; the titles' words; `NavTags` rendered under Node; the rows' wiring; and the two
+new chips in tokens. Changed to the new behaviour: `lib/verify.ts` §32 "every done agent plainly
+says finished" (reads `STATUS_WORD` from `shell/status.ts` and the re-export), the seen section's
+"the Fleet card says finished" and §37's "its headline is the loud tag when unseen, else the quiet
+word" and "the unseen mark itself is untouched" (the card calls `headlineTags`, and the rule gives
+those words, where they matched its inline JSX); `shell/verify.ts` §8 "the navigator marks it from
+the unseen jobs, never in amber" and §10 "a job's group gets the same filled working tag" (the
+rows draw `NavTags`, and the tags are `finished/done` and `1 working/live`, where they matched the
+old spans). Not seen in a browser; the Project screen's job groups (`fleet/project.tsx`) keep
+their own headline.
+
 ### Amendment 193 — post-merge, applied. **An agent's activity folds to its latest step, and a reply stays open until you tick it read.**
 
 Shared (`wire.ts`), daemon (`db/migrations/330_reply_seq.sql` new, `session/store.ts`,

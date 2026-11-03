@@ -35,6 +35,7 @@ import {
   type Snapshot,
 } from '@conductor/shared';
 import { api, Feed, type FeedStatus } from './feed.js';
+import { rollupStatuses } from './rollup.js';
 import { receiveSettings } from './settings.js';
 import { receiveTerminalOut, receiveTerminalRun } from './terminal.js';
 import { receiveBranches } from '../branches/live.js';
@@ -493,15 +494,9 @@ export function useServers(jobId?: string): DevServer[] {
   );
 }
 
-/**
- * The statuses a rollup reads (Amendment 192): an agent paused while it waits in its provider's
- * outage (named in an outage alert, one that counts `waiting`) is still at work, so its job and
- * project read as running. Its own row still says paused, waiting for the model.
- */
-export function rollupStatuses(agents: readonly Pick<Agent, 'id' | 'status'>[], alerts: readonly Pick<Alert, 'kind' | 'waiting' | 'agentIds'>[]): AgentStatus[] {
-  const waiting = new Set(alerts.filter((a) => a.kind === 'connection' && a.waiting !== undefined).flatMap((a) => a.agentIds));
-  return agents.map((a) => (a.status === 'paused' && waiting.has(a.id) ? 'working' : a.status));
-}
+// The statuses a rollup reads (Amendment 192) are in rollup.ts, which loads without React, so the
+// navigator's pure tree reads them too (Amendment 194).
+export { rollupStatuses };
 
 /** Worst status among a project's agents. Drives the Fleet card stripe. */
 export function useProjectStatus(projectId: string): AgentStatus {

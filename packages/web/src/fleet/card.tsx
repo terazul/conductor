@@ -35,12 +35,13 @@ import {
   usePending,
   useProjectSpend,
   useProjectStatus,
+  rollupStatuses,
   useServers,
 } from '../lib/store.js';
 import { monthlyDraft, projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
-import { restOf, restWord } from './rest.js';
+import { headlineTags, restOf } from './rest.js';
 import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents, toggleAgents } from './agentlist.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -656,31 +657,16 @@ export function ProjectCard({
   const stripe = blocked ? 'need' : rest === 'status' ? key : 'idle';
 
   /*
-   * A job here finished and you haven't opened the project or its agents since
-   * (Amendment 87). Red if one of them ended with a failure. Beside what is still
-   * going on, or in place of the project's own done or failed when nothing is.
+   * The headline tags (Amendment 194): needs you, or N working, with finished beside it when a
+   * job here finished unseen (Amendment 87); else finished, or the rest's quiet word. The rule is
+   * `headlineTags`, which the navigator's project and stack rows draw too.
    */
-  const finished =
-    unseen.length > 0 ? (
-      <Tag tone={unseen.some((j) => j.status === 'failed') ? 'fail' : 'done'}>finished</Tag>
-    ) : null;
-
-  // The headline tag. Amber only when a human is actually required.
-  const headline = blocked ? (
-    <>
-      <Tag tone="need">needs you</Tag>
-      {finished}
-    </>
-  ) : working > 0 ? (
-    <>
-      <Tag tone="live">{working === 1 ? '1 working' : `${working} working`}</Tag>
-      {finished}
-    </>
-  ) : (
-    (finished ?? (
-      <Tag tone={rest === 'status' ? key : 'idle'}>{restWord(rest) ?? STATUS_WORD[status]}</Tag>
-    ))
-  );
+  const statuses = useMemo(() => rollupStatuses(agents, allAlerts), [agents, allAlerts]);
+  const headline = headlineTags(statuses, blocked, unseen).map((t) => (
+    <Tag key={t.word} tone={t.tone}>
+      {t.word}
+    </Tag>
+  ));
 
   return (
     <div

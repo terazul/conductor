@@ -28,7 +28,7 @@ import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
 import { readFileSync } from 'node:fs';
 import { nextChoice, parseChoice, resolveTheme } from '../shell/theme.js';
-import { restOf, restWord } from '../fleet/rest.js';
+import { headlineTags, restOf, restWord } from '../fleet/rest.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeWidth } from '../files/width.js';
 import {
   AGENT_INSPECTOR,
@@ -1335,7 +1335,8 @@ console.log('\n31 · a job says it has finished until you have seen it (Amendmen
   const card = readFileSync(new URL('../fleet/card.tsx', import.meta.url), 'utf8');
   const project = readFileSync(new URL('../fleet/project.tsx', import.meta.url), 'utf8');
   const always = readFileSync(new URL('../attention/always.tsx', import.meta.url), 'utf8');
-  check('the Fleet card says finished', /useUnseenJobs\(\)/.test(card) && />finished<\/Tag>/.test(card));
+  // Since Amendment 194 the card draws `headlineTags`, the rule its tags come from, so the word is checked there.
+  check('the Fleet card says finished', /useUnseenJobs\(\)/.test(card) && /headlineTags\(statuses, blocked, unseen\)/.test(card) && headlineTags(['done'], false, [{ status: 'done' }]).map((t) => t.word).join() === 'finished');
   check('the Project screen says it on the job\'s group, and marks its own project\'s jobs seen while in front', /finished=\{finishedHere\(g\.job\)\}/.test(project) && /markJobsSeen\(ids, allJobs\)/.test(project) && /if \(!visible/.test(project));
   check('the notifier counts them, announces them, and opens the project when one is clicked', /useLadderEffects\(pending, alerts, now, activate, finished\)/.test(always) && /openProject\(target\.projectId\)/.test(always) && /startSeenOnce\(\)/.test(always));
 }
@@ -1353,7 +1354,9 @@ console.log('\n32 · status marks are filled, edged and plainly finished (Amendm
     return i === -1 ? '' : css.slice(i, css.indexOf('}', i));
   };
 
-  check('every done agent plainly says finished', /done:\s*'finished'/.test(ui));
+  // STATUS_WORD moved to shell/status.ts (Amendment 194), so a pure rule can read it under Node; ui.tsx re-exports it.
+  const statusTs = readFileSync(new URL('../shell/status.ts', import.meta.url), 'utf8');
+  check('every done agent plainly says finished', /done:\s*'finished'/.test(statusTs) && /export \{ STATUS_KEY, STATUS_WORD, type Tone \} from '\.\/status\.js';/.test(ui));
   check(
     'the live tag is filled, not tinted, and heavier',
     /background:\s*var\(--live\)/.test(rule32(uiCss, '.ui-tag.t-live')) &&
@@ -1760,10 +1763,18 @@ console.log('\n37 · only a project you have not looked at since it finished say
   const card = src('../fleet/card.tsx');
   const project = src('../fleet/project.tsx');
   check('the Fleet card reads the rest and draws its stripe from it', /restOf\(status, agents\.length, unseen\.length > 0\)/.test(card) && /rest === 'status' \? key : 'idle'/.test(card));
-  check('and its headline is the loud tag when unseen, else the quiet word', /\(finished \?\? \(\s*<Tag tone=\{rest === 'status' \? key : 'idle'\}>\{restWord\(rest\) \?\? STATUS_WORD\[status\]\}<\/Tag>/.test(card));
+  // Amendment 194: the card's inline headline is `headlineTags` now; the same cases, through the rule.
+  const headOf = (...a: Parameters<typeof headlineTags>): string => headlineTags(...a).map((t) => `${t.word}/${t.tone}`).join();
+  check(
+    'and its headline is the loud tag when unseen, else the quiet word',
+    /headlineTags\(statuses, blocked, unseen\)\.map\(\(t\) => \(\s*<Tag key=\{t\.word\} tone=\{t\.tone\}>/.test(card) &&
+      headOf(['done', 'done'], false, [{ status: 'done' }]) === 'finished/done' &&
+      headOf(['done', 'done'], false, []) === 'done/idle' &&
+      headOf(['failed', 'done'], false, []) === 'failed/fail',
+  );
   check('the Project screen does the same in its header and on each job group, and the group never says finished twice', /restOf\(status, agents\.length, jobs\.some\(finishedHere\)\)/.test(project) && /restOf\(worstOf\(agents, alerts\), agents\.length, finished\)/.test(project) && /\) : finished \? null : \(/.test(project));
   check('no project-level tag draws STATUS_WORD for a done project without going through the rest', !/<Tag tone=\{STATUS_KEY\[(status|worstOf\(agents, alerts\))\]\}>\{STATUS_WORD/.test(card + project));
-  check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
+  check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', headOf(['done'], false, [{ status: 'done' }]) === 'finished/done' && headOf(['failed'], false, [{ status: 'failed' }]) === 'finished/fail' && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
 console.log('\n38 · the retry delays are a setting (Amendment 140); the budget ceiling and midnight are not (Amendment 180)');
@@ -2281,9 +2292,37 @@ console.log('\n42 · an agent\'s activity folds to its latest step, and a reply 
   );
 }
 
+console.log('\n43 · the project\'s and the stack\'s status, one rule for the Fleet card and the navigator (Amendment 194)');
+{
+  const src = (f: string): string => readFileSync(new URL(f, import.meta.url), 'utf8');
+  const head = (...a: Parameters<typeof headlineTags>): string => headlineTags(...a).map((t) => `${t.word}/${t.tone}`).join();
+
+  // The rule, case by case.
+  check('no agents: the quiet "no agents"', head([], false, []) === 'no agents/idle', head([], false, []));
+  check('working: how many, filled live', head(['working', 'working', 'done'], false, []) === '2 working/live' && head(['working'], false, []) === '1 working/live');
+  check('needs you: amber, and it outranks working', head(['working', 'blocked'], true, []) === 'needs you/need');
+  check('done, and seen: the quiet "done"', head(['done', 'done'], false, []) === 'done/idle');
+  check('failed: the status in its own colour', head(['failed', 'done'], false, []) === 'failed/fail');
+  check('paused, queued and stopped: their own words and tones', head(['paused'], false, []) === 'paused/idle' && head(['queued', 'done'], false, []) === 'queued/queue' && head(['stopped'], false, []) === 'stopped/idle');
+  check('finished unseen: the loud finished alone, red when its job failed', head(['done'], false, [{ status: 'done' }]) === 'finished/done' && head(['failed'], false, [{ status: 'failed' }]) === 'finished/fail');
+  check('working and finished: both, working first', head(['working', 'done'], false, [{ status: 'done' }]) === '1 working/live,finished/done');
+  check('needs you and finished: both, needs you first', head(['blocked'], true, [{ status: 'failed' }, { status: 'done' }]) === 'needs you/need,finished/fail');
+  check('a blocked agent with no request still reads needs you, by its status', head(['blocked', 'done'], false, []) === 'needs you/need');
+  const waiting = [{ id: 'w1', status: 'paused' as const }];
+  const outageAlert = { kind: 'connection' as const, waiting: 1, agentIds: ['w1'] };
+  check('an agent waiting for the model counts as working (Amendment 192), through rollupStatuses', head(rollupStatuses(waiting, [outageAlert]), false, []) === '1 working/live' && head(rollupStatuses(waiting, []), false, []) === 'paused/idle');
+
+  // Who calls it: the card, and the navigator's tree for its project and stack rows.
+  const card = src('../fleet/card.tsx');
+  const tree = src('../shell/navtree.ts');
+  check('the Fleet card draws headlineTags on the rollup, the request and its unseen jobs, and nothing inline', /const statuses = useMemo\(\(\) => rollupStatuses\(agents, allAlerts\), \[agents, allAlerts\]\);/.test(card) && /headlineTags\(statuses, blocked, unseen\)/.test(card) && !/\$\{working\} working/.test(card) && !/>finished<\/Tag>/.test(card));
+  check('the navigator\'s tree heads each project and each stack with it, on the same rollup', /headlineTags\(rollupStatuses\(agents\.filter\(mine\), alerts\), pending\.some\(waits\), unseen\)/.test(tree) && /tags: tagsOf\(\(a\) => a\.projectId === p\.id, \(r\) => r\.projectId === p\.id,/.test(tree) && /tags: tagsOf\(\(a\) => a\.projectId === p\.id && a\.jobId === j\.id,/.test(tree));
+  check('the rollup is the store\'s own, moved where Node loads it without React', /export \{ rollupStatuses \};/.test(src('./store.ts')) && /import \{ rollupStatuses \} from '\.\/rollup\.js';/.test(src('./store.ts')) && !/from 'react'/.test(src('./rollup.ts')));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

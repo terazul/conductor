@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **The navigator shows a project's and a stack's status, as the Fleet card does.** Asked for (3 Nov): "the
+  status of the project shows up in the Fleet page but it does not show in the left menu bar with the project
+  name and does not show up in the agent stack name, fix that."
+  *Done (3 Nov): Amendment 194 (`headlineTags` in `fleet/rest.ts`, one rule for the Fleet card, the
+  navigator's project row and its stack rows, drawn as `sh-nav-tag` chips; **needs you** is left to the row's
+  amber count where it has one). Not done: the Project screen's job groups keep their own headline.*
 - [x] **An agent's activity shows its last line, and a reply must be ticked read.** Asked for (3 Nov): "When
   there is activity from the agent, have that show just the last line and make the others be put in a
   collapsible section. Instead of too much text on the screen I want just the last line and the rest can be

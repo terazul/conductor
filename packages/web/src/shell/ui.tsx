@@ -10,6 +10,7 @@
  */
 
 import type { AgentStatus, ModelCatalog, ProviderModelList } from '@conductor/shared';
+import { STATUS_KEY, type Tone } from './status.js';
 import { modelGroups } from '../lib/models.js';
 import { CLAUDE, providerLabel } from '../lib/providers.js';
 import type { Activity } from './clock.js';
@@ -24,33 +25,9 @@ export function Chevron({ open }: { open: boolean }) {
   return <i className={`sh-nav-chev${open ? ' is-open' : ''}`} aria-hidden="true" />;
 }
 
-/** AgentStatus → token family. The single place the mapping is decided. */
-export const STATUS_KEY: Record<AgentStatus, 'live' | 'need' | 'fail' | 'done' | 'queue' | 'idle'> =
-  {
-    working: 'live',
-    blocked: 'need',
-    failed: 'fail',
-    done: 'done',
-    queued: 'queue',
-    paused: 'idle',
-    // --idle, not --fail. Terminating an agent is a decision, not a fault, and a red
-    // card would read as "something went wrong here" every time you tidied up.
-    stopped: 'idle',
-  };
-
-/**
- * Short label for a status tag. `done` reads `finished` (Amendment 93) — plain,
- * not "unseen" or "new": that distinction stays per job, in `lib/seen.ts`.
- */
-export const STATUS_WORD: Record<AgentStatus, string> = {
-  working: 'working',
-  blocked: 'needs you',
-  failed: 'failed',
-  done: 'finished',
-  queued: 'queued',
-  paused: 'paused',
-  stopped: 'stopped',
-};
+// The status's token and word live in status.ts, which loads under Node (no stylesheet), so a
+// pure rule can use them (Amendment 194); every screen still imports them from here.
+export { STATUS_KEY, STATUS_WORD, type Tone } from './status.js';
 
 export function Dot({ status }: { status: AgentStatus }) {
   return <i className={`ui-dot d-${STATUS_KEY[status]}`} aria-hidden="true" />;
@@ -64,7 +41,7 @@ export function Tag({
   tone,
   children,
 }: {
-  tone: 'live' | 'need' | 'fail' | 'done' | 'queue' | 'idle';
+  tone: Tone;
   children: React.ReactNode;
 }) {
   return <span className={`ui-tag t-${tone}`}>{children}</span>;

@@ -30,6 +30,9 @@ import { readFileSync } from 'node:fs';
 import { ORDER_KEY, SORTS, SORT_KEY, SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects } from '../fleet/order.js';
 import { dirRoot, parseDirRoot } from '../files/tabs.js';
 import { projectNeeds } from './describe.js';
+import { NavTags, navTagWords, navTags } from './navtags.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { budgetOf, sumBudgets } from './autonomy.js';
 import {
   DETAILS_KEY,
@@ -374,7 +377,14 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check('without any to read no row says so, done or not', calm.agents.every((a) => !a.toRead) && calm.agents.some((a) => a.status === 'done'));
   check('the navigator reads the agents to read, not the unseen ones', /const toRead = useToRead\(\)/.test(src('./Navigator.tsx')) && !/useUnseenAgents/.test(src('./Navigator.tsx')));
   const navSrc = src('./Navigator.tsx');
-  check('the navigator marks it from the unseen jobs, never in amber', /navTree\(ordered, agents, pending, alerts, jobs, finished, toRead\)/.test(navSrc) && /sh-nav-tag is-\$\{job\.status === 'failed' \? 'fail' : 'done'\}/.test(navSrc));
+  // Amendment 194: the group draws its headline, the Fleet card's rule, which says finished from the unseen jobs.
+  check(
+    'the navigator marks it from the unseen jobs, never in amber',
+    /navTree\(ordered, agents, pending, alerts, jobs, finished, toRead\)/.test(navSrc) &&
+      /<NavTags tags=\{job\.tags\} needs=\{job\.needs\} \/>/.test(navSrc) &&
+      marked.jobs.find((j) => j.id === 'jOld')!.tags.some((t) => t.word === 'finished' && t.tone === 'done') &&
+      marked.jobs.every((j) => j.tags.every((t) => t.tone !== 'need')),
+  );
 
   const id = navJobId('web', 'jNew');
   check('a group is p:<id>:job:<jobId>', id === 'p:web:job:jNew');
@@ -451,9 +461,12 @@ console.log('\n10 · the carry-through: filled marks and a nested repo\'s branch
       !/a\.finished/.test(nav) &&
       !/a\.status === 'done' && <span className="sh-nav-tag is-done">/.test(nav),
   );
+  // Amendment 194: the group's tag is its headline, "N working" in the same filled is-live, drawn by NavTags.
   check(
     "a job's group gets the same filled working tag when nothing has finished yet",
-    /job\.status === 'working' && <span className="sh-nav-tag is-live">working<\/span>/.test(nav),
+    /<NavTags tags=\{job\.tags\} needs=\{job\.needs\} \/>/.test(nav) &&
+      /className=\{`sh-nav-tag is-\$\{t\.tone\}`\}/.test(src('./navtags.tsx')) &&
+      navTree(projects, agents, [], [], jobs)[0]!.jobs.find((j) => j.id === 'jNew')!.tags.map((t) => `${t.word}/${t.tone}`).join() === '1 working/live',
   );
   check(
     '.sh-nav-tag.is-live and .is-done are filled the same way .ui-tag.t-live/.t-done are (Amendment 93) — reused tokens, nothing invented',
@@ -657,9 +670,42 @@ console.log('\n15 · an agent, launched stack and project can be renamed from th
   check('the Project screen follows a launched stack name too', /\{\(job\.name \?\? job\.prompt\) \|\| 'waiting for instructions'\}/.test(projectScreen));
 }
 
+console.log('\n16 · a project\'s and a stack\'s status show in the navigator, as on the Fleet card (Amendment 194)');
+{
+  const words = (tags: readonly { word: string; tone: string }[]): string => tags.map((t) => `${t.word}/${t.tone}`).join();
+  const jobOf = (p: (typeof tree)[number], id: string) => p.jobs.find((j) => j.id === id)!;
+  // web: a1 done (jOld); a2 working and a3 queued with r1 waiting on it (jNew). api: b1 working, r2 waiting.
+  check('a project waiting on you is headed needs you, as its card is', words(web.tags) === 'needs you/need' && words(api.tags) === 'needs you/need', `${words(web.tags)} | ${words(api.tags)}`);
+  check('the stack the request is for says it; the finished one beside it says done', words(jobOf(web, 'jNew').tags) === 'needs you/need' && words(jobOf(web, 'jOld').tags) === 'done/idle', `${words(jobOf(web, 'jNew').tags)} | ${words(jobOf(web, 'jOld').tags)}`);
+  const calm = navTree(projects, agents, [], [], jobs);
+  check('with nothing waiting, the project counts its working agents, as the card does', words(calm[0]!.tags) === '1 working/live' && words(calm[1]!.tags) === '1 working/live', words(calm[0]!.tags));
+  const marked = navTree(projects, agents, pending, alerts, jobs, new Set(['jOld']))[0]!;
+  check('a finished job not yet seen adds finished to its project and heads its stack', words(marked.tags) === 'needs you/need,finished/done' && words(jobOf(marked, 'jOld').tags) === 'finished/done', `${words(marked.tags)} | ${words(jobOf(marked, 'jOld').tags)}`);
+  const failedJobs = [...jobs.slice(1), { ...jobs[0]!, status: 'failed' as const }];
+  const failedTree = navTree(projects, agents.map((a) => (a.id === 'a1' ? { ...a, status: 'failed' as const } : a)), [], [], failedJobs, new Set(['jOld']))[0]!;
+  check('and finished is red when that job failed', words(failedTree.tags) === '1 working/live,finished/fail' && words(jobOf(failedTree, 'jOld').tags) === 'finished/fail', words(failedTree.tags));
+  check('one project headline at most, plus finished', tree.every((p) => p.tags.length >= 1 && p.tags.length <= 2 && p.tags.filter((t) => t.word !== 'finished').length === 1));
+  const empty = navTree([{ id: 'e', name: 'e', path: '/e' }], agents, [], [], jobs)[0]!;
+  check('a project with no agents says so quietly', words(empty.tags) === 'no agents/idle', words(empty.tags));
+
+  // The amber count already says needs you, and how many: the word is left out beside it.
+  check('needs you is left out where the row has its count, and kept where it has none', words(navTags(marked.tags, 2)) === 'finished/done' && words(navTags(marked.tags, 0)) === 'needs you/need,finished/done');
+  check('the tooltip words follow the same rule', navTagWords(marked.tags, 2) === 'finished' && navTagWords(calm[0]!.tags, 0) === '1 working');
+  const html = (needs: number, tags = marked.tags): string => renderToStaticMarkup(createElement(NavTags, { tags, needs }));
+  check('rendered, a row draws sh-nav-tag chips in the card\'s tones', html(2) === '<span class="sh-nav-tag is-done">finished</span>' && html(0) === '<span class="sh-nav-tag is-need">needs you</span><span class="sh-nav-tag is-done">finished</span>', html(0));
+  check('and a working stack its filled live chip', html(0, jobOf(calm[0]!, 'jNew').tags) === '<span class="sh-nav-tag is-live">1 working</span>', html(0, jobOf(calm[0]!, 'jNew').tags));
+
+  const nav = src('./Navigator.tsx');
+  check('the project row draws its tags before the amber count, and its title says them', /<NavTags tags=\{project\.tags\} needs=\{needs\} \/>\s*\{needs > 0 && <span className="sh-nav-need">\{needs\}<\/span>\}/.test(nav) && /navTagWords\(project\.tags, needs\),/.test(nav));
+  check("the stack row draws them and its title says them", /<NavTags tags=\{job\.tags\} needs=\{job\.needs\} \/>/.test(nav) && /navTagWords\(job\.tags, job\.needs\)/.test(nav));
+  const css = src('./shell.css');
+  const rule = (sel: string): string => css.match(new RegExp(`${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+  check('the need and queue chips are in the theme\'s tokens, no fixed colour', /var\(--need\)/.test(rule('.sh-nav-tag.is-need')) && /var\(--queue\)/.test(rule('.sh-nav-tag.is-queue')) && !/#[0-9a-f]{3,6}\b/i.test(rule('.sh-nav-tag.is-need') + rule('.sh-nav-tag.is-queue')));
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it; and an agent or a project can be renamed from it.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it; and an agent or a project can be renamed from it; and a project\'s and a stack\'s status show beside their names, by the Fleet card\'s rule.\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

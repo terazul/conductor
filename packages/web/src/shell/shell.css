@@ -650,6 +650,22 @@
   border-color: color-mix(in srgb, var(--fail) 45%, transparent);
 }
 
+/*
+ * A project's or a stack's headline (Amendment 194) draws the Fleet card's tags, so it has the
+ * card's other two tones as well, tonal as `.ui-tag.t-need`/`.t-queue` are. Amber only for a
+ * blocked agent with no count beside it: where the row has its `.sh-nav-need`, the word is left
+ * out (navtags.tsx). `is-idle` (paused, stopped, done, no agents) is the plain tag above.
+ */
+.sh-nav-tag.is-need {
+  color: var(--need);
+  border-color: color-mix(in srgb, var(--need) 42%, transparent);
+}
+
+.sh-nav-tag.is-queue {
+  color: var(--queue);
+  border-color: color-mix(in srgb, var(--queue) 30%, transparent);
+}
+
 /* A nested repo's branch, beside its folder in the Files tree it opens (Amendment 94). */
 .sh-nav-repo {
   font-family: var(--mono);
