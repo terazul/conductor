@@ -46,10 +46,12 @@ import { useProjects, useStatusBar } from '../lib/store.js';
 import './spawn.css';
 
 import {
-  EFFORTS,
   MODES,
   PILLS,
   describeAutonomy,
+  effortMovedLine,
+  effortsFor,
+  nearestEffort,
   toAutonomy,
   type PillState,
 } from './autonomy.js';
@@ -342,6 +344,23 @@ function Spawn() {
   );
   /** Plan mode, on an engine without it, is sent — and shown — as "ask me". */
   const shownMode = modeOn(mode, caps);
+  /*
+   * The efforts the chosen model takes (Amendment 190): those its engine's list names, or all
+   * five where it names none (Claude, OpenRouter, an id typed). A model picked that doesn't take
+   * the one chosen moves it to the nearest it does, and the line under the row says so, for that
+   * model, until you pick one yourself.
+   */
+  const offered = useMemo(
+    () => effortsFor(claude ? undefined : theirs.list?.models.find((m) => m.id === engineModel.trim())?.efforts),
+    [claude, theirs.list, engineModel],
+  );
+  const [effortMoved, setEffortMoved] = useState<{ model: string; line: string } | null>(null);
+  useEffect(() => {
+    const to = nearestEffort(effort, offered);
+    if (to === effort) return;
+    setEffort(to);
+    setEffortMoved({ model: engineModel.trim(), line: effortMovedLine(engineModel.trim(), effort, to) });
+  }, [offered, effort, engineModel]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
@@ -1391,12 +1410,15 @@ function Spawn() {
         {has.effort && (
         <div className="sp-efforts">
           <span className="ui-lab">effort</span>
-          {EFFORTS.map((e) => (
+          {offered.map((e) => (
             <button
               key={e.id}
               className={`sp-pill is-tight${e.id === effort ? '' : ''}`}
               aria-pressed={e.id === effort}
-              onClick={() => setEffort(e.id)}
+              onClick={() => {
+                setEffort(e.id);
+                setEffortMoved(null);
+              }}
               onMouseEnter={() => setHint(e.hint)}
               onMouseLeave={() => setHint('')}
             >
@@ -1404,6 +1426,9 @@ function Spawn() {
             </button>
           ))}
         </div>
+        )}
+        {has.effort && !claude && effortMoved && effortMoved.model === engineModel.trim() && (
+          <div className="sp-cf-note">{effortMoved.line}</div>
         )}
 
         <div className="sp-hint">{hint}</div>

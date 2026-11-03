@@ -1,7 +1,9 @@
 /**
  * Terminals in tabs (Amendment 112): real shells, kept by the daemon.
  *
- * `TermPanel` is the Agent screen's terminal tab, in the agent's folder. If the daemon cannot
+ * `TermPanel` is the Agent screen's terminal tab. Its shells start at the project root, as the
+ * dock's do (Amendment 191), and when the agent works in a worktree the tab says so, with the
+ * `cd` that goes there. If the daemon cannot
  * start a shell (no PTY library on this machine, or an OS that is not built), the old command
  * runner (Terminal.tsx, Amendment 58) is shown under a banner with the reason, so a failed
  * native load never leaves the tab empty.
@@ -17,35 +19,67 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { termScopeKey, type Agent, type TermInfo, type TermScope } from '@conductor/shared';
+import { dirRoot } from '../files/tabs.js';
+import { copyText } from '../lib/clipboard.js';
 import { errorText } from '../lib/errors.js';
+import { useJobs, useProjects } from '../lib/store.js';
 import { tildePath } from '../shell/ui.js';
 import { onTerminals } from '../terminal/live.js';
 import { TerminalPanel } from './Terminal.js';
 import { XtermView, type TermLinks } from './Xterm.js';
-import { closeTerminal, endedLine, fallbackBanner, listTerminals, nextSelected, openTerminal, tabLabel, tabTitle } from './term.js';
+import { closeTerminal, endedLine, fallbackBanner, listTerminals, nextSelected, openTerminal, tabLabel, tabTitle, worktreeNote } from './term.js';
 
 /** Scopes this page has opened a first terminal for, or found one already open: closing the last one stays closed. */
 const autoOpened = new Set<string>();
 
 export function TermPanel({ agent }: { agent: Agent }) {
+  const project = useProjects().find((p) => p.id === agent.projectId);
+  const job = useJobs(agent.projectId).find((j) => j.id === agent.jobId);
+  const away = project && job ? worktreeNote(job, project.path) : null;
   return (
     <TermTabs
       scope={{ kind: 'agent', agentId: agent.id }}
-      // An agent's shells start in its job folder, and that is the root its paths stay inside.
-      links={(t) => ({ cwd: t.cwd, root: t.cwd, filesRoot: agent.jobId })}
+      // An agent's shells start at the project root, as the dock's do, and its paths stay inside it.
+      links={(t) => {
+        const root = project?.path ?? t.cwd;
+        return { cwd: t.cwd, root, filesRoot: dirRoot(agent.projectId, root) };
+      }}
+      about={away ? <WorktreeLine where={away.where} branch={away.branch} cd={away.cd} /> : undefined}
       fallback={<TerminalPanel agent={agent} />}
     />
+  );
+}
+
+/** The agent's changes are in its worktree, not where the shell is: where, and the line to go there. */
+function WorktreeLine({ where, branch, cd }: { where: string; branch: string; cd: string }) {
+  const [said, setSaid] = useState<string | null>(null);
+  const copy = (): void => {
+    void copyText(cd).then(
+      () => setSaid('✓ copied'),
+      (err: unknown) => setSaid(`couldn't copy: ${errorText(err)}`),
+    );
+  };
+  return (
+    <div className="ag-termx-where">
+      This agent's changes are in <code>{where}</code>, on <code>{branch}</code>. To go there: <code>{cd}</code>{' '}
+      <button type="button" className="fl-btn is-ghost" title="Copy the cd line" onClick={copy}>
+        {said ?? '⧉ copy'}
+      </button>
+    </div>
   );
 }
 
 export function TermTabs({
   scope,
   links,
+  about,
   fallback,
 }: {
   scope: TermScope;
   /** Where a terminal's printed paths lead in Files. */
   links: (t: TermInfo) => TermLinks;
+  /** A line under the tabs (Amendment 191): where an agent's changes are, when not here. */
+  about?: ReactNode;
   /** What to show under the banner when no shell can start. */
   fallback?: ReactNode;
 }) {
@@ -153,9 +187,21 @@ export function TermTabs({
           +
         </button>
         <span className="ag-termx-note">
-          Runs as you{list.terminals[0] ? <>, in <code>{tildePath(list.terminals[0].cwd)}</code></> : null}. It keeps running if you leave.
+          Runs as you
+          {shown ? (
+            <>
+              , in <code>{tildePath(shown.cwd)}</code>
+              {shown.branch ? (
+                <>
+                  {' '}on <code>{shown.branch}</code>
+                </>
+              ) : null}
+            </>
+          ) : null}
+          . It keeps running if you leave.
         </span>
       </div>
+      {about}
       {shown ? (
         <XtermView key={shown.id} termId={shown.id} onEnded={() => void refresh()} links={links(shown)} />
       ) : (

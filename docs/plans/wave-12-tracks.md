@@ -151,4 +151,6 @@ For the user, not a stack:
 - Delete the empty `packages/daemon/conductor.db` left by a mistaken `sqlite3` call (gitignored).
 - Amendment 167's job budget: removing helpers lowers the job's spend today and its cap together, so
   a job's daily budget is in effect per task. Keep that, or count removed helpers' spend against the
-  job (a lane for wave 13).
+  job (a lane for wave 13). *Decided (16 Oct; see [wave 13 §3](wave-13-tracks.md)): kept per task, as now.
+  Since Amendment 180 a job budget only warns, and Amendment 182's monthly project budget keeps a
+  lasting total, so no lane.*

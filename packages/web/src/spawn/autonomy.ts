@@ -145,6 +145,33 @@ export const EFFORTS: { id: EffortLevel; label: string; hint: string }[] = [
 export const DEFAULT_EFFORT: EffortLevel = 'high';
 
 /**
+ * The efforts a model takes (Amendment 190): those its list names, in `EFFORTS`' order, or all
+ * five where the list names none — Claude, OpenRouter, a model id typed rather than picked.
+ */
+export function effortsFor(listed: readonly string[] | undefined): typeof EFFORTS {
+  const named = EFFORTS.filter((e) => listed?.includes(e.id));
+  return named.length > 0 ? named : EFFORTS;
+}
+
+/**
+ * The effort a model takes that is nearest `effort`: itself when it takes it, else the closest
+ * on the scale, the lower of two as close — a model that doesn't take yours shouldn't quietly
+ * cost more.
+ */
+export function nearestEffort(effort: EffortLevel, offered: typeof EFFORTS): EffortLevel {
+  if (offered.some((e) => e.id === effort)) return effort;
+  const at = (id: EffortLevel) => EFFORTS.findIndex((e) => e.id === id);
+  let best = offered[0]?.id ?? effort;
+  for (const e of offered) if (Math.abs(at(e.id) - at(effort)) < Math.abs(at(best) - at(effort))) best = e.id;
+  return best;
+}
+
+/** What is said when a model is picked that doesn't take the effort chosen, and it moves. */
+export function effortMovedLine(model: string, from: EffortLevel, to: EffortLevel): string {
+  return `${model} doesn't take effort ${from}, so it is ${to}.`;
+}
+
+/**
  * What each agent may spend PER DAY, unless you say otherwise (Amendment 129). $5 was the
  * default while the cap was per message, when it bought a fresh $5 every reply, and $5 stopped
  * a real job part-way through once the cap was a lifetime one. It is a daily figure now, back

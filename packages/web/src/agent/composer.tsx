@@ -38,7 +38,15 @@ import {
   useProviderModels,
   useProviders,
 } from '../lib/providers.js';
-import { DEFAULT_EFFORT, EFFORTS, MERGE_WHEN_DONE_HINT, MERGE_WHEN_DONE_LABEL } from '../spawn/autonomy.js';
+import {
+  DEFAULT_EFFORT,
+  EFFORTS,
+  MERGE_WHEN_DONE_HINT,
+  MERGE_WHEN_DONE_LABEL,
+  effortMovedLine,
+  effortsFor,
+  nearestEffort,
+} from '../spawn/autonomy.js';
 import { queueWhenDone, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
@@ -257,6 +265,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const [modelText, setModelText] = useState<string | null>(null);
   // An agent from before Amendment 40 can hold a nickname; one can outlive its model.
   const modelWarning = claude ? modelProblem(models.catalog, model) : providerModelProblem(theirs.list, model);
+  /** The efforts a model takes, as on Spawn (Amendment 190): its list's, or all five. */
+  const effortsOn = (id: string) => effortsFor(claude ? undefined : theirs.list?.models.find((m) => m.id === id)?.efforts);
 
   /** What is typed in the budget field, while it differs from the cap. null = the cap. */
   const [budgetText, setBudgetText] = useState<string | null>(null);
@@ -366,15 +376,31 @@ export function Composer({ agent }: { agent: Agent }) {
   const pickModel = async (next: string) => {
     if (!next || next === model) return;
     setModelDraft(next);
+    let said = '';
     const ok = await policy.run(
       `Switching to ${next}`,
       () => setModel(agent.id, { model: next }),
       (r) =>
-        r.appliesTo === 'now'
-          ? `${r.model} — applies to the next reply.`
-          : `${r.model} — takes effect on the next run.`,
+        (said =
+          r.appliesTo === 'now'
+            ? `${r.model} — applies to the next reply.`
+            : `${r.model} — takes effect on the next run.`),
     );
-    if (!ok) setModelDraft(null);
+    if (!ok) {
+      setModelDraft(null);
+      return;
+    }
+    // A model that doesn't take the effort it has moves it to the nearest it does, and says so.
+    const from = autonomy.effort ?? DEFAULT_EFFORT;
+    const to = nearestEffort(from, effortsOn(next));
+    if (!has.effort || to === from) return;
+    setDraft({ ...autonomy, effort: to });
+    const moved = await policy.run(
+      `Setting effort to "${to}"`,
+      () => setAutonomy(agent.id, { autonomy: { effort: to } }),
+      `${said} ${effortMovedLine(next, from, to)}`,
+    );
+    if (!moved) setDraft(null);
   };
 
   /*
@@ -637,7 +663,7 @@ export function Composer({ agent }: { agent: Agent }) {
         {has.effort && (
         <div className="ag-modes">
           <span className="ui-lab">effort</span>
-          {EFFORTS.map((e) => (
+          {effortsOn(model).map((e) => (
             <button
               key={e.id}
               type="button"

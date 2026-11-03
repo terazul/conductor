@@ -180,7 +180,7 @@ the last of it on 12 Oct).
   waiting one keeps its row; arriving on a folded helper opens its fold; the Project screen is not
   folded).*
 
-- [ ] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct).
+- [x] **A terminal opens in the project's root folder, not a folder under it.** Asked for (14 Oct). *Done (2 Nov): Amendment 191 (every terminal opens at the project root, the agent's tab and the command runner too; a tab's title and note say the folder and branch, and for an agent in its own worktree a line says its changes are in `.conductor/wt/<jobId>`, with a copyable `cd`).*
   Today the agent screen's **›_ terminal** tab (`web/src/agent/agent.tsx:824-834`) starts its shell in
   the job's folder (`routes/term.ts:84-88`, and `routes/terminal.ts:30-34` for the old command
   runner): `jobs.worktree_path`. For a job in its own worktree, that is
@@ -210,7 +210,7 @@ the last of it on 12 Oct).
 
 - [x] **A sent message ignores the slot limit (wave 11, A2).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): the message waits for a slot and survives a restart.* *Done 15 Oct: Amendment 168 (a `'slot'` row in `scheduled_messages`, the agent `queued`; pump sends it in the first free slot, held or not; the ask to hand off and a relaunch wait the same way).*
 
-- [ ] **A decision that lands while a messaged run is finishing is lost.** Found (15 Oct) in wave 11's A2 (Amendment 168). The relaunch a decision asks for (`#resumeWanted`, `supervisor.ts`) only follows runs started by `#launch`; a run started by `#launchWithPrompt` (your message, a waiting `'slot'` message, the ask to hand off) ends `done` and nothing runs again. It was so before Amendment 168. Starts at: `#launchWithPrompt`'s settle in `supervisor.ts`, beside `#launch`'s `#resumeWanted` check; a check in `session/verify.ts` §15 next to the unwinding-relaunch one.
+- [x] **A decision that lands while a messaged run is finishing is lost.** Found (15 Oct) in wave 11's A2 (Amendment 168). The relaunch a decision asks for (`#resumeWanted`, `supervisor.ts`) only follows runs started by `#launch`; a run started by `#launchWithPrompt` (your message, a waiting `'slot'` message, the ask to hand off) ends `done` and nothing runs again. It was so before Amendment 168. Starts at: `#launchWithPrompt`'s settle in `supervisor.ts`, beside `#launch`'s `#resumeWanted` check; a check in `session/verify.ts` §15 next to the unwinding-relaunch one. *Done (2 Nov): Amendment 189 (`#launchWithPrompt` follows `#resumeWanted` through `#relaunchIfWanted`, as `#launch` does; a decision in the run before the ask to hand off waits for the ask's end).*
 
 - [x] **The arbiter matches the wrong request (wave 11, A3).** Found (14 Oct) for docs/plans/wave-11.md. *Done 14 Oct: Amendment 150.*
 
@@ -232,7 +232,7 @@ the last of it on 12 Oct).
 - [x] **A listed role whose persona names an exact model runs on sonnet (wave 11, O1).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 155 (`ListedRole.model`, kept from the persona and sent as the role's `HelperRole.model`; the role select shows it).*
 - [x] **Changes and diffs miss nested repos (wave 11, N5).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 158 (each dirty nested repo scanned as its own, four deep; each diff from the repo that owns the path).*
 - [x] **Do non-Claude engines drop effort or plan mode? (wave 11, X1).** Found (14 Oct) for docs/plans/wave-11.md §8. *Done 15 Oct: Amendment 160 (traced on Spawn, "+ agent" and `start_helper`; nothing is lost: the effort is sent as `reasoningEffort`, and plan first is sent as "ask me" and shown so before launch; no code changed).*
-- [ ] **An effort the model doesn't take.** Spawn (`route.tsx:1127`) and the composer offer all five efforts for any model, on every engine. Copilot's model list says which each model takes (`efforts`, `copilot.ts:231`); OpenRouter's says nothing. The SDK looks likely to refuse an unsupported one at the run (not tried live). Found (15 Oct) by Amendment 156.
+- [x] **An effort the model doesn't take.** Spawn (`route.tsx:1127`) and the composer offer all five efforts for any model, on every engine. Copilot's model list says which each model takes (`efforts`, `copilot.ts:231`); OpenRouter's says nothing. The SDK looks likely to refuse an unsupported one at the run (not tried live). Found (15 Oct) by Amendment 156. *Done (2 Nov): Amendment 190 (Spawn and the composer offer the model's listed efforts, all five where it lists none; a choice the new model doesn't take moves to the nearest and says so; Copilot drops one it doesn't list, with a line in the transcript).*
 
 - [x] **An orchestrator's page opens to its helpers' reports, not its own replies (wave 11, O3).** Found (14 Oct) for docs/plans/wave-11.md. *Decided (14 Oct): O2 accepted as is; the orchestrator's auto turns start folded.* *Done 15 Oct: Amendment 164 (auto turns fold under `u${seq}`; in an agent that can start helpers they start folded, and one you open stays open in `conductor.agentUnfolds`; fold all reaches them; a `start_helper` line shows its task).*
 - [x] **Drag to move in Files, and rename/delete in the Navigator (wave 11, N6).** Found (14 Oct) for docs/plans/wave-11.md. *Done 15 Oct: Amendment 165 (a drag onto a folder or Move to… is a rename into it, with tabs following; into itself, or anything under it, refused; a taken name shows the daemon's reason; ✎ and ⌫ on the navigator's file and folder rows reuse the Files tree's box and confirm).*
@@ -281,10 +281,12 @@ the last of it on 12 Oct).
   - Metrics, key `8` (122).
   - Midnight (103, 129): a tab left open past midnight reads $0.00 on the status bar, and an agent's
     own budget (the composer's "$4.10 of $25 today") reads $0 again, with its over-budget warning
-    gone. Moving the system clock forward is enough to see both. An agent paused at its ceiling
-    stays paused, and the Budget reached card says its budget is renewed and offers **continue**.
+    gone. Moving the system clock forward is enough to see both.
   - The details panel's **today** and **lifetime** lines, and the wording "budget per agent per
     day" in Spawn (129).
+  - Since then: the Fleet card's fold (173); the monthly budget in Settings, on a project card's
+    **Edit**, and by provider (182, 188); Metrics' **By project** and **By provider** tables; and the
+    status bar's today, then the month (187).
 
 - [ ] **Run the new behaviour once against a real model.** Found (12 Oct). Everything in 100-129 passes
   its tests on fakes; nothing has run on the real SDK, Copilot or OpenRouter. It costs money and needs
@@ -295,7 +297,8 @@ the last of it on 12 Oct).
     sending work back after two and ask you with the question tool?
   - A real outage, with the network unplugged mid-run: the banner counts down 5 s, 15 s, 30 s, 60 s,
     5 min; **retry now** and **stop retrying** work; a reply starts the count again (123).
-  - An agent with a $1 budget (124): the warning at $1, the stop at $2, **+$10** raising it.
+  - An agent with a $1 budget (124, 180): it warns at $1 and keeps going, past $2 too; **+$10**
+    raising it quiets the warning.
   - Metrics (122) after a resumed run: a resume adds only the difference. Also check that
     `duration_api_ms` is a running total; the SDK's types don't say, and `session/metrics.ts` assumes it.
 

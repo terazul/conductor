@@ -218,11 +218,13 @@ export class Alerts {
    * and tomorrow starts clean.
    */
   #daily(): Alert[] {
+    const day = localDay();
+    // Only today's alert can still be open: an earlier day's `since` is let go, as #monthly does.
+    for (const d of this.#dailySince.keys()) if (d !== day) this.#dailySince.delete(d);
     const budget = dailyBudget();
     if (budget === null) return [];
     const spent = costToday(this.#db);
     if (spent < budget) return [];
-    const day = localDay();
     if (!this.#dailySince.has(day)) this.#dailySince.set(day, new Date().toISOString());
     return [
       {

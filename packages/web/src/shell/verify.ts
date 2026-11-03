@@ -653,7 +653,7 @@ console.log('\n15 · an agent, launched stack and project can be renamed from th
   check("a project's row has ✎ too, through the Fleet card's own editProject, and refuses an empty name", /<RenameButton name=\{project\.name\} onClick=\{\(\) => setRenaming\(true\)\} \/>/.test(nav) && /if \(!name\) throw new Error\('A project needs a name\.'\);\s*await editProject\(project\.id, \{ name \}\);/.test(nav));
   check("the project's ✎ shows on hover, as a folder's +", /\.sh-nav-prow:hover \.sh-nav-add,\s*\.sh-nav-prow:focus-within \.sh-nav-add,/.test(css));
   const projectScreen = src('../fleet/project.tsx');
-  check('the Project screen follows a launched stack name too', /\{job\.name \?\? job\.prompt\}/.test(projectScreen));
+  check('the Project screen follows a launched stack name too', /\{\(job\.name \?\? job\.prompt\) \|\| 'waiting for instructions'\}/.test(projectScreen));
 }
 
 console.log(

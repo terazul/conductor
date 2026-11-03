@@ -1795,6 +1795,23 @@ a.ag-files-p:focus-visible {
   color: var(--ink2);
 }
 
+/* Where the agent's changes are, when its terminal is at the project root (Amendment 191). */
+.ag-termx-where {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink3);
+  font-size: var(--fs-sm);
+}
+
+.ag-termx-where code {
+  font-family: var(--mono);
+  color: var(--ink2);
+}
+
 .ag-termx-wait {
   padding: 10px;
   color: var(--ink3);

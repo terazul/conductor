@@ -200,6 +200,94 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 191 — post-merge, applied. **Every terminal opens at the project root, the agent's tab too; its title says the folder and branch, and where the agent's changes are.**
+
+Daemon (`routes/term.ts`, `routes/terminal.ts`, `terminal/service.ts`, `terminal/verify.ts`),
+shared (`wire.ts`), web (`agent/TermPanel.tsx`, `agent/term.ts`, `agent/agent.css`,
+`agent/verify.ts`) and `docs/MANUAL.md`. Asked for 14 Oct; planned as wave 13's T1, decided as
+"every terminal opens at the project root, the agent's tab too".
+
+- **Where it starts.** `agentAt` (`routes/term.ts`) and the command runner's `cwdOf`
+  (`routes/terminal.ts`) start at `project.path`, as the Terminal dock always has, not at the
+  job's `worktreePath`. The shell keeps its agent's scope and its job, so removing the agent or
+  the job still ends it.
+- **What it says.** `TermInfo` has an additive `branch`: the branch checked out where the shell
+  started, read with `git rev-parse --abbrev-ref HEAD` as it opens; absent outside a repo, before
+  the first commit, and from an older daemon. A tab's title is `<folder> on <branch> · started …`,
+  and the note beside the tabs, *Runs as you, in ~/code/app on main*, names the folder and branch
+  of the terminal shown. The dock gets both too.
+- **Where the agent's changes are.** For an agent whose job has its own worktree, a line under the
+  tabs says *This agent's changes are in `.conductor/wt/<jobId>`, on `conductor/<jobId>`. To go
+  there: `cd /…/.conductor/wt/<jobId>`*, with **⧉ copy** for the `cd` line (the path quoted when
+  it needs it). A job on a branch, or in place, works in the project folder, and gets no line.
+- **Links.** A path printed in the agent's terminal now leads into the project root in Files, as
+  the dock's do, rather than into the job's root.
+
+**Verified:** `terminal/verify.ts` §2-3: an agent in a worktree job (`job_t`, its
+`worktreePath` under `.conductor/wt/`) gets a terminal listed at the project root with
+`branch: 'main'`, its shell's `pwd -P` prints the root, and the command runner reports the root
+as its `cwd`. `agent/verify.ts`: the title with and without a branch; `worktreeNote` for a
+worktree inside the project, outside it, and none for a branch or in-place job; `shellWord`'s
+quoting; and from the source, the panel's job and project lookup, its Files root, the line with
+its copy, the note's folder and branch, and the tokens-only style. Not seen in a browser.
+
+### Amendment 190 — post-merge, applied. **Spawn and the composer offer only the efforts the model takes, and Copilot is never sent one it doesn't.**
+
+Web (`spawn/autonomy.ts`, `spawn/route.tsx`, `agent/composer.tsx`, `spawn/verify.ts`,
+`agent/verify.ts`), daemon (`session/backends/copilot.ts`, `session/verify.ts`) and
+`docs/MANUAL.md`. Found 15 Oct by Amendment 156; planned as wave 13's E1, decided as "offer the
+model's listed efforts; all five where the list says nothing".
+
+- **What is offered.** `effortsFor(listed)` is the efforts a model's list names (`efforts` on
+  `GET /api/models?provider=`, which Copilot fills from `supportedReasoningEfforts`), in `EFFORTS`'
+  order, or all five where it names none: Claude, OpenRouter, an id typed rather than picked, or
+  a list naming none of ours. Spawn's effort row shows the chosen engine model's; the composer's,
+  the agent's model's. Claude keeps all five, as decided, though its catalog has `effortLevels`
+  (`xhigh` falls back to `high` there).
+- **A choice that moves.** On Spawn, a model picked that doesn't take the effort chosen moves it
+  to `nearestEffort`: the closest on the scale, the lower of two as close, so it never quietly
+  costs more. The line under the row says `effortMovedLine` (*gpt-5-mini doesn't take effort max,
+  so it is high.*) for that model, until you pick one. On the composer, switching the model does
+  the same as a second patch (`{ autonomy: { effort } }`), and its notice says both.
+- **Never sent.** The Copilot backend checks the effort against the model's list
+  (`copilotEfforts`, filled each time `copilotModels` reads it, and read once if the model isn't
+  known yet) when a session is made, on a live model switch, and on a live effort change. One the
+  model doesn't list is dropped: the model thinks at its default, and the transcript gets one
+  synthetic line, *effort max not sent: gpt-5-mini takes low, high, so it runs at its default*.
+  The agent keeps the effort it was given. A list that can't be read sends it as before.
+
+**Verified:** `spawn/verify.ts` §4: the narrowing, all five where the list names none, the
+nearest (and the lower on a tie), and the line; and that Spawn's row maps `offered`, not
+`EFFORTS`, and moves the choice. `agent/verify.ts`: the composer's row maps `effortsOn(model)`,
+and a model switch moves the effort with the line. `session/verify.ts` §17l: on the fake Copilot
+client, `max` on `gpt-5-mini` (`low`, `high`) makes a session with no `reasoningEffort` and one
+transcript line; `low` is sent with nothing said; `xhigh` on a model that lists none is sent; a
+live switch to `gpt-5-nano` (`medium`) goes without `low` and says so. Without the backend
+change, three of these fail.
+
+### Amendment 189 — post-merge, applied. **A decision that lands while a run your message started is finishing runs the agent again, as after any other run.**
+
+Daemon (`session/supervisor.ts`, `session/verify.ts`) and `docs/MANUAL.md`. Found 15 Oct in wave
+11's A2 (Amendment 168); planned as wave 13's L1.
+
+- **The bug.** A decision that lands while the agent's run is still unwinding is remembered
+  (`#resumeWanted`) and run when the run lets go. Only `#launch` followed it. A run started by
+  `#launchWithPrompt` (your message, a `'slot'` message sent when a slot freed, the ask to hand
+  off) ended `done` and nothing ran again. It was so before Amendment 168.
+- **The fix.** `#launch`'s tail is now `#relaunchIfWanted(agentId)`, called after both
+  `#launch`'s and `#launchWithPrompt`'s settle. It runs the agent again in its session, or
+  queues it with `SLOT_RESUME_NOTE` when every slot is taken (Amendment 168), as before.
+- **One run at a time.** When the agent is already running again when its run's settle ends (the
+  ask to hand off, started from that settle after a restart), the decision is kept for that
+  run's end instead. Before, the decision and the ask both launched it, and two runs went at once.
+
+**Verified:** `session/verify.ts` §15, after the unwinding-relaunch check: a decision during a
+run your message started, and during one a `'slot'` message started, runs the agent again once,
+in its session, told `WAKE_NUDGE`, and then no more. §20, after Amendment 119's checks: a decision
+during the ask to hand off runs it again once when the ask ends; one during the restart run before
+the ask starts nothing beside the ask and runs once after it. Without the fix, seven of these fail;
+without the one-run guard, the restart case starts a third run beside the ask.
+
 ### Amendment 188 — post-merge, applied. **Each engine has a monthly budget, and under Claude each route, in the unit it reports. It only warns.**
 
 Daemon (`db/migrations/320_provider_spend.sql`, `session/store.ts`, `session/backends/claude.ts`,

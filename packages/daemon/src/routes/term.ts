@@ -2,7 +2,7 @@
  * The full terminal over HTTP and a socket (Amendment 112; a project's, the shells and the
  * hub frame, Amendment 141).
  *
- *   POST   /api/agents/:agentId/terminals     open a shell in the agent's folder   -> { id }
+ *   POST   /api/agents/:agentId/terminals     open a shell in the project folder   -> { id }
  *   GET    /api/agents/:agentId/terminals     { available, reason?, terminals }
  *   POST   /api/projects/:projectId/terminals open a shell in the project folder   -> { id }
  *   GET    /api/projects/:projectId/terminals { available, reason?, terminals }
@@ -38,6 +38,7 @@ import { hub } from '../hub.js';
 import { getAgent, getJob, getProject } from '../session/store.js';
 import { defaultShell, shells } from '../terminal/prefs.js';
 import { TermError, terminals } from '../terminal/service.js';
+import { currentBranch } from '../workspace/git.js';
 
 /** The most one `in` frame may carry: a paste, not a file. */
 const MAX_INPUT = 1024 * 1024;
@@ -81,10 +82,14 @@ export default async function termRoutes(app: FastifyInstance): Promise<void> {
   });
 
   type Where = { scope: TermScope; cwd: string; jobId: string | null; projectId: string };
+  // An agent's shell starts at the project root, as the dock's does (Amendment 191): one place
+  // to run things, whichever tab it was opened from. Its job is kept so removing the job ends it,
+  // and the page says where the agent's own changes are when they are in a worktree.
   const agentAt = (agentId: string): Where | null => {
     const agent = getAgent(db, agentId);
     const job = agent ? getJob(db, agent.jobId) : undefined;
-    return agent && job ? { scope: { kind: 'agent', agentId }, cwd: job.worktreePath, jobId: job.id, projectId: agent.projectId } : null;
+    const project = agent ? getProject(db, agent.projectId) : undefined;
+    return agent && job && project ? { scope: { kind: 'agent', agentId }, cwd: project.path, jobId: job.id, projectId: agent.projectId } : null;
   };
   const projectAt = (projectId: string): Where | null => {
     const project = getProject(db, projectId);
@@ -100,9 +105,11 @@ export default async function termRoutes(app: FastifyInstance): Promise<void> {
     // Without a PTY there are none to list, and the page says why.
     return status.available ? { available: true, terminals: mgr.list(at.scope) } : { available: false, reason: status.reason, terminals: [] };
   };
-  const openAt = (at: Where, body: TermCreateRequest | undefined, reply: FastifyReply) => {
+  const openAt = async (at: Where, body: TermCreateRequest | undefined, reply: FastifyReply) => {
+    // The branch checked out there, for the tab's title. Not a repo, or no commit yet: none.
+    const branch = await currentBranch(at.cwd).catch(() => null);
     try {
-      const t = mgr.create({ scope: at.scope, jobId: at.jobId, projectId: at.projectId, cwd: at.cwd, cols: body?.cols, rows: body?.rows });
+      const t = mgr.create({ scope: at.scope, jobId: at.jobId, projectId: at.projectId, cwd: at.cwd, branch, cols: body?.cols, rows: body?.rows });
       const out: TermCreateResponse = { id: t.id };
       return reply.code(201).send(out);
     } catch (err) {

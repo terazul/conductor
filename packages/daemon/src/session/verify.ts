@@ -57,6 +57,7 @@ import type {
   TerminalRun,
   ProviderInfo,
   ProviderModelList,
+  UserTextPayload,
 } from '@conductor/shared';
 import { allowedUnattended, arbiter, fallbackSuggestions, ruleCovers, toolRuleFor } from '../arbiter/index.js';
 import type { PermissionRequest, PermissionRequestResult, SessionConfig, SessionEvent } from '@github/copilot-sdk';
@@ -2387,7 +2388,7 @@ async function main(): Promise<void> {
    */
   await setSlots('2');
   job('job_unwind', null);
-  // Through the queue: a run a message of yours started (`#launchWithPrompt`) is not relaunched this way.
+  // Through the queue; a run a message of yours started (`#launchWithPrompt`) is checked below.
   fixture('agt_unwind', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_unwind', autonomy: DEFAULT_AUTONOMY });
   fixture('agt_ubusy', 'job_unwind', { status: 'queued', sdkSessionId: 'sess_ubusy', autonomy: DEFAULT_AUTONOMY });
   const unwindAt = runs.length;
@@ -2419,6 +2420,58 @@ async function main(): Promise<void> {
     runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length === 2 && sup.slots.used === 1 && getAgent(db, 'agt_unwind')?.status === 'working',
     `${runs.slice(unwindAt).filter((r) => r.options.resume === 'sess_unwind').length} run(s), ${sup.slots.used} of ${slotLimit()}`,
   );
+  for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
+  await until(() => sup.slots.used === 0);
+
+  /*
+   * The same, for a run your message started (`#launchWithPrompt`, Amendment 189). It used to
+   * end `done` and nothing ran again: the decision was lost. Still at a limit of one, so the
+   * 'slot' message below has to wait for one.
+   */
+  const relaunches = (session: string, from: number) => runs.slice(from).filter((r) => r.options.resume === session);
+  job('job_unwind_said', null);
+  fixture('agt_usaid', 'job_unwind_said', { sdkSessionId: 'sess_usaid', autonomy: DEFAULT_AUTONOMY });
+  const saidAt = runs.length;
+  check('a message to an idle agent starts it', (await send<{ delivery?: string }>('POST', '/api/agents/agt_usaid/message', { text: 'one more thing' })).body.delivery === 'resumed' && (await until(() => runs.length === saidAt + 1)));
+  sup.resumeParked('agt_usaid'); // still running: remembered for when its run lets go
+  runs[saidAt]?.finish({ cost: 0, reason: 'completed' });
+  check(
+    'a decision that landed while a run your message started unwound: it runs again, in its own session',
+    (await until(() => relaunches('sess_usaid', saidAt).length === 2)) && getAgent(db, 'agt_usaid')?.status === 'working',
+    `${relaunches('sess_usaid', saidAt).length} run(s), ${getAgent(db, 'agt_usaid')?.status}`,
+  );
+  await until(() => (runs[saidAt + 1]?.prompts.length ?? 0) > 0);
+  check('told what any relaunch is told, not your message again', runs[saidAt + 1]?.prompts[0] === WAKE_NUDGE, JSON.stringify(runs[saidAt + 1]?.prompts));
+  runs[saidAt + 1]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_usaid')?.status === 'done');
+  await settle(150);
+  check('once: it ends done, with no third run', relaunches('sess_usaid', saidAt).length === 2 && sup.slots.used === 0, `${relaunches('sess_usaid', saidAt).length} run(s)`);
+
+  // Started by a 'slot' message (Amendment 168), sent when the slot it waited for freed.
+  fixture('agt_ufill', 'job_unwind_said', { status: 'queued', sdkSessionId: 'sess_ufill', autonomy: DEFAULT_AUTONOMY });
+  fixture('agt_uslot', 'job_unwind_said', { sdkSessionId: 'sess_uslot', autonomy: DEFAULT_AUTONOMY });
+  const slotAt = runs.length;
+  sup.pump();
+  await until(() => sup.slots.used === 1 && runs.length === slotAt + 1);
+  check(
+    "with the one slot taken, a message waits as a 'slot' row",
+    (await send<{ delivery?: string }>('POST', '/api/agents/agt_uslot/message', { text: 'when you can' })).body.delivery === 'queued' && listScheduled(db).some((m) => m.agentId === 'agt_uslot' && m.trigger === 'slot'),
+  );
+  runs[slotAt]?.finish({ cost: 0, reason: 'completed' });
+  check('a freed slot sends it', (await until(() => relaunches('sess_uslot', slotAt).length === 1)) && listScheduled(db).every((m) => m.agentId !== 'agt_uslot'));
+  const slotRun = relaunches('sess_uslot', slotAt)[0];
+  await until(() => (slotRun?.prompts.length ?? 0) > 0);
+  sup.resumeParked('agt_uslot');
+  slotRun?.finish({ cost: 0, reason: 'completed' });
+  check(
+    "a decision that landed while that run unwound: it runs again, once",
+    (await until(() => relaunches('sess_uslot', slotAt).length === 2)) && relaunches('sess_uslot', slotAt)[1] !== slotRun,
+    `${relaunches('sess_uslot', slotAt).length} run(s)`,
+  );
+  relaunches('sess_uslot', slotAt)[1]?.finish({ cost: 0, reason: 'completed' });
+  await until(() => getAgent(db, 'agt_uslot')?.status === 'done');
+  await settle(150);
+  check('and no more', relaunches('sess_uslot', slotAt).length === 2 && sup.slots.used === 0, `${relaunches('sess_uslot', slotAt).length} run(s)`);
   for (const r of runs) r.finish({ cost: 0, reason: 'completed' });
   await until(() => sup.slots.used === 0);
   await setSlots(null);
@@ -4235,6 +4288,45 @@ async function main(): Promise<void> {
     check('its capabilities are the findings: no defer, no dollars, no plan mode yet', JSON.stringify(caps) === JSON.stringify({ defer: false, resume: true, costUsd: false, effort: true, planMode: false, helperTools: true }));
     check('one client per provider, started once each', fakeCopilot.clients === 2 && fakeCopilot.starts === 2, JSON.stringify(fakeCopilot));
     await until(() => sup.slots.used === 0);
+
+    // ── an effort the model doesn't list is not sent (Amendment 190) ──
+    const keptList = fakeCopilot.models;
+    fakeCopilot.models = [...keptList, { id: 'gpt-5-nano', name: 'GPT-5 nano', supportedReasoningEfforts: ['medium'] }];
+    const effortNotes = (id: string) =>
+      payloads(id).filter((p): p is UserTextPayload => p.kind === 'user_text' && p.synthetic === true && /^effort /.test(p.text));
+    cpAgent('agt_cp_max', { autonomy: { ...DEFAULT_AUTONOMY, effort: 'max' } });
+    sup.pump();
+    const sMax = await sessionOf('agt_cp_max');
+    check("an effort the model's list doesn't name is not sent: the session is made without one", sMax !== undefined && sMax.config.reasoningEffort === undefined && sMax.config.model === 'gpt-5-mini', JSON.stringify(sMax?.config.reasoningEffort));
+    check(
+      'and the transcript says so, in one line',
+      effortNotes('agt_cp_max').length === 1 && effortNotes('agt_cp_max')[0]!.text === 'effort max not sent: gpt-5-mini takes low, high, so it runs at its default',
+      JSON.stringify(effortNotes('agt_cp_max')),
+    );
+    check('and the agent keeps the effort it was given, for a model that takes it', getAgent(db, 'agt_cp_max')?.autonomy.effort === 'max');
+    sMax?.emit('session.idle', {});
+    await until(() => getAgent(db, 'agt_cp_max')?.status === 'done');
+    cpAgent('agt_cp_low', { autonomy: { ...DEFAULT_AUTONOMY, effort: 'low' } });
+    cpAgent('agt_cp_any', { model: 'gpt-unlisted', autonomy: { ...DEFAULT_AUTONOMY, effort: 'xhigh' } });
+    sup.pump();
+    const sLow = await sessionOf('agt_cp_low');
+    const sAny = await sessionOf('agt_cp_any');
+    check('one it names is sent, with nothing said', sLow?.config.reasoningEffort === 'low' && effortNotes('agt_cp_low').length === 0, JSON.stringify(sLow?.config.reasoningEffort));
+    check("and a model whose list names none is sent the effort as it is", sAny?.config.reasoningEffort === 'xhigh' && effortNotes('agt_cp_any').length === 0, JSON.stringify(sAny?.config.reasoningEffort));
+    await until(() => getAgent(db, 'agt_cp_low')?.status === 'working');
+    const toNano = await send<{ appliesTo?: string }>('POST', '/api/agents/agt_cp_low/model', { model: 'gpt-5-nano' });
+    check(
+      'a live switch to a model that does not take the effort goes without it, and says so',
+      toNano.body.appliesTo === 'now' && sLow?.models.at(-1) === 'gpt-5-nano' && sLow.efforts.at(-1) === undefined &&
+        effortNotes('agt_cp_low').map((p) => p.text).join() === 'effort low not sent: gpt-5-nano takes medium, so it runs at its default',
+      JSON.stringify([toNano.body, sLow?.models, sLow?.efforts, effortNotes('agt_cp_low')]),
+    );
+    sLow?.emit('session.idle', {});
+    sAny?.emit('session.idle', {});
+    await until(() => sup.slots.used === 0);
+    fakeCopilot.models = keptList;
+    // The switch read Copilot's list, gpt-5-nano and all, into the served cache; 17m's launches on gpt-5 need it gone.
+    forgetProviderModels();
   }
 
   console.log('\n17m · an engine that reports no dollars is capped in tokens (Amendment 77)');
@@ -5429,6 +5521,58 @@ async function main(): Promise<void> {
       runs.length === before119 + 1 && getAgent(db, 'hr_b')?.status === 'queued' && held().some((a) => a.agentIds[0] === 'hr_a'),
       `${runs.length - before119} runs`,
     );
+
+    /*
+     * A decision that lands while the ask to hand off runs (`#launchWithPrompt`, Amendment 189)
+     * is run once that run lets go, as after any other. One that lands in the run before the
+     * ask waits for the ask's end too, rather than start a second run beside it.
+     */
+    const restartAsk = async (id: string, decideIn: 'restart' | 'ask'): Promise<{ at: number; mine: () => typeof runs }> => {
+      hjobRow(`job_${id}`);
+      hfix(`${id}_a`, `job_${id}`, { role: 'analyst', status: 'working', sdkSessionId: `sess_${id}_a`, autonomy: DEFAULT_AUTONOMY });
+      hfix(`${id}_b`, `job_${id}`, { role: 'developer', status: 'queued', dependsOn: [`${id}_a`], autonomy: DEFAULT_AUTONOMY });
+      const at = runs.length;
+      const mine = () => runs.slice(at).filter((r) => r.options.resume === `sess_${id}_a`);
+      sup.reconcile();
+      sup.pump();
+      await until(() => mine().length === 1 && mine()[0]!.prompts.length > 0);
+      if (decideIn === 'restart') sup.resumeParked(`${id}_a`);
+      mine()[0]?.finish({ cost: 0, reason: 'completed' });
+      await until(() => mine().length === 2 && mine()[1]!.prompts.length > 0);
+      if (decideIn === 'ask') sup.resumeParked(`${id}_a`);
+      return { at, mine };
+    };
+    const ask189 = await restartAsk('hd189', 'ask');
+    check('asked to hand off after a restart, as above', ask189.mine()[1]?.prompts[0] === HANDOFF_ASK, JSON.stringify(ask189.mine()[1]?.prompts));
+    await settle(100);
+    check('a decision that lands while it is asked starts nothing beside it', ask189.mine().length === 2, `${ask189.mine().length} runs`);
+    ask189.mine()[1]?.finish({ cost: 0, reason: 'completed' });
+    check(
+      'when the ask ends, the decision runs it again, in its session (Amendment 189)',
+      (await until(() => ask189.mine().length === 3)) && getAgent(db, 'hd189_a')?.status === 'working',
+      `${ask189.mine().length} runs, ${getAgent(db, 'hd189_a')?.status}`,
+    );
+    await until(() => (ask189.mine()[2]?.prompts.length ?? 0) > 0);
+    check('told what any relaunch is told, not to hand off again', ask189.mine()[2]?.prompts[0] === WAKE_NUDGE, JSON.stringify(ask189.mine()[2]?.prompts));
+    ask189.mine()[2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'hd189_a')?.status === 'done');
+    await settle(150);
+    check(
+      'once: it ends held, with no fourth run, and the developer waits',
+      ask189.mine().length === 3 && getHandoff(db, 'hd189_a').held && getAgent(db, 'hd189_b')?.status === 'queued',
+      `${ask189.mine().length} runs`,
+    );
+
+    const early189 = await restartAsk('he189', 'restart');
+    check('a decision in the restart run: the ask still goes, alone', early189.mine()[1]?.prompts[0] === HANDOFF_ASK && sup.isBusy('he189_a'), JSON.stringify(early189.mine()[1]?.prompts));
+    await settle(100);
+    check('and nothing runs beside it', early189.mine().length === 2, `${early189.mine().length} runs`);
+    early189.mine()[1]?.finish({ cost: 0, reason: 'completed' });
+    check('the ask over, the decision runs it again', await until(() => early189.mine().length === 3), `${early189.mine().length} runs`);
+    early189.mine()[2]?.finish({ cost: 0, reason: 'completed' });
+    await until(() => getAgent(db, 'he189_a')?.status === 'done');
+    await settle(150);
+    check('once', early189.mine().length === 3, `${early189.mine().length} runs`);
 
     // One that does hand off after the restart is not asked, and what waits for it starts.
     hjobRow('job_handoff119_ok');
@@ -7984,97 +8128,6 @@ async function main(): Promise<void> {
     old.close();
   }
 
-  console.log('\n31 · several stacks from one launch, one batch: checked first, then made in turn (Amendment 181)');
-  {
-    sdk.query = fakeQuery as typeof sdk.query;
-    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
-    await until(() => sup.slots.used === 0);
-    // Nothing is known of what the gateway serves, so a model id is checked only against the nicknames.
-    forgetCatalog();
-
-    const spid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'stacks178' })).body.project.id;
-    const M = 'claude-opus-s178';
-    const stackBody = (n: number, over: Record<string, unknown> = {}) => ({
-      projectId: spid,
-      prompt: `Run track ${n} of the plan.`,
-      isolation: 'worktree',
-      branch: `s178/t${n}`,
-      preset: 'orchestrated',
-      agents: [{ role: 'orchestrator', model: M, autonomy: DEFAULT_AUTONOMY }],
-      budgetUsd: 500,
-      ...over,
-    });
-    type Batch = {
-      jobs?: Array<{ job: { id: string; branch: string; worktreePath: string; prompt: string; budgetUsd: number | null }; agents: Agent[] }>;
-      stacks?: Array<{ stack: number; jobId?: string; error?: string }>;
-      error?: string;
-      detail?: string;
-    };
-    const batch = (jobs: unknown[]) => send<Batch>('POST', '/api/jobs/batch', { jobs });
-    const jobsNow = (): number => count(db, 'SELECT COUNT(*) AS n FROM jobs');
-    const branches = (): string => git(['branch', '--list', 's178/*']);
-    const setStacks = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [STACKS_KEY]: v } });
-
-    // ── the setting ─────────────────────────────────────────────────────────────
-    check('the setting is a whole number from 1 to 6, nothing else → 400', (await setStacks('0')).status === 400 && (await setStacks('7')).status === 400 && (await setStacks('2.5')).status === 400 && /from 1 to 6/.test((await setStacks('x')).body.detail ?? ''));
-    check('with nothing set it is 3', stacksLimit() === 3 && STACKS_KEY === 'conductor.launch.stacks');
-
-    // ── three, made ─────────────────────────────────────────────────────────────
-    let before = jobsNow();
-    const three = await batch([1, 2, 3].map((n) => stackBody(n)));
-    const made = three.body.jobs ?? [];
-    check('a batch of three is 201, three jobs', three.status === 201 && made.length === 3 && jobsNow() === before + 3, `${three.status} ${JSON.stringify(three.body).slice(0, 300)}`);
-    check('each on its own branch, as named, in order', made.map((m) => m.job.branch).join() === 's178/t1,s178/t2,s178/t3' && branches().split('\n').length === 3, branches());
-    check('each in its own worktree, there on disk', new Set(made.map((m) => m.job.worktreePath)).size === 3 && made.every((m) => existsSync(m.job.worktreePath) && m.job.worktreePath.includes(join('.conductor', 'wt', m.job.id))));
-    check('each with its own prompt and the same budget', made.map((m) => m.job.prompt).join('|') === 'Run track 1 of the plan.|Run track 2 of the plan.|Run track 3 of the plan.' && made.every((m) => m.job.budgetUsd === 500));
-    check('and every stack is listed as started, with its job', JSON.stringify(three.body.stacks) === JSON.stringify(made.map((m, i) => ({ stack: i + 1, jobId: m.job.id }))));
-    const perLaunch = await batch([stackBody(1, { branch: undefined }), stackBody(2, { branch: undefined })]);
-    check('with no branch named, each gets conductor/<jobId> as one launch does', perLaunch.status === 201 && (perLaunch.body.jobs ?? []).every((m) => m.job.branch === `conductor/${m.job.id}`));
-
-    // ── refused before anything is made ─────────────────────────────────────────
-    before = jobsNow();
-    let branchesBefore = branches();
-    const four = await batch([4, 5, 6, 7].map((n) => stackBody(n)));
-    check('four, over the default 3 → 400, nothing made', four.status === 400 && jobsNow() === before && branches() === branchesBefore && /conductor\.launch\.stacks/.test(four.body.detail ?? ''), `${four.status} ${four.body.error} ${four.body.detail}`);
-    check('none, or not a list → 400', (await batch([])).status === 400 && (await send('POST', '/api/jobs/batch', { jobs: 'x' })).status === 400 && jobsNow() === before);
-    check('the setting at 2 refuses three', (await setStacks('2')).status === 200 && stacksLimit() === 2 && (await batch([4, 5, 6].map((n) => stackBody(n)))).status === 400 && jobsNow() === before);
-    check('the setting at 4 makes four', (await setStacks('4')).status === 200 && (await batch([4, 5, 6, 7].map((n) => stackBody(n)))).status === 201 && jobsNow() === before + 4);
-    check('the setting back to the default', (await setStacks(null)).status === 200 && stacksLimit() === 3);
-
-    before = jobsNow();
-    branchesBefore = branches();
-    const nick = await batch([stackBody(8), stackBody(9, { agents: [{ role: 'orchestrator', model: 'opus', autonomy: DEFAULT_AUTONOMY }] }), stackBody(10)]);
-    check('one stack with a bad model → 400 naming it, nothing made, the first stack included', nick.status === 400 && /^stack 2: invalid agents/.test(nick.body.error ?? '') && jobsNow() === before && branches() === branchesBefore, `${nick.status} ${nick.body.error}`);
-    const noPrompt = await batch([stackBody(8), stackBody(9, { prompt: ' ' })]);
-    check('one with no prompt, or a branch not on a worktree → 400, nothing made', noPrompt.status === 400 && /^stack 2: prompt is required/.test(noPrompt.body.error ?? '') && (await batch([stackBody(8), stackBody(9, { isolation: 'in_place' })])).status === 400 && jobsNow() === before);
-    check('one for a project not there → 400, nothing made', (await batch([stackBody(8), stackBody(9, { projectId: 'proj_none' })])).status === 400 && jobsNow() === before && branches() === branchesBefore);
-    const inPlace = await batch([stackBody(8, { isolation: 'in_place', branch: undefined }), stackBody(9, { isolation: 'in_place', branch: undefined })]);
-    check('two stacks in the project folder → 400, nothing made', inPlace.status === 400 && /each in its own checkout/.test(inPlace.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${inPlace.status} ${inPlace.body.error} ${inPlace.body.detail}`);
-    check('so is the old in-place branch', (await batch([stackBody(8, { isolation: 'branch', branch: undefined }), stackBody(9)])).status === 400 && jobsNow() === before);
-    const twice = await batch([stackBody(8), stackBody(9, { branch: 's178/t8' })]);
-    check('two stacks naming one branch → 409, nothing made', twice.status === 409 && /s178\/t8 is named twice/.test(twice.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${twice.status} ${twice.body.detail}`);
-
-    // ── git refuses one part-way: the others are kept ───────────────────────────
-    // `a..b` passes the route's shape check and is refused by git's check-ref-format in createJob.
-    const part = await batch([stackBody(11), stackBody(12, { branch: 's178/a..b' }), stackBody(13)]);
-    const kept = part.body.jobs ?? [];
-    check('git refusing stack 2 → 207', part.status === 207, `${part.status} ${JSON.stringify(part.body).slice(0, 300)}`);
-    check('stack 1 is kept, and stack 3 is still made', kept.map((m) => m.job.branch).join() === 's178/t11,s178/t13' && jobsNow() === before + 2 && kept.every((m) => existsSync(m.job.worktreePath)));
-    check("and stack 2's reason is said", part.body.stacks?.length === 3 && part.body.stacks[0]!.jobId === kept[0]?.job.id && /s178\/a\.\.b/.test(part.body.stacks[1]!.error ?? '') && part.body.stacks[1]!.jobId === undefined && part.body.stacks[2]!.jobId === kept[1]?.job.id, JSON.stringify(part.body.stacks));
-
-    // ── one launch is as it was ─────────────────────────────────────────────────
-    const one = await send<{ job?: { branch: string }; error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
-    check('POST /api/jobs still makes one, 201', one.status === 201 && one.body.job?.branch === 's178/t14');
-    const oneBad = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(15, { prompt: '' }));
-    check('and refuses as it did, word for word', oneBad.status === 400 && JSON.stringify(oneBad.body) === JSON.stringify({ error: 'prompt is required' }));
-    const oneTaken = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
-    check('a branch taken is still its 409', oneTaken.status === 409 && oneTaken.body.error === 'could not use that branch' && /already checked out/.test(oneTaken.body.detail ?? ''), `${oneTaken.status} ${oneTaken.body.detail}`);
-
-    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
-    await until(() => sup.slots.used === 0);
-    sdk.query = realQuery;
-  }
-
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n30 · a changed setting takes effect on the next run, and a live run takes the mode and effort (Amendment 178)');
   {
@@ -8242,6 +8295,97 @@ async function main(): Promise<void> {
     cp?.emit('session.idle', {});
     await until(() => getAgent(db, 's30_cp')?.status === 'done');
     await until(() => sup.slots.used === 0);
+  }
+
+  console.log('\n31 · several stacks from one launch, one batch: checked first, then made in turn (Amendment 181)');
+  {
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    // Nothing is known of what the gateway serves, so a model id is checked only against the nicknames.
+    forgetCatalog();
+
+    const spid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'stacks178' })).body.project.id;
+    const M = 'claude-opus-s178';
+    const stackBody = (n: number, over: Record<string, unknown> = {}) => ({
+      projectId: spid,
+      prompt: `Run track ${n} of the plan.`,
+      isolation: 'worktree',
+      branch: `s178/t${n}`,
+      preset: 'orchestrated',
+      agents: [{ role: 'orchestrator', model: M, autonomy: DEFAULT_AUTONOMY }],
+      budgetUsd: 500,
+      ...over,
+    });
+    type Batch = {
+      jobs?: Array<{ job: { id: string; branch: string; worktreePath: string; prompt: string; budgetUsd: number | null }; agents: Agent[] }>;
+      stacks?: Array<{ stack: number; jobId?: string; error?: string }>;
+      error?: string;
+      detail?: string;
+    };
+    const batch = (jobs: unknown[]) => send<Batch>('POST', '/api/jobs/batch', { jobs });
+    const jobsNow = (): number => count(db, 'SELECT COUNT(*) AS n FROM jobs');
+    const branches = (): string => git(['branch', '--list', 's178/*']);
+    const setStacks = (v: unknown) => send<{ detail?: string }>('PATCH', '/api/settings', { settings: { [STACKS_KEY]: v } });
+
+    // ── the setting ─────────────────────────────────────────────────────────────
+    check('the setting is a whole number from 1 to 6, nothing else → 400', (await setStacks('0')).status === 400 && (await setStacks('7')).status === 400 && (await setStacks('2.5')).status === 400 && /from 1 to 6/.test((await setStacks('x')).body.detail ?? ''));
+    check('with nothing set it is 3', stacksLimit() === 3 && STACKS_KEY === 'conductor.launch.stacks');
+
+    // ── three, made ─────────────────────────────────────────────────────────────
+    let before = jobsNow();
+    const three = await batch([1, 2, 3].map((n) => stackBody(n)));
+    const made = three.body.jobs ?? [];
+    check('a batch of three is 201, three jobs', three.status === 201 && made.length === 3 && jobsNow() === before + 3, `${three.status} ${JSON.stringify(three.body).slice(0, 300)}`);
+    check('each on its own branch, as named, in order', made.map((m) => m.job.branch).join() === 's178/t1,s178/t2,s178/t3' && branches().split('\n').length === 3, branches());
+    check('each in its own worktree, there on disk', new Set(made.map((m) => m.job.worktreePath)).size === 3 && made.every((m) => existsSync(m.job.worktreePath) && m.job.worktreePath.includes(join('.conductor', 'wt', m.job.id))));
+    check('each with its own prompt and the same budget', made.map((m) => m.job.prompt).join('|') === 'Run track 1 of the plan.|Run track 2 of the plan.|Run track 3 of the plan.' && made.every((m) => m.job.budgetUsd === 500));
+    check('and every stack is listed as started, with its job', JSON.stringify(three.body.stacks) === JSON.stringify(made.map((m, i) => ({ stack: i + 1, jobId: m.job.id }))));
+    const perLaunch = await batch([stackBody(1, { branch: undefined }), stackBody(2, { branch: undefined })]);
+    check('with no branch named, each gets conductor/<jobId> as one launch does', perLaunch.status === 201 && (perLaunch.body.jobs ?? []).every((m) => m.job.branch === `conductor/${m.job.id}`));
+
+    // ── refused before anything is made ─────────────────────────────────────────
+    before = jobsNow();
+    let branchesBefore = branches();
+    const four = await batch([4, 5, 6, 7].map((n) => stackBody(n)));
+    check('four, over the default 3 → 400, nothing made', four.status === 400 && jobsNow() === before && branches() === branchesBefore && /conductor\.launch\.stacks/.test(four.body.detail ?? ''), `${four.status} ${four.body.error} ${four.body.detail}`);
+    check('none, or not a list → 400', (await batch([])).status === 400 && (await send('POST', '/api/jobs/batch', { jobs: 'x' })).status === 400 && jobsNow() === before);
+    check('the setting at 2 refuses three', (await setStacks('2')).status === 200 && stacksLimit() === 2 && (await batch([4, 5, 6].map((n) => stackBody(n)))).status === 400 && jobsNow() === before);
+    check('the setting at 4 makes four', (await setStacks('4')).status === 200 && (await batch([4, 5, 6, 7].map((n) => stackBody(n)))).status === 201 && jobsNow() === before + 4);
+    check('the setting back to the default', (await setStacks(null)).status === 200 && stacksLimit() === 3);
+
+    before = jobsNow();
+    branchesBefore = branches();
+    const nick = await batch([stackBody(8), stackBody(9, { agents: [{ role: 'orchestrator', model: 'opus', autonomy: DEFAULT_AUTONOMY }] }), stackBody(10)]);
+    check('one stack with a bad model → 400 naming it, nothing made, the first stack included', nick.status === 400 && /^stack 2: invalid agents/.test(nick.body.error ?? '') && jobsNow() === before && branches() === branchesBefore, `${nick.status} ${nick.body.error}`);
+    const noPrompt = await batch([stackBody(8), stackBody(9, { prompt: ' ' })]);
+    check('one with no prompt, or a branch not on a worktree → 400, nothing made', noPrompt.status === 400 && /^stack 2: prompt is required/.test(noPrompt.body.error ?? '') && (await batch([stackBody(8), stackBody(9, { isolation: 'in_place' })])).status === 400 && jobsNow() === before);
+    check('one for a project not there → 400, nothing made', (await batch([stackBody(8), stackBody(9, { projectId: 'proj_none' })])).status === 400 && jobsNow() === before && branches() === branchesBefore);
+    const inPlace = await batch([stackBody(8, { isolation: 'in_place', branch: undefined }), stackBody(9, { isolation: 'in_place', branch: undefined })]);
+    check('two stacks in the project folder → 400, nothing made', inPlace.status === 400 && /each in its own checkout/.test(inPlace.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${inPlace.status} ${inPlace.body.error} ${inPlace.body.detail}`);
+    check('so is the old in-place branch', (await batch([stackBody(8, { isolation: 'branch', branch: undefined }), stackBody(9)])).status === 400 && jobsNow() === before);
+    const twice = await batch([stackBody(8), stackBody(9, { branch: 's178/t8' })]);
+    check('two stacks naming one branch → 409, nothing made', twice.status === 409 && /s178\/t8 is named twice/.test(twice.body.detail ?? '') && jobsNow() === before && branches() === branchesBefore, `${twice.status} ${twice.body.detail}`);
+
+    // ── git refuses one part-way: the others are kept ───────────────────────────
+    // `a..b` passes the route's shape check and is refused by git's check-ref-format in createJob.
+    const part = await batch([stackBody(11), stackBody(12, { branch: 's178/a..b' }), stackBody(13)]);
+    const kept = part.body.jobs ?? [];
+    check('git refusing stack 2 → 207', part.status === 207, `${part.status} ${JSON.stringify(part.body).slice(0, 300)}`);
+    check('stack 1 is kept, and stack 3 is still made', kept.map((m) => m.job.branch).join() === 's178/t11,s178/t13' && jobsNow() === before + 2 && kept.every((m) => existsSync(m.job.worktreePath)));
+    check("and stack 2's reason is said", part.body.stacks?.length === 3 && part.body.stacks[0]!.jobId === kept[0]?.job.id && /s178\/a\.\.b/.test(part.body.stacks[1]!.error ?? '') && part.body.stacks[1]!.jobId === undefined && part.body.stacks[2]!.jobId === kept[1]?.job.id, JSON.stringify(part.body.stacks));
+
+    // ── one launch is as it was ─────────────────────────────────────────────────
+    const one = await send<{ job?: { branch: string }; error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
+    check('POST /api/jobs still makes one, 201', one.status === 201 && one.body.job?.branch === 's178/t14');
+    const oneBad = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(15, { prompt: '' }));
+    check('and refuses as it did, word for word', oneBad.status === 400 && JSON.stringify(oneBad.body) === JSON.stringify({ error: 'prompt is required' }));
+    const oneTaken = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', stackBody(14));
+    check('a branch taken is still its 409', oneTaken.status === 409 && oneTaken.body.error === 'could not use that branch' && /already checked out/.test(oneTaken.body.detail ?? ''), `${oneTaken.status} ${oneTaken.body.detail}`);
+
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    sdk.query = realQuery;
   }
 
   console.log('\n32 · this month beside today, and a monthly budget for the fleet and each project, which only warns (Amendment 182)');

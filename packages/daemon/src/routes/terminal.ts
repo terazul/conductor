@@ -8,7 +8,7 @@
 import type { FastifyInstance } from 'fastify';
 import { openDb } from '../db/index.js';
 import { hub } from '../hub.js';
-import { getAgent, getJob } from '../session/store.js';
+import { getAgent, getJob, getProject } from '../session/store.js';
 import { Terminal, TerminalError } from '../session/terminal.js';
 
 let instance: Terminal | null = null;
@@ -27,10 +27,11 @@ export default async function terminalRoutes(app: FastifyInstance): Promise<void
   const t = terminal();
   app.addHook('onClose', async () => t.shutdown());
 
+  // At the project root, as the full terminal is (Amendment 191).
   const cwdOf = (agentId: string): string | null => {
     const agent = getAgent(db, agentId);
     const job = agent ? getJob(db, agent.jobId) : undefined;
-    return job?.worktreePath ?? null;
+    return job ? (getProject(db, job.projectId)?.path ?? null) : null;
   };
   const failWith = (reply: import('fastify').FastifyReply, err: unknown) => {
     if (err instanceof TerminalError) return reply.code(err.status).send({ error: err.message });

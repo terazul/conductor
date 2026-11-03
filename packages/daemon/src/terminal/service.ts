@@ -1,6 +1,7 @@
 /**
  * The terminals (Amendment 112): real shells on pseudo-terminals, one or more per agent,
- * in the agent's job folder. The Agent screen's terminal tab shows them with xterm.js.
+ * at the project root (its job folder until Amendment 191). The Agent screen's terminal tab
+ * shows them with xterm.js.
  * Amendment 141 adds a project's terminals, in the project folder, for the Terminal dock
  * under every screen: the same shells by the same rules, with `scope` saying whose.
  *
@@ -120,7 +121,7 @@ export class TerminalManager {
     return n;
   }
 
-  create(o: { scope: TermScope; jobId?: string | null; projectId?: string | null; cwd: string; cols?: number; rows?: number }): TermInfo {
+  create(o: { scope: TermScope; jobId?: string | null; projectId?: string | null; cwd: string; branch?: string | null; cols?: number; rows?: number }): TermInfo {
     const status = ptyStatus();
     const pty = loadPty();
     if (!status.available || !pty) {
@@ -146,6 +147,7 @@ export class TerminalManager {
         id: `term_${randomBytes(6).toString('hex')}`,
         scope: o.scope,
         cwd: o.cwd,
+        ...(o.branch ? { branch: o.branch } : {}),
         shell: shell.file,
         startedAt: new Date().toISOString(),
         exited: false,

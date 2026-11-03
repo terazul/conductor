@@ -49,7 +49,7 @@ import {
   type SessionEvent,
   type Tool,
 } from '@github/copilot-sdk';
-import type { Autonomy, EventPayload } from '@conductor/shared';
+import type { Autonomy, EffortLevel, EventPayload } from '@conductor/shared';
 import type { AgentBackend, PermissionDecision, ProviderModel, RunOpts, RunOutcome, RunnerScope } from '../backend.js';
 import { arbiter, toolRuleFor } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
@@ -212,6 +212,7 @@ export function forgetCopilotState(): void {
   lastLogin = null;
   asking = null;
   openRouterList = null;
+  copilotEfforts.clear();
   clients.clear();
 }
 
@@ -219,11 +220,19 @@ export function forgetCopilotState(): void {
 // models
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The efforts each Copilot model lists, by exact id, from the last time its list was read
+ * (Amendment 190). A model that lists none isn't here, and takes whatever it is sent.
+ */
+const copilotEfforts = new Map<string, string[]>();
+
 /** Copilot's own list (Q11). Needs a login; the SDK caches it after the first call. */
 export async function copilotModels(): Promise<ProviderModel[]> {
   const list = await (await clientFor('copilot')).listModels();
   // The window each model has under Copilot, for the handoff cap (Amendment 120).
   recordWindows('copilot', list.map((m) => ({ id: m.id, tokens: m.capabilities?.limits?.max_context_window_tokens })));
+  copilotEfforts.clear();
+  for (const m of list) if (m.supportedReasoningEfforts?.length) copilotEfforts.set(m.id, [...m.supportedReasoningEfforts]);
   return list.map((m) => ({
     id: m.id,
     displayName: m.name || m.id,
@@ -381,7 +390,7 @@ export class CopilotBackend implements AgentBackend {
   // ── options ───────────────────────────────────────────────────────────────
 
   /** Everything a session is given, on create and on every resume alike. */
-  #config(): Omit<SessionConfig, 'sessionId'> {
+  #config(effort: EffortLevel | undefined): Omit<SessionConfig, 'sessionId'> {
     const { autonomy, worktreePath, model, extraDirs, helperCap, handOff, systemPrompt, roles } = this.#scope;
     let provider: SessionConfig['provider'];
     if (this.#provider === 'openrouter') {
@@ -395,7 +404,7 @@ export class CopilotBackend implements AgentBackend {
     return {
       clientName: 'conductor',
       model,
-      ...(autonomy.effort ? { reasoningEffort: autonomy.effort } : {}),
+      ...(effort ? { reasoningEffort: effort } : {}),
       workingDirectory: worktreePath,
       ...(extraDirs && extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
       ...(provider ? { provider } : {}),
@@ -604,7 +613,7 @@ export class CopilotBackend implements AgentBackend {
         console.warn(`[copilot] ${agentId}: asked to resume a session that isn't this agent's; resuming its own`);
       }
       const client = await clientFor(this.#provider);
-      const config = this.#config();
+      const config = this.#config(await this.#effortOn(this.#scope.model, this.#scope.autonomy.effort));
       // Pending work is not continued (Q6: whether the runtime re-offers it is
       // unconfirmed): the resume prompt says what happened instead.
       const session = resuming
@@ -686,11 +695,31 @@ export class CopilotBackend implements AgentBackend {
     return true;
   }
 
+  /**
+   * The effort to send `model`: the one asked for, unless the model's list names others and not
+   * it (Amendment 190). That one is dropped rather than sent — the model may refuse the run — and
+   * the transcript says so in one line, so a `start_helper` or a saved default can't fail a run:
+   * the model thinks at its own default instead. A model that lists none, or a list that can't be
+   * read, is sent the effort as it is. OpenRouter lists none.
+   */
+  async #effortOn(model: string, effort: EffortLevel | undefined): Promise<EffortLevel | undefined> {
+    if (!effort || !model || this.#provider !== 'copilot') return effort;
+    if (!copilotEfforts.has(model)) await copilotModels().catch(() => undefined);
+    const listed = copilotEfforts.get(model);
+    if (!listed || listed.includes(effort)) return effort;
+    this.#emit({
+      kind: 'user_text',
+      text: `effort ${effort} not sent: ${model} takes ${listed.join(', ')}, so it runs at its default`,
+      synthetic: true,
+    });
+    return undefined;
+  }
+
   /** For the next message, which is when the SDK applies it, at the effort the agent has now. */
   async setModel(model: string): Promise<boolean> {
     const session = this.#session;
     if (!this.#live || !session) return false;
-    const effort = this.#scope.autonomy.effort;
+    const effort = await this.#effortOn(model, this.#scope.autonomy.effort);
     await session.setModel(model, effort ? { reasoningEffort: effort } : undefined);
     this.#scope = { ...this.#scope, model };
     return true;
@@ -714,7 +743,8 @@ export class CopilotBackend implements AgentBackend {
       autonomy: { ...rest, mode: autonomy.mode, ...(autonomy.effort ? { effort: autonomy.effort } : {}) },
     };
     if (autonomy.effort && autonomy.effort !== was.effort) {
-      await session.setModel(this.#scope.model, { reasoningEffort: autonomy.effort });
+      const effort = await this.#effortOn(this.#scope.model, autonomy.effort);
+      if (effort) await session.setModel(this.#scope.model, { reasoningEffort: effort });
     }
     return autonomy.effort !== undefined || was.effort === undefined;
   }

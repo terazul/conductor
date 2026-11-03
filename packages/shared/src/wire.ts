@@ -1302,9 +1302,9 @@ export const DEFAULT_PORT = 7777;
 // ── A full terminal (Amendment 112; scopes, settings and bytes, Amendment 141) ────
 
 /**
- * Whose a terminal is (Amendment 141). An agent's starts in its job folder and is shown on
- * the Agent screen's terminal tab; a project's starts in the project folder and is shown in
- * the Terminal dock under every screen (Ctrl-`). Both live by the same rules (service.ts).
+ * Whose a terminal is (Amendment 141). An agent's is shown on the Agent screen's terminal tab;
+ * a project's is shown in the Terminal dock under every screen (Ctrl-`). Both start in the
+ * project folder (Amendment 191) and live by the same rules (service.ts).
  */
 export type TermScope = { kind: 'agent'; agentId: string } | { kind: 'project'; projectId: string };
 
@@ -1318,8 +1318,13 @@ export interface TermInfo {
   id: string;
   /** Whose it is (Amendment 141). */
   scope: TermScope;
-  /** Where its shell started: the agent's job folder, or the project folder. */
+  /** Where its shell started: the project folder (an agent's too, since Amendment 191). */
   cwd: string;
+  /**
+   * The branch checked out there when it started (Amendment 191), for its title. Absent outside
+   * a git repo, before the first commit, and from an older daemon.
+   */
+  branch?: string;
   /** The shell that ran (Amendment 141), e.g. `/bin/zsh`. */
   shell: string;
   startedAt: string;
