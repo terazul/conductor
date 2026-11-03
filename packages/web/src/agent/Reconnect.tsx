@@ -6,6 +6,10 @@
  * Nothing here removes it: the daemon starts the try, and the status event that follows takes
  * the banner away, so a press that was refused stays on screen with the sentence it was
  * refused with.
+ *
+ * Paused, waiting for the model to come back (Amendment 192), it stays, as "Waiting for Claude to
+ * come back": retry now checks its provider now, and stop waiting ends it failed. The same two
+ * routes: the daemon answers them for a waiting agent too.
  */
 
 import type { Agent, Event } from '@conductor/shared';
@@ -34,20 +38,34 @@ function Ticking({ agent, events, cmd }: { agent: Agent; events: readonly Event[
           type="button"
           className="fl-btn is-primary"
           disabled={cmd.busy}
-          title="Try the model again now instead of waiting"
-          onClick={() => void cmd.run('Retrying now', () => retryNowAgent(agent.id), 'trying again now')}
+          title={bar.waiting ? 'Check the model now instead of waiting for the next check' : 'Try the model again now instead of waiting'}
+          onClick={() =>
+            void cmd.run('Retrying now', () => retryNowAgent(agent.id), bar.waiting ? 'checking now — it goes if the model answers' : 'trying again now')
+          }
         >
           retry now
         </button>
-        <button
-          type="button"
-          className="fl-btn is-ghost"
-          disabled={cmd.busy}
-          title="Give up: the agent ends failed, as it would have before retries"
-          onClick={() => void cmd.run('Stopping the retries', () => stopRetryingAgent(agent.id), 'stopped retrying — it is failed')}
-        >
-          stop retrying
-        </button>
+        {bar.waiting ? (
+          <button
+            type="button"
+            className="fl-btn is-ghost"
+            disabled={cmd.busy}
+            title="Give up: the agent ends failed, as it would have before it waited"
+            onClick={() => void cmd.run('Stopping the wait', () => stopRetryingAgent(agent.id), 'stopped waiting — it is failed')}
+          >
+            stop waiting
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="fl-btn is-ghost"
+            disabled={cmd.busy}
+            title="Give up: the agent ends failed, as it would have before retries"
+            onClick={() => void cmd.run('Stopping the retries', () => stopRetryingAgent(agent.id), 'stopped retrying — it is failed')}
+          >
+            stop retrying
+          </button>
+        )}
       </span>
     </div>
   );

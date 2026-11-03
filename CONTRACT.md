@@ -200,6 +200,74 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 192 — post-merge, applied. **An agent whose tries are spent waits for the model to come back, checked once per provider, and resumes by itself when it answers.**
+
+Shared (`retry.ts`, `events.ts`, `wire.ts`), daemon (`session/retry.ts`, `session/outage.ts`
+new, `session/models.ts`, `session/backends/claude.ts`, `copilot.ts`, `copilot-events.ts`,
+`session/alerts.ts`, `session/supervisor.ts`, `routes/session.ts`, `session/verify.ts`), web
+(`shell/describe.ts`, `agent/endpoints.ts`, `agent/reconnecting.ts`, `agent/Reconnect.tsx`,
+`attention/alerts.ts`, `attention/AlertCard.tsx`, `lib/store.ts`, `fleet/project.tsx`,
+`shell/shell.tsx`, `shell/shell.css`, `lib/verify.ts`) and `docs/MANUAL.md`; the design is
+`docs/plans/w1-design.md`. Asked for 14 Oct; planned as wave 13's W1, decided as "`paused` with a
+note; 30 s, 1, 2, 5, 15 min then every 15 min; no limit; the job shows running; new launches try
+first, then wait".
+
+- **The third answer.** `decideRetry` returns `{ retry: 'outage', cause, retryAt? }` where it
+  returned `failed`: once the short tries (Amendments 123, 140) are spent, or at once when the
+  API's `Retry-After` or Claude's usage-limit reset is later than the next try would be. Login and
+  billing problems, `NEVER_BETTER` errors and Conductor's own budget pause still don't wait.
+- **The wait is `paused`, with a note.** No new status: the agent is `paused`, its status event's
+  `error` is the note ending `MODEL_WAIT_SUFFIX` (*— waiting for it to come back; it carries on by
+  itself then*, `isModelWaitNote` in shared) and its additive `outage: { provider, cause, reason }`
+  says which. It holds no slot. No column and no migration: the event log is where it is kept.
+- **One outage per provider.** `OutageBook` (`session/outage.ts`, on retry.ts's `Clock`) holds
+  who waits, oldest first, and checks the provider itself at `OUTAGE_CHECKS_MS` (30 s, 1, 2, 5,
+  15 min from the start) and then every `OUTAGE_EVERY_MS` (15 min), with no limit. Claude's check
+  is `probeGateway` (`models.ts`): `GET /v1/models?limit=1` with the credential `endpoint` reads;
+  up unless 429, 529 or 5xx. Copilot's and OpenRouter's are their model lists. A `retryAt`
+  (`Retry-After`, a limit's reset) is a `notBefore`: nothing is checked earlier. A heartbeat each
+  minute notices a clock that jumped (sleep) and checks at once.
+- **The canary, then the rest.** A check that answers resumes the longest-waiting agent alone
+  (`state: 'canary'`), told *the model answered a check — trying again* (`OUTAGE_RESUME_NOTE`).
+  When the model answers it (`answered`), the rest follow `STAGGER_MS` (5 s) apart. One that
+  fails again puts the outage back to checking, a step further on, and goes to the back of the line.
+- **New launches** make their short tries first, then join the wait (`outages().started`).
+- **Ending a wait.** `POST /api/outages/:provider/retry-now` checks now (`{ ok: true }`; 409 when
+  none waits or Pause all holds it); `POST /api/outages/:provider/stop-waiting` ends every agent in
+  it `failed` (`{ agents }`; 409 when none waits). An agent's own retry-now and stop-retrying,
+  ▶ resume, and a message sent to it all answer for one that waits; the last two start it at once,
+  out of the wait, and a message is that try, with your words.
+- **Pause all** leaves waiting agents as they are and resumes none; its end checks at once.
+- **A restart** rejoins every agent whose last status event is a model-wait `paused`, from that
+  event's time, and checks at once. The short tries still don't survive one.
+- **How it reads.** `#rollUpJob` doesn't count a waiting agent as settled, so its job stays
+  running, and `rollupStatuses` / `worstOf` (web) read it so too. Needs You has one connection
+  alert per outage, `connection:outage:<provider>:<since>`, with `waiting`, `nextCheckAt`,
+  `limitResetsAt` and `provider`: **Claude down**, *can't reach the model since 14:02 — 6 agents
+  waiting, next check 14:47*, with **retry now**, **stop waiting** and open, no dismiss. The status
+  bar shows **⚠ Claude down** (`.sh-down`), which opens Needs You; the agent's line says *waiting
+  for the model*, and its Reconnect bar *Waiting for Claude to come back* with retry now and stop
+  waiting.
+
+**Verified:** `session/verify.ts` §35. On a stepped clock, with the checks answered by the
+section: the schedule to 15 min and every 15 min after, the canary alone and the rest after it
+answers, the canary failing again (behind the rest, a step on), Pause all, `notBefore` and a
+check's own `Retry-After`, the clock jump, and a provider with no check. Through the supervisor,
+on project `outage`: three agents whose tries are spent wait `paused` with the note, holding no
+slot, their job running, on one card, one of them a launch made during the outage; a check that
+fails and one that answers; the canary failing again; the rest following and the job ending done;
+Pause all holding them and its end checking; a restart rejoining from the event's time; a usage
+limit's reset going straight to the wait, on the card, with no check before it; retry now and
+stop waiting by route, and their 409s; a refused login still failing. And `probeGateway` against
+a local server: the request and its credential, 200 and 401 up, 503, 529 and 429 down, a 429's
+`Retry-After`, and no server down. Section 23's checks that expected `failed` after the last try now expect
+the wait (the verdict, `rt_a`'s and `rt_set`'s last failure, its job, card and transcript,
+continuing it), and a new one checks stop retrying ends it `failed`. `lib/verify.ts` §41: the
+card's line, title, word and actions, `waitingForModel`, the agent's line, the reconnect bar, the
+job's rollup, the status bar's button and its colour; §37's `worstOf` checks now read
+`worstOf(agents, alerts)`. A message or ▶ resume on a waiting agent is not checked. Not seen in
+a browser, and no real outage was waited through.
+
 ### Amendment 191 — post-merge, applied. **Every terminal opens at the project root, the agent's tab too; its title says the folder and branch, and where the agent's changes are.**
 
 Daemon (`routes/term.ts`, `routes/terminal.ts`, `terminal/service.ts`, `terminal/verify.ts`),

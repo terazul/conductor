@@ -62,8 +62,11 @@ export const modelSources: {
 // Asking
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The model API and a way in, as Claude Code would find them. */
-function endpoint(): { base: string; headers: Record<string, string> } {
+/**
+ * The model API and a way in, as Claude Code would find them. With `loose`, a missing credential
+ * is no error: the headers just carry none (Amendment 192's check, which asks whether it answers).
+ */
+function endpoint(loose = false): { base: string; headers: Record<string, string> } {
   let env: Record<string, unknown> = {};
   try {
     const dir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
@@ -81,6 +84,7 @@ function endpoint(): { base: string; headers: Record<string, string> } {
   const bearer = read('ANTHROPIC_AUTH_TOKEN');
   const key = read('ANTHROPIC_API_KEY');
   if (!bearer && !key) {
+    if (loose) return { base, headers: { 'anthropic-version': '2023-06-01' } };
     throw new Error('no API credential Conductor can read — a Claude login is not one');
   }
   return {
@@ -90,6 +94,28 @@ function endpoint(): { base: string; headers: Record<string, string> } {
       ...(bearer ? { authorization: `Bearer ${bearer}` } : { 'x-api-key': key! }),
     },
   };
+}
+
+/**
+ * Whether the Claude API answers (Amendment 192): the check an outage makes before it resumes an
+ * agent. The same `GET /v1/models` the list is asked with, one model's worth, with the credential
+ * when Conductor can read one and none when it can't (a Claude login), so then it says the host
+ * answers, and the first agent resumed is the real test. Up is any answer but a throttle (429, 529)
+ * or a server error; down is one of those, or none at all. A `Retry-After` is passed on.
+ */
+export async function probeGateway(): Promise<{ up: boolean; retryAt?: number }> {
+  const { base, headers } = endpoint(true);
+  try {
+    const res = await fetch(`${base}/v1/models?limit=1`, { headers, signal: AbortSignal.timeout(ASK_TIMEOUT_MS) });
+    // Seconds, or an HTTP date.
+    const raw = res.headers.get('retry-after');
+    const at = raw === null ? NaN : /^\d+$/.test(raw.trim()) ? Date.now() + Number(raw) * 1000 : Date.parse(raw);
+    const retryAt = Number.isFinite(at) && at > Date.now() ? { retryAt: at } : {};
+    void res.body?.cancel().catch(() => {});
+    return { up: !(res.status === 429 || res.status === 529 || res.status >= 500), ...retryAt };
+  } catch {
+    return { up: false };
+  }
 }
 
 function hostOf(base: string): string {

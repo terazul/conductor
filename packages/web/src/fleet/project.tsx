@@ -13,10 +13,12 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Agent, AgentStatus, Job, PendingRequest } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Job, PendingRequest } from '@conductor/shared';
 import { rollupStatus } from '@conductor/shared';
 import {
+  rollupStatuses,
   useAgents,
+  useAlerts,
   useJobDiffstat,
   useJobs,
   usePending,
@@ -93,12 +95,13 @@ function JobGroup({
   // One more agent in this job (Amendment 89): the editor opens under the header.
   const [adding, setAdding] = useState(false);
   const cmd = useCommand();
+  const alerts = useAlerts();
 
   const blocked = agents.filter((a) => pending.some((p) => p.agentId === a.id)).length;
   const working = agents.filter((a) => a.status === 'working').length;
   const live = agents.filter((a) => !ENDED_STATUS.has(a.status));
   // At rest it says done, quietly; the loud finished is the unseen one (Amendment 130).
-  const groupRest = restOf(worstOf(agents), agents.length, finished);
+  const groupRest = restOf(worstOf(agents, alerts), agents.length, finished);
 
   return (
     <section className={`pj-group${selected ? ' is-sel' : ''}`}>
@@ -125,8 +128,8 @@ function JobGroup({
         ) : working > 0 ? (
           <Tag tone="live">{working} working</Tag>
         ) : finished ? null : (
-          <Tag tone={groupRest === 'status' ? STATUS_KEY[worstOf(agents)] : 'idle'}>
-            {restWord(groupRest) ?? STATUS_WORD[worstOf(agents)]}
+          <Tag tone={groupRest === 'status' ? STATUS_KEY[worstOf(agents, alerts)] : 'idle'}>
+            {restWord(groupRest) ?? STATUS_WORD[worstOf(agents, alerts)]}
           </Tag>
         )}
         {finished && <Tag tone={job.status === 'failed' ? 'fail' : 'done'}>finished</Tag>}
@@ -234,9 +237,9 @@ function JobGroup({
 
 const ENDED_STATUS: ReadonlySet<string> = new Set(['done', 'failed', 'stopped']);
 
-/** The status a job's header should wear: its unhappiest agent's. */
-function worstOf(agents: Agent[]): AgentStatus {
-  return rollupStatus(agents.map((a) => a.status));
+/** The status a job's header should wear: its unhappiest agent's, one waiting for the model at work (Amendment 192). */
+function worstOf(agents: Agent[], alerts: readonly Alert[]): AgentStatus {
+  return rollupStatus(rollupStatuses(agents, alerts));
 }
 
 export function ProjectScreen() {

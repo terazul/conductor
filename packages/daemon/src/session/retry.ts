@@ -6,7 +6,9 @@
  * was `failed` at once, and a failed agent fails its job. Now an agent whose run ended because
  * waiting can help (no network, throttled or overloaded, a server error) waits 5 s, 15 s,
  * 30 s, 60 s and 5 min (by default; `conductor.retryDelays` sets them, Amendment 140),
- * resuming its own session after each, and is `failed` only when the last try fails too.
+ * resuming its own session after each. When the last try fails too it is no longer `failed`
+ * (Amendment 192): it is paused, waiting for the model to come back, in its provider's outage
+ * (./outage.ts), which checks the provider and resumes it when it answers.
  *
  * Everything that decides is in this file and takes no I/O, so session/verify.ts drives it
  * with a fake clock:
@@ -20,10 +22,10 @@
  * `#settle` asks it and acts on the answer; Alerts reads the waits to raise the card.
  */
 
-import { RETRY_CARD_FROM, RETRY_DELAYS_DEFAULT_S, RETRY_DELAYS_KEY, parseRetryDelays, retryDelaysProblem, type RetryCause } from '@conductor/shared';
+import { MODEL_WAIT_SUFFIX, RETRY_CARD_FROM, RETRY_DELAYS_DEFAULT_S, RETRY_DELAYS_KEY, parseRetryDelays, retryDelaysProblem, type RetryCause } from '@conductor/shared';
 import { readSettings, settingRule } from '../settings.js';
 
-/** How long to wait before each try with no setting: 5 s, 15 s, 30 s, 60 s, 5 min. Five tries, then the agent is `failed`. */
+/** How long to wait before each try with no setting: 5 s, 15 s, 30 s, 60 s, 5 min. Five tries, then the agent waits for the model (Amendment 192). */
 export const RETRY_DELAYS_MS: readonly number[] = RETRY_DELAYS_DEFAULT_S.map((s) => s * 1000);
 /** How many tries with no setting. The setting's own count is `retryDelaysMs().length`. */
 export const MAX_RETRIES = RETRY_DELAYS_MS.length;
@@ -79,6 +81,17 @@ export function classifyRetry(httpStatus: number | null, error: string): RetryCa
 export interface ApiFailure {
   httpStatus: number | null;
   error: string;
+  /**
+   * When the API said to come back, epoch milliseconds: a `Retry-After`, or a usage limit's
+   * reset (Amendment 192). Later than the next short try, the agent waits in the outage at once.
+   */
+  retryAt?: number;
+}
+
+/** The seconds an error's words say to wait ("Retry-After: 30", "retry after 30s"), or null (Amendment 192). */
+export function retryAfterSeconds(message: string): number | null {
+  const m = /retry[- ]after[:\s]+(\d+)/i.exec(message);
+  return m ? Number(m[1]) : null;
 }
 
 /** Errors the model will answer the same way every time. */
@@ -136,12 +149,15 @@ export type NoRetry =
   /** It failed, but not as the API's trouble, or in a way waiting can't mend. */
   | 'not_api'
   /** The login or the account: a person has to fix it. */
-  | 'needs_a_person'
-  /** Five tries have failed. */
-  | 'out_of_tries';
+  | 'needs_a_person';
 
+/**
+ * Tried again after a delay (`true`); waiting for the model to come back (`'outage'`, Amendment
+ * 192: the short tries are spent, or the API said to come back later than the next one); or not.
+ */
 export type RetryVerdict =
   | { retry: true; cause: RetryCause; attempt: number; of: number; delayMs: number }
+  | { retry: 'outage'; cause: RetryCause; retryAt?: number }
   | { retry: false; why: NoRetry };
 
 /** What a run that just ended tells the decision. */
@@ -156,6 +172,8 @@ export interface EndedRun {
   used: number;
   /** The delays to use; the setting's (`retryDelaysMs`) when not given. */
   delays?: readonly number[];
+  /** Now, to read `failure.retryAt` against. `Date.now()` when not given. */
+  now?: number;
 }
 
 /**
@@ -164,7 +182,8 @@ export interface EndedRun {
  * Retried: the API was unreachable, throttled or failing. Not retried: a login or billing
  * problem (needs a person), your own stop or pause, an interruption, one of
  * the agent's own limits, and anything that was not the API's doing. The sixth failure in a
- * row is not retried either: that is the agent `failed`, as it always was.
+ * row waits for the model to come back (Amendment 192): it was the agent `failed`. So does one
+ * whose API said to come back later than the next try would be.
  */
 export function decideRetry(r: EndedRun): RetryVerdict {
   const no = (why: NoRetry): RetryVerdict => ({ retry: false, why });
@@ -176,7 +195,10 @@ export function decideRetry(r: EndedRun): RetryVerdict {
   if (cause === null) return no('not_api');
   if (cause === 'auth') return no('needs_a_person');
   const delays = r.delays ?? retryDelaysMs();
-  if (r.used >= delays.length) return no('out_of_tries');
+  const retryAt = r.failure?.retryAt;
+  const outage: RetryVerdict = { retry: 'outage', cause, ...(retryAt !== undefined ? { retryAt } : {}) };
+  if (r.used >= delays.length) return outage;
+  if (retryAt !== undefined && retryAt > (r.now ?? Date.now()) + delays[r.used]!) return outage;
   return { retry: true, cause, attempt: r.used + 1, of: delays.length, delayMs: delays[r.used]! };
 }
 
@@ -197,6 +219,11 @@ const WHY: Record<RetryCause, string> = {
   throttled: 'the model is busy',
   server: 'the model is failing',
 };
+
+/** The note an agent is paused with while it waits for the model to come back (Amendment 192). */
+export function modelWaitNote(cause: RetryCause): string {
+  return `${WHY[cause]}${MODEL_WAIT_SUFFIX}`;
+}
 
 /** The transcript's line when an agent starts waiting. */
 export function retryNote(cause: RetryCause, attempt: number, of: number, delayMs: number): string {
@@ -264,6 +291,8 @@ export class RetryBook {
   #due: (agentId: string) => void;
   #notify: () => void;
   #used = new Map<string, { n: number; since: number }>();
+  /** Resumed by its outage (Amendment 192): its short tries are spent until the model answers it. */
+  #spent = new Set<string>();
   #waits = new Map<string, { wait: RetryWait; timer: unknown }>();
 
   constructor(clock: Clock, due: (agentId: string) => void, notify: () => void) {
@@ -272,9 +301,18 @@ export class RetryBook {
     this.#notify = notify;
   }
 
-  /** Tries used since the model last answered this agent. */
+  /**
+   * Tries used since the model last answered this agent. Every one, once its outage has resumed
+   * it (`spent`): a resumed agent that fails again goes back to waiting at once.
+   */
   used(agentId: string): number {
+    if (this.#spent.has(agentId)) return Infinity;
     return this.#used.get(agentId)?.n ?? 0;
+  }
+
+  /** Its outage resumed it (Amendment 192): no short tries until the model answers it. */
+  spent(agentId: string): void {
+    this.#spent.add(agentId);
   }
 
   /** Start waiting for the next try, as the verdict says. */
@@ -327,12 +365,14 @@ export class RetryBook {
   /** The model replied: whatever it was retrying through is over, and the count starts again. */
   answered(agentId: string): void {
     this.#used.delete(agentId);
+    this.#spent.delete(agentId);
   }
 
   /** The agent's part in this is over: the wait and the count both go. */
   forget(agentId: string): void {
     const wait = this.#drop(agentId);
     this.#used.delete(agentId);
+    this.#spent.delete(agentId);
     if (wait) this.#notify();
   }
 

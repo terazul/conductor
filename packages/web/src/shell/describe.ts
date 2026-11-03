@@ -11,8 +11,8 @@
  * have never seen); a card must degrade to a plainer sentence, never throw.
  */
 
-import { HANDOFF_HELD_NOTE, RETRY_CARD_FROM, providerBudgetLabel } from '@conductor/shared';
-import { tokenWords } from '../lib/providers.js';
+import { HANDOFF_HELD_NOTE, RETRY_CARD_FROM, isModelWaitNote, providerBudgetLabel } from '@conductor/shared';
+import { providerLabel, tokenWords } from '../lib/providers.js';
 import type {
   Agent,
   Alert,
@@ -216,6 +216,9 @@ export function currentAction(
   }
 
   if (agent.status === 'paused') {
+    // Waiting for the model to come back (Amendment 192): it carries on by itself.
+    const wait = waitingForModel(events);
+    if (wait) return { head: 'waiting for the model', subject: `${providerLabel(wait.provider)} — it carries on by itself`, tone: 'need' };
     const tokens = agent.inputTokens + agent.outputTokens;
     return {
       head: 'paused',
@@ -436,12 +439,60 @@ export function reconnectLine(r: Reconnect, now: number): string {
   return `Reconnecting ${reconnectTail(r, now)}`;
 }
 
+// ── waiting for the model to come back (Amendment 192) ──────────────────────
+
+/** What an agent waits for, when its last status event is the pause of a model outage. */
+export function waitingForModel(events: readonly Event[]): { provider: string; cause: Retry['cause'] } | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const p = events[i]?.payload;
+    if (p?.kind !== 'status') continue;
+    return p.status === 'paused' && p.outage && isModelWaitNote(p.error) ? { provider: p.outage.provider, cause: p.outage.cause } : null;
+  }
+  return null;
+}
+
+/** A provider's outage card, as opposed to the SDK's own retries: it counts who waits. */
+export function isOutage(alert: Pick<Alert, 'kind' | 'waiting'>): boolean {
+  return alert.kind === 'connection' && alert.waiting !== undefined;
+}
+
+/** "14:02", for a line that doesn't tick. */
+function timeOfDay(iso: string | undefined): string {
+  const d = iso === undefined ? new Date(NaN) : new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * The outage card's line: "can't reach the model since 14:02 — 6 agents waiting, next check
+ * 14:47". "checking now" while a check runs; the usage limit's reset when the API said one.
+ */
+export function outageLine(alert: Pick<Alert, 'cause' | 'since' | 'waiting' | 'nextCheckAt' | 'limitResetsAt'>): string {
+  const n = alert.waiting ?? 0;
+  const who = `${n} agent${n === 1 ? '' : 's'} waiting`;
+  const next = alert.nextCheckAt !== undefined ? `next check ${timeOfDay(alert.nextCheckAt)}` : 'checking now';
+  const limit = alert.limitResetsAt !== undefined ? `, the limit resets at ${timeOfDay(alert.limitResetsAt)}` : '';
+  return `${outageWhy(alert.cause)} since ${timeOfDay(alert.since)} — ${who}, ${next}${limit}`;
+}
+
+function outageWhy(cause: string): string {
+  switch (cause) {
+    case 'throttled':
+      return 'the model is busy';
+    case 'server':
+      return 'the model is failing';
+    default:
+      return "can't reach the model";
+  }
+}
+
 /** One line for an alert card: what happened, with the role filled in. */
 export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: string; subject: string } {
   const who = alert.agentIds.map((id) => agents.find((a) => a.id === id)?.role ?? id);
   const one = agents.find((a) => a.id === alert.agentIds[0]);
   switch (alert.kind) {
     case 'connection': {
+      // A provider's outage (Amendment 192): its line, then who waits.
+      if (isOutage(alert)) return { head: outageLine(alert), subject: who.join(' · ') };
       const head = retryHead({ cause: alert.cause as Retry['cause'], httpStatus: null });
       const count = alert.gaveUp
         ? `gave up after ${alert.attempt ?? '?'} attempts`
@@ -500,7 +551,7 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
 }
 
 /** A word or two for where there is no room for the sentence: the top bar. */
-export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late'>): string {
+export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late' | 'waiting' | 'provider'>): string {
   switch (alert.kind) {
     case 'failed':
       return 'failed';
@@ -521,6 +572,7 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
     case 'handoff_held':
       return 'stopped without handing off';
     case 'connection':
+      if (isOutage(alert)) return `${providerLabel(alert.provider)} down`;
       if (alert.gaveUp) return 'model API gave up';
       return alert.cause === 'auth' ? 'model API login' : 'no model API';
     case 'reconnecting':

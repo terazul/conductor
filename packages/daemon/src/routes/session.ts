@@ -37,6 +37,7 @@ import type {
   SetModelResponse,
   StackLaunch,
   StopRetryingResponse,
+  StopWaitingResponse,
 } from '@conductor/shared';
 import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
@@ -1136,6 +1137,33 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     } catch (err) {
       if (err instanceof RetryRefusedError) return fail(reply, 409, 'could not stop retrying', err.message);
       return fail(reply, 500, 'could not stop retrying', String(err));
+    }
+  });
+
+  /*
+   * A provider that isn't answering, and the agents waiting for it to come back (Amendment 192).
+   * `retry-now` checks it at once, and resumes the agent that has waited longest if it answers;
+   * `stop-waiting` ends every agent waiting for it `failed`, as the run that failed would have.
+   * Both 409, with the sentence in `detail`, when no agent waits for it, or, for retry-now,
+   * while everything is paused until a time.
+   */
+  app.post<{ Params: { provider: string } }>('/api/outages/:provider/retry-now', async (req, reply) => {
+    try {
+      sup.checkProvider(req.params.provider);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof RetryRefusedError) return fail(reply, 409, 'could not check now', err.message);
+      return fail(reply, 500, 'could not check now', String(err));
+    }
+  });
+
+  app.post<{ Params: { provider: string } }>('/api/outages/:provider/stop-waiting', async (req, reply) => {
+    try {
+      const done: StopWaitingResponse = { agents: sup.stopWaiting(req.params.provider) };
+      return reply.send(done);
+    } catch (err) {
+      if (err instanceof RetryRefusedError) return fail(reply, 409, 'could not stop waiting', err.message);
+      return fail(reply, 500, 'could not stop waiting', String(err));
     }
   });
 

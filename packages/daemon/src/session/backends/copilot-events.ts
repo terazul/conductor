@@ -18,7 +18,7 @@
 import type { PermissionRequest, SessionEvent } from '@github/copilot-sdk';
 import type { EventPayload } from '@conductor/shared';
 import { fileEditFromTool, isWriteTool, normaliseTool, todoFromInput, toolLabel, toolSummary } from '../translate.js';
-import type { ApiFailure } from '../retry.js';
+import { retryAfterSeconds, type ApiFailure } from '../retry.js';
 
 /** A call that has started and not yet ended. */
 export interface CallInfo {
@@ -202,7 +202,11 @@ export function apiFailureOf(e: { message: string; errorType?: string; statusCod
     return { httpStatus: status, error: 'authentication_failed' };
   }
   if (type === 'quota' || status === 402) return { httpStatus: status, error: 'billing_error' };
-  if (type === 'rate_limit' || status === 429) return { httpStatus: status ?? 429, error: 'rate_limit' };
+  if (type === 'rate_limit' || status === 429) {
+    // When it says how long, the outage checks no sooner (Amendment 192).
+    const after = retryAfterSeconds(e.message);
+    return { httpStatus: status ?? 429, error: 'rate_limit', ...(after !== null ? { retryAt: Date.now() + after * 1000 } : {}) };
+  }
   if (type === 'context_limit' || type === 'query') return { httpStatus: status, error: 'invalid_request' };
   if (status !== null) return { httpStatus: status, error: status >= 500 ? 'server_error' : 'invalid_request' };
   return CONNECTION_LOST.test(e.message) ? { httpStatus: null, error: 'unknown' } : null;

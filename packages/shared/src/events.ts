@@ -152,6 +152,13 @@ export interface StatusPayload {
    * sentence the transcript shows.
    */
   retry?: { cause: RetryCause; attempt: number; of: number; delayMs: number };
+  /**
+   * On 'paused' (Amendment 192): the short tries are spent and the agent waits for its provider
+   * to answer again, in that provider's outage, which resumes it by itself. `error` is the note
+   * (`isModelWaitNote`), `detail` what the SDK said, and `reason` how the run ended, so stop
+   * waiting fails it as the run would have. Absent on every other pause.
+   */
+  outage?: { provider: string; cause: RetryCause; reason: string | null };
 }
 
 /**

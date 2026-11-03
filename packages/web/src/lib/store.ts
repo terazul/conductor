@@ -493,16 +493,26 @@ export function useServers(jobId?: string): DevServer[] {
   );
 }
 
+/**
+ * The statuses a rollup reads (Amendment 192): an agent paused while it waits in its provider's
+ * outage (named in an outage alert, one that counts `waiting`) is still at work, so its job and
+ * project read as running. Its own row still says paused, waiting for the model.
+ */
+export function rollupStatuses(agents: readonly Pick<Agent, 'id' | 'status'>[], alerts: readonly Pick<Alert, 'kind' | 'waiting' | 'agentIds'>[]): AgentStatus[] {
+  const waiting = new Set(alerts.filter((a) => a.kind === 'connection' && a.waiting !== undefined).flatMap((a) => a.agentIds));
+  return agents.map((a) => (a.status === 'paused' && waiting.has(a.id) ? 'working' : a.status));
+}
+
 /** Worst status among a project's agents. Drives the Fleet card stripe. */
 export function useProjectStatus(projectId: string): AgentStatus {
   return useSelect(`projstatus:${projectId}`, (s) =>
-    rollupStatus(s.agents.filter((a) => a.projectId === projectId).map((a) => a.status)),
+    rollupStatus(rollupStatuses(s.agents.filter((a) => a.projectId === projectId), s.alerts)),
   );
 }
 
 export function useJobStatus(jobId: string): AgentStatus {
   return useSelect(`jobstatus:${jobId}`, (s) =>
-    rollupStatus(s.agents.filter((a) => a.jobId === jobId).map((a) => a.status)),
+    rollupStatus(rollupStatuses(s.agents.filter((a) => a.jobId === jobId), s.alerts)),
   );
 }
 

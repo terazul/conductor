@@ -226,9 +226,15 @@ export function forgetCopilotState(): void {
  */
 const copilotEfforts = new Map<string, string[]>();
 
-/** Copilot's own list (Q11). Needs a login; the SDK caches it after the first call. */
-export async function copilotModels(): Promise<ProviderModel[]> {
-  const list = await (await clientFor('copilot')).listModels();
+/**
+ * Copilot's own list (Q11). Needs a login; the SDK caches it after the first call. `fresh` asks
+ * again (Amendment 192: an outage's check must reach the service, and a cached list says nothing).
+ * The cache is the client's `modelsCache`, private to its types and an ordinary field at runtime.
+ */
+export async function copilotModels(fresh = false): Promise<ProviderModel[]> {
+  const client = await clientFor('copilot');
+  if (fresh && 'modelsCache' in client) (client as unknown as { modelsCache: unknown }).modelsCache = null;
+  const list = await client.listModels();
   // The window each model has under Copilot, for the handoff cap (Amendment 120).
   recordWindows('copilot', list.map((m) => ({ id: m.id, tokens: m.capabilities?.limits?.max_context_window_tokens })));
   copilotEfforts.clear();

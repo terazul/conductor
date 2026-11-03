@@ -101,7 +101,7 @@ the last of it on 12 Oct).
     *Decided (16 Oct): design `docs/plans/p1-design.md` approved, option B: one `POST /api/jobs/batch`, no migration; the cap is a setting, `conductor.launch.stacks` (1 to 6, default 3); each stack's prompt and named branch fill in `{track}`; the Fleet card is left for later.*
     *Done (16 Oct): Amendment 181. Spawn's orchestrated launch has a **stacks** control (1 to the setting, `conductor.launch.stacks`, default 3) and posts N stacks to `POST /api/jobs/batch`, each with `{track}` filled in its prompt and named branch; the daemon checks all before making any, and reports each stack it made or why not (201, or 207 with the rest kept). Left: the Fleet card still shows one job per project, and there is no daemon merge lock.*
 
-- [ ] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
+- [x] **Never give up on the model: wait for it to come back, then resume.** Asked for (14 Oct);
   this replaces "back off to every hour". Today an agent that can't reach the model retries on its
   own (`daemon/src/session/retry.ts`: 5 s, 15 s, 30 s, 60 s, 5 min by default, Amendments 123 and
   140), each try a fresh Claude Code process resuming its session. After roughly 7 minutes it is
@@ -148,6 +148,16 @@ the last of it on 12 Oct).
   - Is there a limit at all: give up after a day, or never?
   - While its agents wait, does a job show as running or as waiting?
   - Are new launches on a provider that's down held, or allowed to try?
+  *Decided (16 Oct): `paused` with a note; checks at 30 s, 1, 2, 5 and 15 min, then every 15 min;
+  no limit; the job shows running; new launches try first, then join the wait.*
+  - *Done (2 Nov): Amendment 192. `decideRetry` answers `'outage'` once the tries are spent, or when
+    the API's `Retry-After` or limit reset is later than the next try; the agent is `paused` with
+    *waiting for it to come back* and joins its provider's outage (`session/outage.ts`), checked on
+    that schedule with the provider's list of models, the longest-waiting agent resumed first and
+    the rest 5 s apart once it is answered. No column and no migration: the status event says the
+    agent waits, and a restart rejoins it from there. One **Claude down** card with **retry now**
+    and **stop waiting**, **⚠ Claude down** in the status bar, *Waiting for Claude to come back* on
+    the agent screen, and its job reads running.*
 
 - [x] **Queue work for an agent until it is done.** Asked for (14 Oct). Beside **⏲ later**'s date and
   time, a **queue** choice: the message waits until the agent's turn ends (it is `done`, or stops to

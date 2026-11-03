@@ -47,7 +47,7 @@ import type { Db } from '../../db/index.js';
 import { eventLog } from '../../eventlog.js';
 import type { ToolAccess } from '../../routes/helpers.js';
 import { modelAnswered } from '../alerts.js';
-import { classifyRetry } from '../retry.js';
+import { classifyRetry, failureCause } from '../retry.js';
 import { lifetimeCost } from '../budget.js';
 import { broadcastSpend, costChanged } from '../../daily.js';
 import { recordClaudeResult, type Recorded } from '../metrics.js';
@@ -167,6 +167,8 @@ export class ClaudeBackend implements AgentBackend {
   #stopped = false;
   /** tool_use_id → started-at, so tool_end can report a duration. */
   #startedAt = new Map<string, number>();
+  /** When a usage limit that refused this run resets, epoch ms (Amendment 192): from `rate_limit_event`. */
+  #limitResetsAt: number | null = null;
 
   constructor(db: Db, scope: RunnerScope) {
     this.#db = db;
@@ -506,6 +508,7 @@ export class ClaudeBackend implements AgentBackend {
     this.#input = new MessageStream();
     this.#live = true;
     this.#stopping = false;
+    this.#limitResetsAt = null;
 
     const options = this.#buildOptions(opts.resume ?? null);
     this.#bypassable = options.allowDangerouslySkipPermissions === true;
@@ -566,6 +569,12 @@ export class ClaudeBackend implements AgentBackend {
       setAgentSession(this.#db, this.#scope.agentId, sid);
     }
 
+    // A usage limit refused it, and says when it resets (Amendment 192): the outage checks no sooner.
+    if (m['type'] === 'rate_limit_event') {
+      const info = (m['rate_limit_info'] ?? {}) as Record<string, unknown>;
+      this.#limitResetsAt = info['status'] === 'rejected' && typeof info['resetsAt'] === 'number' ? info['resetsAt'] * 1000 : null;
+    }
+
     switch (message.type) {
       case 'assistant': {
         for (const text of assistantText(m['message'])) {
@@ -614,6 +623,10 @@ export class ClaudeBackend implements AgentBackend {
         if (!outcome.isError) outcome.apiFailure = null;
         else if (!outcome.apiFailure && typeof m['api_error_status'] === 'number') {
           outcome.apiFailure = { httpStatus: m['api_error_status'], error: 'unknown' };
+        }
+        // Throttled by a limit that said when it resets: the wait is until then (Amendment 192).
+        if (outcome.apiFailure && this.#limitResetsAt !== null && failureCause(outcome.apiFailure) === 'throttled') {
+          outcome.apiFailure = { ...outcome.apiFailure, retryAt: this.#limitResetsAt };
         }
 
         const deferred = m['deferred_tool_use'];
