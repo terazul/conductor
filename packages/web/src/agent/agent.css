@@ -42,7 +42,9 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  width: 52px;
+  /* Wide enough for DEVELOPER and ORCHESTRATOR at this size and spacing: at 52px the
+     longer role labels ran off the left edge and read "EVELOPER". */
+  width: 92px;
   flex: none;
   padding-top: 3px;
   text-align: right;
@@ -428,6 +430,26 @@
 
 .ag-folded:hover .ag-folded-line {
   color: var(--ink);
+}
+
+/*
+ * When a turn was said (Amendment 195): to the right of its first line, quiet and mono, as a
+ * folded turn's count is. It is outside the turn's body, so a reply's Read it box never has it
+ * beside it, and it shows folded or open. Your turn's body is padded inside its bar, so its
+ * time drops to the bar's first line.
+ */
+.ag-when {
+  flex: none;
+  padding-top: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink3);
+}
+
+.ag-msg.is-you .ag-when {
+  padding-top: 8px;
 }
 
 /*

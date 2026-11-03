@@ -200,6 +200,96 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 195 — post-merge, applied. **Your message folds like any turn, the long ones to start with, and every message and reply says when.**
+
+Web only (`lib/when.ts`, `agent/transcript.tsx`, `agent/agent.css`, `agent/agent.tsx`,
+`lib/verify.ts`, `agent/verify.ts`) and `docs/MANUAL.md`. Asked 3 Nov: *"make my text that I type
+to the agent also collapsible. Also include date time to my text entries and to the response."*
+*Amends Amendment 33*: "fold all" folds your messages too. *Amends Amendment 164*: your turn is
+drawn by the auto turn's component (`SentTurn`), keeping its own look (Amendment 106).
+
+- **Your message folds** from its **you** label, as an auto turn does, to its first line
+  (`foldLine`) and **N lines** (`lineCount`). One longer than `YOU_FOLD_LINES` (3) starts folded in
+  any transcript, through `startFoldedKeys`, so opening it is kept in `Unfolds`; a shorter one
+  starts open, so folding it is kept in `Folds`. `replyKeys` is now every turn, so "fold all" and
+  "unfold all" take them as they take the replies; the fold-all button's title says so. Keys are
+  unchanged (`u${seq}`), so folds already kept still apply.
+- **When** (`fmtStamp(iso, now)`, `lib/when.ts`, pure): `14:05` today, `3 Nov 14:05` this year,
+  `3 Nov 2025 14:05` otherwise; local time, 24-hour, English month names as the request wrote them.
+  Not `fmtWhen`, whose weekday, zone and *tomorrow* are for times to come and would crowd every turn.
+  `fullStamp` (weekday, date, seconds and zone) is its title, and the ISO instant its `dateTime`.
+- **Which time.** `Turn.ts` is its first event's (`buildTranscript`; the keys don't move) and a
+  prose block carries its own. A message of yours, or an auto turn, says its `user_text`'s time. A
+  reply says its last prose's, the seq Amendment 193 ticks read (`replyTs`); a turn with no reply,
+  still going or ended on a tool, has none. Activity has none; its toggle's title adds *from 09:02*,
+  when the turn started.
+- **Where**: `<time class="ag-when">` after the turn's body, the right of its first line, folded or
+  open, in `--ink3` mono at `--fs-sm`. Outside the body, so a reply's **Read it** box is never
+  beside it; a turn of yours drops it to its bar's first line.
+
+**Verified:** `lib/verify.ts` §44: `fmtStamp` today, this year, another year, across midnight and
+New Year with a fixed now, and a bad time; `fullStamp`; the turns' keys and times; the reply's time
+from its last prose; what starts folded (over three lines, exactly three, an auto turn only for an
+orchestrator); rendered under Node, a short message open and a long one folded to its first line
+and **4 lines**, each with its time, a reply's time its last prose's and the activity with none,
+the toggle's title; a kept open and a kept fold, rendered; fold all and unfold all, in the rules and
+rendered; the style's tokens and the wiring. Changed to the new behaviour, in `agent/verify.ts`:
+"fold all folds replies, not your turns" (now every turn, `u1 a2 u4 a5`), "fold all covers the
+auto turns" (`u1 a2 u3 a4`), "rendered after fold all, nothing is open" (four turns folded, your
+first message among them, where it was three), and "a turn Conductor sent for you is marked auto
+and keeps the plain look" (one component, `is-auto` only when `synthetic`, where it matched your
+turn's plain `<div className="ag-msg is-you">`). Not seen in a browser; the export and the pinned
+**You asked** have no times.
+
+### Amendment 194 — post-merge, applied. **A project's and a stack's status show in the navigator, by the Fleet card's own rule.**
+
+Web only (`fleet/rest.ts`, `fleet/card.tsx`, `shell/status.ts` new, `shell/ui.tsx`,
+`lib/rollup.ts` new, `lib/store.ts`, `shell/navtree.ts`, `shell/navtags.tsx` new,
+`shell/Navigator.tsx`, `shell/shell.css`, `lib/verify.ts`, `shell/verify.ts`) and
+`docs/MANUAL.md`. Asked 3 Nov: *"the status of the project shows up in the Fleet page but it does
+not show in the left menu bar with the project name and does not show up in the agent stack name,
+fix that."* *Amends Amendment 94*: a stack's row in the navigator says what its Fleet card would,
+**N working** with its count where it said **working**, and **needs you**, **done**, **failed** or
+**paused** where it said nothing.
+
+- **One rule** (`headlineTags(statuses, blocked, unseen)`, `fleet/rest.ts`, pure): **needs you**
+  (amber) when something waits on you, else **N working** (filled), then **finished** (filled,
+  red when an unseen job failed) beside either when a job is unseen; with neither, the quiet word
+  of Amendment 130 (**done**, **no agents**), or the status in its own tone. The card's headline is
+  now this, where its JSX had it inline. Its statuses are `rollupStatuses` (Amendment 192), so an
+  agent waiting for the model counts in **N working** on the card too, as its stripe already did.
+- **Moved where Node loads them**, so the navigator's tree stays pure: `STATUS_KEY` and
+  `STATUS_WORD` to `shell/status.ts`, re-exported by `shell/ui.tsx`; `rollupStatuses` to
+  `lib/rollup.ts`, re-exported by `lib/store.ts`. Nothing else in either changed.
+- **The navigator** (`navTree`): `NavProject.tags` and `NavJob.tags`. A project's are its card's,
+  from its agents, its requests and its unseen jobs, so one tag plus **finished** at most. A
+  stack's are from its own agents, a request on one of them and whether it is the unseen job;
+  **finished** takes the job's own status, else the group's worst. The jobs `navTree` takes may now
+  carry their status.
+- **Drawn as `sh-nav-tag` chips** (`NavTags`, `shell/navtags.tsx`, no stylesheet so it renders under
+  Node) after the name and before the amber count, in the card's tones: `.is-need` and `.is-queue`
+  are new, tonal, in `--need`/`--queue`; idle is the plain tag. **Needs you** is left out where the
+  row has its amber `sh-nav-need` count, which says it and how many; it is kept, amber, on a row
+  with no count. The rows' titles add the same words: *web-app — 2 things need you; finished*,
+  *Fix the login — 2 agents, 1 working*.
+
+**Verified:** `lib/verify.ts` §43: the rule's cases (no agents, working, needs you over working,
+done seen, failed, paused, queued, stopped, finished unseen and failed, working and finished, needs
+you and finished, a blocked agent with no request), an agent waiting for the model counted as
+working through `rollupStatuses`, and the card, the tree and the store's re-export calling it.
+`shell/verify.ts` §16: the project and stack tags from the shared fixtures, with nothing waiting,
+with an unseen job and a failed one, no agents, one headline plus finished at most; needs you left
+out beside a count; the titles' words; `NavTags` rendered under Node; the rows' wiring; and the two
+new chips in tokens. Changed to the new behaviour: `lib/verify.ts` §32 "every done agent plainly
+says finished" (reads `STATUS_WORD` from `shell/status.ts` and the re-export), the seen section's
+"the Fleet card says finished" and §37's "its headline is the loud tag when unseen, else the quiet
+word" and "the unseen mark itself is untouched" (the card calls `headlineTags`, and the rule gives
+those words, where they matched its inline JSX); `shell/verify.ts` §8 "the navigator marks it from
+the unseen jobs, never in amber" and §10 "a job's group gets the same filled working tag" (the
+rows draw `NavTags`, and the tags are `finished/done` and `1 working/live`, where they matched the
+old spans). Not seen in a browser; the Project screen's job groups (`fleet/project.tsx`) keep
+their own headline.
+
 ### Amendment 193 — post-merge, applied. **An agent's activity folds to its latest step, and a reply stays open until you tick it read.**
 
 Shared (`wire.ts`), daemon (`db/migrations/330_reply_seq.sql` new, `session/store.ts`,

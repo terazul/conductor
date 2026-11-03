@@ -764,7 +764,7 @@ export function AgentScreen() {
               <button
                 type="button"
                 className="fl-btn is-ghost"
-                title={anyOpen ? 'Fold every reply you have read to one line, and every turn to its latest step' : 'Unfold every reply, and every step'}
+                title={anyOpen ? 'Fold your messages and every reply you have read to one line, and every turn to its latest step' : 'Unfold every reply, and every step'}
                 onClick={() => {
                   updateFoldState((s) =>
                     anyOpen ? foldEvery(s, agent.id, foldable, byDefault) : unfoldEvery(s, agent.id, byDefault),

@@ -271,7 +271,8 @@ const convo = buildTranscript([
   said(4, 'user_text', 'more'),
   said(5, 'text', 'three'),
 ]);
-check('fold all folds replies, not your turns', replyKeys(convo).join(' ') === 'a2 a5', replyKeys(convo).join(' '));
+// Amendment 195: your own messages fold too, so fold all covers every turn.
+check('fold all folds every turn, your messages too', replyKeys(convo).join(' ') === 'u1 a2 u4 a5', replyKeys(convo).join(' '));
 check('line counting is 1-based on a single line', lineCount('abc') === 1);
 check('and counts the lines, not the breaks', lineCount('a\nb\nc') === 3);
 
@@ -546,8 +547,8 @@ console.log('\nYour turns · what you typed reads in its own colour (Amendment 1
       /color: var\(--you\)/.test(rule('.ag-lastask-t')));
   const body = rule('.ag-msg.is-you:not(.is-auto) .ag-body');
   check('so are your words and their bar, on a --you tint', /color: var\(--you\)/.test(body) && /border-left-color: var\(--you\)/.test(body) && /color-mix\(in srgb, var\(--you\) 10%, transparent\)/.test(body));
-  // Amendment 164: a turn Conductor sent is its own component now, so it can fold; your own turns are not marked auto.
-  check('a turn Conductor sent for you is marked auto and keeps the plain look', /className=\{`ag-msg is-you is-auto\$\{folded \? ' is-folded' : ''\}`\}/.test(tsx) && /className="ag-msg is-you" id=/.test(tsx));
+  // Amendment 164: a turn Conductor sent is its own component, so it can fold; since Amendment 195 yours is the same one, not marked auto.
+  check('a turn Conductor sent for you is marked auto and keeps the plain look', /className=\{`ag-msg is-you\$\{auto \? ' is-auto' : ''\}\$\{folded \? ' is-folded' : ''\}`\}/.test(tsx) && /const auto = turn\.synthetic;/.test(tsx) && /\{auto \? 'auto' : 'you'\}/.test(tsx));
   check('no status colour on your turn', !/var\(--(need|live|done|fail|queue|idle)\)/.test(body + rule('.ag-msg.is-you:not(.is-auto) .ag-who')));
 }
 
@@ -1197,7 +1198,7 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
   check('on another agent it is still folded', !draw('agt_orch2', true).includes('HELPER_BODY'));
 
   // Fold all: the replies and the auto turns.
-  check('fold all covers the auto turns', replyKeys(run).join(' ') === 'a2 u3 a4', replyKeys(run).join(' '));
+  check('fold all covers the auto turns, and your own (Amendment 195)', replyKeys(run).join(' ') === 'u1 a2 u3 a4', replyKeys(run).join(' '));
   const keys = replyKeys(run);
   const byDefault = startFoldedKeys(run, true);
   const all = foldEvery(opened, 'agt_orch', keys, byDefault);
@@ -1208,7 +1209,7 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
   check('and on a non-orchestrator, fold all folds its auto turns too', keys.every((k) => shownFolded(plainAll, 'agt_plain', k, false)));
   updateFoldState((s) => foldEvery(s, 'agt_orch', keys, byDefault));
   const folded = draw('agt_orch', true);
-  check('rendered after fold all, nothing is open', (folded.match(/aria-expanded="false"/g) ?? []).length === 3 && !folded.includes('HELPER_BODY') && !folded.includes('class="ag-md"'), folded);
+  check('rendered after fold all, nothing is open', (folded.match(/aria-expanded="false"/g) ?? []).length === 4 && !folded.includes('HELPER_BODY') && !folded.includes('class="ag-md"'), folded);
 
   // The start_helper row says what it was asked to do, not its JSON.
   check('a start_helper line shows its task', /<span class="ag-tool-subj">Build lane O3: fold the auto turns<\/span>/.test(plain) && !plain.includes('&quot;task&quot;'));

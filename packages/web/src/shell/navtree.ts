@@ -54,6 +54,8 @@ import { requestTitle } from '../attention/describe.js';
 import { dirRoot } from '../files/tabs.js';
 import { alertTitle, projectNeeds } from './describe.js';
 import { budgetOf, budgetWords, sumBudgets, type Budget } from './autonomy.js';
+import { headlineTags, type HeadTag } from '../fleet/rest.js';
+import { rollupStatuses } from '../lib/rollup.js';
 import { SORT_RANK, fleetSort, moveBefore, parseOrder, sortFacts, sortProjects, type FleetSort } from '../fleet/order.js';
 
 /** Which nodes are open: a JSON array of node ids. */
@@ -122,6 +124,11 @@ export interface NavJob {
   finished: boolean;
   /** Its agents' budgets summed (`sumBudgets`); null when none of them has one (Amendment 140). */
   budget: Budget | null;
+  /**
+   * Its headline, as a Fleet card's (`headlineTags`, Amendment 194): needs you, N working,
+   * finished, done, failed, paused… Filled by `navTree`; `groupByJob` alone leaves it empty.
+   */
+  tags: HeadTag[];
 }
 
 export interface NavNeed {
@@ -152,6 +159,8 @@ export interface NavProject {
   jobs: NavJob[];
   needsRows: NavNeed[];
   folders: NavFolder[];
+  /** Its headline, the Fleet card's own (`headlineTags`, Amendment 194). */
+  tags: HeadTag[];
 }
 
 /** A folder's last segment, so `~/src/app/` reads `app`. */
@@ -188,7 +197,7 @@ export function navTree(
   agents: Agent[],
   pending: PendingRequest[],
   alerts: Alert[],
-  jobs: Pick<Job, 'id' | 'createdAt' | 'prompt'>[] = [],
+  jobs: (Pick<Job, 'id' | 'createdAt' | 'prompt'> & Partial<Pick<Job, 'status'>>)[] = [],
   finished: ReadonlySet<string> = new Set(),
   toRead: ReadonlySet<string> = new Set(),
   /** The day the meters read; this browser's unless a check says. */
@@ -228,14 +237,30 @@ export function navTree(
       };
     });
 
+    /*
+     * The headlines (Amendment 194), the Fleet card's rule on the card's inputs: the agents as a
+     * rollup reads them, whether a request waits, and the jobs finished unseen, each in its own
+     * status (a job we weren't told the status of reads as its worst agent does).
+     */
+    const groups = groupByJob(rows, jobs, finished);
+    const unseenOf = (g: NavJob): Pick<Job, 'status'>[] =>
+      g.finished ? [{ status: jobs.find((j) => j.id === g.id)?.status ?? (g.status === 'failed' ? 'failed' : 'done') }] : [];
+    const tagsOf = (mine: (a: Agent) => boolean, waits: (r: PendingRequest) => boolean, unseen: Pick<Job, 'status'>[]): HeadTag[] =>
+      headlineTags(rollupStatuses(agents.filter(mine), alerts), pending.some(waits), unseen);
+
     return {
       id: p.id,
       name: p.name,
       needs: projectNeeds(p.id, pending, alerts),
       agents: rows,
-      jobs: groupByJob(rows, jobs, finished).map((j) => ({ ...j, rows: foldHelpers(j.agents, agents) })),
+      jobs: groups.map((j) => ({
+        ...j,
+        rows: foldHelpers(j.agents, agents),
+        tags: tagsOf((a) => a.projectId === p.id && a.jobId === j.id, (r) => j.agents.some((a) => a.id === r.agentId), unseenOf(j)),
+      })),
       needsRows: [...requests, ...stopped],
       folders: projectFolders(p),
+      tags: tagsOf((a) => a.projectId === p.id, (r) => r.projectId === p.id, groups.flatMap(unseenOf)),
     };
   });
 }
@@ -264,6 +289,7 @@ export function groupByJob(
         needs: 0,
         finished: finished.has(a.jobId),
         budget: null,
+        tags: [],
       };
       out.set(a.jobId, g);
     }

@@ -75,6 +75,34 @@ export function fmtWhen(iso: string, now: Date = new Date()): string {
   return `${weekday} ${date} ${tail}`;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * When something was said in a transcript (Amendment 195): `14:05` today, `3 Nov 14:05` this
+ * year, `3 Nov 2025 14:05` before it. Local time, 24-hour. Shorter than `fmtWhen`, with no
+ * weekday and no zone: it sits beside every turn, and `fullStamp` in its title has the rest.
+ * Empty for a time that isn't one.
+ */
+export function fmtStamp(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const day = (x: Date) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if (day(d) === day(now)) return time;
+  const date = `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  return d.getFullYear() === now.getFullYear() ? `${date} ${time}` : `${date} ${d.getFullYear()} ${time}`;
+}
+
+/** The same instant in full, to the second and with the zone: `Tue 3 Nov 2026 14:05:09 EST`. */
+export function fullStamp(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return iso;
+  const zone = zoneName(d);
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} ${time}${zone ? ` ${zone}` : ''}`;
+}
+
 /** Why a chosen local time can't be used, or null. The daemon refuses the same (session/schedule.ts). */
 export function whenProblem(value: string, now: Date = new Date()): string | null {
   const iso = fromLocalInput(value);

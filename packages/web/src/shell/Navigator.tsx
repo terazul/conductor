@@ -81,6 +81,7 @@ import {
   type NavPart,
   type NavProject,
 } from './navtree.js';
+import { NavTags, navTagWords } from './navtags.js';
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
 import { Chevron, Dot, OrchestratorMark, STATUS_WORD, tildePath } from './ui.js';
@@ -382,17 +383,14 @@ function JobGroup({
               e.preventDefault();
               setRenaming(true);
             }}
-            title={`${job.label} — ${count}${job.needs > 0 ? `, ${job.needs} waiting on you` : ''}${job.finished ? ', finished' : ''}`}
+            title={`${job.label} — ${[count, navTagWords(job.tags, job.needs)].filter(Boolean).join(', ')}${job.needs > 0 ? `, ${job.needs} waiting on you` : ''}`}
           >
             <Chevron open={shown} />
             <Dot status={job.status} />
             <span className="sh-nav-label">{job.label}</span>
             <span className="sh-nav-n">{job.agents.length}</span>
-            {job.finished ? (
-              <span className={`sh-nav-tag is-${job.status === 'failed' ? 'fail' : 'done'}`}>finished</span>
-            ) : (
-              job.status === 'working' && <span className="sh-nav-tag is-live">working</span>
-            )}
+            {/* The stack's headline, the Fleet card's rule (Amendment 194). */}
+            <NavTags tags={job.tags} needs={job.needs} />
             <NavMeter budget={job.budget} whose="its agents' daily budgets together" />
             {job.needs > 0 && <span className="sh-nav-need">{job.needs}</span>}
           </button>
@@ -835,13 +833,16 @@ function ProjectNode({
               e.preventDefault();
               setRenaming(true);
             }}
-            title={
-              needs > 0
-                ? `${project.name} — ${needs === 1 ? '1 thing needs' : `${needs} things need`} you`
-                : `Open ${project.name}`
-            }
+            title={[
+              needs > 0 ? `${project.name} — ${needs === 1 ? '1 thing needs' : `${needs} things need`} you` : `Open ${project.name}`,
+              navTagWords(project.tags, needs),
+            ]
+              .filter(Boolean)
+              .join(needs > 0 ? '; ' : ' — ')}
           >
             <span className="sh-nav-label">{project.name}</span>
+            {/* The project's headline, as its Fleet card's (Amendment 194). */}
+            <NavTags tags={project.tags} needs={needs} />
             {needs > 0 && <span className="sh-nav-need">{needs}</span>}
           </button>
           <RenameButton name={project.name} onClick={() => setRenaming(true)} />

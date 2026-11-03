@@ -28,7 +28,7 @@ import { ApiError, errorText, explain } from './errors.js';
 import { api } from './feed.js';
 import { readFileSync } from 'node:fs';
 import { nextChoice, parseChoice, resolveTheme } from '../shell/theme.js';
-import { restOf, restWord } from '../fleet/rest.js';
+import { headlineTags, restOf, restWord } from '../fleet/rest.js';
 import { TREE_DEFAULT, TREE_MIN, storedTreeWidth, treeWidth } from '../files/width.js';
 import {
   AGENT_INSPECTOR,
@@ -110,8 +110,9 @@ import type { StorageState } from '@conductor/shared';
 import { keyLine, keyStateFrom, loginLine, providerLabel, readCopilotLogin, readKeyState, saveKey } from './providers.js';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Transcript, buildTranscript, replyStates, splitTurn, type Turn } from '../agent/transcript.js';
-import { foldEvery, foldLine, lastLine, shownFolded, type FoldState } from '../agent/folds.js';
+import { Transcript, YOU_FOLD_LINES, buildTranscript, replyKeys, replyStates, splitTurn, startFoldedKeys, type Turn } from '../agent/transcript.js';
+import { foldEvery, foldLine, lastLine, shownFolded, toggleFold, unfoldEvery, updateFoldState, type FoldState } from '../agent/folds.js';
+import { fmtStamp, fullStamp } from './when.js';
 import { MAX_ACKS, REPLY_ACKS_KEY, canUntick, isRead, parseAcks, serializeAcks, setAck, startAcks, toRead, type ReplyAcks } from './replies.js';
 
 let failures = 0;
@@ -1335,7 +1336,8 @@ console.log('\n31 · a job says it has finished until you have seen it (Amendmen
   const card = readFileSync(new URL('../fleet/card.tsx', import.meta.url), 'utf8');
   const project = readFileSync(new URL('../fleet/project.tsx', import.meta.url), 'utf8');
   const always = readFileSync(new URL('../attention/always.tsx', import.meta.url), 'utf8');
-  check('the Fleet card says finished', /useUnseenJobs\(\)/.test(card) && />finished<\/Tag>/.test(card));
+  // Since Amendment 194 the card draws `headlineTags`, the rule its tags come from, so the word is checked there.
+  check('the Fleet card says finished', /useUnseenJobs\(\)/.test(card) && /headlineTags\(statuses, blocked, unseen\)/.test(card) && headlineTags(['done'], false, [{ status: 'done' }]).map((t) => t.word).join() === 'finished');
   check('the Project screen says it on the job\'s group, and marks its own project\'s jobs seen while in front', /finished=\{finishedHere\(g\.job\)\}/.test(project) && /markJobsSeen\(ids, allJobs\)/.test(project) && /if \(!visible/.test(project));
   check('the notifier counts them, announces them, and opens the project when one is clicked', /useLadderEffects\(pending, alerts, now, activate, finished\)/.test(always) && /openProject\(target\.projectId\)/.test(always) && /startSeenOnce\(\)/.test(always));
 }
@@ -1353,7 +1355,9 @@ console.log('\n32 · status marks are filled, edged and plainly finished (Amendm
     return i === -1 ? '' : css.slice(i, css.indexOf('}', i));
   };
 
-  check('every done agent plainly says finished', /done:\s*'finished'/.test(ui));
+  // STATUS_WORD moved to shell/status.ts (Amendment 194), so a pure rule can read it under Node; ui.tsx re-exports it.
+  const statusTs = readFileSync(new URL('../shell/status.ts', import.meta.url), 'utf8');
+  check('every done agent plainly says finished', /done:\s*'finished'/.test(statusTs) && /export \{ STATUS_KEY, STATUS_WORD, type Tone \} from '\.\/status\.js';/.test(ui));
   check(
     'the live tag is filled, not tinted, and heavier',
     /background:\s*var\(--live\)/.test(rule32(uiCss, '.ui-tag.t-live')) &&
@@ -1760,10 +1764,18 @@ console.log('\n37 · only a project you have not looked at since it finished say
   const card = src('../fleet/card.tsx');
   const project = src('../fleet/project.tsx');
   check('the Fleet card reads the rest and draws its stripe from it', /restOf\(status, agents\.length, unseen\.length > 0\)/.test(card) && /rest === 'status' \? key : 'idle'/.test(card));
-  check('and its headline is the loud tag when unseen, else the quiet word', /\(finished \?\? \(\s*<Tag tone=\{rest === 'status' \? key : 'idle'\}>\{restWord\(rest\) \?\? STATUS_WORD\[status\]\}<\/Tag>/.test(card));
+  // Amendment 194: the card's inline headline is `headlineTags` now; the same cases, through the rule.
+  const headOf = (...a: Parameters<typeof headlineTags>): string => headlineTags(...a).map((t) => `${t.word}/${t.tone}`).join();
+  check(
+    'and its headline is the loud tag when unseen, else the quiet word',
+    /headlineTags\(statuses, blocked, unseen\)\.map\(\(t\) => \(\s*<Tag key=\{t\.word\} tone=\{t\.tone\}>/.test(card) &&
+      headOf(['done', 'done'], false, [{ status: 'done' }]) === 'finished/done' &&
+      headOf(['done', 'done'], false, []) === 'done/idle' &&
+      headOf(['failed', 'done'], false, []) === 'failed/fail',
+  );
   check('the Project screen does the same in its header and on each job group, and the group never says finished twice', /restOf\(status, agents\.length, jobs\.some\(finishedHere\)\)/.test(project) && /restOf\(worstOf\(agents, alerts\), agents\.length, finished\)/.test(project) && /\) : finished \? null : \(/.test(project));
   check('no project-level tag draws STATUS_WORD for a done project without going through the rest', !/<Tag tone=\{STATUS_KEY\[(status|worstOf\(agents, alerts\))\]\}>\{STATUS_WORD/.test(card + project));
-  check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', />finished<\/Tag>/.test(card) && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
+  check('the unseen mark itself is untouched: still the filled finished tag (Amendment 87)', headOf(['done'], false, [{ status: 'done' }]) === 'finished/done' && headOf(['failed'], false, [{ status: 'failed' }]) === 'finished/fail' && /<Tag tone=\{job\.status === 'failed' \? 'fail' : 'done'\}>finished<\/Tag>/.test(project));
 }
 
 console.log('\n38 · the retry delays are a setting (Amendment 140); the budget ceiling and midnight are not (Amendment 180)');
@@ -2281,9 +2293,124 @@ console.log('\n42 · an agent\'s activity folds to its latest step, and a reply 
   );
 }
 
+console.log('\n43 · the project\'s and the stack\'s status, one rule for the Fleet card and the navigator (Amendment 194)');
+{
+  const src = (f: string): string => readFileSync(new URL(f, import.meta.url), 'utf8');
+  const head = (...a: Parameters<typeof headlineTags>): string => headlineTags(...a).map((t) => `${t.word}/${t.tone}`).join();
+
+  // The rule, case by case.
+  check('no agents: the quiet "no agents"', head([], false, []) === 'no agents/idle', head([], false, []));
+  check('working: how many, filled live', head(['working', 'working', 'done'], false, []) === '2 working/live' && head(['working'], false, []) === '1 working/live');
+  check('needs you: amber, and it outranks working', head(['working', 'blocked'], true, []) === 'needs you/need');
+  check('done, and seen: the quiet "done"', head(['done', 'done'], false, []) === 'done/idle');
+  check('failed: the status in its own colour', head(['failed', 'done'], false, []) === 'failed/fail');
+  check('paused, queued and stopped: their own words and tones', head(['paused'], false, []) === 'paused/idle' && head(['queued', 'done'], false, []) === 'queued/queue' && head(['stopped'], false, []) === 'stopped/idle');
+  check('finished unseen: the loud finished alone, red when its job failed', head(['done'], false, [{ status: 'done' }]) === 'finished/done' && head(['failed'], false, [{ status: 'failed' }]) === 'finished/fail');
+  check('working and finished: both, working first', head(['working', 'done'], false, [{ status: 'done' }]) === '1 working/live,finished/done');
+  check('needs you and finished: both, needs you first', head(['blocked'], true, [{ status: 'failed' }, { status: 'done' }]) === 'needs you/need,finished/fail');
+  check('a blocked agent with no request still reads needs you, by its status', head(['blocked', 'done'], false, []) === 'needs you/need');
+  const waiting = [{ id: 'w1', status: 'paused' as const }];
+  const outageAlert = { kind: 'connection' as const, waiting: 1, agentIds: ['w1'] };
+  check('an agent waiting for the model counts as working (Amendment 192), through rollupStatuses', head(rollupStatuses(waiting, [outageAlert]), false, []) === '1 working/live' && head(rollupStatuses(waiting, []), false, []) === 'paused/idle');
+
+  // Who calls it: the card, and the navigator's tree for its project and stack rows.
+  const card = src('../fleet/card.tsx');
+  const tree = src('../shell/navtree.ts');
+  check('the Fleet card draws headlineTags on the rollup, the request and its unseen jobs, and nothing inline', /const statuses = useMemo\(\(\) => rollupStatuses\(agents, allAlerts\), \[agents, allAlerts\]\);/.test(card) && /headlineTags\(statuses, blocked, unseen\)/.test(card) && !/\$\{working\} working/.test(card) && !/>finished<\/Tag>/.test(card));
+  check('the navigator\'s tree heads each project and each stack with it, on the same rollup', /headlineTags\(rollupStatuses\(agents\.filter\(mine\), alerts\), pending\.some\(waits\), unseen\)/.test(tree) && /tags: tagsOf\(\(a\) => a\.projectId === p\.id, \(r\) => r\.projectId === p\.id,/.test(tree) && /tags: tagsOf\(\(a\) => a\.projectId === p\.id && a\.jobId === j\.id,/.test(tree));
+  check('the rollup is the store\'s own, moved where Node loads it without React', /export \{ rollupStatuses \};/.test(src('./store.ts')) && /import \{ rollupStatuses \} from '\.\/rollup\.js';/.test(src('./store.ts')) && !/from 'react'/.test(src('./rollup.ts')));
+}
+
+console.log('\n44 · your message folds, and every turn says when (Amendment 195)');
+{
+  const src = (f: string): string => readFileSync(new URL(f, import.meta.url), 'utf8');
+  // Local time, as a reader sees it: built from local parts, so the zone the checks run in doesn't matter.
+  const local = (y: number, mo: number, d: number, h: number, mi: number, sec = 0): Date => new Date(y, mo, d, h, mi, sec);
+  const now = local(2026, 10, 3, 14, 30);
+  check('today: the time alone, 24-hour', fmtStamp(local(2026, 10, 3, 14, 5).toISOString(), now) === '14:05' && fmtStamp(local(2026, 10, 3, 9, 7).toISOString(), now) === '09:07', fmtStamp(local(2026, 10, 3, 9, 7).toISOString(), now));
+  check('this year: the day and month first', fmtStamp(local(2026, 1, 28, 18, 0).toISOString(), now) === '28 Feb 18:00', fmtStamp(local(2026, 1, 28, 18, 0).toISOString(), now));
+  check('another year: and the year', fmtStamp(local(2025, 10, 3, 14, 5).toISOString(), now) === '3 Nov 2025 14:05' && fmtStamp(local(2027, 0, 1, 0, 0).toISOString(), now) === '1 Jan 2027 00:00');
+  const justAfter = local(2026, 10, 4, 0, 10);
+  check('across midnight: last night is yesterday\'s date, a minute past midnight is today', fmtStamp(local(2026, 10, 3, 23, 55).toISOString(), justAfter) === '3 Nov 23:55' && fmtStamp(local(2026, 10, 4, 0, 1).toISOString(), justAfter) === '00:01');
+  check('and New Year\'s Eve, seen on New Year\'s Day, carries its year', fmtStamp(local(2026, 11, 31, 23, 59).toISOString(), local(2027, 0, 1, 0, 1)) === '31 Dec 2026 23:59');
+  check('a time that isn\'t one is nothing, not "Invalid Date"', fmtStamp('', now) === '' && fmtStamp('soon', now) === '');
+  const full = fullStamp(local(2026, 10, 3, 14, 5, 9).toISOString());
+  check('the full time has the weekday, the date, the seconds and the zone', /^Tue 3 Nov 2026 14:05:09( \S+)?$/.test(full), full);
+
+  // A transcript with a short message of yours, a long one, an auto turn and replies.
+  const AGY = 'agt_you';
+  const T = (n: number): string => local(2026, 10, 3, 9, n, 30).toISOString();
+  const at = (n: number, payload: EventPayload): Event => ({ seq: n, ts: T(n), projectId: P, jobId: J, agentId: AGY, payload });
+  const LONG = 'Build the lane\nwith the folding\nand the times\nand nothing else';
+  const run = buildTranscript([
+    at(1, { kind: 'user_text', text: 'Short ask\nin two lines' }),
+    at(2, { kind: 'tool_start', toolUseId: 'tq2', tool: 'Read', input: { file_path: 'a.ts' }, label: 'Read a.ts' }),
+    at(3, { kind: 'text', text: 'FIRST_REPLY: done the first part.' }),
+    at(4, { kind: 'text', text: 'FIRST_REPLY_END: and checked it.' }),
+    at(5, { kind: 'user_text', text: LONG }),
+    at(6, { kind: 'text', text: 'SECOND_REPLY: on it.' }),
+    at(7, { kind: 'user_text', text: 'One\nTwo\nThree\nFour', synthetic: true }),
+  ]);
+  check('turns keep their keys, and carry their first event\'s time', run.map((t) => t.key).join() === 'u1,a2,u5,a6,u7' && run.map((t) => t.ts).join() === [1, 2, 5, 6, 7].map(T).join());
+  check('a reply\'s time is its last prose\'s, the one ticking it read marks', splitTurn(run[1]!, false).replySeq === 4 && (splitTurn(run[1]!, false).reply.at(-1) as { ts?: string }).ts === T(4));
+
+  // Folding: more than YOU_FOLD_LINES starts folded, in any transcript; an auto turn only in an orchestrator's.
+  check(`a message of yours over ${YOU_FOLD_LINES} lines starts folded; a shorter one starts open`, startFoldedKeys(run, false).join() === 'u5' && startFoldedKeys(run, true).join() === 'u5,u7', startFoldedKeys(run, true).join());
+  check('exactly three lines still starts open', startFoldedKeys(buildTranscript([at(1, { kind: 'user_text', text: 'a\nb\nc' })]), false).length === 0);
+  check('fold all covers your messages: every turn', replyKeys(run).join() === 'u1,a2,u5,a6,u7');
+  const draw = (): string => renderToStaticMarkup(createElement(Transcript, { turns: run, agentId: AGY, role: 'developer', streaming: false, links: null, startFolded: startFoldedKeys(run, false) }));
+  const turnOf = (html: string, key: string): string => {
+    const i = html.lastIndexOf('<div class="ag-msg', html.indexOf(`id="t-${key}"`));
+    const j = html.indexOf('<div class="ag-msg', i + 1);
+    return html.slice(i, j === -1 ? undefined : j);
+  };
+  const html = draw();
+  const short = turnOf(html, 'u1');
+  const long = turnOf(html, 'u5');
+  check('your short message is open, and folds from its you label', /^<div class="ag-msg is-you" id="t-u1">/.test(short) && short.includes('class="ag-who ag-who-fold" aria-expanded="true" title="Fold your message to one line">you') && short.includes('Short ask\nin two lines'), short);
+  check('your long one starts folded: its first line and how many lines', /^<div class="ag-msg is-you is-folded" id="t-u5">/.test(long) && long.includes('aria-expanded="false" title="Unfold your message"') && long.includes('<span class="ag-folded-line">Build the lane</span><span class="ag-folded-n">4 lines</span>') && !long.includes('nothing else'), long);
+  const stamp = (n: number): string => `<time class="ag-when" dateTime="${T(n)}" title="${fullStamp(T(n))}">${fmtStamp(T(n))}</time>`;
+  check('each message of yours says when you sent it, open and folded, after its body', short.includes(`</div>${stamp(1)}</div>`) && long.includes(`</div>${stamp(5)}</div>`), short);
+  check('a reply says when it was said: its last prose\'s time, not its first step\'s', turnOf(html, 'a2').includes(stamp(4)) && !turnOf(html, 'a2').includes(`dateTime="${T(2)}"`) && !turnOf(html, 'a2').includes(`dateTime="${T(3)}"`));
+  check('the activity has no time of its own: one time on the turn, the reply\'s', (turnOf(html, 'a2').match(/<time /g) ?? []).length === 1);
+  const steps = buildTranscript([
+    at(1, { kind: 'tool_start', toolUseId: 'ts1', tool: 'Read', input: { file_path: 'a.ts' }, label: 'Read a.ts' }),
+    at(2, { kind: 'tool_start', toolUseId: 'ts2', tool: 'Read', input: { file_path: 'b.ts' }, label: 'Read b.ts' }),
+  ]);
+  const stepsHtml = renderToStaticMarkup(createElement(Transcript, { turns: steps, agentId: AGY, role: 'developer', streaming: true, links: null }));
+  check('its toggle\'s title says when the turn started', stepsHtml.includes(`title="Show every step, from ${fmtStamp(T(1))}"`) && !stepsHtml.includes('<time '), stepsHtml.match(/class="ag-act-tog"[^>]*>/)?.[0]);
+  check('the auto turn says when it was sent too', turnOf(html, 'u7').includes(stamp(7)));
+
+  // Kept: opening the long one is kept as opened; folding the short one as folded; both rendered.
+  updateFoldState((st) => toggleFold(toggleFold(st, AGY, 'u5', true), AGY, 'u1', false));
+  updateFoldState((st) => toggleFold(st, AGY, 'a2', false));
+  const kept = draw();
+  check('the long one you opened stays open, rendered whole', /^<div class="ag-msg is-you" id="t-u5">/.test(turnOf(kept, 'u5')) && turnOf(kept, 'u5').includes('nothing else'));
+  check('the short one you folded stays folded, its time still showing', /^<div class="ag-msg is-you is-folded" id="t-u1">/.test(turnOf(kept, 'u1')) && turnOf(kept, 'u1').includes('<span class="ag-folded-n">2 lines</span>') && turnOf(kept, 'u1').includes(stamp(1)));
+  check('a folded reply keeps its time', /is-folded/.test(turnOf(kept, 'a2').slice(0, 60)) && turnOf(kept, 'a2').includes(stamp(4)));
+  const none: FoldState = { folds: {}, unfolds: {} };
+  const keys = replyKeys(run);
+  const byDefault = startFoldedKeys(run, false);
+  const all = foldEvery(toggleFold(none, AGY, 'u5', true), AGY, keys, byDefault);
+  check('fold all folds your messages, the long one you opened back to its fold', keys.every((k) => shownFolded(all, AGY, k, byDefault.includes(k))));
+  const loose = unfoldEvery(all, AGY, byDefault);
+  check('unfold all opens them all, the long one included', keys.every((k) => !shownFolded(loose, AGY, k, byDefault.includes(k))));
+  updateFoldState((st) => foldEvery(st, AGY, keys, byDefault));
+  const folded = draw();
+  check('rendered after fold all, every turn is one line and still says when', (folded.match(/aria-expanded="false"/g) ?? []).length === 5 && !folded.includes('nothing else') && (folded.match(/<time class="ag-when"/g) ?? []).length === 5, folded);
+  updateFoldState((st) => unfoldEvery(st, AGY, byDefault));
+  check('and after unfold all, none is', !draw().includes('ag-who-fold" aria-expanded="false"') && draw().includes('nothing else'));
+
+  const css = src('../agent/agent.css');
+  const rule = (sel: string): string => css.match(new RegExp(`\\n${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+  check('the time is quiet: --ink3, mono, small, never wrapping, in no fixed colour', /color: var\(--ink3\)/.test(rule('.ag-when')) && /font-family: var\(--mono\)/.test(rule('.ag-when')) && /white-space: nowrap/.test(rule('.ag-when')) && !/#[0-9a-f]{3,6}\b/i.test(rule('.ag-when')), rule('.ag-when'));
+  const tsx = src('../agent/transcript.tsx');
+  check('one component draws your turn and the auto turn, with the time after the body', /function SentTurn\(/.test(tsx) && !/className="ag-msg is-you" id=/.test(tsx) && /<SentTurn key=\{t\.key\} turn=\{t\} agentId=\{agentId\} startFolded=\{startFolded\.includes\(t\.key\)\} \/>/.test(tsx) && /<Stamp ts=\{turn\.ts\} \/>/.test(tsx) && /<Stamp ts=\{replyTs\(split\)\} \/>/.test(tsx));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

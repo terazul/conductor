@@ -13,7 +13,8 @@
  * lib/verify.ts checks the rule and the screens only draw it.
  */
 
-import type { AgentStatus } from '@conductor/shared';
+import { rollupStatus, type AgentStatus, type Job } from '@conductor/shared';
+import { STATUS_KEY, STATUS_WORD, type Tone } from '../shell/status.js';
 
 /**
  *  empty   it has no agents: nothing ran, nothing finished.
@@ -36,4 +37,44 @@ export function restOf(status: AgentStatus, agentCount: number, unseenFinished: 
 /** The word for a rest that is not a status, or null for `status`. */
 export function restWord(rest: Rest): string | null {
   return rest === 'empty' ? 'no agents' : rest === 'done' ? 'done' : null;
+}
+
+/** One tag of a headline: its word and the tone it is drawn in. */
+export interface HeadTag {
+  word: string;
+  tone: Tone;
+}
+
+/**
+ * The tags a project, or a stack, heads with (Amendment 194): the Fleet card's headline, which
+ * the navigator's project row and stack row now draw too, so the three can't disagree.
+ *
+ *   `statuses`  its agents' statuses as a rollup reads them (`rollupStatuses`, lib/rollup.ts):
+ *               an agent waiting for the model counts as working (Amendment 192).
+ *   `blocked`   a request of its waits on you.
+ *   `unseen`    its jobs that finished and you haven't seen (lib/seen.ts, Amendment 87).
+ *
+ * Amber only when a human is actually required: **needs you**. Else **N working** while any
+ * agent works. Either way, **finished** beside it when a job finished unseen, red when one of
+ * them failed. With neither, **finished** alone, or the rest's quiet word (`restOf`): **no
+ * agents**, **done**, or the rolled-up status in its own colour (failed, paused, queued…).
+ */
+export function headlineTags(
+  statuses: readonly AgentStatus[],
+  blocked: boolean,
+  unseen: readonly Pick<Job, 'status'>[],
+): HeadTag[] {
+  const finished: HeadTag | null =
+    unseen.length > 0 ? { word: 'finished', tone: unseen.some((j) => j.status === 'failed') ? 'fail' : 'done' } : null;
+  const working = statuses.filter((s) => s === 'working').length;
+  const lead: HeadTag | null = blocked
+    ? { word: 'needs you', tone: 'need' }
+    : working > 0
+      ? { word: `${working} working`, tone: 'live' }
+      : null;
+  if (lead) return finished ? [lead, finished] : [lead];
+  if (finished) return [finished];
+  const status = rollupStatus(statuses);
+  const rest = restOf(status, statuses.length, false);
+  return [{ word: restWord(rest) ?? STATUS_WORD[status], tone: rest === 'status' ? STATUS_KEY[status] : 'idle' }];
 }
