@@ -200,6 +200,177 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 198 — post-merge, applied. **An HTML file renders in the Files pane, its scripts sandboxed.**
+
+Daemon (`routes/workspace.ts`, `workspace/service.ts`, `workspace/pages.ts`, `workspace/verify.ts`, and one
+header in `index.ts`) and web (`files/FilePane.tsx`, `files/files.css`, `files/useWorkspace.ts`,
+`files/useTabs.ts`, `lib/settings.ts`, `files/verify.ts`), and `docs/MANUAL.md`. Asked 3 Nov: *"add support
+for viewing files that are html pages."* Decided with the user: the page's scripts run, sandboxed, so charts,
+interactive reports and CDN libraries work, but the page can't read or call Conductor, send requests, submit
+forms or navigate the app. No wire change and no migration.
+
+Sent back once in review: the first routes named the page's job or project in the URL, and a page could put
+another job's file in a `<script src>`. A tag load sends no `Origin`, so the guard let it through, and the
+policy's `'self'` was the whole origin. Pages are now served under tokens, and the policy names the token.
+
+- **The routes.**
+  - `POST /api/pages` ← `{ jobId, path }` or `{ projectId, dir, path }` → `{ token, url }` (201). The root
+    and path are checked as the file route checks them (`resolveForRead`), and the file must be `.html` or
+    `.htm` (415 otherwise). A missing file is 404, a folder 400, an unknown job or project 404 and a folder
+    that isn't the project's 404. Any other body is 400. The guard applies, so a sandboxed page's
+    `Origin: null` POST is 403, as is any foreign Origin.
+  - `GET /api/pages/:token/<path>` serves the page and the files beside it. The path is in the URL path, not
+    the query, so the page's relative `style.css` or `img/a.png` resolves under the same token to its own
+    folder. An unknown or expired token is 404 (*"no such page — open it again from the Files pane"*). The
+    root is looked up again by id on each request, so a workspace that was removed is 410. Paths follow the
+    file and image routes: NUL, absolute, `.git`, `..` (plain or encoded) and symlinks out are 400. The type
+    comes from the extension (`PAGE_TYPES`: html, htm, css, js, mjs, json, map, txt, svg, png, jpg, jpeg,
+    gif, webp, ico, woff, woff2, ttf), and anything else is 415. A missing file is 404, a folder is 400, and
+    anything over 12 MB (`MAX_PAGE_BYTES`, the image cap) is 413. HEAD answers too.
+  - The first version's `GET /api/jobs/:jobId/page/*` and `GET /api/projects/:projectId/page/:dir/*` are
+    gone (404).
+- **The token** (`workspace/pages.ts`, `PageTokens`) is 32 bytes from `crypto.randomBytes`, base64url: 43
+  characters of `A-Z a-z 0-9 - _`. It is bound to one root, a job's worktree or one project folder. Tokens
+  are kept in memory only, at most 256 (`MAX_PAGE_TOKENS`; one more drops the least recently used), and one
+  unused for 12 hours is gone (`PAGE_TOKEN_TTL_MS`). A restart forgets them all.
+- **The headers**, on every response under a token: `X-Content-Type-Options: nosniff`,
+  `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and `pageCsp(token)`, where `OWN` is
+  `*:*/api/pages/<token>/`:
+  `sandbox allow-scripts; default-src OWN https: data: blob:; script-src OWN 'unsafe-inline' 'unsafe-eval'
+  https: blob:; style-src OWN 'unsafe-inline' https:; img-src OWN https: data: blob:; font-src OWN https:
+  data:; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'self'`.
+  `OWN` sits where another policy would say `'self'`. `'self'` would be the whole origin, and on that
+  origin `/preview/<jobId>/` (another job's dev server, either port) and Vite's `/@fs/` (5173) answer a
+  `<script src>` with JavaScript; the review's harness ran both. The host is `*` because the daemon can't
+  know which local host and port the browser used, since Vite's proxy rewrites Host. The path is what pins
+  it, and an http host gives no more than `https:` already does. Each directive is explained where it is
+  defined.
+- **Every `/api/` answer carries `X-Content-Type-Options: nosniff`** (`index.ts`, the guard's hook). The
+  review's brief assumed it already did; only the image and page routes did. With it, a `<script src>` of a
+  JSON route is refused as a script, not sniffed.
+- **What a page can reach.**
+  - Files in its own root, under its own token: CSS, classic scripts, images, JSON as text, and whatever
+    else `PAGE_TYPES` allows.
+  - Anything on `https:`, and `data:` and `blob:` URLs: CDN libraries, fonts and images, and what exported
+    reports inline.
+  - It can link to any URL. A link navigates the frame itself.
+- **What it can't reach.** It can't read or act as Conductor, for four reasons, each checked:
+  1. **Its origin is opaque.** That comes from the CSP's `sandbox`, which holds even when the URL is opened
+     in a tab of its own, and from the frame's `sandbox="allow-scripts"` (`PAGE_SANDBOX`, with
+     `referrerpolicy="no-referrer"`). Neither has `allow-same-origin`, so the page can't read the app's DOM,
+     storage or cookies. Neither has `allow-forms`, `allow-top-navigation` or `allow-popups` either.
+  2. **It can't send a request it reads.** `connect-src 'none'` stops fetch, XHR, WebSocket and
+     EventSource, and `form-action 'none'` stops form submits.
+  3. **It can't mint.** Only `POST /api/pages` mints, and a page can't make that request: its fetch is
+     `connect-src 'none'`, and any CORS-mode request it makes carries `Origin: null`, which the guard refuses.
+  4. **It can load nothing else from this origin.** That means no other token's files, no other job's or
+     folder's files by id (those routes are gone), no `/api/…` JSON, image or file route, no `/preview/`,
+     and no Vite `/@fs/` or `/src/`. Anything else under its own token is held to its root by the path gate.
+- **What is left.**
+  - A page can still make a GET it can't read, by navigating its own frame to a URL on this origin:
+    `/api/…`, `/preview/…` or Vite's own. The frame then shows that response in place of the page, still
+    sandboxed, and the page's scripts are gone with the page, so nothing reads it. The GET routes only
+    read. The one with a side effect is `GET /api/providers/copilot/login`, which may start the Copilot
+    runtime to ask whether you are logged in.
+  - A page can guess at another token, but at 256 bits that is no attack.
+  - A page can link out, and send what it knows in a URL to an `https:` host it loads from: its own
+    text, and its files' contents, which it could read only as text it was served with. It can't send
+    anything of Conductor's.
+- **Popups are left out**, of the CSP and the frame alike. A window let out of the sandbox would open at the
+  app's own origin, so `target=_blank` and `window.open` do nothing.
+- **The pane.** `.html` and `.htm` open rendered (`isPagePath`; `tabs.ts` already accepted the view), with raw
+  showing the source and diff as for any file. A deleted page shows its source, and an empty one says so.
+  The frame fills the pane under a one-line note that it runs sandboxed.
+  - **Minting.** `usePageSrc` mints a token when the page is first shown and keeps it for the session, one
+    per root and path (`pageSrc`). Until the token arrives, the pane says *"Opening the page…"*, and a mint
+    the daemon refuses is shown as *"Couldn't open the page: …"*.
+  - **Reloading.** The frame's `src` is the token's url plus `?r=<revision>.<digest of the text>`, so a write
+    reloads it, including a save in a project folder, which has no events.
+  - **A token that has gone.** On each new revision the pane asks with a HEAD of the token url whether the
+    token still holds. On a 404 (a restart, or 12 hours) it mints again.
+  - ¶ column and ⎙ PDF stay markdown's. A link to an `.html` file in markdown or a transcript opens it in
+    Files, rendered.
+- **Drawn under Node.** `useEdit`, `useWantedLine`, `useSetting` and `useAsked` pass their snapshot as the
+  server snapshot too, so `files/verify.ts` can render `FilePane` with `renderToStaticMarkup`. The browser's
+  behaviour is unchanged.
+
+**Known limits.**
+- A module script (`type="module"`) or an `@font-face` font beside the page is fetched in CORS mode, so it
+  carries `Origin: null` and the guard refuses it; CDN copies work.
+- An edit to the CSS or JS beside a page reloads only on ↻, because the page's text didn't change.
+- In token mode (`CONDUCTOR_TOKEN`) the frame sends no `Authorization` header, as images don't, so the
+  page is 401 there.
+- A token shown once in a URL bar or devtools reaches that root's files until it expires or the daemon
+  restarts.
+
+**Verified by** `workspace/verify.ts` section 18. It checks:
+- **Minting.**
+  - It answers 201 with a 43-character base64url token, a url of `/api/pages/<token>/<encoded path>` that
+    serves (a space and a `#` in the path), and a new token each time.
+  - An `Origin: null` POST and a foreign Origin are each 403.
+  - It refuses CSS and JS (415), `..`, absolute paths and links out (400), a missing file (404), a folder
+    (400), an unknown job or project (404), a folder that isn't the project's (404), and each malformed body
+    (400).
+- **Serving.**
+  - Each type is served with the exact headers, `pageCsp` for its own token included, and the body on
+    disk. The policy has no `'self'` source, and HEAD answers 200.
+  - The refusals under a token: `..`, encoded `..`, absolute paths, symlinks out (a file and a folder),
+    `.git`, unknown types, missing files, folders, an empty path and over-size.
+- **Across roots.**
+  - Job A's token reaches none of job B's files, by nine paths (`..`, `%2e%2e`, `%2f`, B's absolute path,
+    and others), and no answer holds B's secret.
+  - B's own token serves B's file, and can't serve A's page.
+  - A project-folder token is held to its folder: `..`, encoded `..`, an absolute path, a link out and
+    size are each refused.
+- **Tokens.**
+  - An unknown, made-up or job-id token is 404, by GET and HEAD.
+  - The old id routes are 404.
+  - The store holds 256 tokens and drops the least recently used. A token holds at exactly 12 hours unused
+    and is gone after that, on an injected clock, and each is bound to its root.
+  - The daemon's own store pushes out its first token after 256 more mints.
+  - A removed workspace's token is 410.
+- **The guard** answers 403 to an `Origin: null` POST to `/api/jobs`, and to `Origin: null` GETs of the
+  snapshot and of a page.
+- **nosniff.** `/file` answers `application/json` with nosniff to a request marked as a script. So do the
+  snapshot and a 404 from no route.
+
+It is also verified by `files/verify.ts`:
+- `isPagePath`, and `pageMintBody` for a job and a project folder.
+- **Minting, with a fake minter.** `pageSrc` mints the first time, and the `src` is the token url plus the
+  revision. A new revision only asks with HEAD, a 404 mints again, and each page has its own token.
+- **The daemon's minter, with `fetch` stood in.** It sends a POST to `/api/pages`, a HEAD to ask, and a
+  second POST after a 404.
+- **Tabs** open, and come back, rendered.
+- **`FilePane` under Node.**
+  - A page with no token yet shows *"Opening the page…"* and no frame.
+  - Once minted, it renders with exactly `sandbox="allow-scripts"`, `no-referrer`, a title, the note, and
+    no column or PDF. Its `src` is the token url and the revision, and it changes with the text.
+  - A project folder's frame uses its own token.
+- **The rest.** Raw, diff and their fallbacks, links from markdown and transcripts, and CSS that uses tokens
+  only.
+
+The pane was looked at in headless Chrome, in both themes, on a sample page:
+- the page's CSS, image and classic script loaded, and its inline script ran;
+- reaching the parent's DOM, storage or cookies threw `SecurityError`;
+- `window.open` opened nothing;
+- `fetch('/api/snapshot')` failed;
+- clicking a `target=_blank` link opened no tab, and submitting a form left the frame where it was;
+- opened in its own tab, the page still had a `null` origin, and its fetch still failed.
+
+The send-back was run in headless Chrome too, with a scratch daemon and Vite and two jobs. Job B had a
+`secret.js` that sets a global, and job B's dev server was registered for `/preview`. Job A's page tried 15
+`<script src>` loads of B's script, loaded top level from Vite's port and from the daemon's:
+- the old id routes;
+- A's token with `..`, `%2e%2e`, `%2f` and an absolute path;
+- a made-up token, and B's job id as a token;
+- the `/file`, `/image` and project `/dir/file` routes;
+- `/preview/job_b/`;
+- Vite's `/@fs/` for B's file and for an app source, and a root-relative path.
+
+Every load failed and the global never appeared. A's own CSS, JS and image loaded, and its `fetch` failed.
+Another job's image is not shown either. Before the policy named the token, `/preview` and Vite's `/@fs/`
+ran B's script, which is why it does.
+
 ### Amendment 197 — post-merge, applied. **The browser tab's icon is a dark tile with the amber baton.**
 
 Web only (`public/favicon.svg` new, `index.html`, `attention/notify.ts`). Asked 3 Nov: *"the browser

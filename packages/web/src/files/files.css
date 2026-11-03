@@ -818,6 +818,31 @@
   object-fit: contain;
 }
 
+/* An HTML page (Amendment 198): the frame fills the pane under one line saying how it runs.
+   Painted on --paper, as the preview's frame is, because a page with no background of its
+   own expects white, not the app's dark pane. */
+.c5-panebody.c5-pagebody {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.c5-pagenote {
+  color: var(--ink3);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.c5-page {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--paper);
+}
+
 /* ── tabs (Amendment 29) ──────────────────────────────────────────────────── */
 
 /* The strip and the pane under it share the space right of the splitter. */

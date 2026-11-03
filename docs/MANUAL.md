@@ -1157,6 +1157,34 @@ column; that choice is remembered for every file in this browser. **⎙ PDF** pr
 rendered file on its own, on white, whichever theme you're in. Pick **Save as PDF**
 in the print dialog to get a file named after the one you're reading.
 
+**An HTML file** (`.html`, `.htm`) opens rendered too, as the page it is: its own
+styles, images and scripts, so a chart or an interactive report works. A line above it
+says it **runs sandboxed**. Its scripts run, but the page can't read or call Conductor.
+It also can't send requests, submit forms, open windows or tabs, or move the app
+somewhere else. A link in it opens inside the pane.
+
+- **raw** shows its source, and **⑂ diff** works as for any file. ¶ column and ⎙ PDF are
+  for markdown only.
+- **What it loads.** Files from its own job's worktree, or its own project folder, load:
+  CSS, images, data, and plain `<script src>`. So do copies on a CDN (`https://…`). A module script (`type="module"`)
+  or a font file beside it doesn't; use the CDN copy.
+- **What it can't load.** Nothing else Conductor serves: no other job's files, no other
+  folder's, no dev server's preview and no part of the app. Its address is a long random
+  key that works for its own worktree or folder only, so it can't name another one.
+- **What is left.** A page can still send you somewhere: a link, or its own script, can
+  point the pane at another address. If that address is Conductor's, the pane shows
+  what came back, still sandboxed, and the page that sent it is gone, so it can't read
+  it. A page can also send what is in it to a site on the web it loads from. It has
+  nothing of Conductor's to send, only its own text and files. Open pages you'd open in
+  a browser.
+- **After a restart** the page's key is forgotten. The pane asks for a new one the next
+  time the page changes or you open it again. If it says **no such page**, close the tab
+  and open the file again.
+- **With `CONDUCTOR_TOKEN` set**, a page doesn't load, as images don't.
+- **When it reloads.** It reloads when it's written. If only its CSS or JS changed, press
+  **↻**.
+- A link to an `.html` file in a markdown file or a transcript opens it here, rendered.
+
 A file an agent **deleted** stays in the tree with a **deleted** badge, because git
 still has it. Opening it shows git's last copy, read-only, under a banner saying so.
 A tab whose file can't be opened any more says why and offers **retry** and **close

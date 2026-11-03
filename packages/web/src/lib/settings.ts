@@ -168,5 +168,6 @@ export function onSettings(fn: () => void): () => void {
 
 /** One setting, re-rendering when it changes. */
 export function useSetting(key: string): string | null {
-  return useSyncExternalStore(onSettings, () => readSetting(key));
+  const get = (): string | null => readSetting(key);
+  return useSyncExternalStore(onSettings, get, get);
 }

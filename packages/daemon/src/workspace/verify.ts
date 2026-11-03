@@ -42,6 +42,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import type {
@@ -1936,6 +1937,251 @@ async function main(): Promise<void> {
     const probe = readFileSync(new URL('../preview/probe.ts', import.meta.url), 'utf8');
     const fn = probe.slice(probe.indexOf('export function pidForPort'), probe.indexOf('/**', probe.indexOf('export function pidForPort')));
     check('pidForPort catches a spawn that throws, and answers null (Amendment 171)', /try \{\s*execFile\(/.test(fn) && /\} catch \{\s*resolve\(null\);/.test(fn));
+  }
+
+  console.log('\n18 · an HTML page and the files beside it, sandboxed, under a token (Amendment 198)');
+  {
+    const PAGE = join(realpathSync(tmpdir()), `conductor-198-page-${process.pid}`);
+    const OUT = `${PAGE}-outside`;
+    // Job B: another job's worktree, with a script that would leak a global if a page ran it.
+    const B = `${PAGE}-b`;
+    for (const d of [PAGE, OUT, B]) rmSync(d, { recursive: true, force: true });
+    mkdirSync(join(PAGE, 'report', 'img'), { recursive: true });
+    mkdirSync(OUT, { recursive: true });
+    mkdirSync(B, { recursive: true });
+    mkdirSync(join(PAGE, 'report', 'old.html'));
+    mkdirSync(join(PAGE, 'my report'));
+    writeFileSync(join(PAGE, 'my report', 'a#b.html'), '<p>spaced</p>');
+    writeFileSync(join(PAGE, 'report', 'index.html'), '<link rel="stylesheet" href="style.css"><script src="app.js"></script><img src="img/dot.png">');
+    writeFileSync(join(PAGE, 'report', 'style.css'), 'body { color: teal }');
+    writeFileSync(join(PAGE, 'report', 'app.js'), 'document.title = "x";');
+    writeFileSync(join(PAGE, 'report', 'data.json'), '{}');
+    writeFileSync(join(PAGE, 'report', 'img', 'dot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(PAGE, 'report', 'notes.env'), 'SECRET=1');
+    writeFileSync(join(PAGE, 'big.json'), Buffer.alloc(12 * 1024 * 1024 + 1, 0x20));
+    writeFileSync(join(OUT, 'secret.html'), '<p>outside</p>');
+    writeFileSync(join(B, 'secret.js'), 'window.B_SECRET = "from job B";');
+    writeFileSync(join(B, 'index.html'), '<p>job B</p>');
+    symlinkSync(join(OUT, 'secret.html'), join(PAGE, 'report', 'out.html'));
+    symlinkSync(OUT, join(PAGE, 'outdir'));
+    project('prj_page', PAGE);
+    project('prj_pageb', B);
+    const opened = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
+      jobId: 'job_page', projectId: 'prj_page', repoPath: PAGE, isolation: 'in_place',
+    });
+    check('a folder with a page in it opens as a workspace', opened.status === 201, `${opened.status}`);
+    const openedB = await send<{ workspace: WorkspaceRecord }>('POST', '/api/workspaces', {
+      jobId: 'job_pageb', projectId: 'prj_pageb', repoPath: B, isolation: 'in_place',
+    });
+    check("and so does job B's, beside it", openedB.status === 201, `${openedB.status}`);
+
+    /** The page's policy, every `'self'` narrowed to the files under its own token. */
+    const cspFor = (token: string): string => {
+      const own = `*:*/api/pages/${token}/`;
+      return `sandbox allow-scripts; default-src ${own} https: data: blob:; script-src ${own} 'unsafe-inline' 'unsafe-eval' https: blob:; ` +
+        `style-src ${own} 'unsafe-inline' https:; img-src ${own} https: data: blob:; font-src ${own} https: data:; ` +
+        "connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'self'";
+    };
+    /** A request sent exactly as written: fetch() would fold `..` and `%2e%2e` away first. */
+    const raw = (path: string, headers: Record<string, string> = {}, method = 'GET', body?: unknown) =>
+      new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((done, reject) => {
+        const sent = body === undefined ? undefined : JSON.stringify(body);
+        const req = httpRequest({
+          host: '127.0.0.1', port: PORT, path, method,
+          headers: { host: `127.0.0.1:${PORT}`, ...(sent ? { 'content-type': 'application/json' } : {}), ...headers },
+        });
+        req.on('response', (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => done({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+        });
+        req.on('error', reject);
+        req.end(sent);
+      });
+    const headersExact = (h: Record<string, string | string[] | undefined>, token: string): boolean =>
+      h['x-content-type-options'] === 'nosniff' &&
+      h['cache-control'] === 'no-store' &&
+      h['referrer-policy'] === 'no-referrer' &&
+      h['content-security-policy'] === cspFor(token);
+    const mint = (body: unknown, headers: Record<string, string> = {}) => raw('/api/pages', headers, 'POST', body);
+    const minted = async (body: unknown): Promise<{ token: string; url: string }> => {
+      const res = await mint(body);
+      return res.status === 201 ? (JSON.parse(res.body.toString()) as { token: string; url: string }) : { token: '', url: '' };
+    };
+    const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+    // ── minting: only for a page, in a root, by the app ──
+    const first = await mint({ jobId: 'job_page', path: 'report/index.html' });
+    check('POST /api/pages mints a token for a job\'s page → 201', first.status === 201, `${first.status} ${first.body.toString().slice(0, 160)}`);
+    const a = first.status === 201 ? (JSON.parse(first.body.toString()) as { token: string; url: string }) : { token: '', url: '' };
+    check('the token is 32 random bytes, base64url: 43 characters of A-Z a-z 0-9 - _', TOKEN.test(a.token), a.token);
+    check('the url is /api/pages/<token>/<path>', a.url === `/api/pages/${a.token}/report/index.html`, a.url);
+    const again = await minted({ jobId: 'job_page', path: 'report/index.html' });
+    check('a second mint is a different token', TOKEN.test(again.token) && again.token !== a.token);
+    const spaced = await minted({ jobId: 'job_page', path: 'my report/a#b.html' });
+    check('each segment of the url is encoded, the slashes are not', spaced.url === `/api/pages/${spaced.token}/my%20report/a%23b.html`, spaced.url);
+    check('and that url serves the page', (await raw(spaced.url)).body.toString() === '<p>spaced</p>');
+    check('POST /api/pages with Origin: null (a sandboxed page) → 403', (await mint({ jobId: 'job_page', path: 'report/index.html' }, { origin: 'null' })).status === 403);
+    check('with a foreign Origin → 403', (await mint({ jobId: 'job_page', path: 'report/index.html' }, { origin: 'https://evil.example' })).status === 403);
+    check('with the app\'s own Origin → 201', (await mint({ jobId: 'job_page', path: 'report/index.html' }, { origin: 'http://localhost:5173' })).status === 201);
+    const mintRefused: Array<[string, unknown, number]> = [
+      ['a file that is not HTML', { jobId: 'job_page', path: 'report/style.css' }, 415],
+      ['a script', { jobId: 'job_page', path: 'report/app.js' }, 415],
+      ['a path out of the root', { jobId: 'job_page', path: '../conductor-198-page-x/a.html' }, 400],
+      ['an absolute path', { jobId: 'job_page', path: join(B, 'index.html') }, 400],
+      ['a link out of the root', { jobId: 'job_page', path: 'report/out.html' }, 400],
+      ['a missing file', { jobId: 'job_page', path: 'report/gone.html' }, 404],
+      ['a folder named like a page', { jobId: 'job_page', path: 'report/old.html' }, 400],
+      ['a job with no workspace', { jobId: 'job_nope', path: 'index.html' }, 404],
+      ['no path', { jobId: 'job_page' }, 400],
+      ['a job and a project at once', { jobId: 'job_page', projectId: 'prj_page', dir: PAGE, path: 'report/index.html' }, 400],
+      ['a project with no folder', { projectId: 'prj_page', path: 'report/index.html' }, 400],
+      ['a path that is not a string', { jobId: 'job_page', path: ['report/index.html'] }, 400],
+      ['a folder that is not the project\'s', { projectId: 'prj_page', dir: OUT, path: 'secret.html' }, 404],
+      ['a project that does not exist', { projectId: 'prj_nope', dir: PAGE, path: 'report/index.html' }, 404],
+    ];
+    for (const [label, body, code] of mintRefused) {
+      const res = await mint(body);
+      check(`no token for ${label} → ${code}`, res.status === code, `${res.status} ${res.body.toString().slice(0, 120)}`);
+    }
+
+    // ── serving under the token ──
+    const at = `/api/pages/${a.token}`;
+    const served: Array<[string, string]> = [
+      ['report/index.html', 'text/html; charset=utf-8'],
+      ['report/style.css', 'text/css; charset=utf-8'],
+      ['report/app.js', 'text/javascript; charset=utf-8'],
+      ['report/data.json', 'application/json; charset=utf-8'],
+      ['report/img/dot.png', 'image/png'],
+    ];
+    for (const [path, type] of served) {
+      const res = await raw(`${at}/${path}`);
+      check(`${path} is served under the token as ${type}`, res.status === 200 && res.headers['content-type'] === type, `${res.status} ${String(res.headers['content-type'])}`);
+      check(`and carries every header, exactly`, headersExact(res.headers, a.token), JSON.stringify(res.headers));
+    }
+    const page = await raw(a.url);
+    check('the page is the bytes on disk', page.body.toString() === readFileSync(join(PAGE, 'report', 'index.html'), 'utf8'));
+    check('the CSP the route sends is the one the contract spells out', (await import('../routes/workspace.js')).pageCsp(a.token) === cspFor(a.token));
+    check("its sources are the page's own token's files, never the whole origin", !cspFor(a.token).includes("src 'self'") && page.headers['content-security-policy'] === cspFor(a.token));
+    check('a HEAD of it, which is how the pane asks whether its token still holds, → 200', (await raw(a.url, {}, 'HEAD')).status === 200);
+
+    const refused: Array<[string, string, number]> = [
+      ['`..` out of the root', `${at}/../../../../etc/passwd`, 400],
+      ['`..` behind a real folder', `${at}/report/../../conductor-198-outside/secret.html`, 400],
+      ['an encoded `..`', `${at}/%2e%2e/%2e%2e/etc/hosts`, 400],
+      ['an absolute path', `${at}//etc/hosts`, 400],
+      ['an encoded absolute path', `${at}/%2Fetc%2Fhosts`, 400],
+      ['a link to a file outside', `${at}/report/out.html`, 400],
+      ['a file under a linked folder outside', `${at}/outdir/secret.html`, 400],
+      ['.git', `${at}/.git/config`, 400],
+      ['a type not on the list', `${at}/report/notes.env`, 415],
+      ['a missing file', `${at}/report/gone.html`, 404],
+      ['a folder with no type', `${at}/report`, 415],
+      ['a folder named like a page', `${at}/report/old.html`, 400],
+      ['no path at all', `${at}/`, 400],
+      ['a file past the 12 MB ceiling', `${at}/big.json`, 413],
+    ];
+    for (const [label, path, code] of refused) {
+      const res = await raw(path);
+      check(`refused: ${label} → ${code}`, res.status === code, `${res.status} ${res.body.toString().slice(0, 120)}`);
+    }
+    check('and nothing from outside was sent', !(await raw(`${at}/report/out.html`)).body.toString().includes('outside'));
+
+    // ── a token reaches its own root and nothing else ──
+    const bName = basename(B);
+    const bAbs = encodeURIComponent(join(B, 'secret.js'));
+    const crossB: Array<[string, string]> = [
+      ["B's file by its own name", `${at}/secret.js`],
+      ["`..` to B's folder", `${at}/../${bName}/secret.js`],
+      ["`..` from a real folder", `${at}/report/../../${bName}/secret.js`],
+      ['an encoded `..`', `${at}/%2e%2e/${bName}/secret.js`],
+      ['a double-encoded `..`', `${at}/%252e%252e/${bName}/secret.js`],
+      ['an encoded slash', `${at}/..%2F${bName}%2Fsecret.js`],
+      ["B's absolute path", `${at}/${join(B, 'secret.js')}`],
+      ["B's absolute path, encoded", `${at}/${bAbs}`],
+      ['a backslash', `${at}/..%5C${bName}%5Csecret.js`],
+    ];
+    for (const [label, path] of crossB) {
+      const res = await raw(path);
+      check(`job A's token can't serve job B's file: ${label} → ${res.status}`, res.status >= 400 && !res.body.toString().includes('B_SECRET'), `${res.status} ${res.body.toString().slice(0, 120)}`);
+    }
+    const bTok = await minted({ jobId: 'job_pageb', path: 'index.html' });
+    check("B's own token serves B's file — so it was there to leak", (await raw(`/api/pages/${bTok.token}/secret.js`)).body.toString().includes('B_SECRET'));
+    check("and B's token can't serve A's page", (await raw(`/api/pages/${bTok.token}/report/index.html`)).status === 404);
+
+    const unknown = (await import('node:crypto')).randomBytes(32).toString('base64url');
+    check('a well-formed token nobody minted → 404', (await raw(`/api/pages/${unknown}/report/index.html`)).status === 404);
+    check('a made-up token → 404', (await raw('/api/pages/abc/report/index.html')).status === 404);
+    check("a job's id where the token goes → 404", (await raw('/api/pages/job_page/report/index.html')).status === 404);
+    check('a HEAD with a token nobody minted → 404, which is when the pane mints again', (await raw(`/api/pages/${unknown}/report/index.html`, {}, 'HEAD')).status === 404);
+
+    check('the old route by job id is gone → 404', (await raw('/api/jobs/job_page/page/report/index.html')).status === 404);
+    check('and the one by project folder', (await raw(`/api/projects/prj_page/page/${encodeURIComponent(PAGE)}/report/index.html`)).status === 404);
+    check("so B's file by B's id is not there either", (await raw('/api/jobs/job_pageb/page/secret.js')).status === 404);
+
+    // The guard (guard.ts) is what keeps a page's scripts off the API: a sandboxed page has an
+    // opaque origin, so whatever it sends says `Origin: null`. A plain GET has no Origin.
+    const nullPost = await raw('/api/jobs', { origin: 'null', 'content-type': 'application/json' }, 'POST');
+    check('a POST to /api/jobs with Origin: null is refused by the guard', nullPost.status === 403, `${nullPost.status}`);
+    check('so is a read of the snapshot', (await raw('/api/snapshot', { origin: 'null' })).status === 403);
+    check('and a CORS read of the page route itself', (await raw(`${at}/report/data.json`, { origin: 'null' })).status === 403);
+    check('while a GET with no Origin, the frame and its <link>/<script>/<img>, passes', page.status === 200);
+
+    // What a page can still *show* but not read: a `<script src>` of a JSON route is refused as
+    // a script, because the type is JSON and `nosniff` says the type is the only one.
+    const asScript = await raw('/api/jobs/job_pageb/file?path=secret.js', { 'sec-fetch-dest': 'script', 'sec-fetch-mode': 'no-cors' });
+    check(
+      "a <script src> of B's /file answers application/json with nosniff, so it can't run",
+      asScript.status === 200 && asScript.headers['content-type'] === 'application/json; charset=utf-8' && asScript.headers['x-content-type-options'] === 'nosniff',
+      `${asScript.status} ${String(asScript.headers['content-type'])} ${String(asScript.headers['x-content-type-options'])}`,
+    );
+    const snap = await raw('/api/snapshot');
+    check('so does every API answer, the snapshot too', snap.headers['x-content-type-options'] === 'nosniff' && String(snap.headers['content-type']).startsWith('application/json'));
+    check('and a 404 from no route at all', (await raw('/api/nothing-here')).headers['x-content-type-options'] === 'nosniff');
+
+    // A project's folder, its token held to that folder.
+    const dirTok = await minted({ projectId: 'prj_page', dir: PAGE, path: 'report/index.html' });
+    check("a project folder's page mints a token", TOKEN.test(dirTok.token) && dirTok.url === `/api/pages/${dirTok.token}/report/index.html`, dirTok.url);
+    const dirPage = await raw(dirTok.url);
+    check('and serves its page', dirPage.status === 200 && dirPage.headers['content-type'] === 'text/html; charset=utf-8', `${dirPage.status}`);
+    check("with every header, exactly, and the folder token's own policy", headersExact(dirPage.headers, dirTok.token));
+    const dirCss = await raw(`/api/pages/${dirTok.token}/report/style.css`);
+    check('and the CSS beside it, which is what `href="style.css"` resolves to', dirCss.status === 200 && dirCss.body.toString() === 'body { color: teal }');
+    const dirAt = `/api/pages/${dirTok.token}`;
+    check('`..` out of a project folder → 400', (await raw(`${dirAt}/report/../../${bName}/secret.js`)).status === 400);
+    check('an encoded `..` out of it → 400', (await raw(`${dirAt}/%2e%2e/${bName}/secret.js`)).status === 400);
+    check("B's absolute path under it → 400", (await raw(`${dirAt}/${bAbs}`)).status === 400);
+    check('a link out of a project folder → 400', (await raw(`${dirAt}/report/out.html`)).status === 400);
+    check('a project folder caps size the same', (await raw(`${dirAt}/big.json`)).status === 413);
+
+    // The store: a bound, the least recently used going first, and twelve hours unused.
+    const { PageTokens, MAX_PAGE_TOKENS, PAGE_TOKEN_TTL_MS } = await import('./pages.js');
+    check('at most 256 live tokens, each gone after 12 hours unused', MAX_PAGE_TOKENS === 256 && PAGE_TOKEN_TTL_MS === 12 * 60 * 60 * 1000);
+    let t = 1_000;
+    const store = new PageTokens({ now: () => t });
+    const root = { kind: 'job', jobId: 'job_x' } as const;
+    const toks = Array.from({ length: 256 }, () => store.mint(root));
+    check('256 tokens are all live', store.size === 256 && store.lookup(toks[0]!) !== null && store.lookup(toks[255]!) !== null);
+    // toks[0] was just used, so toks[1] is now the least recently used.
+    const extra = store.mint(root);
+    check('the 257th pushes out the least recently used', store.size === 256 && store.lookup(toks[1]!) === null && store.lookup(extra) !== null);
+    check('and a token used lately stays', store.lookup(toks[0]!) !== null && store.lookup(toks[2]!) !== null);
+    const fresh = store.mint(root);
+    t += PAGE_TOKEN_TTL_MS;
+    check('a token used exactly 12 hours ago still holds, and its clock restarts', store.lookup(fresh) !== null);
+    t += PAGE_TOKEN_TTL_MS + 1;
+    check('one unused for longer is gone', store.lookup(fresh) === null && store.lookup(toks[3]!) === null);
+    check('a token is bound to its root', (() => { const s = new PageTokens(); const k = s.mint({ kind: 'dir', projectId: 'p', dir: '/d' }); const r = s.lookup(k); return r?.kind === 'dir' && r.projectId === 'p' && r.dir === '/d'; })());
+
+    // The daemon's own store is bound the same: 256 more and A's first token is gone.
+    for (let i = 0; i < MAX_PAGE_TOKENS; i++) workspace().pages.mint({ kind: 'job', jobId: 'job_page' });
+    check("the daemon's store holds 256, so 256 mints later the first token → 404", (await raw(a.url)).status === 404 && workspace().pages.size === MAX_PAGE_TOKENS);
+
+    const live = await minted({ jobId: 'job_page', path: 'report/index.html' });
+    await send('DELETE', '/api/workspaces/job_page?force=true');
+    check('a token for a workspace removed since → 410', (await raw(live.url)).status === 410);
+    await send('DELETE', '/api/workspaces/job_pageb?force=true');
+    for (const d of [PAGE, OUT, B]) rmSync(d, { recursive: true, force: true });
   }
 
   // ───────────────────────────────────────────────────────────────────────────

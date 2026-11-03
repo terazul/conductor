@@ -5,7 +5,8 @@
  *
  * Every request goes through `api()` from lib/feed.ts so auth stays in one
  * place, and every piece of live state is read through the hooks in
- * lib/store.ts. Nothing here opens a socket or calls fetch directly.
+ * lib/store.ts. Nothing here opens a socket, and the one direct fetch is a page's
+ * HEAD (`daemonPages`), with `authHeaders()` as `api()` sends.
  *
  * The refresh rule: the tree and the open file are REST reads, but *when* to
  * re-read them is derived from the event log. A `file_edit` for this job means
@@ -34,7 +35,7 @@ import type {
   RenameResponse,
   WriteFileRequest,
 } from '@conductor/shared';
-import { api } from '../lib/feed.js';
+import { api, authHeaders } from '../lib/feed.js';
 import { ApiError, errorText } from '../lib/errors.js';
 import { useAgents, useJobEvents, useJobs } from '../lib/store.js';
 import { parseDirRoot, rootEndpoint as endpoint } from './tabs.js';
@@ -57,12 +58,14 @@ export function askedOf(root: string | null): number {
 }
 
 function useAsked(root: string | null): number {
+  const get = (): number => askedOf(root);
   return useSyncExternalStore(
     (fn) => {
       askers.add(fn);
       return () => askers.delete(fn);
     },
-    () => askedOf(root),
+    get,
+    get,
   );
 }
 
@@ -349,6 +352,114 @@ export function isImagePath(path: string): boolean {
  */
 export function imageUrl(jobId: string, path: string, revision: number): string {
   return `${endpoint(jobId, 'image', path)}&r=${revision}`;
+}
+
+/** The extensions the pane shows as a web page, in a sandboxed frame (Amendment 198). */
+const PAGE_EXT = new Set(['.html', '.htm']);
+
+/** Does this path render as a web page rather than as text? Its source is still text. */
+export function isPagePath(path: string): boolean {
+  const dot = path.lastIndexOf('.');
+  return dot > -1 && PAGE_EXT.has(path.slice(dot).toLowerCase());
+}
+
+/**
+ * A page is framed from a URL the daemon mints (Amendment 198, `POST /api/pages`): a token
+ * bound to the page's root, so the page can load what is beside it and can't name another
+ * job's files. The file's path is in the URL's path, not its query, so what the page loads by
+ * a relative URL — `style.css`, `img/chart.png` — resolves beside it, under the same token.
+ */
+interface PageToken {
+  token: string;
+  url: string;
+}
+
+/** How the pane gets a page's URL: the daemon, or a stand-in in files/verify.ts. */
+export interface PageMinter {
+  mint(root: string, path: string): Promise<string>;
+  /** Does the daemon still know this URL's token? No once it answers 404. */
+  holds(url: string): Promise<boolean>;
+}
+
+/** What `POST /api/pages` is sent for a root: a job's id, or a project folder's. */
+export function pageMintBody(root: string, path: string): Record<string, string> {
+  const d = parseDirRoot(root);
+  return d ? { projectId: d.projectId, dir: d.dir, path } : { jobId: root, path };
+}
+
+export const daemonPages: PageMinter = {
+  async mint(root, path) {
+    return (await api<PageToken>('/api/pages', { method: 'POST', body: pageMintBody(root, path) })).url;
+  },
+  async holds(url) {
+    // The one direct fetch in this file: a HEAD, which `api()` would try to read a body from.
+    const res = await fetch(url, { method: 'HEAD', headers: authHeaders() });
+    return res.status !== 404;
+  },
+};
+
+/** Minted this session, by root and path. A restart forgets the daemon's side; `holds` notices. */
+const pageTokens = new Map<string, string>();
+const pageKey = (root: string, path: string): string => `${root}\u0000${path}`;
+
+/**
+ * `revision` rides along as a cache-buster, as for `imageUrl`: a frame does not reload an
+ * unchanged `src`. The daemon routes on the URL's path, so the query never reaches the file.
+ */
+const withRevision = (url: string, revision: string): string => `${url}?r=${encodeURIComponent(revision)}`;
+
+/** The frame's `src` if this session already has the page's token, else null. */
+export function knownPageSrc(root: string, path: string, revision: string): string | null {
+  const url = pageTokens.get(pageKey(root, path));
+  return url === undefined ? null : withRevision(url, revision);
+}
+
+/**
+ * The frame's `src`: the token this session minted for the page, if the daemon still knows it,
+ * or a new one — on first showing it, and again after a restart or once the daemon's bound has
+ * pushed the old one out, both of which it answers with a 404.
+ */
+export async function pageSrc(root: string, path: string, revision: string, pages: PageMinter = daemonPages): Promise<string> {
+  const key = pageKey(root, path);
+  let url = pageTokens.get(key);
+  if (url !== undefined && !(await pages.holds(url))) {
+    pageTokens.delete(key);
+    url = undefined;
+  }
+  if (url === undefined) {
+    url = await pages.mint(root, path);
+    pageTokens.set(key, url);
+  }
+  return withRevision(url, revision);
+}
+
+/**
+ * `pageSrc` for the pane, asked again whenever the revision moves. Until it answers for this
+ * page it shows the token it already has, so a reload doesn't blank the frame first; a page
+ * shown for the first time has no `src` until its token is minted.
+ */
+export function usePageSrc(
+  root: string,
+  path: string,
+  revision: string,
+  enabled: boolean,
+): { src: string | null; error: string | null } {
+  const key = pageKey(root, path);
+  const [got, setGot] = useState<{ key: string; src: string | null; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    pageSrc(root, path, revision).then(
+      (src) => live && setGot({ key, src, error: null }),
+      (err: unknown) => live && setGot({ key, src: null, error: errorText(err) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [root, path, revision, enabled, key]);
+  if (!enabled) return { src: null, error: null };
+  if (got?.key === key) return got;
+  return { src: knownPageSrc(root, path, revision), error: null };
 }
 
 /** One per open tab, and then some. Module-level, so it outlives the screen. */

@@ -17,6 +17,13 @@
  *   GET  /api/projects/:projectId/dir/{tree,file,image,diff}?dir=…[&path=…]
  *   PUT  /api/projects/:projectId/dir/file?dir=…
  *
+ * An HTML page and the files it loads by relative URL (Amendment 198), under a token only the
+ * app can mint, bound to the one root it was minted for (workspace/pages.ts). The file's path
+ * is in the URL's path rather than a query, because a relative `href="style.css"` drops the
+ * query. Nothing names a page by its job or project, so a page can't name another's:
+ *   POST /api/pages  ← { jobId, path } | { projectId, dir, path } → { token, url } (201)
+ *   GET  /api/pages/:token/<path>
+ *
  * New folders, renames and deletes (Amendment 138), for either kind of root, through the
  * same gate and lock as a write (service.ts, "folders, renames and deletes"):
  *   POST   …/folders  ← CreateFolderRequest → CreateFolderResponse (201)
@@ -60,6 +67,7 @@ import type {
 import type { WorkspaceRecord } from '../workspace/service.js';
 import { initWorkspace, WorkspaceError, workspace } from '../workspace/service.js';
 import { PathEscape } from '../workspace/paths.js';
+import type { PageRoot } from '../workspace/pages.js';
 import { GitError } from '../workspace/git.js';
 import {
   JobElsewhereError,
@@ -99,6 +107,16 @@ interface OpenBody {
   branch?: string;
   baseRef?: string;
 }
+
+/** `POST /api/pages`: a job's page, or a project folder's. */
+interface PageBody {
+  jobId?: unknown;
+  projectId?: unknown;
+  dir?: unknown;
+  path?: unknown;
+}
+
+const PAGE_BAD = 'send { jobId, path } or { projectId, dir, path }';
 
 const ISOLATIONS = new Set<Isolation>(['worktree', 'branch', 'in_place']);
 
@@ -175,6 +193,58 @@ function sendImage(reply: FastifyReply, img: { buf: Buffer; mime: string }): Fas
     .send(img.buf);
 }
 
+/**
+ * The policy every response from the page route carries (Amendment 198), for the token it was
+ * served under. The page's scripts run, so charts and interactive reports work, and what keeps
+ * them from Conductor is this, with the iframe's own `sandbox` attribute (files/FilePane.tsx)
+ * and the guard (guard.ts):
+ *
+ *  - `sandbox allow-scripts` — sandboxed even when the URL is opened in a tab of its own, not
+ *    only inside the pane's frame. No `allow-same-origin`, so the page's origin is opaque: it
+ *    can't read the app's storage or DOM, and anything it does send carries `Origin: null`,
+ *    which the guard refuses. No `allow-forms`, `allow-top-navigation` or `allow-popups`: a
+ *    window it opened could escape the sandbox at the app's own origin, so `target=_blank`
+ *    and `window.open` do nothing, and the frame's attribute leaves popups out to match.
+ *  - `*:*\/api/pages/<token>/` where another policy would say `'self'` — the files beside the
+ *    page, under its own token, and nothing else this origin serves. `'self'` would be the
+ *    whole origin: on Vite's 5173 that is `/@fs/` (any file in the repo Vite runs from, which
+ *    holds this project's own worktrees) and on either port `/preview/<jobId>/` (another job's
+ *    dev server), both of which answer a `<script src>` with JavaScript. The host is `*`
+ *    because the daemon can't know which local host and port the browser used (Vite's proxy
+ *    rewrites Host); the path is what pins it, and an http host is no more than `https:` is.
+ *  - `https: data: blob:` — CDN assets, and what exported reports inline.
+ *  - `script-src … 'unsafe-inline' 'unsafe-eval'` — a report's inline script, and the libraries
+ *    that compile templates; they run inside the sandbox, which is what makes that safe.
+ *  - `connect-src 'none'` — no `fetch`, XHR, WebSocket or EventSource, to us or anywhere.
+ *  - `form-action 'none'` — no form submits, even if a sandbox flag were added later.
+ *  - `frame-ancestors 'self'` — only the app may frame it.
+ *  - `base-uri 'self'` — a `<base>` can't point its relative URLs at another host.
+ */
+export function pageCsp(token: string): string {
+  const own = `*:*/api/pages/${token}/`;
+  return (
+    `sandbox allow-scripts; default-src ${own} https: data: blob:; ` +
+    `script-src ${own} 'unsafe-inline' 'unsafe-eval' https: blob:; ` +
+    `style-src ${own} 'unsafe-inline' https:; img-src ${own} https: data: blob:; ` +
+    `font-src ${own} https: data:; connect-src 'none'; form-action 'none'; ` +
+    "frame-ancestors 'self'; base-uri 'self'"
+  );
+}
+
+/** A page's file and its headers. */
+function sendPage(reply: FastifyReply, token: string, file: { buf: Buffer; mime: string }): FastifyReply {
+  return reply
+    .type(file.mime)
+    // The declared type is the only one: a .txt can't be sniffed into a script.
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Content-Security-Policy', pageCsp(token))
+    // An agent rewrites the page; the pane reloads it and must not get the old one.
+    .header('Cache-Control', 'no-store')
+    // A link out of the page doesn't tell the site which job's file it came from.
+    .header('Referrer-Policy', 'no-referrer')
+    .send(file.buf);
+}
+
 export default async function workspaceRoutes(app: FastifyInstance): Promise<void> {
   // Boot the service here rather than in daemon/src/index.ts, which is W0's.
   const svc = initWorkspace();
@@ -232,6 +302,46 @@ export default async function workspaceRoutes(app: FastifyInstance): Promise<voi
       }
     },
   );
+
+  /**
+   * A page's token (Amendment 198). Only the app mints one: a page's own fetch is
+   * `connect-src 'none'`, and anything it sends says `Origin: null`, which the guard refuses,
+   * as it refuses a foreign page's Origin. The root and the path pass the same gate as a read,
+   * and the file must be `.html` or `.htm`.
+   */
+  app.post<{ Body: PageBody }>('/api/pages', async (req, reply) => {
+    const body = req.body ?? {};
+    if (!isName(body.path)) return reply.code(400).send({ error: PAGE_BAD });
+    let root: PageRoot;
+    if (isName(body.jobId) && body.projectId === undefined && body.dir === undefined) {
+      root = { kind: 'job', jobId: body.jobId };
+    } else if (isName(body.projectId) && isName(body.dir) && body.jobId === undefined) {
+      root = { kind: 'dir', projectId: body.projectId, dir: body.dir };
+    } else {
+      return reply.code(400).send({ error: PAGE_BAD });
+    }
+    try {
+      return reply.code(201).send(workspace().mintPage(root, body.path));
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  /**
+   * A page's files, under its token. A GET with no Origin, which is how the frame loads the
+   * page and how its `<link>`, `<script>` and `<img>` load the rest, passes the guard as any
+   * GET does. A `type="module"` script or an `@font-face` from beside the page is a CORS
+   * request, sent with `Origin: null`, and the guard refuses it: CDN copies of both work.
+   */
+  app.get<{ Params: { token: string; '*': string } }>('/api/pages/:token/*', async (req, reply) => {
+    const path = req.params['*'];
+    if (!path) return reply.code(400).send({ error: 'a file path is required after the token' });
+    try {
+      return sendPage(reply, req.params.token, workspace().pageByToken(req.params.token, path));
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
 
   app.put<{ Params: JobParams; Body: WriteFileRequest }>(
     '/api/jobs/:jobId/file',

@@ -51,6 +51,7 @@ import { Watcher } from './watcher.js';
 import { canonicalRoot, relativePosix, resolveEntry, resolveForRead, resolveForWrite } from './paths.js';
 import { MAX_TEXT_BYTES, looksBinary, ownerOf, scanChanges } from './changes.js';
 import { buildTree } from './tree.js';
+import { PageTokens, type PageRoot } from './pages.js';
 import { isMarkdown, renderMarkdown } from './markdown.js';
 import { diff as gitDiff, diffUntracked, isRepo, readBlob, status, storedCopy, trackedCount } from './git.js';
 
@@ -81,6 +82,45 @@ const IMAGE_TYPES: Record<string, string> = {
 /** Images get a larger ceiling than text: a screenshot is legitimately big. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
+/**
+ * What an HTML page in a worktree may load from beside it (Amendment 198): the page, its
+ * styles, scripts, data, images and fonts. The same kind of boundary as `IMAGE_TYPES`, and
+ * an unknown extension is a 415 for the same reason: a page route that served whatever bytes
+ * a path holds would be "download any file", one `<a href>` away.
+ */
+const PAGE_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
+
+/**
+ * A page's files share the image ceiling, not the text one: a report with its data inlined,
+ * or a charting library's bundle, is past 2 MB and still a page.
+ */
+const MAX_PAGE_BYTES = MAX_IMAGE_BYTES;
+
+/** What a page's token can be minted for: the page itself, not what it loads. */
+const HTML_TYPES: Record<string, string> = {
+  '.html': PAGE_TYPES['.html']!,
+  '.htm': PAGE_TYPES['.htm']!,
+};
+
 /** Carries the HTTP status so the route layer stays a thin translation. */
 export class WorkspaceError extends Error {
   readonly status: number;
@@ -104,6 +144,7 @@ export class WorkspaceService {
   #db: Db;
   #store: WorkspaceStore;
   #lock = new KeyedLock();
+  #pages = new PageTokens();
   #mgr: WorktreeMgr;
   #watchers = new Map<string, Watcher>();
   #unsubscribe: (() => void) | null = null;
@@ -351,43 +392,48 @@ export class WorkspaceService {
     return buildTree(ws.path, basename(ws.path) || ws.branch, changes);
   }
 
-  /**
-   * An image's bytes and its MIME type.
-   *
-   * Containment is `resolveForRead`, exactly as for text — this route reaches the
-   * filesystem, so it gets the same gate and no second implementation of it.
-   *
-   * The extension decides the type, and an unknown extension is a 415 rather than
-   * `application/octet-stream`. Sniffing content to decide would mean this route
-   * could serve anything with the right leading bytes, which is how a "view images"
-   * feature quietly becomes "download any file".
-   */
+  /** An image's bytes and its MIME type, by `served`'s rules (below). */
   async image(jobId: string, relPath: string): Promise<{ buf: Buffer; mime: string }> {
     return this.imageOf(this.resolve(jobId), relPath);
   }
 
   async imageOf(ws: WorkspaceRecord, relPath: string): Promise<{ buf: Buffer; mime: string }> {
-    const abs = resolveForRead(ws.path, relPath);
-    const mime = IMAGE_TYPES[extname(abs).toLowerCase()];
-    if (!mime) {
-      throw new WorkspaceError(415, `${relPath} is not an image this pane can show`);
-    }
+    return served(ws, relPath, IMAGE_TYPES, MAX_IMAGE_BYTES, 'an image this pane can show');
+  }
 
-    let st;
-    try {
-      st = statSync(abs);
-    } catch {
-      throw new WorkspaceError(404, `${relPath} does not exist in this worktree`);
-    }
-    if (st.isDirectory()) throw new WorkspaceError(400, `${relPath} is a directory`);
-    if (st.size > MAX_IMAGE_BYTES) {
-      throw new WorkspaceError(
-        413,
-        `${relPath} is ${(st.size / 1024 / 1024).toFixed(1)} MB — too large to show in the pane`,
-      );
-    }
+  /**
+   * Mint the token an HTML page is served under (Amendment 198, pages.ts): the root by the
+   * same gate as every read (`resolve`, or `dirRoot` for a project's folder), and the page by
+   * `served`'s rules with only `.html` and `.htm` on the list, so a token is never minted for a
+   * file the pane wouldn't frame. Returns the token and the URL the frame loads.
+   */
+  mintPage(root: PageRoot, relPath: string): { token: string; url: string } {
+    checkServable(this.#pageRoot(root), relPath, HTML_TYPES, MAX_PAGE_BYTES, 'an HTML page');
+    const token = this.#pages.mint(root);
+    const at = relPath.split('/').map(encodeURIComponent).join('/');
+    return { token, url: `/api/pages/${token}/${at}` };
+  }
 
-    return { buf: readFileSync(abs), mime };
+  /**
+   * A file of a page, for the Files pane's sandboxed frame: the page itself, or something it
+   * loads by a relative URL, under the token's root and nowhere else. `image`'s rules exactly,
+   * with `PAGE_TYPES` for its list; the route adds the headers that keep the page in its box.
+   * An unknown or expired token is a 404, as a missing file is. The root is resolved again each
+   * time, so a workspace removed since is a 410 and a folder taken off the project a 404.
+   */
+  pageByToken(token: string, relPath: string): { buf: Buffer; mime: string } {
+    const root = this.#pages.lookup(token);
+    if (!root) throw new WorkspaceError(404, 'no such page — open it again from the Files pane');
+    return served(this.#pageRoot(root), relPath, PAGE_TYPES, MAX_PAGE_BYTES, 'a file a page can load');
+  }
+
+  /** For the verify script: the token store, to check its bound and expiry. */
+  get pages(): PageTokens {
+    return this.#pages;
+  }
+
+  #pageRoot(root: PageRoot): WorkspaceRecord {
+    return root.kind === 'job' ? this.resolve(root.jobId) : this.dirRoot(root.projectId, root.dir);
   }
 
   async file(jobId: string, relPath: string): Promise<FileContentResponse> {
@@ -975,6 +1021,54 @@ function filesUnder(
 const plural = (n: number, word: string): string => `${n.toLocaleString('en')} ${word}${n === 1 ? '' : 's'}`;
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * A file's bytes and its type, by an extension list: `image` and a page's files.
+ *
+ * Containment is `resolveForRead`, exactly as for text — these routes reach the filesystem,
+ * so they get the same gate and no second implementation of it. The extension decides the
+ * type, and an unknown one is a 415 rather than `application/octet-stream`. Sniffing content
+ * to decide would mean a route could serve anything with the right leading bytes, which is
+ * how a "view images" feature quietly becomes "download any file".
+ */
+function served(
+  ws: WorkspaceRecord,
+  relPath: string,
+  types: Record<string, string>,
+  cap: number,
+  what: string,
+): { buf: Buffer; mime: string } {
+  const { abs, mime } = checkServable(ws, relPath, types, cap, what);
+  return { buf: readFileSync(abs), mime };
+}
+
+/** `served`'s checks without the read: what minting a page's token asks of it. */
+function checkServable(
+  ws: WorkspaceRecord,
+  relPath: string,
+  types: Record<string, string>,
+  cap: number,
+  what: string,
+): { abs: string; mime: string } {
+  const abs = resolveForRead(ws.path, relPath);
+  const mime = types[extname(abs).toLowerCase()];
+  if (!mime) throw new WorkspaceError(415, `${relPath} is not ${what}`);
+
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    throw new WorkspaceError(404, `${relPath} does not exist in this worktree`);
+  }
+  if (st.isDirectory()) throw new WorkspaceError(400, `${relPath} is a directory`);
+  if (st.size > cap) {
+    throw new WorkspaceError(
+      413,
+      `${relPath} is ${(st.size / 1024 / 1024).toFixed(1)} MB — too large to show in the pane`,
+    );
+  }
+  return { abs, mime };
+}
 
 /** Where a symlink points when nothing is there. Null for anything that isn't a link. */
 function danglingTarget(abs: string): string | null {
