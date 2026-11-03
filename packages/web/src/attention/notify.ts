@@ -357,6 +357,12 @@ const ICON_TILE = '#100f0e';
 const ICON_EDGE = '#4a443d';
 const ICON_BATON = '#ffb03a';
 
+/** A rounded rectangle where the browser has one, a plain one where it doesn't (older WebKit). */
+function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+}
+
 function paintFavicon(count: number, urgent: boolean): void {
   const bg = token('--bg');
   const hot = urgent ? token('--fail') : token('--need');
@@ -374,7 +380,7 @@ function paintFavicon(count: number, urgent: boolean): void {
   ctx.strokeStyle = ICON_EDGE;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.roundRect(0.75, 0.75, 30.5, 30.5, 6.5);
+  rounded(ctx, 0.75, 0.75, 30.5, 30.5, 6.5);
   ctx.fill();
   ctx.stroke();
   ctx.save();
@@ -382,7 +388,7 @@ function paintFavicon(count: number, urgent: boolean): void {
   ctx.rotate((18 * Math.PI) / 180);
   ctx.fillStyle = ICON_BATON;
   ctx.beginPath();
-  ctx.roundRect(-3.25, -12, 6.5, 24, 3.25);
+  rounded(ctx, -3.25, -12, 6.5, 24, 3.25);
   ctx.fill();
   ctx.restore();
 

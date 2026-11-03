@@ -218,8 +218,11 @@ icon at all until the script first painted one.
   shows the same icon. `paintFavicon` still adds its own `<link id="atn-favicon">`, which the browser
   prefers, as the latest icon link.
 
-**Verified:** `attention/verify.ts` and `web verify` pass; the SVG rendered in Chrome at 16px and 32px on
-light (`#dee1e6`) and dark (`#202124`) strips. The canvas copy was not looked at in a browser tab.
+A browser without `ctx.roundRect` (older WebKit) gets square corners rather than no icon (`rounded`).
+
+**Verified by eye only:** the SVG rendered in Chrome at 16px and 32px on light (`#dee1e6`) and dark
+(`#202124`) tab strips. No check covers the icon: `attention/verify.ts` and `web verify` pass, but neither
+draws it. The canvas copy was not looked at in a browser tab.
 
 ### Amendment 196 — post-merge, applied. **One chevron for every fold, on its left, and bigger; the Read it box is bigger.**
 
