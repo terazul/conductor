@@ -1157,6 +1157,21 @@ column; that choice is remembered for every file in this browser. **⎙ PDF** pr
 rendered file on its own, on white, whichever theme you're in. Pick **Save as PDF**
 in the print dialog to get a file named after the one you're reading.
 
+**An HTML file** (`.html`, `.htm`) opens rendered too, as the page it is: its own
+styles, images and scripts, so a chart or an interactive report works. A line above it
+says it **runs sandboxed**. Its scripts run, but the page can't read or call Conductor.
+It also can't send requests, submit forms, open windows or tabs, or move the app
+somewhere else. A link in it opens inside the pane.
+
+- **raw** shows its source, and **⑂ diff** works as for any file. ¶ column and ⎙ PDF are
+  for markdown only.
+- **What it loads.** Files beside it load: CSS, images, data, and plain `<script src>`.
+  So do copies on a CDN (`https://…`). A module script (`type="module"`) or a font file
+  beside it doesn't; use the CDN copy.
+- **When it reloads.** It reloads when it's written. If only its CSS or JS changed, press
+  **↻**.
+- A link to an `.html` file in a markdown file or a transcript opens it here, rendered.
+
 A file an agent **deleted** stays in the tree with a **deleted** badge, because git
 still has it. Opening it shows git's last copy, read-only, under a banner saying so.
 A tab whose file can't be opened any more says why and offers **retry** and **close

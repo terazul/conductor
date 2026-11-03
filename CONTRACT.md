@@ -200,6 +200,79 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 198 — post-merge, applied. **An HTML file renders in the Files pane, its scripts sandboxed.**
+
+Daemon (`routes/workspace.ts`, `workspace/service.ts`, `workspace/verify.ts`) and web (`files/FilePane.tsx`,
+`files/files.css`, `files/useWorkspace.ts`, `files/useTabs.ts`, `lib/settings.ts`, `files/verify.ts`), and
+`docs/MANUAL.md`. Asked 3 Nov: *"add support for viewing files that are html pages."* Decided with the user:
+the page's scripts run, sandboxed, so charts, interactive reports and CDN libraries work, but the page can't
+read or call Conductor, send requests, submit forms or navigate the app. No wire change and no migration.
+
+- **The routes.** `GET /api/jobs/:jobId/page/<path>` and `GET /api/projects/:projectId/page/<encodeURIComponent(dir)>/<path>`
+  serve a page and the files beside it. The path is in the URL path, not the query, so the page's relative
+  `style.css` or `img/a.png` resolves to its own folder. A project folder is named by its absolute path in
+  one segment, as `dirRoot` names it: a folder that isn't the project's is 404, and one that has gone is 410.
+  Paths follow the file and image routes (`resolveForRead`): NUL, absolute, `.git`, `..` and symlinks out are 400.
+  The type comes from the extension (`PAGE_TYPES`: html, htm, css, js, mjs, json, map, txt, svg, png, jpg,
+  jpeg, gif, webp, ico, woff, woff2, ttf), and anything else is 415. A missing file is 404, a folder is 400,
+  and anything over 12 MB (`MAX_PAGE_BYTES`, the image cap) is 413. `served()` in `service.ts` is now shared
+  by `image` and `page`.
+- **The headers**, on every response: `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`,
+  `Referrer-Policy: no-referrer`, and `PAGE_CSP`: `sandbox allow-scripts; default-src 'self' https: data: blob:;
+  script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:;
+  img-src 'self' https: data: blob:; font-src 'self' https: data:; connect-src 'none'; form-action 'none';
+  frame-ancestors 'self'; base-uri 'self'`. Each directive is explained where it is defined.
+- **The security model.** Three layers, and each is enough to stop the page reaching Conductor:
+  1. **The CSP's `sandbox`.** It holds even when the URL is opened in a tab of its own. There is no
+     `allow-same-origin`, so the page's origin is opaque: it can't read the app's DOM, storage or cookies.
+     `connect-src 'none'` stops fetch, XHR, WebSocket and EventSource, and `form-action 'none'` stops form submits.
+  2. **The frame's `sandbox="allow-scripts"`** (`PAGE_SANDBOX`), with `referrerpolicy="no-referrer"`.
+     It has no `allow-same-origin`, `allow-forms`, `allow-top-navigation` or `allow-popups`.
+  3. **The guard** (Amendment 4) runs on these routes as on every other. A sandboxed page's CORS-mode
+     request carries `Origin: null`, and the guard refuses it. A plain GET with no Origin (the frame's
+     own load, a classic `<script>`, `<link>` CSS, `<img>`) still passes.
+- **Popups are left out**, of the CSP and the frame alike. A window let out of the sandbox would open at the
+  app's own origin, so `target=_blank` and `window.open` do nothing. A plain link navigates the frame itself.
+- **The pane.** `.html` and `.htm` open rendered (`isPagePath`; `tabs.ts` already accepted the view), with raw
+  showing the source and diff as for any file. A deleted page shows its source, and an empty one says so.
+  The frame fills the pane under a one-line note that it runs sandboxed. Its `src` carries the file's
+  revision and a digest of its text (`pageUrl`), so a write reloads it, including a save in a project
+  folder, which has no events. ¶ column and ⎙ PDF stay markdown's. A link to an `.html` file in markdown
+  or a transcript opens it in Files, rendered.
+- **Drawn under Node.** `useEdit`, `useWantedLine`, `useSetting` and `useAsked` pass their snapshot as the
+  server snapshot too, so `files/verify.ts` can render `FilePane` with `renderToStaticMarkup`. The browser's
+  behaviour is unchanged.
+
+**Known limits.** A module script (`type="module"`) or an `@font-face` font beside the page is fetched in CORS
+mode, so it carries `Origin: null` and the guard refuses it; CDN copies work. An edit to the CSS or JS beside
+a page reloads only on ↻, because the page's text didn't change. In token mode the frame sends no
+`Authorization` header, as images don't.
+
+**Verified by** `workspace/verify.ts` section 18. It checks:
+- each type is served with the exact headers and the body on disk, and the route's policy is `PAGE_CSP`;
+- the refusals: `..`, encoded `..`, absolute paths, symlinks out (a file and a folder), `.git`, unknown types,
+  missing files, folders, an empty path, over-size and an unknown job;
+- the guard: an `Origin: null` POST to `/api/jobs`, and an `Origin: null` GET of the snapshot and of the page,
+  are each 403;
+- the project-folder variant, with its own 404s, 400s and 413.
+
+It is also verified by `files/verify.ts`:
+- `isPagePath` and `pageUrl`;
+- tabs open, and come back, rendered;
+- `FilePane` renders under Node with exactly `sandbox="allow-scripts"`, `no-referrer`, a title, a `src` that
+  changes with the text, the note, and no column or PDF;
+- raw, diff and their fallbacks;
+- links from markdown and transcripts;
+- the CSS uses tokens only.
+
+The pane was looked at in headless Chrome, in both themes, on a sample page:
+- the page's CSS, image and classic script loaded, and its inline script ran;
+- reaching the parent's DOM, storage or cookies threw `SecurityError`;
+- `window.open` opened nothing;
+- `fetch('/api/snapshot')` failed;
+- clicking a `target=_blank` link opened no tab, and submitting a form left the frame where it was;
+- opened in its own tab, the page still had a `null` origin, and its fetch still failed.
+
 ### Amendment 197 — post-merge, applied. **The browser tab's icon is a dark tile with the amber baton.**
 
 Web only (`public/favicon.svg` new, `index.html`, `attention/notify.ts`). Asked 3 Nov: *"the browser

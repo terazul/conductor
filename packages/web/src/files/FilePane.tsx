@@ -30,6 +30,11 @@
  *
  * Rendered markdown fills the pane unless you ask for a reading column, and prints on
  * its own as a PDF (print.ts, Amendment 32).
+ *
+ * An HTML file renders too (Amendment 198), as the page it is, in a frame whose scripts
+ * run sandboxed: `PAGE_SANDBOX` below, and the policy the daemon sends with it
+ * (routes/workspace.ts, `PAGE_CSP`). Its own links and loads are its own, so nothing above
+ * rewrites them; the column and the PDF stay markdown's.
  */
 
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
@@ -40,7 +45,7 @@ import { headingSlugs, rawAround, resolveDocLink } from './links.js';
 import { printRendered } from './print.js';
 import type { View } from './tabs.js';
 import { lineShown, putEdit, takeFocus, useEdit, useScrollMemory, useWantedLine } from './useTabs.js';
-import { imageUrl, isImagePath, since, writeFile } from './useWorkspace.js';
+import { imageUrl, isImagePath, isPagePath, pageUrl, since, useFileRevision, writeFile } from './useWorkspace.js';
 import { errorText } from '../lib/errors.js';
 import { hrefFor, navigate } from '../lib/nav.js';
 import { SCREEN } from '../shell/nav.js';
@@ -72,6 +77,22 @@ const ORIGINAL = 'data-doc';
  */
 const WIDTH_KEY = 'conductor.files.column';
 
+/**
+ * The frame's sandbox for an HTML page (Amendment 198): its scripts run, and nothing else
+ * is let out. No `allow-same-origin`, so its origin is opaque and it can't touch the app's
+ * DOM, storage or API (what it sends says `Origin: null`, and the guard refuses that). No
+ * `allow-forms` or `allow-top-navigation`. No `allow-popups` either: the daemon's policy
+ * leaves them out, and a window let out of the sandbox would open at the app's own origin.
+ */
+export const PAGE_SANDBOX = 'allow-scripts';
+
+/** A short digest of a file's text, so a page whose text changed is a new `src`. */
+function digest(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
 export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved, has }: Props) {
   const edit = useEdit(tabKey);
   const [saving, setSaving] = useState(false);
@@ -96,17 +117,24 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
 
   const hasDiff = (file.diff ?? '').length > 0;
   const markdown = file.html !== undefined;
+  // A page is drawn from disk, so a deleted one has only its source to show.
+  const page = isPagePath(file.path) && !file.deleted;
+  const renderable = markdown || page;
   // What the tab asked for, where the file can show it. A tab kept at `diff` whose
   // changes have since been committed, or at `rendered` for a file that isn't
-  // markdown, shows the text instead of an empty pane.
+  // markdown or a page, shows the text instead of an empty pane.
   const shown: View =
-    view === 'rendered' && !markdown
+    view === 'rendered' && !renderable
       ? 'raw'
       : view === 'diff' && !hasDiff
-        ? markdown
+        ? renderable
           ? 'rendered'
           : 'raw'
         : view;
+  // The file's events and refreshes, as for an image, and its text: a page saved in a
+  // project folder, which has no events, still reloads.
+  const pageRev = useFileRevision(jobId, file.path);
+  const framed = page && shown === 'rendered' && !editing && file.raw.length > 0;
 
   useScrollMemory(body, tabKey, editing ? null : shown);
 
@@ -303,7 +331,7 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
         {dirty && <span className="c5-tag done">unsaved</span>}
 
         <div className="c5-actions">
-          {markdown && (
+          {renderable && (
             <button
               type="button"
               className={`c5-btn${shown === 'rendered' && !editing ? ' on' : ''}`}
@@ -373,7 +401,10 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
         </div>
       </div>
 
-      <div ref={body} className={`c5-panebody${shown === 'diff' && !editing ? ' flush' : ''}`}>
+      <div
+        ref={body}
+        className={`c5-panebody${shown === 'diff' && !editing ? ' flush' : ''}${framed ? ' flush c5-pagebody' : ''}`}
+      >
         {file.deleted && !editing && (
           <div className={`c5-banner${shown === 'diff' ? ' inset' : ''}`}>
             Deleted from the worktree. This is git&rsquo;s last copy of it — what the
@@ -406,6 +437,20 @@ export function FilePane({ tabKey, jobId, file, view, onView, role, now, onSaved
           <div className="c5-note c5-emptyfile">
             This file is empty.{!file.deleted && ' ✎ edit to write in it.'}
           </div>
+        ) : framed ? (
+          <>
+            <div className="c5-pagenote">
+              Runs sandboxed: its scripts run, but it can&rsquo;t reach Conductor, send
+              requests, submit forms or open windows.
+            </div>
+            <iframe
+              className="c5-page"
+              src={pageUrl(jobId, file.path, `${pageRev}.${digest(file.raw)}`)}
+              sandbox={PAGE_SANDBOX}
+              referrerPolicy="no-referrer"
+              title={`${file.path}, rendered`}
+            />
+          </>
         ) : shown === 'rendered' && file.html !== undefined ? (
           // Sanitized server-side — see the note at the top of this file.
           <div

@@ -57,12 +57,14 @@ export function askedOf(root: string | null): number {
 }
 
 function useAsked(root: string | null): number {
+  const get = (): number => askedOf(root);
   return useSyncExternalStore(
     (fn) => {
       askers.add(fn);
       return () => askers.delete(fn);
     },
-    () => askedOf(root),
+    get,
+    get,
   );
 }
 
@@ -349,6 +351,33 @@ export function isImagePath(path: string): boolean {
  */
 export function imageUrl(jobId: string, path: string, revision: number): string {
   return `${endpoint(jobId, 'image', path)}&r=${revision}`;
+}
+
+/** The extensions the pane shows as a web page, in a sandboxed frame (Amendment 198). */
+const PAGE_EXT = new Set(['.html', '.htm']);
+
+/** Does this path render as a web page rather than as text? Its source is still text. */
+export function isPagePath(path: string): boolean {
+  const dot = path.lastIndexOf('.');
+  return dot > -1 && PAGE_EXT.has(path.slice(dot).toLowerCase());
+}
+
+/**
+ * The URL a page's `<iframe src>` points at (Amendment 198). The file's path is in the
+ * URL's path, not its query, so what the page loads by a relative URL — `style.css`,
+ * `img/chart.png` — resolves to the files beside it, through the same route. A project
+ * folder is named by its path, in one encoded segment, as `dirRoot` names it.
+ *
+ * `revision` rides along as a cache-buster, as for `imageUrl`: a frame does not reload
+ * an unchanged `src`.
+ */
+export function pageUrl(root: string, path: string, revision: number | string): string {
+  const d = parseDirRoot(root);
+  const at = path.split('/').map(encodeURIComponent).join('/');
+  const base = d
+    ? `/api/projects/${encodeURIComponent(d.projectId)}/page/${encodeURIComponent(d.dir)}`
+    : `/api/jobs/${encodeURIComponent(root)}/page`;
+  return `${base}/${at}?r=${encodeURIComponent(String(revision))}`;
 }
 
 /** One per open tab, and then some. Module-level, so it outlives the screen. */

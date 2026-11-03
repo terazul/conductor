@@ -157,7 +157,8 @@ function subscribeLines(fn: () => void): () => void {
 }
 
 export function useWantedLine(key: string): number | null {
-  return useSyncExternalStore(subscribeLines, () => lineWanted.get(key) ?? null);
+  const get = (): number | null => lineWanted.get(key) ?? null;
+  return useSyncExternalStore(subscribeLines, get, get);
 }
 
 /** The pane has scrolled to it: a later visit to the tab comes back where you left it, as before. */
@@ -278,8 +279,10 @@ export function unsavedUnder(root: string, path: string): string[] {
   return tabsUnder(state, root, path).filter((k) => dirty.has(k));
 }
 
+/** The same snapshot serves a server render, so the pane can be drawn under Node (files/verify.ts). */
 export function useEdit(key: string): Edit | null {
-  return useSyncExternalStore(subscribeEdits, () => editOf(key));
+  const get = (): Edit | null => editOf(key);
+  return useSyncExternalStore(subscribeEdits, get, get);
 }
 
 export function useDirty(): ReadonlySet<string> {

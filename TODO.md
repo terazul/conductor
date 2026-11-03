@@ -20,6 +20,14 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **View files that are HTML pages.** Asked for (3 Nov): *"add support for viewing files that are html
+  pages."* Decided with the user: the page's scripts run, sandboxed.
+  *Done (3 Nov): Amendment 198 (`.html` and `.htm` open rendered in a sandboxed frame from
+  `/api/jobs/:jobId/page/*` and its project-folder twin; the page's CSS, images, classic scripts and CDN
+  libraries load, but it has an opaque origin, `connect-src 'none'`, no forms, popups or top navigation, and
+  the guard refuses its `Origin: null`; raw and diff as before). Not done: a module script or font file
+  beside the page is refused (CDN copies work); a change to only its CSS or JS reloads on ↻.*
+
 - [x] **The browser tab's icon is hard to see.** Asked for (3 Nov): *"the browser tab icon is not very
   distinct, it is hard to see."* It was a 4px grey bar on nothing.
   *Done (3 Nov): Amendment 197 (the header's amber baton on a dark rounded tile, in `public/favicon.svg`
