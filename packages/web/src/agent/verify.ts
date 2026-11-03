@@ -519,10 +519,11 @@ console.log('\nTabs · one per agent in the project (Amendment 49)');
   const src = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the Agent screen shows them only with more than one', /tabs\.length > 1 &&/.test(src) && /openAgent\(target\)/.test(src));
   check(
-    "a finished agent's own tab says so, filled (Amendment 94), until you open it (Amendment 105); working already pulses via the Dot",
-    /t\.status === 'done' && unseenAgents\.has\(t\.id\) && <span className="ag-tab-tag">finished<\/span>/.test(src) &&
-      /const unseenAgents = useUnseenAgents\(\)/.test(src) &&
-      /import \{ useUnseenAgents \} from '\.\.\/lib\/seen\.js'/.test(src),
+    "an agent's own tab says to read, filled (Amendment 94), until you tick its latest reply (Amendment 193, of 105's finished); working already pulses via the Dot",
+    /\{toRead\.has\(t\.id\) && <span className="ag-tab-tag">to read<\/span>\}/.test(src) &&
+      /const toRead = useToRead\(\)/.test(src) &&
+      /import \{ useReplyAcks, useToRead \} from '\.\.\/lib\/replies\.js'/.test(src) &&
+      !/useUnseenAgents|>finished</.test(src),
   );
 }
 
@@ -1214,7 +1215,14 @@ console.log("\n· an orchestrator's auto turns start folded, and one you open st
 
   const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
   check('the Agent screen calls an agent with helpers an orchestrator, and passes what starts folded', /const orchestrator = \(agent\?\.helperCap \?\? 0\) > 0;/.test(screen) && /startFoldedKeys\(turns, orchestrator\)/.test(screen) && /startFolded=\{startFolded\}/.test(screen));
-  check('and its fold all uses both sets', /foldEvery\(s, agent\.id, replies, startFolded\)/.test(screen) && /unfoldEvery\(s, agent\.id, startFolded\)/.test(screen));
+  // Amendment 193: what starts folded is these and the replies you ticked read; what folds is all but the unread.
+  check(
+    'and its fold all uses both sets, with the read replies starting folded and the unread left out',
+    /const byDefault = useMemo\(\(\) => \[\.\.\.startFolded, \.\.\.read\.read\]/.test(screen) &&
+      /replies\.filter\(\(k\) => !read\.unread\.includes\(k\)\)/.test(screen) &&
+      /foldEvery\(s, agent\.id, foldable, byDefault\)/.test(screen) &&
+      /unfoldEvery\(s, agent\.id, byDefault\)/.test(screen),
+  );
 }
 console.log('\n· a working agent says what its run took (Amendment 178)');
 {

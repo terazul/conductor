@@ -12,6 +12,11 @@
  * orchestrator's reply to it is what you read. For those the default is the fold, so what's
  * kept is the other set: the ones you opened (`Unfolds`), and one you open stays open.
  *
+ * Inside a reply, its activity (the tool calls and what it said between them) starts folded to
+ * its latest step, and a reply you haven't ticked read can't fold at all (Amendment 193): the
+ * activity's opened set is kept beside these, and a reply you ticked starts folded, as an
+ * "auto" turn does, so opening it again is kept in `Unfolds`.
+ *
  * Turn keys (`a${seq}`, `u${seq}`) come from the event log, so they are the same after a reload
  * and on another screen. Bounded, like the Files tabs: a long run can't grow
  * localStorage without limit, and the agent looked at least recently goes first.
@@ -129,14 +134,32 @@ export function unfoldEvery(s: FoldState, agentId: string, byDefault: readonly s
  */
 export function foldLine(prose: string): string {
   for (const raw of prose.split('\n')) {
-    const line = raw
-      .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|```\S*)/, '')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/(\*\*|__|~~|`)/g, '')
-      .trim();
-    if (line.length > 0 && !/^[-*_]{3,}$/.test(line)) return line;
+    const line = plainLine(raw);
+    if (line !== null) return line;
   }
   return '';
+}
+
+/**
+ * The one line folded activity shows of prose that is its latest step: its LAST line, as
+ * `foldLine` would write it (Amendment 193). What an agent says last is where it has got to.
+ */
+export function lastLine(prose: string): string {
+  for (const raw of prose.split('\n').reverse()) {
+    const line = plainLine(raw);
+    if (line !== null) return line;
+  }
+  return '';
+}
+
+/** A line without its markdown, or null for one that says nothing (blank, a rule, a fence). */
+function plainLine(raw: string): string | null {
+  const line = raw
+    .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|```\S*)/, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|~~|`)/g, '')
+    .trim();
+  return line.length > 0 && !/^[-*_]{3,}$/.test(line) ? line : null;
 }
 
 // ── the storage side ────────────────────────────────────────────────────────
@@ -181,6 +204,12 @@ function kept(key: string) {
 const folded = kept('conductor.agentFolds');
 /** The turns that start folded which you opened (Amendment 164). */
 const unfolded = kept('conductor.agentUnfolds');
+/**
+ * The turns whose activity you opened (Amendment 193). A turn's activity, its tool calls and
+ * what it said between them, starts folded to its latest step, so what's kept is the opened set,
+ * the same shape and bounds as the folds. "Unfold all" opens every turn's; "fold all" none.
+ */
+const activityOpen = kept('conductor.agentActivityOpen');
 
 /** You folded, opened, folded all or unfolded all: both sets, as `fn` leaves them. */
 export function updateFoldState(fn: (s: FoldState) => FoldState): void {
@@ -196,4 +225,20 @@ export function useFolds(): Folds {
 
 export function useUnfolds(): Unfolds {
   return unfolded.use();
+}
+
+/** The turns whose activity you opened, per agent (Amendment 193). */
+export function useActivityOpen(): Folds {
+  return activityOpen.use();
+}
+
+export function readActivityOpen(): Folds {
+  return activityOpen.read();
+}
+
+/** You opened or folded one turn's activity, or all of them: the set as `fn` leaves it. */
+export function updateActivityOpen(fn: (f: Folds) => Folds): void {
+  const was = activityOpen.read();
+  const now = fn(was);
+  if (now !== was) activityOpen.write(now);
 }

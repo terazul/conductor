@@ -47,7 +47,8 @@ import { errorText } from '../lib/errors.js';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects } from '../lib/store.js';
-import { useUnseenAgents, useUnseenJobs } from '../lib/seen.js';
+import { useUnseenJobs } from '../lib/seen.js';
+import { useToRead } from '../lib/replies.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
 import { createFile, isImagePath, renameEntry, useFileTree } from '../files/useWorkspace.js';
 import { NewFileForm } from '../files/NewFileForm.js';
@@ -287,10 +288,10 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
         <span className="sh-nav-label">{a.label}</span>
         {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
         {a.orchestrator && <OrchestratorMark short />}
-        {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). Finished only until
-            you open the agent, and again when it finishes again (Amendment 105). */}
+        {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). To read until you
+            tick its latest reply read, in the transcript (Amendment 193, of 105's finished). */}
         {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
-        {a.finished && <span className="sh-nav-tag is-done">finished</span>}
+        {a.toRead && <span className="sh-nav-tag is-done">to read</span>}
         <NavMeter budget={a.budget} whose={`${a.label}'s daily budget`} />
         {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}
       </button>
@@ -328,7 +329,7 @@ function FoldRow({
         <Chevron open={shown} />
         <Dot status={fold.status} />
         <span className="sh-nav-label">{fold.label}</span>
-        {fold.finished && <span className={`sh-nav-tag is-${fold.status === 'failed' ? 'fail' : 'done'}`}>finished</span>}
+        {fold.toRead && <span className={`sh-nav-tag is-${fold.status === 'failed' ? 'fail' : 'done'}`}>to read</span>}
       </button>
       {shown && (
         <div className="sh-nav-items">
@@ -897,7 +898,7 @@ export function Navigator() {
   const jobs = useJobs();
   const unseen = useUnseenJobs();
   const finished = useMemo(() => new Set(unseen.map((j) => j.id)), [unseen]);
-  const unseenAgents = useUnseenAgents();
+  const toRead = useToRead();
   const route = useRoute();
   const open = parseOpen(useSetting(NAV_TREE_KEY));
   const panel = usePanel(NAV_PANEL);
@@ -911,8 +912,8 @@ export function Navigator() {
     [projects, rawSort, rawOrder, agents, pending, spent],
   );
   const tree = useMemo(
-    () => navTree(ordered, agents, pending, alerts, jobs, finished, unseenAgents),
-    [ordered, agents, pending, alerts, jobs, finished, unseenAgents],
+    () => navTree(ordered, agents, pending, alerts, jobs, finished, toRead),
+    [ordered, agents, pending, alerts, jobs, finished, toRead],
   );
 
   const [dragging, setDragging] = useState<string | null>(null);

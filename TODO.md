@@ -20,6 +20,21 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **An agent's activity shows its last line, and a reply must be ticked read.** Asked for (3 Nov): "When
+  there is activity from the agent, have that show just the last line and make the others be put in a
+  collapsible section. Instead of too much text on the screen I want just the last line and the rest can be
+  opened up if I need the details. Also, when there is an actual response, make that response require me to
+  check it off to acknowledge that I have seen it and responded to it. I keep on missing stuff that it says.
+  Make the response collapsible as well (the default is the unacknowledged stay open); once checked off they
+  collapse."
+  - **Decide:** what folded activity shows, where an unread reply shows besides its transcript, what marks it
+    read, and the replies already there.
+    *Decided (3 Nov): one line, the latest step, with **▸ N earlier steps**; **to read** on the agent screen,
+    its navigator row and its tab, in place of the agent's **finished** (Amendment 105), not in Needs You;
+    only the box marks it; the replies already there count as read.*
+  *Done (3 Nov): Amendment 193 (`splitTurn` and **Read it** in the transcript, `conductor.replyAcks` and
+  `conductor.agentActivityOpen` in Settings, migration 330's `agents.reply_seq` for the navigator and the
+  tabs). Not done: a count of replies to read on the Fleet card.*
 - [x] **TOP PRIORITY. Queue a command to the orchestrator.** Asked for (15 Oct). The nearest thing
   built is **⏲ when done** (Amendment 157, `web/src/agent/scheduled.tsx`; the daemon's `#sendWhenDone`,
   `session/supervisor.ts`): a message sent when the agent's turn ends `done`, refused only for one

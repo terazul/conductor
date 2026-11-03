@@ -171,6 +171,13 @@ export interface Agent {
    * Only a label: `role` is still what it is.
    */
   name?: string;
+  /**
+   * Amendment 193. The seq of the agent's latest reply: the last `text` event of a run that ended
+   * on prose, after its last tool call or ask. It is the key the transcript ticks that reply read
+   * by, and what the navigator and the Agent tabs read to say **to read** without loading the
+   * transcript. Absent until it has replied, and from a daemon before this.
+   */
+  replySeq?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

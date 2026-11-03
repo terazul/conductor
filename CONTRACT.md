@@ -200,6 +200,72 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 193 — post-merge, applied. **An agent's activity folds to its latest step, and a reply stays open until you tick it read.**
+
+Shared (`wire.ts`), daemon (`db/migrations/330_reply_seq.sql` new, `session/store.ts`,
+`session/supervisor.ts`, `session/verify.ts`), web (`lib/replies.ts` new, `agent/transcript.tsx`,
+`agent/folds.ts`, `agent/agent.tsx`, `agent/agent.css`, `attention/always.tsx`, `lib/seen.ts`,
+`shell/navtree.ts`, `shell/Navigator.tsx`, `lib/verify.ts`, `agent/verify.ts`, `shell/verify.ts`,
+`lib/verify-seen-agents.ts`) and `docs/MANUAL.md`. Asked 3 Nov: *"When there is activity from the
+agent, have that show just the last line and make the others be put in a collapsible section …
+when there is an actual response, make that response require me to check it off to acknowledge
+that I have seen it and responded to it. I keep on missing stuff that it says."* Decided as "one
+line, the latest step, and *▸ N earlier steps*; an unticked reply says **to read** on its row and
+its tab, in place of **finished**, not in Needs You; only the box marks it; the replies already
+there count as read". *Amends Amendment 18*: a reply still starts open, but one you haven't ticked
+can't be folded, and one you ticked starts folded. *Amends Amendment 33*: "fold all" leaves an
+unticked reply open. *Amends Amendment 105*: an agent's row and tab say **to read** until you tick
+its latest reply, not **finished** until you open it.
+
+- **A turn is its activity and its reply** (`splitTurn(turn, live)`, `agent/transcript.tsx`, pure).
+  The reply is what follows the turn's last tool call or ask, once the turn is over, if some of it
+  is prose; it is named by the seq of its last prose, the transcript's `p${seq}` key. A status
+  note doesn't end the activity, since every run that finishes notes *finished* after what it
+  said. A turn still going, or one that ended on a tool or an ask, has no reply and is all activity.
+- **Activity folds to its latest step.** With two or more blocks it shows its latest (prose as its
+  last line, `lastLine` in `folds.ts`) and **▸ N earlier steps**, which opens it. An ask you
+  haven't answered and a need or failure note stay shown. What you opened is kept per agent in
+  `conductor.agentActivityOpen`, in the folds' shape and bounds.
+- **Read it.** An unticked reply is open, with a left bar and a **Read it** box, and its label
+  can't fold it. Ticked, it folds to one line marked **✓ read** (a read reply starts folded, as an
+  auto turn does: opening it is kept in the unfolds) and opens again from that line; unticking makes
+  it unread. Only the box marks it. "Fold all" leaves unticked replies open, and "unfold all" opens
+  every turn's activity too.
+- **Kept in Settings** as `conductor.replyAcks` = `{ sinceSeq, agents: { <agentId>: [seq…] } }`
+  (`lib/replies.ts`): `parseAcks`, `serializeAcks`, `startAcks`, `isRead`, `canUntick`, `setAck`,
+  `toRead` (pure), `startAcksOnce`, `markReply`, `useReplyAcks`, `useToRead` (live). `sinceSeq` is
+  the hub's seq when it was first written (`attention/always.tsx`, once the settings are in), and
+  every reply at or below it is read and can't be unticked. Each agent keeps its newest 200 ticks;
+  agents the hub no longer has drop out as it is written. Until it is written there is no box and
+  replies behave as before.
+- **The agent's latest reply, from the daemon.** Migration 330 adds `agents.reply_seq`; the wire
+  `Agent` gains `replySeq?`. `markReply` (`session/store.ts`) sets it in `#settle` at every run's
+  end, to its last `text` event when no `tool_start` or `request` follows it, the same rule as
+  `splitTurn`, and the supervisor pushes the agent when it moves. NULL, and no backfill, for every
+  agent from before. The web holds events only for the agents you opened, so the navigator and the
+  tabs know only each agent's latest reply: an earlier one you didn't tick stays open in its
+  transcript but doesn't light the row.
+- **To read.** `navTree` takes the agents to read: `NavAgent.toRead`, and a fold's `toRead` when
+  any helper in it has one, in place of `finished`; the Agent screen's tab says **to read**. Any
+  status: an agent working again still says it until you tick. The job's **finished** (Amendment 87)
+  is unchanged. `useUnseenAgents` is gone; `markAgentSeen` still writes `conductor.seenAgents`, so a
+  tab on an older bundle still clears its tag.
+
+**Verified:** `session/verify.ts` §36, through the supervisor: no reply before a run ends; a run
+ending on prose keeps its last text's seq and every browser hears it; one ending on a tool call or
+an ask leaves it; a new reply moves it; a reopened file has it; migration 330 on an existing agent
+gives none. `lib/verify.ts` §42: `splitTurn` (after a tool, the finished note in the reply, live,
+ending on a tool or an ask, prose only, after an answered ask), `lastLine`, the acks' parsing,
+`sinceSeq`, tick, untick, no-op, pruning and the 200 bound, `canUntick`, `toRead`, `replyStates`,
+fold all leaving the unread out; rendered under Node, the unread reply open with its box and a
+label that can't fold it, the read one folded **✓ read**, a live turn's folded activity, a pinned
+ask and failure, and no box before acks are kept; and the wiring and the styles' tokens. Changed to
+the new behaviour: `shell/verify.ts`'s Amendment 105 rows (a working agent with an unticked reply
+now says **to read**, where a non-done one said nothing), its row-tag and fold checks;
+`lib/verify-seen-agents.ts` §G and §H (the rows, the tags and the hook order through `useToRead`);
+`agent/verify.ts`'s tab check and its fold-all check (read replies start folded, unread left out).
+Not seen in a browser, and the Fleet card has no count of replies to read.
+
 ### Amendment 192 — post-merge, applied. **An agent whose tries are spent waits for the model to come back, checked once per provider, and resumes by itself when it answers.**
 
 Shared (`retry.ts`, `events.ts`, `wire.ts`), daemon (`session/retry.ts`, `session/outage.ts`

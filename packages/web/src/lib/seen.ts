@@ -25,6 +25,9 @@
  * when it finishes again. Only opening the agent itself sees it, not opening its project.
  * It is a separate key so a tab still on an older bundle, which rewrites `seenJobs` whole,
  * can't drop it, and so its own `since` keeps the upgrade from lighting every old agent.
+ * Since Amendment 193 nothing here reads it: an agent's row and tab say **to read** until you
+ * tick its reply (lib/replies.ts), since opening it cleared **finished** whether you read it or
+ * not. It is still written, so a tab on a bundle from before that still clears its tag.
  *
  * The rules are pure, for lib/verify.ts; the hooks at the bottom read the store.
  */
@@ -244,13 +247,6 @@ export function markAgentSeen(
   if (!unseenDoneAgents(agents, seen).some((a) => a.id === id)) return;
   const next = markAgentsSeen(seen, [id], agents);
   if (next) writeSetting(SEEN_AGENTS_KEY, serializeSeenAgents(next));
-}
-
-/** The ids of every done agent you haven't opened since it ended. */
-export function useUnseenAgents(): ReadonlySet<string> {
-  const agents = useAgents();
-  const raw = useSetting(SEEN_AGENTS_KEY);
-  return useMemo(() => new Set(unseenDoneAgents(agents, parseSeenAgents(raw)).map((a) => a.id)), [agents, raw]);
 }
 
 function onVisibility(fn: () => void): () => void {

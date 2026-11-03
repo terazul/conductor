@@ -28,7 +28,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlwaysOnDef } from '../lib/screens.js';
 import { currentRoute, navigate, onNavigate } from '../lib/nav.js';
 import { markAgentSeen, markJobsSeen, seenOnAgent, startSeenOnce, useTabVisible, useUnseenJobs } from '../lib/seen.js';
-import { useAgents, useAlerts, useJobs, usePending, useProjects } from '../lib/store.js';
+import { useAgents, useAlerts, useJobs, usePending, useProjects, useStatusBar } from '../lib/store.js';
+import { startAcksOnce } from '../lib/replies.js';
 import { openProject, recall, SCREEN as SHELL } from '../shell/nav.js';
 import { jobLine } from '../shell/navtree.js';
 import { alertNotice } from './alerts.js';
@@ -60,6 +61,12 @@ function Notifier() {
 
   // First load after Amendment 87: what has already finished counts as seen.
   useEffect(() => startSeenOnce(), []);
+  /*
+   * And after Amendment 193, every reply there is counts as read: kept from the hub's seq the
+   * snapshot brought with the settings, which is what changing `seq` is the first time.
+   */
+  const { seq } = useStatusBar();
+  useEffect(() => startAcksOnce(seq), [seq]);
 
   const finished: LadderFinished[] = useMemo(
     () =>
@@ -76,8 +83,9 @@ function Notifier() {
   );
 
   // Looking at one of a finished job's agents is seeing it — while the tab is in front.
-  // It also sees the agent itself (Amendment 105): its **finished** in the navigator and
-  // the tabs clears. `agents` changes when it ends, so one you are watching is seen at once.
+  // It also still sees the agent itself (Amendment 105), though nothing on this bundle reads
+  // that since **to read** replaced its **finished** (Amendment 193): a tab on an older one,
+  // open across the change, still clears its tag. `agents` changes when it ends.
   const onAgent = route.id === SHELL.agent ? (route.params['agentId'] ?? recall().agentId) : undefined;
   useEffect(() => {
     if (!visible) return;
