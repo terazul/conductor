@@ -40,6 +40,7 @@ import {
 } from '../shell/nav.js';
 import { primaryJob } from '../shell/describe.js';
 import {
+  Chevron,
   DiffNums,
   STATUS_KEY,
   STATUS_WORD,
@@ -115,7 +116,7 @@ function JobGroup({
             onSelect();
           }}
         >
-          <span className="pj-group-ch">{open ? '⌃' : '⌄'}</span>
+          <Chevron open={open} />
           <span className="pj-group-prompt">{(job.name ?? job.prompt) || 'waiting for instructions'}</span>
         </button>
 

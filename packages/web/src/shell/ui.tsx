@@ -16,14 +16,9 @@ import { CLAUDE, providerLabel } from '../lib/providers.js';
 import type { Activity } from './clock.js';
 import './ui.css';
 
-/**
- * The open/closed triangle every fold uses: it points right when closed and turns down
- * when open. The navigator's submenus and the composer's agent settings (Amendment 110)
- * share it, so a fold looks the same wherever it is. Styled by `.sh-nav-chev` (shell.css).
- */
-export function Chevron({ open }: { open: boolean }) {
-  return <i className={`sh-nav-chev${open ? ' is-open' : ''}`} aria-hidden="true" />;
-}
+// Every fold's chevron lives in chevron.tsx, which loads under Node (no stylesheet), so a
+// transcript or the Files tree can be rendered there with it (Amendment 196).
+export { Chevron, ChevronSpace } from './chevron.js';
 
 // The status's token and word live in status.ts, which loads under Node (no stylesheet), so a
 // pure rule can use them (Amendment 194); every screen still imports them from here.

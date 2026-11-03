@@ -22,6 +22,7 @@ import type { AgentStatus, ScheduledMessage } from '@conductor/shared';
 import { errorText } from '../lib/errors.js';
 import { useAgent, useScheduled } from '../lib/store.js';
 import { useNow } from '../shell/clock.js';
+import { Chevron } from '../shell/chevron.js';
 import { fmtIn, fmtWhen, fromLocalInput, nextHour, toLocalInput, tomorrowMorning, whenProblem } from '../lib/when.js';
 import { cancelScheduled } from './endpoints.js';
 
@@ -128,7 +129,7 @@ export function ScheduledList({ agentId }: { agentId: string }) {
             title={open.has(m.id) ? 'Hide the message' : 'Show the whole message'}
             onClick={() => toggle(m.id)}
           >
-            <span className="ag-sched-chev" aria-hidden="true">{open.has(m.id) ? '▾' : '▸'}</span>
+            <Chevron open={open.has(m.id)} />
             <span className="ag-sched-when">
               {m.trigger === 'done' ? whenDoneLabel(orchestrator) : m.trigger === 'slot' ? '⏲ waiting for a slot' : `⏲ ${fmtWhen(m.at, now)}`}
               {!m.error && (

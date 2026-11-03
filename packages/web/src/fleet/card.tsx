@@ -73,6 +73,7 @@ import { usePathComplete } from '../spawn/browse.js';
 import { LatestNote, NotesButton, NotesPanel } from './Notes.js';
 import { HandOffChip } from './HandOffChip.js';
 import {
+  Chevron,
   OrchestratorMark,
   ProviderBadge,
   Dot,
@@ -714,9 +715,7 @@ export function ProjectCard({
               }}
               onKeyDown={(e) => e.stopPropagation()}
             >
-              <span className="fl-card-fold-chev" aria-hidden="true">
-                {listOpen ? '▾' : '▸'}
-              </span>
+              <Chevron open={listOpen} />
               {agentsToggleWords(agents.length, needing)}
             </button>
             {rows.map((a) => (

@@ -223,12 +223,6 @@
   text-overflow: ellipsis;
 }
 
-.c5-caret {
-  width: 9px;
-  flex: none;
-  color: var(--ink3);
-}
-
 /* A nested repo's branch, beside its folder (Amendment 94). Quiet: it's a fact
    about the tree, not a change to review, so it borrows no status colour. */
 .c5-repo {

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Conductor's tab icon (Amendment 197): the header's amber baton on a dark tile, so it
+       reads on a light tab strip and a dark one. The same shape notify.ts paints. -->
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="6.5" fill="#100f0e" stroke="#4a443d" stroke-width="1.5"/>
+  <rect x="12.75" y="4" width="6.5" height="24" rx="3.25" fill="#ffb03a" transform="rotate(18 16 16)"/>
+</svg>

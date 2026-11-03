@@ -345,11 +345,28 @@ function token(name: string): string | null {
 
 const FAVICON_ID = 'atn-favicon';
 
+/**
+ * The tab icon's own colours (Amendment 197): the dark theme's background and its amber, fixed
+ * rather than read from the theme. The icon sits in the browser's tab strip, not on the page, so
+ * the page's theme says nothing about what is behind it; a dark tile with a bright baton reads on
+ * a light strip and a dark one. They match `public/favicon.svg`, the icon before this script runs.
+ * The badge still takes the page's tokens, as it always has.
+ */
+const ICON_TILE = '#100f0e';
+/** The tile's edge, so it still has one against a dark tab strip. */
+const ICON_EDGE = '#4a443d';
+const ICON_BATON = '#ffb03a';
+
+/** A rounded rectangle where the browser has one, a plain one where it doesn't (older WebKit). */
+function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+}
+
 function paintFavicon(count: number, urgent: boolean): void {
-  const ink3 = token('--ink3');
   const bg = token('--bg');
   const hot = urgent ? token('--fail') : token('--need');
-  if (ink3 === null || bg === null || hot === null) return;
+  if (bg === null || hot === null) return;
 
   const canvas = document.createElement('canvas');
   canvas.width = 32;
@@ -357,9 +374,23 @@ function paintFavicon(count: number, urgent: boolean): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // The baton, so the idle icon still reads as Conductor.
-  ctx.fillStyle = ink3;
-  ctx.fillRect(14, 5, 4, 22);
+  // The baton on its tile, as the header draws it, so the idle icon reads as Conductor. It
+  // was a 4px grey bar on nothing, which was hard to find among the other tabs.
+  ctx.fillStyle = ICON_TILE;
+  ctx.strokeStyle = ICON_EDGE;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  rounded(ctx, 0.75, 0.75, 30.5, 30.5, 6.5);
+  ctx.fill();
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(16, 16);
+  ctx.rotate((18 * Math.PI) / 180);
+  ctx.fillStyle = ICON_BATON;
+  ctx.beginPath();
+  rounded(ctx, -3.25, -12, 6.5, 24, 3.25);
+  ctx.fill();
+  ctx.restore();
 
   if (count > 0) {
     ctx.beginPath();

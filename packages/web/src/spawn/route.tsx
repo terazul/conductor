@@ -36,7 +36,7 @@ import type {
 } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { catalogLine, useModels } from '../lib/models.js';
-import { ModelSelect, OrchestratorMark, ProviderModelSelect } from '../shell/ui.js';
+import { Chevron, ModelSelect, OrchestratorMark, ProviderModelSelect } from '../shell/ui.js';
 import { useCommand } from '../agent/endpoints.js';
 import { removeProject } from './endpoints.js';
 import { errorText } from '../lib/errors.js';
@@ -1435,7 +1435,11 @@ function Spawn() {
 
         {/* No hidden translation: show exactly what the daemon will be sent. */}
         <details className="sp-resolved">
-          <summary>resulting SDK options — {describeAutonomy(autonomy)}</summary>
+          <summary>
+            {/* A <details> keeps its own open state: shell.css turns the chevron while it's open. */}
+            <Chevron open={false} />
+            resulting SDK options — {describeAutonomy(autonomy)}
+          </summary>
           <div>
             permissionMode <code>{autonomy.mode}</code>
             <br />

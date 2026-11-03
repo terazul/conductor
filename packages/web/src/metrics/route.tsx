@@ -61,6 +61,7 @@ import {
   type ProjectSpendRow,
   type ProviderSpendRow,
 } from './rules.js';
+import { Chevron } from '../shell/chevron.js';
 import './metrics.css';
 
 /** The range's report, re-read whenever something says a result may have landed. */
@@ -292,7 +293,11 @@ export function Report({ resp }: { resp: MetricsResponse }) {
       )}
 
       <details className="mt-how">
-        <summary>How these are counted</summary>
+        <summary>
+          {/* A <details> keeps its own open state: shell.css turns the chevron while it's open. */}
+          <Chevron open={false} />
+          How these are counted
+        </summary>
         <ul>
           {HOW_COUNTED.map((line) => (
             <li key={line}>{line}</li>

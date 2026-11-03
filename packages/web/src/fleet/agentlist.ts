@@ -2,7 +2,7 @@
  * A Fleet card's list of agents, open or folded, kept per card (Amendment 173).
  *
  * Every card listed every agent, so a project with a twelve-helper stack was a card twelve
- * rows tall. The list now folds under one toggle, "▸ 12 agents", and STARTS FOLDED: a card's
+ * rows tall. The list now folds under one toggle, "12 agents" after the chevron every fold has, and STARTS FOLDED: a card's
  * project id in the set means you opened it, as a navigator fold's does (Amendment 169). The
  * set is the navigator's kind, read and written by the very functions it uses (`parseOpen`,
  * `toggleOpen`, `serializeOpen`, shell/navtree.ts), under its own key, so a card and a
@@ -10,7 +10,7 @@
  *
  * NOTHING THAT NEEDS YOU IS FOLDED AWAY. An agent with a request waiting, a `blocked` status,
  * or an alert naming it (the navigator's `needs`, agent/tabs.ts:63) keeps its row while the
- * list is folded, and the toggle counts them: "▸ 12 agents · 1 needs you".
+ * list is folded, and the toggle counts them: "12 agents · 1 needs you".
  *
  * Pure: no DOM, no React, no storage. lib/verify.ts checks it under Node.
  */
