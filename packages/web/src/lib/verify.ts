@@ -2269,10 +2269,10 @@ console.log('\n42 · an agent\'s activity folds to its latest step, and a reply 
   const live = turnOf('a29', '');
   check('an unread reply is open, with its Read it box, and its label can\'t fold it', /is-unread/.test(html.slice(html.indexOf('id="t-a25"') - 60, html.indexOf('id="t-a25"'))) && unreadT.includes('SECOND_REPLY') && unreadT.includes('class="ag-ack"') && unreadT.includes('Read it') && unreadT.includes('aria-disabled="true"') && unreadT.includes('class="ag-reply"'), unreadT);
   check('a reply you ticked is folded to one line, marked read', readT.includes('aria-expanded="false"') && readT.includes('class="ag-folded-read"') && readT.includes('✓ read') && readT.includes('FIRST_REPLY') && !readT.includes('class="ag-ack'), readT);
-  check('a turn still going has no box, and its activity folds to its latest step', !live.includes('ag-ack') && live.includes('class="ag-act-tog"') && live.includes('▸ 1 earlier step') && live.includes('aria-expanded="false"') && !live.includes('Working on it.'), live);
+  check('a turn still going has no box, and its activity folds to its latest step', !live.includes('ag-ack') && live.includes('class="ag-act-tog"') && live.includes('<i class="sh-nav-chev" aria-hidden="true"></i>1 earlier step') && live.includes('aria-expanded="false"') && !live.includes('Working on it.'), live);
   const pin = buildTranscript([e(40, { kind: 'user_text', text: 'x' }), ask(41), say(42, 'Meanwhile, more.'), tool(43), say(44, 'Still going.\nLAST_LINE')]);
   const pinned = renderToStaticMarkup(createElement(Transcript, { turns: pin, agentId: AG, role: 'developer', streaming: true, links: null }));
-  check('folded activity keeps an ask you haven\'t answered, and shows what it said last as its last line', pinned.includes('Which branch?') && pinned.includes('class="ag-act-last">LAST_LINE<') && !pinned.includes('Meanwhile, more.') && pinned.includes('▸ 3 earlier steps'), pinned);
+  check('folded activity keeps an ask you haven\'t answered, and shows what it said last as its last line', pinned.includes('Which branch?') && pinned.includes('class="ag-act-last">LAST_LINE<') && !pinned.includes('Meanwhile, more.') && pinned.includes('<i class="sh-nav-chev" aria-hidden="true"></i>3 earlier steps'), pinned);
   const failed = buildTranscript([e(50, { kind: 'user_text', text: 'x' }), tool(51, 'Bash ls'), fail(52), tool(53, 'Read later.ts'), say(54, 'Next.')]);
   const failHtml = renderToStaticMarkup(createElement(Transcript, { turns: failed, agentId: AG, role: 'developer', streaming: true, links: null }));
   check('…and a failure, while the steps before it fold', failHtml.includes('failed — boom') && !failHtml.includes('Bash ls'), failHtml);
@@ -2367,7 +2367,7 @@ console.log('\n44 · your message folds, and every turn says when (Amendment 195
   const html = draw();
   const short = turnOf(html, 'u1');
   const long = turnOf(html, 'u5');
-  check('your short message is open, and folds from its you label', /^<div class="ag-msg is-you" id="t-u1">/.test(short) && short.includes('class="ag-who ag-who-fold" aria-expanded="true" title="Fold your message to one line">you') && short.includes('Short ask\nin two lines'), short);
+  check('your short message is open, and folds from its you label', /^<div class="ag-msg is-you" id="t-u1">/.test(short) && short.includes('class="ag-who ag-who-fold" aria-expanded="true" title="Fold your message to one line"><i class="sh-nav-chev is-open" aria-hidden="true"></i>you</button>') && short.includes('Short ask\nin two lines'), short);
   check('your long one starts folded: its first line and how many lines', /^<div class="ag-msg is-you is-folded" id="t-u5">/.test(long) && long.includes('aria-expanded="false" title="Unfold your message"') && long.includes('<span class="ag-folded-line">Build the lane</span><span class="ag-folded-n">4 lines</span>') && !long.includes('nothing else'), long);
   const stamp = (n: number): string => `<time class="ag-when" dateTime="${T(n)}" title="${fullStamp(T(n))}">${fmtStamp(T(n))}</time>`;
   check('each message of yours says when you sent it, open and folded, after its body', short.includes(`</div>${stamp(1)}</div>`) && long.includes(`</div>${stamp(5)}</div>`), short);
@@ -2408,9 +2408,83 @@ console.log('\n44 · your message folds, and every turn says when (Amendment 195
   check('one component draws your turn and the auto turn, with the time after the body', /function SentTurn\(/.test(tsx) && !/className="ag-msg is-you" id=/.test(tsx) && /<SentTurn key=\{t\.key\} turn=\{t\} agentId=\{agentId\} startFolded=\{startFolded\.includes\(t\.key\)\} \/>/.test(tsx) && /<Stamp ts=\{turn\.ts\} \/>/.test(tsx) && /<Stamp ts=\{replyTs\(split\)\} \/>/.test(tsx));
 }
 
+console.log('\n45 · one chevron for every fold, on its left, and bigger; Read it bigger too (Amendment 196)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  // No fold draws its own glyph any more. The docks' "▸ terminal" and "▸ console" are tabs, not folds.
+  const root = new URL('../', import.meta.url);
+  const walk = (dir: URL): string[] => readdirSync(dir).flatMap((name) => {
+    const at = new URL(name, dir);
+    if (statSync(at).isDirectory()) return walk(new URL(`${name}/`, dir));
+    return /\.(tsx?|css)$/.test(name) && name !== 'verify.ts' ? [at.pathname.slice(root.pathname.length)] : [];
+  });
+  const files = walk(root);
+  const glyphs = files.flatMap((f) => src(`../${f}`).split('\n').map((line, i) => ({ f, i, line })))
+    .filter(({ f, line }) => /[⌃⌄▸▾]/.test(line) && !/▸ (terminal|console)/.test(line) && !f.endsWith('.css'))
+    .map(({ f, i, line }) => `${f}:${i + 1} ${line.trim()}`);
+  check('no fold draws ⌃, ⌄, ▸ or ▾ as text: only the docks\' ▸ terminal and ▸ console are left', glyphs.length === 0, glyphs.join('\n'));
+  const oldClasses = files.flatMap((f) => (src(`../${f}`).match(/\b(c5-caret|ag-sched-chev|pj-group-ch|ag-fold-ch|ag-tool-ch|fl-card-fold-chev)\b/g) ?? []).map((c) => `${f}: ${c}`));
+  check('the folds\' own glyph classes are gone: .c5-caret, .ag-sched-chev, .pj-group-ch, .ag-fold-ch, .ag-tool-ch, .fl-card-fold-chev', oldClasses.length === 0, oldClasses.join('\n'));
+  // The two CSS list markers are a list's "now" bullet, not a fold.
+  check('the only ▸ in a stylesheet is a list\'s "now" marker, which folds nothing', files.filter((f) => f.endsWith('.css') && src(`../${f}`).includes('▸')).sort().join() === 'agent/agent.css,files/files.css' && /\.ag-todo li\.is-active::before \{\s*content: "▸";/.test(src('../agent/agent.css')) && /\.c5-md li\.task\.now::before \{\s*content: "▸";/.test(src('../files/files.css')));
+  const folds: Array<[string, RegExp]> = [
+    ['agent/transcript.tsx', /\{canOpen \? <Chevron open=\{open\} \/> : <ChevronSpace \/>\}\s*<b>\{block\.tool\.toLowerCase\(\)\}<\/b>[\s\S]*<Chevron open=\{open\} \/>[\s\S]*<Chevron open=\{!folded\} \/>[\s\S]*<Chevron open=\{!folded\} \/>/],
+    ['agent/scheduled.tsx', /<Chevron open=\{open\.has\(m\.id\)\} \/>/],
+    ['agent/agent.tsx', /<Chevron open=\{anyOpen\} \/>/],
+    ['files/FileTree.tsx', /<Chevron open=\{open\} \/>/],
+    ['fleet/card.tsx', /<Chevron open=\{listOpen\} \/>/],
+    ['fleet/project.tsx', /<Chevron open=\{open\} \/>/],
+    ['metrics/route.tsx', /<summary[^>]*>\s*\{\/\*[^]*?\*\/\}\s*<Chevron open=\{false\} \/>/],
+    ['spawn/route.tsx', /<summary[^>]*>\s*\{\/\*[^]*?\*\/\}\s*<Chevron open=\{false\} \/>/],
+    ['shell/Navigator.tsx', /<Chevron open=/],
+  ];
+  for (const [f, re] of folds) check(`${f} draws its fold with the Chevron`, re.test(src(`../${f}`)));
+
+  // Rendered: the chevron comes first, before the role label and before the tool's name.
+  const at = (n: number, payload: EventPayload): Event => ({ seq: n, ts: new Date(Date.UTC(2026, 10, 3, 9, 0, n)).toISOString(), projectId: 'prj_c', jobId: 'job_c', agentId: 'agt_c', payload });
+  const html = renderToStaticMarkup(createElement(Transcript, {
+    turns: buildTranscript([
+      at(1, { kind: 'user_text', text: 'Make it bigger' }),
+      at(2, { kind: 'tool_start', toolUseId: 'c1', tool: 'Read', input: { file_path: 'a.ts' }, label: 'Read a.ts' }),
+      at(3, { kind: 'tool_start', toolUseId: 'c2', tool: 'Read', input: { file_path: 'b.ts' }, label: 'Read b.ts' }),
+      at(4, { kind: 'text', text: 'Done.' }),
+    ]),
+    agentId: 'agt_c', role: 'developer', streaming: false, links: null,
+  }));
+  check('your turn: the chevron, then you, in the label\'s one button', /class="ag-who ag-who-fold" aria-expanded="true" title="Fold your message to one line"><i class="sh-nav-chev is-open" aria-hidden="true"><\/i>you<\/button>/.test(html), html.match(/<button[^>]*ag-who-fold[^]*?<\/button>/)?.[0]);
+  check('a reply: the chevron, then its role', /class="ag-who ag-who-fold" aria-expanded="true" aria-disabled="false" title="Fold this reply to one line"><i class="sh-nav-chev is-open" aria-hidden="true"><\/i>developer<\/button>/.test(html), html);
+  check('folded activity: the chevron, then how many steps', html.includes('<i class="sh-nav-chev" aria-hidden="true"></i>1 earlier step'), html);
+  check('a tool row: the chevron, then the tool\'s name', /class="ag-tool-tog"[^>]*><i class="sh-nav-chev" aria-hidden="true"><\/i><b>read<\/b>/.test(html), html.match(/class="ag-tool-tog"[^>]*>.{0,80}/)?.[0]);
+  check('the transcript\'s labels stand left, so every turn\'s chevron is in one place', /justify-content: flex-start/.test(src('../agent/agent.css').match(/\n\.ag-who-fold \{([^}]*)\}/)?.[1] ?? '') && /text-align: left/.test(src('../agent/agent.css').match(/\n\.ag-who \{([^}]*)\}/)?.[1] ?? ''));
+  const { FileTree } = await import('../files/FileTree.js');
+  const tree = renderToStaticMarkup(createElement(FileTree, {
+    root: { path: '', name: '', type: 'dir', children: [{ path: 'src', name: 'src', type: 'dir', children: [{ path: 'src/a.ts', name: 'a.ts', type: 'file' }] }] },
+    selected: null, onSelect: () => {}, folders: undefined, onToggle: () => {}, touches: new Map(), roles: new Map(), now: 0,
+  }));
+  check('the Files tree: a folder\'s chevron before its name, and a file keeps the room empty', /<i class="sh-nav-chev is-open" aria-hidden="true"><\/i>[^<]*<span[^>]*>src/.test(tree) || /<i class="sh-nav-chev is-open" aria-hidden="true"><\/i>.{0,120}src\//.test(tree), tree);
+  check('…and a file keeps the chevron\'s room, empty', tree.includes('<i class="sh-nav-chev-sp" aria-hidden="true"></i>'), tree);
+
+  // The chevron itself: 16px box, a 7px triangle, in --ink2 at full strength, turning without motion if asked.
+  const shell = src('../shell/shell.css');
+  const rule = (css: string, sel: string): string => css.match(new RegExp(`\\n${sel.replace(/[.()>[\]]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+  const box = rule(shell, '.sh-nav-chev,\n.sh-nav-chev-sp');
+  check('the chevron is a fixed 16px box', /width: 16px;/.test(box) && /height: 16px;/.test(box) && /flex: none;/.test(box), box);
+  check('its triangle is 7px wide and 10px tall', /border-width: 5px 0 5px 7px;/.test(rule(shell, '.sh-nav-chev::before')), rule(shell, '.sh-nav-chev::before'));
+  check('it is --ink2, at full strength: no opacity', /color: var\(--ink2\);/.test(rule(shell, '.sh-nav-chev')) && !/opacity/.test(rule(shell, '.sh-nav-chev')) && !/opacity/.test(box), rule(shell, '.sh-nav-chev'));
+  check('it turns, and not at all with reduced motion', /transition: transform/.test(rule(shell, '.sh-nav-chev')) && /@media \(prefers-reduced-motion: reduce\) \{\s*\.sh-nav-chev \{\s*transition: none;/.test(shell));
+  check('a <details> with it draws no marker of its own, and turns it open', /summary:has\(> \.sh-nav-chev\) \{[^}]*list-style: none;[^}]*\}/.test(shell) && /summary:has\(> \.sh-nav-chev\)::-webkit-details-marker \{\s*display: none;/.test(shell) && /details\[open\] > summary > \.sh-nav-chev/.test(shell));
+  const agentCss = src('../agent/agent.css');
+  const fleetCss = src('../fleet/fleet.css');
+  check('each fold\'s button is at least 24px tall', [rule(agentCss, '.ag-who-fold'), rule(agentCss, '.ag-act-tog'), rule(fleetCss, '.fl-card-fold'), rule(fleetCss, '.pj-grouptoggle')].every((r) => /min-height: 24px;/.test(r)));
+
+  // Read it: an 18px box, its words at --fs-sm.
+  check('the Read it box is 18px', /width: 18px;/.test(rule(agentCss, '.ag-ack input')) && /height: 18px;/.test(rule(agentCss, '.ag-ack input')), rule(agentCss, '.ag-ack input'));
+  check('and its words are --fs-sm', /font-size: var\(--fs-sm\);/.test(rule(agentCss, '.ag-ack')), rule(agentCss, '.ag-ack'));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

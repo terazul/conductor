@@ -33,6 +33,7 @@ import type { Folders } from './tabs.js';
 import { NewFileForm } from './NewFileForm.js';
 import { since, type Touch } from './useWorkspace.js';
 import { MOVE_MIME, canDrop } from './moving.js';
+import { Chevron, ChevronSpace } from '../shell/chevron.js';
 
 /** New folder, rename and delete (Amendment 138). Held by the screen, as `adding` is. */
 export interface TreeVerbs {
@@ -333,7 +334,7 @@ export function FileTree({
                 aria-expanded={open}
                 data-path={kid.path}
               >
-                <span className="c5-caret">{open ? '▾' : '▸'}</span>
+                <Chevron open={open} />
                 <span className="c5-name">{kid.name}/</span>
                 {/* A nested clone or submodule's branch, as a quiet mark (Amendment 94). */}
                 {kid.repo && <span className="c5-repo">⑂ {kid.repo.branch ?? 'detached'}</span>}
@@ -398,7 +399,7 @@ export function FileTree({
           title={gone ? `${kid.path} was deleted — opens git's last copy` : undefined}
           data-path={kid.path}
         >
-          <span className="c5-caret" />
+          <ChevronSpace />
           <span className="c5-name">{kid.name}</span>
           {kid.change ? (
             <span className="c5-badge">

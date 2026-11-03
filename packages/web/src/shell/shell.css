@@ -497,19 +497,58 @@
   font-weight: 500;
 }
 
-.sh-nav-chev {
-  width: 0;
-  height: 0;
+/*
+ * Every fold's chevron (Amendment 196): a 7px triangle in a fixed 16px box, so the row
+ * doesn't move as it turns, centred on its label's line, in --ink2 at full strength so it
+ * reads in both themes. `.sh-nav-chev-sp` is its room, empty, for a row with nothing to open.
+ */
+.sh-nav-chev,
+.sh-nav-chev-sp {
   flex: none;
-  border-style: solid;
-  border-width: 4px 0 4px 6px;
-  border-color: transparent transparent transparent currentColor;
-  opacity: 0.7;
+  align-self: center;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.sh-nav-chev {
+  color: var(--ink2);
   transition: transform 0.13s;
 }
 
-.sh-nav-chev.is-open {
+.sh-nav-chev::before {
+  content: "";
+  margin-left: 2px;
+  border-style: solid;
+  border-width: 5px 0 5px 7px;
+  border-color: transparent transparent transparent currentColor;
+}
+
+.sh-nav-chev.is-open,
+details[open] > summary > .sh-nav-chev {
   transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sh-nav-chev {
+    transition: none;
+  }
+}
+
+/* A <details> whose summary carries the chevron draws no marker of its own. */
+summary:has(> .sh-nav-chev) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  list-style: none;
+}
+
+summary:has(> .sh-nav-chev)::-webkit-details-marker {
+  display: none;
 }
 
 .sh-nav-subs {

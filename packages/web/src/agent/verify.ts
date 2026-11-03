@@ -709,7 +709,9 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
   check('no "settings ▸" button is left', !/settings \{open \?/.test(comp) && !/'▸'/.test(comp));
   const navSrc = readFileSync(new URL('../shell/Navigator.tsx', import.meta.url), 'utf8');
   const uiSrc = readFileSync(new URL('../shell/ui.tsx', import.meta.url), 'utf8');
-  check('one Chevron, in ui.tsx, used by the navigator too', /export function Chevron\(/.test(uiSrc) && !/function Chevron\(/.test(navSrc) && /import \{ Chevron,/.test(navSrc));
+  const chevSrc = readFileSync(new URL('../shell/chevron.tsx', import.meta.url), 'utf8');
+  // Amendment 196: it moved to chevron.tsx, so Node can render it, and ui.tsx re-exports it.
+  check('one Chevron, in chevron.tsx, re-exported by ui.tsx, used by the navigator too', /export function Chevron\(/.test(chevSrc) && !/function Chevron\(/.test(uiSrc) && /export \{ Chevron, ChevronSpace \} from '\.\/chevron\.js';/.test(uiSrc) && !/function Chevron\(/.test(navSrc) && /import \{ Chevron,/.test(navSrc));
   // Amendment 125: the mode is the alarm; the budget in the line keeps its own colour (data-tone), yellow then red.
   check('a passed budget or an unsafe mode stays in sight while folded', /const summaryAlarm = current\?\.danger === true;/.test(comp) && /data-tone=\{spend\?\.tone\} title=\{summary\}/.test(comp) && /\{current && \(open \|\| current\.danger\) && \(/.test(comp) && /\{modelWarning && <div/.test(comp));
 }

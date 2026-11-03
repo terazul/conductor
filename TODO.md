@@ -20,6 +20,14 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **One collapse/expand icon, in one place, bigger; a bigger Read it box.** Asked for (3 Nov): "the icon to
+  collapse and expand is not always in the same location, make it consistent across the whole UI. Also make
+  the icon bigger, it is hard to see. Make the Read it check mark bigger as well."
+  *Done (3 Nov): Amendment 196 (the shared `Chevron`, now in `shell/chevron.tsx`, is every fold's glyph, on
+  the left of its label: transcript turns, tool rows, earlier steps, fold all, the scheduled list, the Files
+  tree, a Fleet card's agents, the Project screen's job group and the Metrics and Spawn summaries; a 7px
+  triangle in a 16px box in `--ink2`, buttons 24px; Read it an 18px box). Not done: the docks' **▸ terminal**
+  and **▸ console** are tabs, not folds, and keep their glyph.*
 - [x] **Your own messages fold, and every message and reply says when.** Asked for (3 Nov): "make my text that I
   type to the agent also collapsible. Also include date time to my text entries and to the response."
   *Done (3 Nov): Amendment 195 (your message folds from its **you** label, a long one starts folded, fold all

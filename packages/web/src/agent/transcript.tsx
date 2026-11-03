@@ -51,6 +51,7 @@ import {
 import { canUntick, isRead, markReply, useReplyAcks, type ReplyAcks } from '../lib/replies.js';
 import { lineCount, renderMarkdown } from './markdown.js';
 import { fmtStamp, fullStamp } from '../lib/when.js';
+import { Chevron, ChevronSpace } from '../shell/chevron.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
 
@@ -425,6 +426,7 @@ function ToolCall({ block, links }: { block: ToolBlock; links: FileLinks | null 
           aria-expanded={open}
           aria-label={`${block.tool} ${subject}`}
         >
+          {canOpen ? <Chevron open={open} /> : <ChevronSpace />}
           <b>{block.tool.toLowerCase()}</b>
         </button>
         {href !== null ? (
@@ -449,7 +451,6 @@ function ToolCall({ block, links }: { block: ToolBlock; links: FileLinks | null 
           </span>
         )}
         {block.ok === null && <span className="ag-tool-running">running…</span>}
-        <span className="ag-tool-ch">{canOpen ? (open ? '⌃' : '⌄') : ''}</span>
       </div>
 
       {open && body && (
@@ -605,7 +606,8 @@ function Activity({
         title={`${open ? 'Fold these steps to the latest' : 'Show every step'}${fmtStamp(since) ? `, from ${fmtStamp(since)}` : ''}`}
         onClick={toggle}
       >
-        {open ? `▾ hide ${earlier} earlier step${earlier === 1 ? '' : 's'}` : `▸ ${earlier} earlier step${earlier === 1 ? '' : 's'}`}
+        <Chevron open={open} />
+        {open ? `hide ${earlier} earlier step${earlier === 1 ? '' : 's'}` : `${earlier} earlier step${earlier === 1 ? '' : 's'}`}
       </button>
       {open ? (
         <Blocks blocks={blocks} links={links} />
@@ -685,10 +687,8 @@ function AgentTurn({
         title={unread ? 'Tick Read it first: a reply you haven\'t read stays open' : folded ? 'Unfold this reply' : 'Fold this reply to one line'}
         onClick={toggle}
       >
+        <Chevron open={!folded} />
         {role}
-        <span className="ag-fold-ch" aria-hidden="true">
-          {folded ? '⌄' : '⌃'}
-        </span>
       </button>
       <div className="ag-body">
         {folded ? (
@@ -766,10 +766,8 @@ function SentTurn({ turn, agentId, startFolded }: { turn: Turn; agentId: string;
         title={folded ? `Unfold ${what}` : `Fold ${what} to one line`}
         onClick={toggle}
       >
+        <Chevron open={!folded} />
         {auto ? 'auto' : 'you'}
-        <span className="ag-fold-ch" aria-hidden="true">
-          {folded ? '⌄' : '⌃'}
-        </span>
       </button>
       {folded ? (
         <div className="ag-body">

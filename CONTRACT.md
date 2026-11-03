@@ -200,6 +200,55 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 196 — post-merge, applied. **One chevron for every fold, on its left, and bigger; the Read it box is bigger.**
+
+Web only (`shell/chevron.tsx` new, `shell/ui.tsx`, `shell/shell.css`, `agent/transcript.tsx`,
+`agent/agent.tsx`, `agent/scheduled.tsx`, `agent/agent.css`, `files/FileTree.tsx`,
+`files/files.css`, `fleet/card.tsx`, `fleet/project.tsx`, `fleet/fleet.css`, `fleet/agentlist.ts`
+(its comment), `metrics/route.tsx`, `spawn/route.tsx`, `lib/verify.ts`, `agent/verify.ts`) and
+`docs/MANUAL.md`. Asked 3 Nov: *"the icon to collapse and expand is not always in the same
+location, make it consistent across the whole UI. Also make the icon bigger, it is hard to see.
+Make the Read it check mark bigger as well."* *Amends Amendments 33, 169, 173 and 193*: their
+folds keep their behaviour and lose their own glyphs.
+
+- **One glyph.** The shared `Chevron` (and `ChevronSpace`, its room left empty for a row with
+  nothing to open) moves to `shell/chevron.tsx`, which has no stylesheet, so a transcript, the
+  Files tree and the scheduled list render under Node with it; `ui.tsx` re-exports both. It
+  points right closed and down open (`is-open`, or `details[open]` for a summary). It replaces
+  the transcript's `⌃`/`⌄` (`.ag-fold-ch`), the tool row's `.ag-tool-ch`, the activity's text
+  **▸**/**▾**, fold all's `⌃`/`⌄` (the words stay), the scheduled list's `.ag-sched-chev`, the
+  Files tree's `.c5-caret`, the Fleet card's `.fl-card-fold-chev`, the Project screen's
+  `.pj-group-ch`, and the browser's own marker on Metrics' **How these are counted** and Spawn's
+  **resulting SDK options**. The navigator and the composer had it already.
+- **Always on the left**, just before its label: a turn's chevron before its role, in the same
+  button; a tool row's before the tool's name; the activity's before **N earlier steps**. The
+  role labels now stand left in their column (112px, where 92px was, for ORCHESTRATOR and the
+  chevron), so every turn's chevron is at the same place down the transcript. Click targets are
+  unchanged.
+- **Bigger**: a 7px by 10px triangle in a fixed 16px box, in `--ink2` at full strength (it was
+  4px by 6px at 0.7), centred on the label's first line; each fold's button at least 24px tall;
+  it turns in 0.13s, not at all under `prefers-reduced-motion`. A disabled turn label's chevron
+  is at 0.4, as its label is quiet.
+- **Read it** is an 18px box (was the browser's 13px), its words at `--fs-sm`, still a real
+  checkbox in its label, under the reply and never beside its time.
+- Left alone, as they fold nothing: the docks' **▸ terminal** and **▸ console** tabs, the todo's
+  and plan's "now" list markers (`::before "▸"`), and the popovers (**pause all**, **⏲ later**,
+  the card's **…**, the notes count, **+ agent**).
+
+**Verified:** `lib/verify.ts` §45: no `⌃`, `⌄`, `▸` or `▾` as text in any `.ts`/`.tsx` but the
+docks' two tabs, none of the old glyph classes anywhere, the only `▸` in a stylesheet the two list
+markers; each fold's source draws the `Chevron`; rendered under Node, the chevron before **you**,
+before the role, before **N earlier steps** and before the tool's name, and in the Files tree before
+a folder's name with a file's room empty; the 16px box, the triangle, `--ink2` with no opacity, the
+reduced-motion rule, the summary marker, the 24px buttons; the Read it box's 18px and `--fs-sm`.
+Changed to the new behaviour: in `agent/verify.ts`, "one Chevron, in ui.tsx" (now in
+`chevron.tsx`, re-exported by `ui.tsx`, still the navigator's); in `lib/verify.ts` §42, "▸ 1
+earlier step" and "▸ 3 earlier steps" (the chevron, then the words), and §44's "your short
+message folds from its you label" (the chevron inside the button, before **you**). Seen in Chrome,
+headless, both themes: the navigator, a transcript, the Files tree, a Fleet card's agents and the
+Project screen's job group, every chevron 16px, `--ink2`, left of its label, every button 24px or
+more.
+
 ### Amendment 195 — post-merge, applied. **Your message folds like any turn, the long ones to start with, and every message and reply says when.**
 
 Web only (`lib/when.ts`, `agent/transcript.tsx`, `agent/agent.css`, `agent/agent.tsx`,

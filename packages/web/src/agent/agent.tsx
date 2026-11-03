@@ -25,7 +25,7 @@ import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
 import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
-import { Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
+import { Chevron, Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
 import { useFileTree } from '../files/useWorkspace.js';
 import {
@@ -772,7 +772,8 @@ export function AgentScreen() {
                   updateActivityOpen((f) => (anyOpen ? unfoldAll(f, agent.id) : foldAll(f, agent.id, agentTurns)));
                 }}
               >
-                {anyOpen ? '⌃ fold all' : '⌄ unfold all'}
+                <Chevron open={anyOpen} />
+                {anyOpen ? 'fold all' : 'unfold all'}
               </button>
             )}
             {ask === null && rerunAsk === null && (

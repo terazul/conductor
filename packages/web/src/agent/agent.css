@@ -42,12 +42,14 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  /* Wide enough for DEVELOPER and ORCHESTRATOR at this size and spacing: at 52px the
-     longer role labels ran off the left edge and read "EVELOPER". */
-  width: 92px;
+  /* Wide enough for DEVELOPER and ORCHESTRATOR at this size and spacing, with the fold's
+     chevron before them (Amendment 196): at 52px the longer role labels ran off the left
+     edge and read "EVELOPER". */
+  width: 112px;
   flex: none;
   padding-top: 3px;
-  text-align: right;
+  /* Left, so every turn's chevron stands at the same place down the transcript (Amendment 196). */
+  text-align: left;
   color: var(--ink3);
 }
 
@@ -365,37 +367,32 @@
 /* ── folding a reply (Amendment 33) ────────────────────────────────────────── */
 
 /*
- * The role label is the reply's fold control, with its chevron under the name: the
- * same `⌃`/`⌄` a tool row has, in the one place every reply already carries.
+ * The role label is the reply's fold control, with the chevron every fold has on its left,
+ * on the label's line (Amendment 196). 24px tall, which is the body's first line, so the
+ * label sits level with it and the target is big enough to hit.
  */
 .ag-who-fold {
   background: none;
   border: 0;
-  padding: 3px 0 0;
+  padding: 0;
+  min-height: 24px;
+  align-self: flex-start;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
   transition: color 0.14s;
+}
+
+/* Your turn's words are padded inside their bar: the label drops to their first line, as its time does. */
+.ag-msg.is-you .ag-who-fold {
+  margin-top: 7px;
 }
 
 .ag-who-fold:hover,
 .ag-who-fold:focus-visible {
   color: var(--ink2);
-}
-
-.ag-fold-ch {
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  letter-spacing: 0;
-  color: var(--ink3);
-  opacity: 0.6;
-}
-
-.ag-who-fold:hover .ag-fold-ch,
-.ag-msg.is-folded .ag-fold-ch {
-  opacity: 1;
 }
 
 /* One line, like a tool row: the reply's first line, and what else it carried. */
@@ -460,8 +457,8 @@
   cursor: default;
 }
 
-.ag-who-fold[aria-disabled="true"] .ag-fold-ch {
-  opacity: 0.25;
+.ag-who-fold[aria-disabled="true"] .sh-nav-chev {
+  opacity: 0.4;
 }
 
 .ag-folded-read {
@@ -480,7 +477,11 @@
 .ag-act-tog {
   font-family: var(--mono);
   font-size: var(--fs-sm);
-  padding: 2px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0;
   background: none;
   border: 0;
   color: var(--ink3);
@@ -533,7 +534,10 @@
   cursor: pointer;
 }
 
+/* 18px, so the box is easy to see and to hit (Amendment 196); still the real checkbox. */
 .ag-ack input {
+  width: 18px;
+  height: 18px;
   accent-color: var(--done);
   margin: 0;
   cursor: inherit;
@@ -852,6 +856,8 @@
   cursor: pointer;
   flex: none;
   display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .ag-tool-tog::after {
@@ -933,21 +939,6 @@ a.ag-tool-subj:focus-visible {
 .ag-tool-running {
   color: var(--live);
   animation: conductor-pulse var(--pulse-slow) ease-in-out infinite;
-}
-
-.ag-tool-ch {
-  color: var(--ink3);
-  flex: none;
-  width: 9px;
-  text-align: right;
-}
-
-.ag-tool-nums ~ .ag-tool-ch,
-.ag-tool-ok ~ .ag-tool-ch,
-.ag-tool-bad ~ .ag-tool-ch,
-.ag-tool-new ~ .ag-tool-ch,
-.ag-tool-running ~ .ag-tool-ch {
-  margin-left: 0;
 }
 
 /* ── inline diff ───────────────────────────────────────────────────────────── */
@@ -1263,6 +1254,7 @@ a.ag-tool-subj:focus-visible {
   flex: 0 1 auto;
   border: none;
   border-radius: 4px;
+  min-height: 24px;
   padding: 2px 6px 2px 2px;
   color: var(--ink2);
   background: none;
@@ -2122,11 +2114,6 @@ a.ag-files-p:focus-visible {
 .ag-sched-open:hover .ag-sched-text,
 .ag-sched-row.is-open .ag-sched-text {
   color: var(--ink);
-}
-
-.ag-sched-chev {
-  flex: none;
-  color: var(--ink3);
 }
 
 .ag-sched-row.is-open {
