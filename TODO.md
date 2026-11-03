@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Your own messages fold, and every message and reply says when.** Asked for (3 Nov): "make my text that I
+  type to the agent also collapsible. Also include date time to my text entries and to the response."
+  *Done (3 Nov): Amendment 195 (your message folds from its **you** label, a long one starts folded, fold all
+  takes it; `fmtStamp` in `lib/when.ts` at the right of every message of yours and every reply, folded or
+  open, its full time in the title). Not done: times in the export and on the pinned **You asked**.*
 - [x] **The navigator shows a project's and a stack's status, as the Fleet card does.** Asked for (3 Nov): "the
   status of the project shows up in the Fleet page but it does not show in the left menu bar with the project
   name and does not show up in the agent stack name, fix that."

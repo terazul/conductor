@@ -50,6 +50,7 @@ import {
 } from './folds.js';
 import { canUntick, isRead, markReply, useReplyAcks, type ReplyAcks } from '../lib/replies.js';
 import { lineCount, renderMarkdown } from './markdown.js';
+import { fmtStamp, fullStamp } from '../lib/when.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,8 @@ interface ProseBlock {
   kind: 'prose';
   key: string;
   text: string;
+  /** When it was said: the reply's time is its last prose's (Amendment 195). */
+  ts: string;
 }
 
 interface ToolBlock {
@@ -98,6 +101,8 @@ export interface Turn {
   text: string;
   synthetic: boolean;
   blocks: Block[];
+  /** Its first event's time: when you sent it, or when the agent started on it (Amendment 195). */
+  ts: string;
 }
 
 /**
@@ -115,10 +120,10 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
   // Amendment 8: two channels report every write, and summing both double-counts.
   const editWinner = countingSource(events);
 
-  const agentTurn = (seq: number): Turn => {
+  const agentTurn = (seq: number, ts: string): Turn => {
     const last = turns.at(-1);
     if (last && last.who === 'agent') return last;
-    const t: Turn = { key: `a${seq}`, who: 'agent', text: '', synthetic: false, blocks: [] };
+    const t: Turn = { key: `a${seq}`, who: 'agent', text: '', synthetic: false, blocks: [], ts };
     turns.push(t);
     return t;
   };
@@ -134,11 +139,12 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
           text: p.text,
           synthetic: p.synthetic === true,
           blocks: [],
+          ts: e.ts,
         });
         break;
 
       case 'text':
-        agentTurn(e.seq).blocks.push({ kind: 'prose', key: `p${e.seq}`, text: p.text });
+        agentTurn(e.seq, e.ts).blocks.push({ kind: 'prose', key: `p${e.seq}`, text: p.text, ts: e.ts });
         break;
 
       case 'tool_start': {
@@ -156,7 +162,7 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
           created: false,
         };
         tools.set(p.toolUseId, block);
-        agentTurn(e.seq).blocks.push(block);
+        agentTurn(e.seq, e.ts).blocks.push(block);
         break;
       }
 
@@ -200,7 +206,7 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
           answered: null,
         };
         asks.set(p.requestId, block);
-        agentTurn(e.seq).blocks.push(block);
+        agentTurn(e.seq, e.ts).blocks.push(block);
         break;
       }
 
@@ -212,14 +218,14 @@ export function buildTranscript(events: readonly Event[], worktreePath = ''): Tu
 
       case 'status': {
         const note = statusNote(p.status, prevStatus, p.blockMode, p.error, p.detail);
-        if (note) agentTurn(e.seq).blocks.push({ ...note, key: `s${e.seq}` });
+        if (note) agentTurn(e.seq, e.ts).blocks.push({ ...note, key: `s${e.seq}` });
         prevStatus = p.status;
         break;
       }
 
       case 'helpers_removed':
         // Your new task cleared the last one's helpers (Amendment 177, of 167).
-        agentTurn(e.seq).blocks.push({ kind: 'note', key: `h${e.seq}`, text: helpersRemovedNote(p.count, p.names), tone: 'idle' });
+        agentTurn(e.seq, e.ts).blocks.push({ kind: 'note', key: `h${e.seq}`, text: helpersRemovedNote(p.count, p.names), tone: 'idle' });
         break;
 
       // usage / todo drive the inspector; worktree, dev_server and console are
@@ -521,6 +527,24 @@ function Blocks({ blocks, links }: { blocks: Block[]; links: FileLinks | null })
   );
 }
 
+/**
+ * When a turn was said (Amendment 195), at the right of its first line, folded or open: short
+ * (`fmtStamp`), with the full time to the second in its title and `dateTime`.
+ */
+function Stamp({ ts }: { ts: string | null }) {
+  if (!ts || !fmtStamp(ts)) return null;
+  return (
+    <time className="ag-when" dateTime={ts} title={fullStamp(ts)}>
+      {fmtStamp(ts)}
+    </time>
+  );
+}
+
+/** When a reply was said: its last prose's time, the one ticking it read marks. */
+function replyTs(split: SplitTurn): string | null {
+  return split.reply.find((b): b is ProseBlock => b.kind === 'prose' && b.key === `p${split.replySeq}`)?.ts ?? null;
+}
+
 /** Prose, as the agent wrote it — what a folded reply summarises. */
 function proseOf(blocks: readonly Block[]): string {
   return blocks
@@ -554,11 +578,14 @@ function Activity({
   blocks,
   agentId,
   turnKey,
+  since,
   links,
 }: {
   blocks: Block[];
   agentId: string;
   turnKey: string;
+  /** When the turn started, which the toggle's title says: the activity has no time of its own. */
+  since: string;
   links: FileLinks | null;
 }) {
   const opened = useActivityOpen();
@@ -575,7 +602,7 @@ function Activity({
         type="button"
         className="ag-act-tog"
         aria-expanded={open}
-        title={open ? 'Fold these steps to the latest' : 'Show every step'}
+        title={`${open ? 'Fold these steps to the latest' : 'Show every step'}${fmtStamp(since) ? `, from ${fmtStamp(since)}` : ''}`}
         onClick={toggle}
       >
         {open ? `▾ hide ${earlier} earlier step${earlier === 1 ? '' : 's'}` : `▸ ${earlier} earlier step${earlier === 1 ? '' : 's'}`}
@@ -677,7 +704,7 @@ function AgentTurn({
           </button>
         ) : (
           <>
-            <Activity blocks={split.activity} agentId={agentId} turnKey={turn.key} links={links} />
+            <Activity blocks={split.activity} agentId={agentId} turnKey={turn.key} since={turn.ts} links={links} />
             {split.reply.length > 0 && (
               <div className="ag-reply">
                 <Blocks blocks={split.reply} links={links} />
@@ -707,33 +734,39 @@ function AgentTurn({
           </>
         )}
       </div>
+      <Stamp ts={replyTs(split)} />
     </div>
   );
 }
 
 /**
- * A turn Conductor sent ("auto"): a helpers' report, a resume nudge, a merge note. It folds
- * from its label as a reply does (Amendment 164). `startFolded` is whether it starts folded:
- * in an orchestrator's transcript, where the helpers' report is long and its own reply to it
- * is what you came for. Elsewhere it starts open, as every reply does (Amendment 18).
+ * A turn sent to the agent: one you typed, or one Conductor sent ("auto"), such as a helpers'
+ * report, a resume nudge or a merge note. Each folds from its label as a reply does (Amendment
+ * 164; yours since Amendment 195), to its first line and a count. `startFolded` is whether it
+ * starts folded: an auto turn in an orchestrator's transcript, where the helpers' report is long
+ * and its own reply to it is what you came for, and a message of yours longer than
+ * `YOU_FOLD_LINES`, which you wrote and needn't read again. Anything else starts open, as every
+ * reply does (Amendment 18). Its time is when it was sent.
  */
-function AutoTurn({ turn, agentId, startFolded }: { turn: Turn; agentId: string; startFolded: boolean }) {
+function SentTurn({ turn, agentId, startFolded }: { turn: Turn; agentId: string; startFolded: boolean }) {
   const folds = useFolds();
   const unfolds = useUnfolds();
   const folded = shownFolded({ folds, unfolds }, agentId, turn.key, startFolded);
   const toggle = (): void => updateFoldState((s) => toggleFold(s, agentId, turn.key, startFolded));
   const lines = turn.text.length > 0 ? lineCount(turn.text) : 0;
+  const auto = turn.synthetic;
+  const what = auto ? 'this turn' : 'your message';
 
   return (
-    <div className={`ag-msg is-you is-auto${folded ? ' is-folded' : ''}`} id={`t-${turn.key}`}>
+    <div className={`ag-msg is-you${auto ? ' is-auto' : ''}${folded ? ' is-folded' : ''}`} id={`t-${turn.key}`}>
       <button
         type="button"
         className="ag-who ag-who-fold"
         aria-expanded={!folded}
-        title={folded ? 'Unfold this turn' : 'Fold this turn to one line'}
+        title={folded ? `Unfold ${what}` : `Fold ${what} to one line`}
         onClick={toggle}
       >
-        auto
+        {auto ? 'auto' : 'you'}
         <span className="ag-fold-ch" aria-hidden="true">
           {folded ? '⌄' : '⌃'}
         </span>
@@ -748,22 +781,33 @@ function AutoTurn({ turn, agentId, startFolded }: { turn: Turn; agentId: string;
       ) : (
         <div className="ag-body">{turn.text}</div>
       )}
+      <Stamp ts={turn.ts} />
     </div>
   );
 }
 
-/** The turns that fold, by key — what "fold all" folds: the replies, and the turns Conductor sent. */
+/**
+ * The turns that fold, by key — what "fold all" folds: the replies, the turns Conductor sent,
+ * and since Amendment 195 your own messages. Every turn, then.
+ */
 export function replyKeys(turns: readonly Turn[]): string[] {
-  return turns.filter((t) => t.who === 'agent' || t.synthetic).map((t) => t.key);
+  return turns.map((t) => t.key);
 }
+
+/** A message of yours longer than this starts folded (Amendment 195): you wrote it. */
+export const YOU_FOLD_LINES = 3;
 
 /**
  * The turns that start folded (Amendment 164): in an orchestrator's transcript, the ones
- * Conductor sent it. None anywhere else. `orchestrator` is whether the agent may start
- * helpers (`helperCap` above 0), which is what a helpers' report is sent to.
+ * Conductor sent it. `orchestrator` is whether the agent may start helpers (`helperCap` above
+ * 0), which is what a helpers' report is sent to. And in any transcript, a message you typed
+ * longer than `YOU_FOLD_LINES` (Amendment 195): what you said is in your head, and what it
+ * answered is what you came to read.
  */
 export function startFoldedKeys(turns: readonly Turn[], orchestrator: boolean): string[] {
-  return orchestrator ? turns.filter((t) => t.who === 'you' && t.synthetic).map((t) => t.key) : [];
+  return turns
+    .filter((t) => t.who === 'you' && (t.synthetic ? orchestrator : lineCount(t.text) > YOU_FOLD_LINES))
+    .map((t) => t.key);
 }
 
 export function Transcript({
@@ -795,13 +839,8 @@ export function Transcript({
   return (
     <div className="ag-trans">
       {turns.map((t, i) =>
-        t.who === 'you' && t.synthetic ? (
-          <AutoTurn key={t.key} turn={t} agentId={agentId} startFolded={startFolded.includes(t.key)} />
-        ) : t.who === 'you' ? (
-          <div key={t.key} className="ag-msg is-you" id={`t-${t.key}`}>
-            <span className="ag-who">you</span>
-            <div className="ag-body">{t.text}</div>
-          </div>
+        t.who === 'you' ? (
+          <SentTurn key={t.key} turn={t} agentId={agentId} startFolded={startFolded.includes(t.key)} />
         ) : (
           <AgentTurn
             key={t.key}

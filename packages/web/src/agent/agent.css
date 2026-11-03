@@ -431,6 +431,26 @@
 }
 
 /*
+ * When a turn was said (Amendment 195): to the right of its first line, quiet and mono, as a
+ * folded turn's count is. It is outside the turn's body, so a reply's Read it box never has it
+ * beside it, and it shows folded or open. Your turn's body is padded inside its bar, so its
+ * time drops to the bar's first line.
+ */
+.ag-when {
+  flex: none;
+  padding-top: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink3);
+}
+
+.ag-msg.is-you .ag-when {
+  padding-top: 8px;
+}
+
+/*
  * A reply you haven't ticked read can't fold (Amendment 193): its label stays a label, and
  * says why on hover.
  */
