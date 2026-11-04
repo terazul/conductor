@@ -106,6 +106,29 @@ export function setAck(
   return serializeAcks(out) === serializeAcks(a) ? null : out;
 }
 
+/**
+ * Every one of `seqs` ticked at once ("mark all read", Amendment 200), under `setAck`'s rules: a
+ * seq at or below `sinceSeq` is read already and left out, the newest `MAX_ACKS` are kept, and
+ * every agent not in `known` drops out. Null when nothing would change.
+ */
+export function setAcksAll(
+  a: ReplyAcks,
+  agentId: string,
+  seqs: readonly number[],
+  known?: ReadonlySet<string>,
+): ReplyAcks | null {
+  const since = a.sinceSeq;
+  if (since === null) return null;
+  const agents: Record<string, number[]> = {};
+  for (const [id, kept] of Object.entries(a.agents)) if (!known || known.has(id) || id === agentId) agents[id] = kept;
+  const now = agents[agentId] ?? [];
+  const add = seqs.filter((n, i) => n > since && !now.includes(n) && seqs.indexOf(n) === i);
+  const next = [...now, ...add].sort((x, y) => x - y).slice(-MAX_ACKS);
+  if (next.length > 0) agents[agentId] = next;
+  const out = { sinceSeq: since, agents };
+  return serializeAcks(out) === serializeAcks(a) ? null : out;
+}
+
 /** The agents whose latest reply (`replySeq`, from the daemon) you haven't ticked. */
 export function toRead(agents: readonly Pick<Agent, 'id' | 'replySeq'>[], a: ReplyAcks): Set<string> {
   return new Set(agents.filter((g) => g.replySeq !== undefined && !isRead(a, g.id, g.replySeq)).map((g) => g.id));
@@ -129,6 +152,13 @@ export function startAcksOnce(seq: number): void {
 export function markReply(agentId: string, seq: number, read: boolean): void {
   const ids = store.select('agents:*', (s) => s.agents).map((a) => a.id);
   const next = setAck(parseAcks(readSetting(REPLY_ACKS_KEY)), agentId, seq, read, ids.length > 0 ? new Set(ids) : undefined);
+  if (next) writeSetting(REPLY_ACKS_KEY, serializeAcks(next));
+}
+
+/** Tick all of `seqs` on this agent read, in one write: `markReply` for many (Amendment 200). */
+export function markReplies(agentId: string, seqs: readonly number[]): void {
+  const ids = store.select('agents:*', (s) => s.agents).map((a) => a.id);
+  const next = setAcksAll(parseAcks(readSetting(REPLY_ACKS_KEY)), agentId, seqs, ids.length > 0 ? new Set(ids) : undefined);
   if (next) writeSetting(REPLY_ACKS_KEY, serializeAcks(next));
 }
 

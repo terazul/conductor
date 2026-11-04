@@ -128,6 +128,17 @@ export function unfoldEvery(s: FoldState, agentId: string, byDefault: readonly s
 }
 
 /**
+ * "Mark all read" (Amendment 200): the replies in `keys`, just ticked, back to the fold a read
+ * reply starts in, as one tick does — any you had opened lose their key in `Unfolds`. Nothing
+ * else changes: your messages, activity, and the replies read before, opened on purpose.
+ */
+export function closeRead(s: FoldState, agentId: string, keys: readonly string[]): FoldState {
+  const opened = s.unfolds[agentId] ?? [];
+  if (!opened.some((k) => keys.includes(k))) return s;
+  return { ...s, unfolds: put(s.unfolds, agentId, opened.filter((k) => !keys.includes(k))) };
+}
+
+/**
  * The one line a folded reply shows: its first line of prose, without the markdown
  * that only means something rendered. Nothing is dropped that would change what the
  * line says — `**not** safe` reads `not safe`, not `safe`.

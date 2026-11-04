@@ -200,6 +200,32 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 200 — post-merge, applied. **One button ticks every reply on an agent read, and folds them.**
+
+Web only (`lib/replies.ts`, `agent/folds.ts`, the new `agent/readall.tsx`, `agent/agent.tsx`, `lib/verify.ts`),
+and `docs/MANUAL.md`. Asked 4 Nov: *"add a button to mark all "Read" checkmarks on an agent as read (and close
+them)."* Adds to Amendment 193. No migration.
+
+- **The button.** **✓ mark all read (N)** sits just before **fold all** in the Agent screen's header, in its
+  style, while nothing is armed. It shows only when the agent has an unread reply, N being how many. Its
+  `aria-label` gives the count, and its title says it ticks every reply on this agent read and folds them.
+- **What it ticks** (`toTick`). Every reply the transcript holds that you haven't ticked, by the seq Read it
+  marks (`splitTurn`'s `replySeq`, the `p${seq}` key). The tab holds only `MAX_EVENTS_PER_AGENT` events, so
+  the agent's own `replySeq` is ticked as well when it is unread: its row and tab say **to read** by it
+  alone, and clear even if that reply's events have dropped out of the tab.
+- **One write.** `setAcksAll(acks, agentId, seqs, known?)`, beside `setAck`, keeps `setAck`'s rules: seqs at
+  or below `sinceSeq` are left out, each agent keeps its newest `MAX_ACKS`, agents the hub no longer has drop
+  out, and no change is `null`. `markReplies(agentId, seqs)` writes `conductor.replyAcks` once per click.
+- **Closed.** A read reply starts folded, so what kept a ticked one open is its key in `Unfolds`.
+  `closeRead(state, agentId, keys)` removes the ticked turns' keys there, as one tick does. Nothing else
+  changes: your messages, activity, and replies read before that you opened on purpose.
+- **To read.** The navigator and the tab clear on their own: `toRead` reads the agent's `replySeq`, which is
+  now ticked.
+- **Checks.** Web `lib/verify.ts` §46, 25 checks: `setAcksAll` (several seqs, one read already, one at
+  `sinceSeq`, the bound, other agents, pruning, the same as ticking each); `toTick` with and without the lost
+  `replySeq`; `closeRead` on an opened unread reply and an opened read one; one write of the acks per click,
+  counted through `onSettings`; the button rendered with its count, label and title, and absent with none.
+
 ### Amendment 199 — post-merge, applied. **A done agent's lost folder can be recreated from its message box and Needs You.**
 
 Shared (`events.ts`, `wire.ts`), daemon (`session/supervisor.ts`, `routes/session.ts`, `session/alerts.ts`,

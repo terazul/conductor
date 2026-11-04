@@ -42,6 +42,7 @@ import {
   useUnfolds,
 } from './folds.js';
 import { Transcript, buildTranscript, replyKeys, replyStates, startFoldedKeys } from './transcript.js';
+import { ReadAllButton, toTick } from './readall.js';
 import { Composer } from './composer.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
@@ -542,6 +543,12 @@ export function AgentScreen() {
     () => (active === null ? { read: [], unread: [] } : replyStates(turns, streaming, active, acks)),
     [turns, streaming, active, acks],
   );
+  // What "mark all read" ticks (Amendment 200): the unread replies here, and the latest if it is.
+  const replySeq = agent?.replySeq;
+  const unticked = useMemo(
+    () => (active === null ? { seqs: [], keys: [] } : toTick(turns, streaming, active, acks, replySeq)),
+    [turns, streaming, active, acks, replySeq],
+  );
   const foldable = useMemo(() => replies.filter((k) => !read.unread.includes(k)), [replies, read]);
   const byDefault = useMemo(() => [...startFolded, ...read.read], [startFolded, read]);
   const agentTurns = useMemo(() => turns.filter((t) => t.who === 'agent').map((t) => t.key), [turns]);
@@ -760,6 +767,7 @@ export function AgentScreen() {
              * While terminate or remove is armed, the header is the decision: its confirm
              * needs the room, and these can wait (Amendment 89).
              */}
+            {ask === null && rerunAsk === null && <ReadAllButton agentId={agent.id} tick={unticked} />}
             {ask === null && rerunAsk === null && replies.length > 0 && (
               <button
                 type="button"

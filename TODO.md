@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Mark every reply on an agent read at once.** Asked for (4 Nov): *"add a button to mark all "Read"
+  checkmarks on an agent as read (and close them)."*
+  *Done (4 Nov): Amendment 200 (**✓ mark all read (N)** beside **fold all**, while there is an unread reply;
+  one settings write ticks every unread reply the transcript holds, and the agent's latest `replySeq`, so
+  **to read** clears even when its events have dropped out of the tab; each one folds. Adds to Amendment 193).*
+
 - [x] **View files that are HTML pages.** Asked for (3 Nov): *"add support for viewing files that are html
   pages."* Decided with the user: the page's scripts run, sandboxed.
   *Done (3 Nov): Amendment 198 (`.html` and `.htm` open rendered in a sandboxed frame, under a random token
