@@ -19,6 +19,8 @@
  *   budget_over  an agent, or its job, is past its budget and still working: a warning (Amendment 124)
  *   finished     a worktree job finished with its branch ahead of the target: merge it? (Amendment 144)
  *   merged       its agent's setting merged it and cleaned up: information (Amendment 144)
+ *   folder_gone  a message to an agent was refused because its job's worktree is gone, and the
+ *                agent did not fail, so `failed` doesn't say so (Amendment 199)
  *
  * Failures, old budget pauses and dead servers are DERIVED from what is stored: the agent's
  * status, the status event that set it, and the dev server's row. A reload or a restart
@@ -30,6 +32,7 @@
  * reaches the log as ordinary `text` and can't be told apart there.
  */
 
+import { existsSync } from 'node:fs';
 import {
   HANDOFF_HELD_NOTE,
   capState,
@@ -51,7 +54,7 @@ import { onServersChanged } from '../preview/registry.js';
 import { agentBudget, budgetStop, jobCap } from './budget.js';
 import { RETRY_ALERT_FROM, classifyRetry, onRetryChanged, retryBook } from './retry.js';
 import { onOutageChanged, outages } from './outage.js';
-import { costMonth, costToday, dueNotes, getAgent, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend, providerSpend } from './store.js';
+import { costMonth, costToday, dueNotes, getAgent, getJob, heldHandoffs, listAgents, listProjects, localDay, localMonth, projectSpend, providerSpend } from './store.js';
 import { DAILY_KEY, MONTHLY_KEY, dailyBudget, monthlyBudget, onCostChanged, providerBudgets, startDayWatch } from '../daily.js';
 import { onSettingsChanged } from '../settings.js';
 import { finishAlerts, onFinishesChanged } from './finish.js';
@@ -170,6 +173,7 @@ export class Alerts {
       ...this.#blockedDeps(),
       ...this.#heldHandoffs(),
       ...this.#serversDown(),
+      ...this.#folderGone(),
       ...finishAlerts(this.#db),
     ].sort((a, b) => a.since.localeCompare(b.since));
     return [...this.#daily(), ...this.#monthly(), ...this.#notesDue(), ...this.#outages(), ...this.#connection(now), ...this.#reconnecting(), ...derived].filter(
@@ -391,6 +395,9 @@ export class Alerts {
       // pause, a stop — ends this agent's part in the outage.
       if (r && p.status === 'failed') r.gaveUp = true;
       else if (r) this.#retrying.delete(r.agentId);
+      this.refresh();
+    } else if (p.kind === 'folder_refused') {
+      // A done agent's folder is gone and you were refused (Amendment 199).
       this.refresh();
     }
   }
@@ -756,6 +763,43 @@ export class Alerts {
     }
     return out;
   }
+
+  /**
+   * Agents a message was refused for because their job's folder is gone, and that did not fail
+   * (Amendment 199): a `done` agent's refusal changes no status, so `failed` says nothing. One
+   * card per agent, from its latest `folder_refused` event; its id carries that event's seq, so
+   * a dismissal lasts until the next refusal. It clears once the folder is back (recreated, or
+   * put back by hand), and while the agent is failed, whose own card offers the same.
+   */
+  #folderGone(): Alert[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT e.seq, e.ts, e.agent_id, e.payload FROM events e
+          WHERE e.kind = 'folder_refused' AND e.agent_id IS NOT NULL
+            AND e.seq = (SELECT MAX(seq) FROM events x WHERE x.agent_id = e.agent_id AND x.kind = 'folder_refused')`,
+      )
+      .all() as { seq: number; ts: string; agent_id: string; payload: string }[];
+    const out: Alert[] = [];
+    for (const r of rows) {
+      const agent = getAgent(this.#db, r.agent_id);
+      if (!agent || agent.status === 'failed') continue;
+      const job = getJob(this.#db, agent.jobId);
+      if (!job || job.isolation !== 'worktree' || existsSync(job.worktreePath)) continue;
+      const p = JSON.parse(r.payload) as { restorable?: boolean };
+      if (p.restorable !== true) continue;
+      out.push({
+        id: `folder_gone:${agent.id}:${r.seq}`,
+        kind: 'folder_gone',
+        cause: 'folder_gone',
+        projectId: agent.projectId,
+        jobId: job.id,
+        agentIds: [agent.id],
+        since: r.ts,
+        detail: job.worktreePath,
+      });
+    }
+    return out;
+  }
 }
 
 let instance: Alerts | null = null;
@@ -783,5 +827,10 @@ export function modelAnswered(agentId: string): void {
 
 /** A budget was changed (Amendment 124): the warning may be over, with no status change to say so. */
 export function budgetChanged(): void {
+  instance?.refresh();
+}
+
+/** Something a derived alert reads changed with no event to say so, such as a folder recreated (Amendment 199). */
+export function alertsChanged(): void {
   instance?.refresh();
 }

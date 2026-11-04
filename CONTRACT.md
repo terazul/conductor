@@ -200,6 +200,57 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 199 — post-merge, applied. **A done agent's lost folder can be recreated from its message box and Needs You.**
+
+Shared (`events.ts`, `wire.ts`), daemon (`session/supervisor.ts`, `routes/session.ts`, `session/alerts.ts`,
+`session/verify-folder.ts`) and web (`lib/errors.ts`, `agent/endpoints.ts`, `agent/composer.tsx`,
+`agent/agent.css`, `attention/alerts.ts`, `attention/AlertCard.tsx`, `shell/describe.ts`,
+`attention/verify-folder.ts`), and `docs/MANUAL.md`. Asked 4 Nov: *"it said its tree was gone. I did not see
+the Needs You, can you add the button to rebuild the tree there on the message in the box (in addition to
+the Needs you)?"* Decided with the user: the card is raised, and the agent and its job stay `done`. No
+migration.
+
+Amendment 114's recreate was only on a `failed` agent's card. A message to a `done` agent whose worktree was
+deleted was refused with a 409 and changed no status, so nothing offered the fix.
+
+- **The wire.**
+  - A folder refusal's 409 is now a `FolderRefusalBody`: `{ error, detail, code, jobId, restorable }`.
+    `code` is `folder_gone` from `POST /api/agents/:id/message`, and `folder_present` from
+    `POST /api/jobs/:id/folder` when the folder is there already. `restorable` is false for a job that isn't
+    a worktree. Other 409s are unchanged.
+  - The sentence now reads *"its folder … is gone — recreate folder brings it back on its branch, and its
+    conversation is kept"*, no longer pointing only at Needs You.
+  - The new event `folder_refused { path, restorable }` is logged on each refusal. The transcript ignores
+    it.
+  - The new alert kind `folder_gone` has `detail` set to the folder's path.
+- **The card.** `Alerts.#folderGone()` derives one card per agent from its latest `folder_refused`, with id
+  `folder_gone:<agentId>:<seq>`, so a dismissal lasts until the next refusal. It is raised only when all of
+  these hold:
+  - the agent exists and isn't `failed` (that card already offers recreate);
+  - its job is a worktree job and the folder is still missing;
+  - the refusal said `restorable`.
+  
+  It clears once the folder exists, whoever puts it back. `restoreFolder` refreshes the alerts
+  (`alertsChanged()`), so the card clears straight away. Buttons: **recreate folder** (`restore_only`), then
+  **open agent** and **dismiss**. It doesn't continue the agent, because the message is in its box.
+- **The composer.** `explain()` adds `action: { kind: 'restore', jobId }` to the notice for a restorable
+  `folder_gone` 409. The notice then shows **recreate folder and send**, or **recreate folder** when the box
+  is empty. It recreates the folder, sends the box, and clears the box only if the send succeeded.
+  `restoreFolder()` in `agent/endpoints.ts` treats `folder_present` as success. Amendment 114's
+  `restoreAndContinue` now uses it too.
+- **Checks.** Daemon `session/verify-folder.ts`, 30 checks:
+  - the 409's fields;
+  - a done agent's card, with the agent still done;
+  - one card after two refusals;
+  - no card for a failed agent or a job that isn't a worktree;
+  - the card clears after a recreate;
+  - `folder_present` on a second recreate.
+  
+  Web `attention/verify-folder.ts`: `explain`'s action, `folderPresent`, the card's buttons and wording, and
+  the composer button.
+- **Not done here (planned, approved):** locking each job's worktree while its job exists, and a pre-push
+  hook refusing `conductor/job_*`. These stop agents deleting or pushing other jobs' worktrees and branches.
+
 ### Amendment 198 — post-merge, applied. **An HTML file renders in the Files pane, its scripts sandboxed.**
 
 Daemon (`routes/workspace.ts`, `workspace/service.ts`, `workspace/pages.ts`, `workspace/verify.ts`, and one

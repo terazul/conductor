@@ -20,7 +20,7 @@
 
 import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
-import { spentOn, type Agent, type Autonomy, type EffortLevel } from '@conductor/shared';
+import { spentOn, type Agent, type Autonomy, type EffortLevel, type SendMessageResponse } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, ProviderModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -47,7 +47,7 @@ import {
   effortsFor,
   nearestEffort,
 } from '../spawn/autonomy.js';
-import { queueWhenDone, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
+import { queueWhenDone, restoreFolder, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
 import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
@@ -288,6 +288,20 @@ export function Composer({ agent }: { agent: Agent }) {
     const ok = await send.run('Sending a message', () => sendMessage(agent.id, { text: body }), (r) => sentText(r));
     // Only clear the box on success — a 404 must not eat what you wrote.
     if (ok) setText('');
+  };
+
+  // Its folder is gone (Amendment 199): recreate it on its branch, then send what is in the box.
+  const restoreAndSend = async (jobId: string) => {
+    const body = text.trim();
+    const ok = await send.run(
+      'Recreating the folder',
+      async () => {
+        await restoreFolder(jobId);
+        return body.length > 0 ? sendMessage(agent.id, { text: body }) : null;
+      },
+      (r: SendMessageResponse | null) => (r === null ? 'Folder recreated.' : sentText(r, 'Folder recreated, and sent.')),
+    );
+    if (ok && body.length > 0) setText('');
   };
 
   // Send it later (Amendment 111): the same text, at a time you pick, in your local time.
@@ -874,6 +888,20 @@ export function Composer({ agent }: { agent: Agent }) {
             role="status"
           >
             {notice.text}
+            {notice.action?.kind === 'restore' && (
+              <button
+                type="button"
+                className="ag-notice-act"
+                disabled={send.busy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void restoreAndSend(notice.action!.jobId);
+                }}
+                title="Put the job's worktree back on its branch (or from main if the branch is gone); its conversation is kept"
+              >
+                {text.trim().length > 0 ? 'recreate folder and send' : 'recreate folder'}
+              </button>
+            )}
           </div>
         )}
       </div>

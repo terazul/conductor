@@ -62,6 +62,26 @@ function sentenceIn(body: unknown): string | null {
 export interface Notice {
   tone: 'ok' | 'warn' | 'fail';
   text: string;
+  /**
+   * What fixes it, offered as a button on the notice. `restore`: the agent's job folder is gone
+   * and can be recreated on its branch (Amendment 199).
+   */
+  action?: { kind: 'restore'; jobId: string };
+}
+
+/** A 409 saying the agent's folder is gone and can be recreated (Amendment 199): its job, else null. */
+export function folderGoneJob(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const b = err.body as { code?: unknown; jobId?: unknown; restorable?: unknown } | null;
+  if (typeof b !== 'object' || b === null) return null;
+  return b.code === 'folder_gone' && b.restorable === true && typeof b.jobId === 'string' ? b.jobId : null;
+}
+
+/** A 409 saying the folder is there already (Amendment 199): a recreate that has nothing to do. */
+export function folderPresent(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  const b = err.body as { code?: unknown } | null;
+  return typeof b === 'object' && b !== null && b.code === 'folder_present';
 }
 
 /**
@@ -91,7 +111,11 @@ export function explain(label: string, err: unknown): Notice {
   // was fine and some state is in the way. Which state is the whole content of
   // the message ("builder is still running"), so it is passed through rather
   // than translated into a sentence this function would have to guess at.
-  if (err.status === 409) return { tone: 'warn', text: said ?? `${label} was refused.` };
+  if (err.status === 409) {
+    const jobId = folderGoneJob(err);
+    const text = said ?? `${label} was refused.`;
+    return jobId !== null ? { tone: 'warn', text, action: { kind: 'restore', jobId } } : { tone: 'warn', text };
+  }
 
   /*
    * 404 means two different things. Before the routes existed, every command 404'd

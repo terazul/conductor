@@ -72,7 +72,7 @@ import { expand as expandPath } from '../workspace/browse.js';
 import { workspace } from '../workspace/service.js';
 import { terminals } from '../terminal/service.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
-import { budgetChanged } from './alerts.js';
+import { alertsChanged, budgetChanged } from './alerts.js';
 import { skillsProblem, systemPromptProblem } from './persona.js';
 import {
   handOffLine,
@@ -271,12 +271,23 @@ export const FOLDER_GONE = 'folder_gone';
 /** The sentence for it, with what will fix it. */
 export function folderGoneDetail(path: string, restorable: boolean): string {
   return restorable
-    ? `its folder ${path} is gone — recreate it (Needs You → recreate folder) and continue; its conversation is kept`
+    ? `its folder ${path} is gone — recreate folder brings it back on its branch, and its conversation is kept`
     : `its folder ${path} is gone — put the folder back, or remove this job`;
 }
 
-/** A message refused because the agent's folder is gone; its message is the sentence. */
-export class FolderGoneError extends Error {}
+/**
+ * A message refused because the agent's folder is gone, or a recreate refused; its message is
+ * the sentence. `code` and `jobId` go out in the 409 (Amendment 199), so the composer can offer
+ * recreate folder; without them it is a refusal like any other.
+ */
+export class FolderGoneError extends Error {
+  constructor(
+    message: string,
+    readonly refusal?: { code: 'folder_gone' | 'folder_present'; jobId: string; restorable: boolean },
+  ) {
+    super(message);
+  }
+}
 
 /** Whether a pause note is `strandNote`'s. */
 export const isStrandNote = (note: string | null): boolean =>
@@ -2244,7 +2255,17 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!agent.sdkSessionId && job?.prompt !== '') throw new Error(`agent ${agentId} cannot receive messages yet`);
     if (job && !existsSync(job.worktreePath)) {
-      throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}`);
+      const restorable = job.isolation === 'worktree';
+      // Its status stays; Needs You reads this to offer recreating the folder (Amendment 199).
+      eventLog().emit(
+        { projectId: agent.projectId, jobId: job.id, agentId },
+        { kind: 'folder_refused', path: job.worktreePath, restorable },
+      );
+      throw new FolderGoneError(`${agent.role}: ${folderGoneDetail(job.worktreePath, restorable)}`, {
+        code: 'folder_gone',
+        jobId: job.id,
+        restorable,
+      });
     }
     // Yours, not ours: a new task, so the helpers of the last one go (Amendment 167).
     if (!synthetic) this.#clearFinishedHelpers(agent);
@@ -2681,7 +2702,13 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, jobId);
     if (!job) throw new FolderGoneError('no such job');
     const project = getProject(this.#db, job.projectId);
-    if (existsSync(job.worktreePath)) throw new FolderGoneError(`${job.worktreePath} is there already`);
+    if (existsSync(job.worktreePath)) {
+      throw new FolderGoneError(`${job.worktreePath} is there already`, {
+        code: 'folder_present',
+        jobId,
+        restorable: job.isolation === 'worktree',
+      });
+    }
     if (job.isolation !== 'worktree') {
       throw new FolderGoneError(`this job works in ${job.worktreePath} itself, not a worktree of its own — put that folder back`);
     }
@@ -2725,6 +2752,8 @@ export class Supervisor implements AgentControl {
         },
       );
     }
+    // A folder_gone card clears now, not at the next status change (Amendment 199).
+    alertsChanged();
     return result;
   }
 

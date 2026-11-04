@@ -287,6 +287,18 @@ export interface HelpersRemovedPayload {
   names: string[];
 }
 
+/**
+ * A message to this agent was refused because its job's folder is gone (Amendment 199). Its
+ * status is left as it was, so Needs You reads this to offer recreating the folder. The
+ * transcript does not show it: the composer already said so.
+ */
+export interface FolderRefusedPayload {
+  kind: 'folder_refused';
+  path: string;
+  /** The job has a worktree of its own, so `POST /api/jobs/:jobId/folder` can recreate it. */
+  restorable: boolean;
+}
+
 export type EventPayload =
   | TextPayload
   | UserTextPayload
@@ -302,7 +314,8 @@ export type EventPayload =
   | DevServerPayload
   | ConsolePayload
   | ApiRetryPayload
-  | HelpersRemovedPayload;
+  | HelpersRemovedPayload
+  | FolderRefusedPayload;
 
 export type EventKind = EventPayload['kind'];
 
