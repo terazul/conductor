@@ -17,7 +17,7 @@
 
 import { useCallback, useState } from 'react';
 import { api } from '../lib/feed.js';
-import { explain, type Notice } from '../lib/errors.js';
+import { explain, folderPresent, type Notice } from '../lib/errors.js';
 import type {
   Agent,
   HandOffRequest,
@@ -143,6 +143,19 @@ export function removeAgent(agentId: string): Promise<RemoveAgentResponse> {
 /** The same for a job: its agents go with it. */
 export function removeJob(jobId: string): Promise<{ removed: string }> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+}
+
+/**
+ * Recreate a job's deleted folder on its branch (Amendments 114, 199). A folder that is there
+ * already, put back by hand or by another tab, is what was wanted, so that refusal is success.
+ * Any other refusal throws, with the daemon's sentence.
+ */
+export async function restoreFolder(jobId: string): Promise<void> {
+  try {
+    await api(`/api/jobs/${encodeURIComponent(jobId)}/folder`, { method: 'POST', body: {} });
+  } catch (err) {
+    if (!folderPresent(err)) throw err;
+  }
 }
 
 /** The launched stack's display name, or null to show its original prompt again. */

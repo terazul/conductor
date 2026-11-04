@@ -22,6 +22,7 @@ import type {
   DecideRequest,
   Decision,
   EffortLevel,
+  FolderRefusalBody,
   HandOffRequest,
   HelperRole,
   Isolation,
@@ -88,6 +89,13 @@ const MODES: Autonomy['mode'][] = [
 
 function fail(reply: FastifyReply, code: number, error: string, detail?: string): FastifyReply {
   return reply.code(code).send(detail ? { error, detail } : { error });
+}
+
+/** A folder refusal's 409: the sentence, and what the composer needs to offer recreating it (Amendment 199). */
+function folderRefused(reply: FastifyReply, error: string, err: FolderGoneError): FastifyReply {
+  if (!err.refusal) return fail(reply, 409, error, err.message);
+  const body: FolderRefusalBody = { error, detail: err.message, ...err.refusal };
+  return reply.code(409).send(body);
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -800,7 +808,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     try {
       return reply.send(await sup.restoreFolder(req.params.jobId));
     } catch (err) {
-      if (err instanceof FolderGoneError) return fail(reply, 409, 'could not recreate the folder', err.message);
+      if (err instanceof FolderGoneError) return folderRefused(reply, 'could not recreate the folder', err);
       return fail(reply, 500, 'could not recreate the folder', err instanceof Error ? err.message : String(err));
     }
   });
@@ -856,9 +864,9 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       const result = sup.sendMessage(req.params.agentId, body.text.trim(), body.synthetic === true);
       return reply.send({ ok: true, delivery: result });
     } catch (err) {
-      // A folder that's gone says so in a sentence to show, so it goes out bare.
-      const detail = err instanceof FolderGoneError ? err.message : String(err);
-      return fail(reply, 409, 'could not deliver message', detail);
+      // A folder that's gone says so in a sentence to show, with what recreates it (Amendment 199).
+      if (err instanceof FolderGoneError) return folderRefused(reply, 'could not deliver message', err);
+      return fail(reply, 409, 'could not deliver message', String(err));
     }
   });
 

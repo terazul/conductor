@@ -10,7 +10,7 @@
 
 import { HANDOFF_SUMMARY_MAX, missingHeadings, providerBudgetLabel, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
 import { api } from '../lib/feed.js';
-import { handOffAgent, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
+import { handOffAgent, restoreFolder, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
 import { alertTitle, isOutage } from '../shell/describe.js';
 import { branchAction, previewMerge } from '../branches/endpoints.js';
@@ -38,6 +38,11 @@ export type AlertAction =
   | { id: 'preview'; jobId: string }
   /** Its job's folder was deleted (Amendment 114): recreate it, then continue. */
   | { id: 'restore'; jobId: string; agentId: string }
+  /**
+   * The same for an agent that is done and was sent a message (Amendment 199): recreate it
+   * only. The message is still in its box, to send once the folder is back.
+   */
+  | { id: 'restore_only'; jobId: string }
   /** A due note (Amendment 63): tick it done, or go to its project. */
   | { id: 'note_done'; projectId: string; noteId: string }
   | { id: 'project'; projectId: string }
@@ -220,6 +225,11 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
     case 'merged':
       // Information: what the setting merged. Its agent, when it is still there to open.
       return [...open, ...(alert.projectId ? [{ id: 'branches', projectId: alert.projectId } as const] : []), dismiss];
+
+    case 'folder_gone':
+      // A done agent's message was refused (Amendment 199): the fix is the folder; the message
+      // waits in its box, so open is the way back to it.
+      return [...(alert.jobId ? [{ id: 'restore_only', jobId: alert.jobId } as const] : []), ...open, dismiss];
   }
 }
 
@@ -292,7 +302,7 @@ export function alertNotice(
   const project = alertProject(alert, projects);
   const within = (t: string) => (project ? `${project} · ${t}` : t);
   // Worded like a request's notification, "demo · builder needs you", with the why below.
-  if (alert.kind === 'budget' || alert.kind === 'failed' || alert.kind === 'blocked_dep' || alert.kind === 'handoff_held') {
+  if (alert.kind === 'budget' || alert.kind === 'failed' || alert.kind === 'blocked_dep' || alert.kind === 'handoff_held' || alert.kind === 'folder_gone') {
     return { title: within(`${head} needs you`), body: `${head} ${subject}` };
   }
   // A warning (Amendment 124): the agent is still working, so it is not asking for you.
@@ -364,7 +374,7 @@ export async function continueAgent(agent: Pick<Agent, 'id' | 'status'>): Promis
  * 114). The daemon refuses, with the sentence, when the folder can't be recreated.
  */
 export async function restoreAndContinue(jobId: string, agent: Pick<Agent, 'id' | 'status'>): Promise<void> {
-  await api(`/api/jobs/${encodeURIComponent(jobId)}/folder`, { method: 'POST', body: {} });
+  await restoreFolder(jobId);
   await continueAgent(agent);
 }
 

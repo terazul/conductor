@@ -1,6 +1,7 @@
 /**
  * Validator checks for Amendment 114: an agent whose job's folder is gone is told so, and
- * the folder can be put back so it carries on in its own session.
+ * the folder can be put back so it carries on in its own session. Amendment 199: a done
+ * agent's refused message raises a folder_gone card and leaves it done.
  *
  * A real git repo and worktree in tmpdir; a fake SDK, as in session/verify.ts, so a launch
  * is a count in `runs`. Run:
@@ -154,11 +155,16 @@ async function main(): Promise<void> {
   git(ROOT, 'worktree', 'remove', '--force', WT);
   check('it is gone', !existsSync(WT));
 
-  const msg = await send<{ error: string; detail?: string }>('POST', '/api/agents/agt_arch/message', { text: 'carry on' });
+  const msg = await send<{ error: string; detail?: string; code?: string; jobId?: string; restorable?: boolean }>('POST', '/api/agents/agt_arch/message', { text: 'carry on' });
   check('a message is refused with 409, saying the folder is gone', msg.status === 409 && /folder .* is gone/.test(msg.body.detail ?? ''), JSON.stringify(msg.body));
-  check('and says how to fix it', /recreate it/.test(msg.body.detail ?? ''), msg.body.detail);
+  check('and says how to fix it', /recreate folder brings it back/.test(msg.body.detail ?? ''), msg.body.detail);
+  check('with what the composer needs to offer it (Amendment 199)', msg.body.code === 'folder_gone' && msg.body.jobId === 'job_f' && msg.body.restorable === true, JSON.stringify(msg.body));
   check('nothing was launched', runs.length === 0);
   check('its status is unchanged', status('agt_arch') === 'done');
+  const gone = alerts().list().find((a) => a.kind === 'folder_gone' && a.agentIds[0] === 'agt_arch');
+  check('Needs You has a folder_gone card for it, done as it is (Amendment 199)', gone?.jobId === 'job_f' && gone.detail === WT && /^folder_gone:agt_arch:\d+$/.test(gone.id), JSON.stringify(gone));
+  await send('POST', '/api/agents/agt_arch/message', { text: 'carry on' });
+  check('a second refusal is still one card for it', alerts().list().filter((a) => a.kind === 'folder_gone' && a.agentIds[0] === 'agt_arch').length === 1);
 
   agent('agt_queued', 'job_f', { status: 'queued' });
   sup.pump();
@@ -166,16 +172,21 @@ async function main(): Promise<void> {
   check('still nothing launched', runs.length === 0);
   const alert = alerts().list().find((a) => a.kind === 'failed' && a.agentIds[0] === 'agt_queued');
   check('Needs You has it, with the cause and the sentence', alert?.cause === FOLDER_GONE && /is gone/.test(alert.detail ?? ''), JSON.stringify(alert));
+  agent('agt_failed', 'job_f', { status: 'failed', sdkSessionId: 'sess_failed' });
+  const failedMsg = await send<{ code?: string }>('POST', '/api/agents/agt_failed/message', { text: 'carry on' });
+  check('a failed agent refused the same gets no second card: its failed one offers the fix', failedMsg.body.code === 'folder_gone' && !alerts().list().some((a) => a.kind === 'folder_gone' && a.agentIds[0] === 'agt_failed'), JSON.stringify(failedMsg.body));
+  check('and stays failed', status('agt_failed') === 'failed');
 
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n2 · recreate it on its branch');
   const restored = await send<{ path: string; branch: string; from: string }>('POST', '/api/jobs/job_f/folder');
   check('POST /api/jobs/:id/folder → 200, from its branch', restored.status === 200 && restored.body.from === 'branch', JSON.stringify(restored.body));
   check('the folder is back, on its branch, with what was committed', existsSync(join(WT, 'work.txt')) && git(WT, 'branch', '--show-current') === 'conductor/job_f');
+  check('the folder_gone card has cleared, the agent still done', !alerts().list().some((a) => a.kind === 'folder_gone') && status('agt_arch') === 'done');
   const evs = await send<{ events: { payload: { kind: string; text?: string } }[] }>('GET', '/api/agents/agt_arch/events');
   check("its transcript says the folder was recreated, and to check what's there", evs.body.events.some((e) => e.payload.kind === 'user_text' && /was deleted and has been recreated on conductor\/job_f/.test(e.payload.text ?? '')));
-  const again = await send<{ error: string; detail?: string }>('POST', '/api/jobs/job_f/folder');
-  check('again → 409, it is there already', again.status === 409 && /there already/.test(again.body.detail ?? ''), JSON.stringify(again.body));
+  const again = await send<{ error: string; detail?: string; code?: string }>('POST', '/api/jobs/job_f/folder');
+  check('again → 409, it is there already', again.status === 409 && /there already/.test(again.body.detail ?? '') && again.body.code === 'folder_present', JSON.stringify(again.body));
 
   const go = await send<{ ok: boolean }>('POST', '/api/agents/agt_arch/message', { text: 'carry on' });
   check('now a message goes through', go.status === 200, JSON.stringify(go.body));
@@ -197,6 +208,9 @@ async function main(): Promise<void> {
   job('job_ip', 'in_place', GONE, 'main');
   const inPlace = await send<{ error: string; detail?: string }>('POST', '/api/jobs/job_ip/folder');
   check('a job that works in a folder of its own choosing → 409, saying what to do', inPlace.status === 409 && /put that folder back/.test(inPlace.body.detail ?? ''), JSON.stringify(inPlace.body));
+  agent('agt_ip', 'job_ip', { sdkSessionId: 'sess_ip' });
+  const ipMsg = await send<{ code?: string; restorable?: boolean }>('POST', '/api/agents/agt_ip/message', { text: 'carry on' });
+  check('a message to its agent says it cannot be recreated, and raises no card', ipMsg.status === 409 && ipMsg.body.code === 'folder_gone' && ipMsg.body.restorable === false && !alerts().list().some((a) => a.kind === 'folder_gone'), JSON.stringify(ipMsg.body));
   const none = await send<{ error: string }>('POST', '/api/jobs/job_nope/folder');
   check('no such job → 404', none.status === 404);
 

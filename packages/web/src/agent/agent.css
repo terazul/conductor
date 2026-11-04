@@ -1384,6 +1384,23 @@ a.ag-tool-subj:focus-visible {
   background: color-mix(in srgb, var(--fail) 8%, transparent);
 }
 
+/* What fixes the notice (Amendment 199): recreate a gone folder. */
+.ag-notice-act {
+  margin-left: 8px;
+  font: inherit;
+  padding: 1px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--need);
+  color: var(--need);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ag-notice-act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── inspector ─────────────────────────────────────────────────────────────── */
 
 .ag-insp {

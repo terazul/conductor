@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { providerBudgetLabel, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
-import { checkOutageNow, retryNowAgent, stopRetryingAgent, stopWaitingOutage, useCommand } from '../agent/endpoints.js';
+import { checkOutageNow, restoreFolder, retryNowAgent, stopRetryingAgent, stopWaitingOutage, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { openBranches } from '../shell/nav.js';
 import { alertTitle, isOutage, reconnectLine, retryHead, retryHint } from '../shell/describe.js';
@@ -55,6 +55,7 @@ const KIND: Record<AlertKind, { label: string; tone: string }> = {
   budget_over: { label: 'Over its daily budget', tone: 'var(--need)' },
   finished: { label: 'Finished', tone: 'var(--need)' },
   merged: { label: 'Merged', tone: 'var(--done)' },
+  folder_gone: { label: 'Folder gone', tone: 'var(--need)' },
 };
 
 /** What the strip says once a fix was accepted, until the daemon clears the card. */
@@ -130,6 +131,9 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         if (agent) void cmd.run('Recreating the folder', () => restoreAndContinue(a.jobId, agent), SENT);
         return;
       }
+      case 'restore_only':
+        void cmd.run('Recreating the folder', () => restoreFolder(a.jobId), 'folder recreated — send your message again from its box');
+        return;
       case 'note_done':
         void cmd.run('Ticking the note', () => editNote(a.projectId, a.noteId, { done: true }), 'Done.');
         return;
@@ -247,7 +251,8 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
         {alert.kind === 'merged' && alert.sha !== undefined && <Kv k="merge" v={alert.sha.slice(0, 7)} />}
         {alert.kind === 'finished' && alert.detail !== undefined && <Kv k="not merged by itself" v={alert.detail} tone="var(--need)" />}
         {alert.kind === 'merged' && alert.detail !== undefined && <Kv k="not cleaned up" v={alert.detail} tone="var(--need)" />}
-        {alert.detail !== undefined && alert.kind !== 'finished' && alert.kind !== 'merged' && <Kv k="sdk said" v={alert.detail} />}
+        {alert.kind === 'folder_gone' && alert.detail !== undefined && <Kv k="folder" v={alert.detail} tone="var(--need)" />}
+        {alert.detail !== undefined && alert.kind !== 'finished' && alert.kind !== 'merged' && alert.kind !== 'folder_gone' && <Kv k="sdk said" v={alert.detail} />}
         {alert.endpoint !== undefined && <Kv k="endpoint" v={alert.endpoint} />}
         {alert.port !== undefined && <Kv k="port" v={String(alert.port)} />}
         {alert.kind === 'note_due' && alert.noteText !== undefined && (
@@ -412,6 +417,7 @@ function isFix(a: AlertAction): boolean {
     a.id === 'note_done' ||
     a.id === 'hand_off' ||
     a.id === 'restore' ||
+    a.id === 'restore_only' ||
     a.id === 'retry_now' ||
     a.id === 'check_now' ||
     a.id === 'merge_clean'
@@ -435,6 +441,8 @@ function labelOf(a: AlertAction): string {
       return 'open preview';
     case 'restore':
       return 'recreate folder and continue';
+    case 'restore_only':
+      return 'recreate folder';
     case 'note_done':
       return '✓ mark done';
     case 'project':
@@ -468,6 +476,8 @@ function titleOf(a: AlertAction): string | undefined {
       return 'Edit the summary the agents after it are told, then send it';
     case 'restore':
       return "Put the job's worktree back on its branch (or from main if the branch is gone), then continue in the same session";
+    case 'restore_only':
+      return "Put the job's worktree back on its branch (or from main if the branch is gone). Its conversation is kept; your message waits in its box";
     case 'dismiss':
       return 'Put it away. It comes back only if this happens again.';
     case 'retry_now':

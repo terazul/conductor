@@ -419,6 +419,19 @@ export interface SendMessageResponse {
 }
 
 /**
+ * The 409 for a job whose folder is gone or is there already (Amendment 199), from POST
+ * /api/agents/:agentId/message and POST /api/jobs/:jobId/folder. `folder_gone` with
+ * `restorable` means that POST can recreate it; `folder_present` means it is there.
+ */
+export interface FolderRefusalBody {
+  error: string;
+  detail: string;
+  code: 'folder_gone' | 'folder_present';
+  jobId: string;
+  restorable: boolean;
+}
+
+/**
  * Hand off for an agent that ended its turn without calling `hand_off` (Amendment 104):
  * the summary the agents after it are told, edited by the person.
  */
@@ -791,7 +804,12 @@ export type AlertKind =
   /** A worktree job finished with its branch ahead of the target: merge it? (Amendment 144) */
   | 'finished'
   /** A finished job's branch was merged by itself, and cleaned up (Amendment 144). Information only. */
-  | 'merged';
+  | 'merged'
+  /**
+   * A message to an agent that is not failed was refused because its job's worktree is gone
+   * (Amendment 199): recreate it. Clears once the folder is back. A failed agent's is `failed`.
+   */
+  | 'folder_gone';
 
 /**
  * Not a PendingRequest: a pending request is a tool call waiting for approve or deny,
@@ -838,7 +856,7 @@ export interface Alert {
    * `copilot` or `openrouter`.
    */
   provider?: string;
-  /** failed: what the SDK said, from the status event's `detail`. */
+  /** failed: what the SDK said, from the status event's `detail`. folder_gone (Amendment 199): the folder that is gone. */
   detail?: string;
   /**
    * blocked_dep (Amendment 85): the agent being waited on. Not in `agentIds`, so it isn't

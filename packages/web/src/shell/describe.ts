@@ -547,6 +547,9 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
           ? `was merged into ${alert.into ?? 'main'} and cleaned up`
           : `was merged into ${alert.into ?? 'main'}, and not cleaned up`,
       };
+    case 'folder_gone':
+      // A done agent's message was refused (Amendment 199); the composer kept it.
+      return { head: who[0] ?? 'an agent', subject: "lost its folder: your message wasn't sent, and is still in its box" };
   }
 }
 
@@ -581,6 +584,8 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
       return 'finished: merge?';
     case 'merged':
       return 'merged';
+    case 'folder_gone':
+      return 'folder gone';
   }
 }
 
