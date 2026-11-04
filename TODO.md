@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Copy a reply without the app's colours.** Asked for (4 Nov): *"whenever I ask you for a reply, make the
+  background "null" and give me a copy button, that way I can copy it and paste it into a black or white theme window."*
+  *Done (4 Nov): Amendment 201 (**⧉ copy** on every reply, beside its time, open or folded, copies the reply only: its
+  markdown as `text/plain`, and its rendering with no `style`, `class`, colour or background as `text/html`, so it
+  pastes in the target's colours; **⌘C** in the transcript copies a selection cleaned the same way. On screen nothing changes).*
+
 - [x] **Mark every reply on an agent read at once.** Asked for (4 Nov): *"add a button to mark all "Read"
   checkmarks on an agent as read (and close them)."*
   *Done (4 Nov): Amendment 200 (**✓ mark all read (N)** beside **fold all**, while there is an unread reply;

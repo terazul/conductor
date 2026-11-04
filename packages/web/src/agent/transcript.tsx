@@ -26,7 +26,7 @@
  *     the history and must not vanish with the request.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { HANDOFF_BY_USER_NOTE, HANDOFF_HELD_NOTE } from '@conductor/shared';
 import type {
   BlockMode,
@@ -52,6 +52,7 @@ import { canUntick, isRead, markReply, useReplyAcks, type ReplyAcks } from '../l
 import { lineCount, renderMarkdown } from './markdown.js';
 import { fmtStamp, fullStamp } from '../lib/when.js';
 import { Chevron, ChevronSpace } from '../shell/chevron.js';
+import { cleanHtml, copyRich } from '../lib/clipboard.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
 
@@ -567,6 +568,65 @@ function carried(turn: Turn): string {
 }
 
 /**
+ * A reply's ⧉ copy (Amendment 201): its prose and nothing of its activity, as the markdown the
+ * agent wrote and as HTML with no colour, so it pastes into a black or a white window in that
+ * window's colours (agent/replycopy.tsx). Beside its time, outside the body, so it is there
+ * folded or open and never beside the Read it box. It says "copied" for a moment, or that it
+ * couldn't, as a code block's does (CodeBlock.tsx).
+ */
+function ReplyCopy({ reply }: { reply: Block[] }) {
+  const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const say = (next: { ok: boolean; why?: string }): void => {
+    setSaid(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
+  };
+  const copy = (): void => {
+    const html = import('./replycopy.js').then((m) => m.replyClipboard(reply).html);
+    void copyRich(proseOf(reply), html).then(
+      () => say({ ok: true }),
+      (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
+    );
+  };
+  return (
+    <button
+      type="button"
+      className={`ag-reply-copy${said && !said.ok ? ' is-failed' : ''}`}
+      aria-label="Copy this reply"
+      title={said && !said.ok ? `Couldn't copy: ${said.why}` : 'Copy the reply, without its colours, to paste anywhere'}
+      onClick={copy}
+    >
+      {said ? (said.ok ? '✓ copied' : "couldn't copy") : '⧉ copy'}
+    </button>
+  );
+}
+
+/**
+ * Cmd-C in the transcript (Amendment 201): the selection, `cleanHtml`'d, so what you paste takes
+ * the target's colours rather than the theme's that the browser would have inlined. Anything
+ * going wrong leaves the browser's own copy to it: this never stops a copy.
+ */
+function copySelection(e: ClipboardEvent<HTMLDivElement>): void {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const box = document.createElement('div');
+    for (let i = 0; i < sel.rangeCount; i++) box.appendChild(sel.getRangeAt(i).cloneContents());
+    const html = cleanHtml(box.innerHTML);
+    const text = sel.toString();
+    e.clipboardData.setData('text/html', html);
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+  } catch {
+    // The browser's own copy, colours and all, is better than none.
+  }
+}
+
+/**
  * A turn's activity (Amendment 193): FOLDED to its latest step, with a toggle for the steps
  * before it. A long run is a screenful of tool rows and asides, and what you look for is where
  * it has got to. Prose that is the latest step shows its last line, which is where it is now.
@@ -734,6 +794,7 @@ function AgentTurn({
           </>
         )}
       </div>
+      {split.replySeq !== null && <ReplyCopy reply={split.reply} />}
       <Stamp ts={replyTs(split)} />
     </div>
   );
@@ -835,7 +896,7 @@ export function Transcript({
   }
 
   return (
-    <div className="ag-trans">
+    <div className="ag-trans" onCopy={copySelection}>
       {turns.map((t, i) =>
         t.who === 'you' ? (
           <SentTurn key={t.key} turn={t} agentId={agentId} startFolded={startFolded.includes(t.key)} />
