@@ -69,7 +69,8 @@ import { DECLINE_NOTE, bannerLine, bringLine, homeish, questionLines } from '../
 import { importable, mergeIncoming, onSettings, readSetting, writeSetting } from './settings.js';
 import { SLOTS_DEFAULT, SLOTS_KEY, SLOTS_MAX, STACKS_DEFAULT, STACKS_KEY, STACKS_MAX, slotsProblem, stacksProblem } from '../settings/slots.js';
 import { readDraft, writeDraft } from './drafts.js';
-import { copyText } from './clipboard.js';
+import { cleanHtml, copyRich, copyText } from './clipboard.js';
+import { replyClipboard } from '../agent/replycopy.js';
 import { SEEN_KEY, isFinished, markSeen, parseSeen, seenOnAgent, serializeSeen, startSeen, unseenFinished } from './seen.js';
 import { SEEN_AGENTS_KEY, markAgentsSeen, parseSeenAgents, serializeSeenAgents, unseenDoneAgents } from './seen.js';
 import { REVOKE_NOTE, copyLine, ruleOrigin, ruleTitle } from '../settings/rules.js';
@@ -2569,9 +2570,127 @@ console.log('\n46 · one button ticks every reply on an agent read, in one write
   writeSetting(UNF, wasUnf);
 }
 
+console.log('\n47 · a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C (Amendment 201)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const AG = 'agt_copy';
+  const e = (n: number, payload: EventPayload): Event => ({ seq: n, ts: new Date(Date.UTC(2026, 10, 4, 9, 0, n)).toISOString(), projectId: P, jobId: J, agentId: AG, payload });
+  const say = (n: number, text: string): Event => e(n, { kind: 'text', text });
+  const tool = (n: number): Event => e(n, { kind: 'tool_start', toolUseId: `tu${n}`, tool: 'Read', input: { file_path: 'a.ts' }, label: 'Read a.ts' });
+  const done = (n: number): Event => e(n, { kind: 'status', status: 'done' });
+  const colourless = (h: string): boolean => !/color|background|style=|class=|data-theme|var\(--/i.test(h.replace(/ style="font-family: monospace"/g, ''));
+
+  // The builder: the reply's markdown, and that rendered with no colour.
+  const MD = [
+    '# Findings',
+    '',
+    'Run `make test` first, and see [the docs](https://example.com/docs?a=1&b=2).',
+    '',
+    '- one **bold**',
+    '- two',
+    '  1. nested',
+    '- [x] done task',
+    '',
+    '| name | n |',
+    '|:-----|--:|',
+    '| a    | 1 |',
+    '',
+    '```ts',
+    'const x = 1 < 2;',
+    '```',
+    '',
+    '```mermaid',
+    'graph TD; A-->B',
+    '```',
+    '',
+    '> quoted',
+  ].join('\n');
+  const turn = buildTranscript([e(1, { kind: 'user_text', text: 'go' }), tool(2), say(3, 'NOT_THE_REPLY'), tool(4), say(5, MD), say(6, 'And a second paragraph.'), done(7)]).find((t) => t.who === 'agent')!;
+  const split = splitTurn(turn, false);
+  const clip = replyClipboard(split.reply);
+  check('text/plain is the reply\'s markdown as the agent wrote it, its prose blocks in turn', clip.text === `${MD}\n\nAnd a second paragraph.`, JSON.stringify(clip.text));
+  check('…the reply only: nothing it said between its tools', !clip.text.includes('NOT_THE_REPLY') && !clip.html.includes('NOT_THE_REPLY') && !clip.text.includes('finished'));
+  check('text/html has no colour, background, style or class anywhere, but monospace on code', colourless(clip.html) && clip.html.includes('<code style="font-family: monospace">make test</code>'), clip.html);
+  check('headings, lists (nested, numbered), bold and a quote survive as plain HTML', clip.html.includes('<h1>Findings</h1>') && /<ul><li>one <strong>bold<\/strong><\/li><li>two<ol><li>nested<\/li><\/ol><\/li>/.test(clip.html) && clip.html.includes('<blockquote><p>quoted</p></blockquote>'), clip.html);
+  check('a table survives, with its alignment as an attribute and not a style', clip.html.includes('<table><thead><tr><th align="left">name</th><th align="right">n</th></tr></thead><tbody><tr><td align="left">a</td><td align="right">1</td></tr></tbody></table>'), clip.html);
+  check('a web link survives with its href', clip.html.includes('<a href="https://example.com/docs?a=1&amp;b=2">the docs</a>'), clip.html);
+  check('a code block is <pre><code>, no background, no copy button, the code escaped', clip.html.includes('<pre style="font-family: monospace"><code style="font-family: monospace">const x = 1 &lt; 2;</code></pre>') && !clip.html.includes('copy'), clip.html);
+  check('a mermaid diagram goes in as its source, in a code block', clip.html.includes('<pre style="font-family: monospace"><code style="font-family: monospace">graph TD; A--&gt;B</code></pre>') && !/<svg|<button|source<|hidden/.test(clip.html), clip.html);
+  check('a task keeps whether it is done, as text', clip.html.includes('<li>☑ done task</li>'), clip.html);
+  check('the second prose block follows, as a paragraph', clip.html.endsWith('<p>And a second paragraph.</p>'));
+
+  // The cleaner, on what a selection's innerHTML looks like.
+  const sel = '<div class="ag-msg is-unread" id="t-a2" style="display:flex"><button class="ag-who ag-who-fold" aria-expanded="true"><i class="sh-nav-chev" aria-hidden="true"></i>developer</button>' +
+    '<div class="ag-body"><div class="ag-md"><p style="color: rgb(230, 230, 230); background-color: rgb(20, 20, 20);">Hi <code class="x" style="background:#222">x</code> <a href="#files?path=a.ts" class="ag-file">a.ts</a></p>' +
+    '<div class="ag-code" data-theme="light"><button type="button" class="ag-code-copy">⧉ copy</button><pre class="lang-sh" style="background: var(--paper)"><code>ls &gt; out</code></pre></div>' +
+    '<div class="md-table"><table><tbody><tr><td style="text-align:center;color:red" colspan="2">c</td></tr></tbody></table></div></div>' +
+    '<label class="ag-ack"><input type="checkbox">Read it</label></div><button class="ag-reply-copy">⧉ copy</button><time class="ag-when" dateTime="x">09:00</time>' +
+    '<svg viewBox="0 0 1 1"><g><text fill="#fff">B</text></g></svg><!-- c --><span title="a > b">tail</span></div>';
+  const clean = cleanHtml(sel);
+  check('the cleaner strips every style and class, colours included, and keeps structure', clean === '<p>Hi <code style="font-family: monospace">x</code> a.ts</p><pre style="font-family: monospace"><code style="font-family: monospace">ls &gt; out</code></pre><table><tbody><tr><td colspan="2" align="center">c</td></tr></tbody></table>09:00tail' .replace(/^/, 'developer'), clean);
+  check('…drops the app\'s controls, the chevron and a drawing, and keeps an in-app link\'s text', !/copy|Read it|<svg|B<|sh-nav/.test(clean) && clean.includes(' a.ts</p>'));
+  check('…closes what it opened, even from a cut-off selection', cleanHtml('<ul><li>one<li>two') === '<ul><li>one<li>two</li></li></ul>' && cleanHtml('</p>loose</div>') === 'loose');
+  check('…and leaves plain text as it is', cleanHtml('a &amp; b') === 'a &amp; b' && cleanHtml('') === '');
+
+  // The clipboard: both flavours where it can, the text alone where it can't.
+  const nav = globalThis as unknown as { navigator?: unknown; ClipboardItem?: unknown };
+  const wasNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const wasItem = nav.ClipboardItem;
+  const wrote: Record<string, string>[] = [];
+  const plain: string[] = [];
+  class Item {
+    constructor(readonly parts: Record<string, Blob | Promise<Blob>>) {}
+  }
+  const setNav = (clipboard: unknown): void => {
+    Object.defineProperty(globalThis, 'navigator', { value: { clipboard }, configurable: true, writable: true });
+  };
+  setNav({
+    write: async (items: Item[]) => {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(items[0]!.parts)) out[k] = await (await v).text();
+      wrote.push(out);
+    },
+    writeText: async (t: string) => void plain.push(t),
+  });
+  nav.ClipboardItem = Item;
+  await copyRich(clip.text, Promise.resolve(clip.html));
+  check('with ClipboardItem it writes text/plain and text/html, once', wrote.length === 1 && wrote[0]!['text/plain'] === clip.text && wrote[0]!['text/html'] === clip.html && plain.length === 0, JSON.stringify(Object.keys(wrote[0] ?? {})));
+  nav.ClipboardItem = undefined;
+  await copyRich('just text', Promise.resolve('<p>x</p>'));
+  check('without it, the text alone, through copyText', plain.join() === 'just text' && wrote.length === 1);
+  nav.ClipboardItem = Item;
+  await copyRich('after a failed render', Promise.reject(new Error('no renderer')));
+  check('if the HTML fails, the text is still copied', plain.at(-1) === 'after a failed render');
+  if (wasNav) Object.defineProperty(globalThis, 'navigator', wasNav);
+  else delete nav.navigator;
+  nav.ClipboardItem = wasItem;
+
+  // The button, rendered: on an unread reply, on a folded read one, on neither yours nor a turn with no reply.
+  const run = buildTranscript([
+    e(20, { kind: 'user_text', text: 'one' }), tool(21), say(22, 'FIRST_REPLY'), done(23),
+    e(24, { kind: 'user_text', text: 'two' }), tool(25), say(26, 'SECOND_REPLY'), done(27),
+    e(28, { kind: 'user_text', text: 'three' }), say(29, 'Working on it.'), tool(30),
+  ]);
+  writeSetting(REPLY_ACKS_KEY, serializeAcks({ sinceSeq: 20, agents: { [AG]: [22] } }));
+  const html = renderToStaticMarkup(createElement(Transcript, { turns: run, agentId: AG, role: 'developer', streaming: true, links: null }));
+  writeSetting(REPLY_ACKS_KEY, null);
+  const turnOf = (k: string, next: string): string => html.slice(html.indexOf(`id="t-${k}"`), next ? html.indexOf(`id="t-${next}"`) : undefined);
+  const BTN = '<button type="button" class="ag-reply-copy" aria-label="Copy this reply" title="Copy the reply, without its colours, to paste anywhere">⧉ copy</button>';
+  const readT = turnOf('a21', 'u24');
+  const unreadT = turnOf('a25', 'u28');
+  check('an unread reply has its ⧉ copy, after its body and just before its time', unreadT.includes('class="ag-ack"') && unreadT.includes(`</div>${BTN}<time class="ag-when"`), unreadT);
+  check('a folded read reply has it too, to copy without unfolding it', readT.includes('class="ag-folded-read"') && readT.includes(`</div>${BTN}<time class="ag-when"`), readT);
+  check('your turns and a turn with no reply yet have none', !turnOf('u20', 'a21').includes('ag-reply-copy') && !turnOf('a29', '').includes('ag-reply-copy') && (html.match(/ag-reply-copy/g) ?? []).length === 2);
+  check('the transcript cleans what Cmd-C copies', /<div className="ag-trans" onCopy=\{copySelection\}>/.test(src('../agent/transcript.tsx')) && /e\.clipboardData\.setData\('text\/html', html\);\s*e\.clipboardData\.setData\('text\/plain', text\);\s*e\.preventDefault\(\);\s*\} catch/.test(src('../agent/transcript.tsx')));
+  const css = src('../agent/agent.css');
+  const rule = /\.ag-reply-copy \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  check('it is a sibling of the body and the time in the turn\'s row, its own width, top-aligned and quiet', /flex: none;/.test(rule) && /align-self: flex-start;/.test(rule) && /white-space: nowrap;/.test(rule) && /color: var\(--ink3\);/.test(rule) && !/position: absolute/.test(rule), rule);
+  check('…not inside the body, where the Read it box is, nor on the time', !/\.ag-body .ag-reply-copy|\.ag-when .ag-reply-copy|\.ag-ack .ag-reply-copy/.test(css));
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C.\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

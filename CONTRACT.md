@@ -200,6 +200,57 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 201 — post-merge, applied. **A reply copies without the app's colours, from its ⧉ copy and from ⌘C.**
+
+Web only (`lib/clipboard.ts`, the new `agent/replycopy.tsx`, `agent/transcript.tsx`, `agent/agent.css`,
+`lib/verify.ts`), and `docs/MANUAL.md`. Asked 4 Nov: *"whenever I ask you for a reply, make the background "null"
+and give me a copy button, that way I can copy it and paste it into a black or white theme window."* No migration.
+
+Copying a reply by selecting it and pressing ⌘C carried the theme: Chrome inlines computed styles in the
+`text/html` it copies, so a dark-theme reply pasted into a white document was light text on a dark box, and
+either theme's text pasted into a dark window was dark.
+
+- **The button.** **⧉ copy** on every agent turn with a reply (`splitTurn`'s `replySeq` not null), a sibling of
+  its body and its time, just before the time (Amendment 195): outside the body, so never beside the Read it box,
+  and there unread, read and open, or read and folded, so a folded reply copies without opening. None on your
+  turns, an auto turn, or a turn still going or ended on a tool. Quiet mono in `--ink3`, `min-width: 8ch` so
+  **✓ copied** doesn't move the row, which it says for 2 s (or **couldn't copy**, with why in its title, for 4 s),
+  as a code block's does (Amendment 185).
+- **What it copies** (`replyClipboard(reply)`): the reply's prose only, not its activity.
+  - `text/plain` is its markdown as the agent wrote it, its prose blocks joined by a blank line.
+  - `text/html` is each block through `renderMarkdown` and `renderToStaticMarkup`, then `cleanHtml`.
+  - `copyRich(text, html)` writes both with one `ClipboardItem`, the HTML as a promise so the write starts in
+    the click. Without `ClipboardItem`, or if the write is refused or the render fails, it is `copyText(text)`.
+  - `replycopy.tsx` holds `react-dom/server`, and the transcript loads it on the first copy (its own chunk,
+    63 kB gzipped), not with the app.
+- **`cleanHtml(html)`**, pure, on a string: no `style` and no `class` survive, so no colour or background.
+  - Kept: headings, paragraphs, lists (an `ol`'s `start`), quotes, tables (a cell's span, and its alignment as
+    `align`), bold, italic and strikethrough, `hr`, `br`, and links with an `http(s)` href. An in-app link is
+    its text.
+  - `pre` and `code` carry `font-family: monospace` and nothing else, so the target draws code in its own
+    colours. A diagram is its source in a code block, which is what a static render of `MermaidBlock` is.
+  - A task box becomes ☑ or ☐.
+  - Divs, spans, buttons and labels give up their tags and keep their text.
+  - Dropped with their contents: SVG (a drawn diagram, the theme's colours), scripts, `hidden` and
+    `aria-hidden` elements (the chevrons), and the app's own controls (`ag-code-copy`, `ag-reply-copy`,
+    `ag-ack`, the diagram's toggle and error, the cursor).
+- **⌘C.** The transcript's `copy` handler clones the selection's ranges, sets `text/html` to their
+  `cleanHtml` and `text/plain` to `selection.toString()`, and prevents the default. A collapsed selection, or
+  anything throwing, leaves the browser's own copy. The terminal is not in the transcript, and a code block's
+  ⧉ copy writes plain text as before. Both copy buttons are `user-select: none`, so their labels aren't in a
+  selection's text.
+- **On screen** nothing changes: the reply keeps its theme.
+- **Checks.** Web `lib/verify.ts` §47, 23 checks.
+  - `replyClipboard`: the text is the markdown, the reply's only; the HTML has no colour, `style` or `class`
+    but monospace on code; a heading, nested lists, a quote, an aligned table, a link, inline code, a code
+    block, a mermaid source and a task survive.
+  - `cleanHtml` on a selection-shaped string, a cut-off one and plain text.
+  - `copyRich` with and without `ClipboardItem`, and with a failed render.
+  - The button rendered on an unread reply and a folded read one, and absent on your turns and a turn with no
+    reply; the `onCopy` wiring; and the CSS placing it.
+  - Seen headless in Chrome, both themes, through CDP with clipboard permission: the button's `text/html` and
+    ⌘C's had no colour.
+
 ### Amendment 200 — post-merge, applied. **One button ticks every reply on an agent read, and folds them.**
 
 Web only (`lib/replies.ts`, `agent/folds.ts`, the new `agent/readall.tsx`, `agent/agent.tsx`, `lib/verify.ts`),
