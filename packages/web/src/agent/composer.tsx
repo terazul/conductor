@@ -548,7 +548,7 @@ export function Composer({ agent }: { agent: Agent }) {
           onKeyDown={(e) => {
             // ⏎ sends, ⌥⏎ / ⇧⏎ makes a newline; with ⏎ new line ticked, ⏎ is a newline too and
             // only send sends (Amendment 203).
-            if (enterAction(e, enterSendsNow) === 'send') {
+            if (enterAction({ key: e.key, shiftKey: e.shiftKey, altKey: e.altKey, composing: e.nativeEvent.isComposing }, enterSendsNow) === 'send') {
               e.preventDefault();
               void submit();
             }

@@ -210,7 +210,8 @@ in that case, you have to hit Send."*
 - **⏎ new line**, a checkbox where the *⇧⏎ newline* hint was, in the row under the message box. Unticked
   (the default, and what an absent setting means) ⏎ sends, as before. Ticked, ⏎ is a new line and only
   **send** sends; the label turns the live colour so it's plain that ⏎ won't send. ⇧⏎ and ⌥⏎ are a new
-  line either way.
+  line either way, and a ⏎ that picks a word in a Japanese or Chinese input method never sends
+  (`isComposing`, which the old handler didn't check).
 - One setting for every agent, `conductor.enterNewline` (`newline` or `send`), kept in Settings like the
   agent settings fold (Amendment 96), so it's the same in every browser.
 - The rule is `enterAction(e, sends)` in `agent/settingsfold.ts`, pure, so it's checked under Node. Other

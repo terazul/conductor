@@ -2715,7 +2715,8 @@ await (async () => {
   check('⇧⏎ and ⌥⏎ are a new line either way', ['type', 'type', 'type', 'type'].join() === [enterAction(key('Enter', true), true), enterAction(key('Enter', false, true), true), enterAction(key('Enter', true), false), enterAction(key('Enter', false, true), false)].join());
   check('other keys are typed', enterAction(key('a'), true) === 'type' && enterAction(key('a'), false) === 'type');
   const comp = src('../agent/composer.tsx');
-  check('the box asks enterAction, with the setting', /if \(enterAction\(e, enterSendsNow\) === 'send'\)/.test(comp) && /const enterSendsNow = enterSends\(useSetting\(ENTER_KEY\)\);/.test(comp));
+  check('a ⏎ that picks a word in an input method never sends', enterAction({ ...key('Enter'), composing: true }, true) === 'type');
+  check('the box asks enterAction, with the setting and the input method', /if \(enterAction\(\{ key: e\.key, shiftKey: e\.shiftKey, altKey: e\.altKey, composing: e\.nativeEvent\.isComposing \}, enterSendsNow\) === 'send'\)/.test(comp) && /const enterSendsNow = enterSends\(useSetting\(ENTER_KEY\)\);/.test(comp));
   check('a real checkbox, ticked when ⏎ is a new line, writing the setting', /<input\s+type="checkbox"\s+checked=\{!enterSendsNow\}\s+onChange=\{\(e\) => writeSetting\(ENTER_KEY, e\.target\.checked \? 'newline' : 'send'\)\}/.test(comp) && /⏎ new line\s*<\/label>/.test(comp));
   check('send still sends, whatever the box', /onClick=\{\(\) => void submit\(\)\}/.test(comp));
   const css = src('../agent/agent.css');

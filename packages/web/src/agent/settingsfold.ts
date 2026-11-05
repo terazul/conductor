@@ -34,10 +34,15 @@ export function enterSends(raw: string | null): boolean {
 
 /**
  * What a key press in the message box does: send it, or leave the key to the box (a new line).
- * ⇧⏎ and ⌥⏎ are always a new line; plain ⏎ sends only while ⏎ sends.
+ * ⇧⏎ and ⌥⏎ are always a new line; plain ⏎ sends only while ⏎ sends. A ⏎ that picks a word
+ * while typing Japanese or Chinese (`composing`) is the input method's, never a send, as the
+ * navigator's new-file box already has it.
  */
-export function enterAction(e: { key: string; shiftKey: boolean; altKey: boolean }, sends: boolean): 'send' | 'type' {
-  return e.key === 'Enter' && !e.shiftKey && !e.altKey && sends ? 'send' : 'type';
+export function enterAction(
+  e: { key: string; shiftKey: boolean; altKey: boolean; composing?: boolean },
+  sends: boolean,
+): 'send' | 'type' {
+  return e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.composing && sends ? 'send' : 'type';
 }
 
 export interface SettingsLine {
