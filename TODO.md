@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **The reply's copy button blends in; light the waiting buttons while an agent works.** Asked for (5 Nov):
+  *"make the copy button more noticeable. Also, when we have the agent busy doing work, make the "send" not
+  highlighted and highlight next wake and later buttons. When complete, go back to just highlighting send."*
+  *Done (5 Nov): Amendment 202 (⧉ copy is a bordered `--live` chip; while working, ⏲ later and ⏲ when done /
+  next wake are lit and send is plain, and send is lit again once it stops).*
+
 - [x] **Copy a reply without the app's colours.** Asked for (4 Nov): *"whenever I ask you for a reply, make the
   background "null" and give me a copy button, that way I can copy it and paste it into a black or white theme window."*
   *Done (4 Nov): Amendment 201 (**⧉ copy** on every reply, beside its time, open or folded, copies the reply only: its

@@ -324,6 +324,9 @@ export function Composer({ agent }: { agent: Agent }) {
   // An orchestrator's goes sooner, at its next wake, with its helpers' report (Amendment 174).
   const doneRefused = whenDoneRefusal(agent.status);
   const orchestrator = (agent.helperCap ?? 0) > 0;
+  // Working: the waiting buttons are lit and send isn't; not working, send is (Amendment 202).
+  // An orchestrator queued on its helpers is still at work, as the scheduled list says of it.
+  const busyNow = agent.status === 'working' || (orchestrator && agent.status === 'queued');
   const whenDone = async () => {
     const body = text.trim();
     if (body.length === 0) return;
@@ -600,9 +603,14 @@ export function Composer({ agent }: { agent: Agent }) {
 
           <div className="ag-crow-r">
             <span className="ui-lab">⇧⏎ newline</span>
+            {/*
+             * While the agent is working, a message you send now interrupts what it's doing, so
+             * the waiting kinds (next wake / when done, and later) are the ones lit, and send goes
+             * plain. Once it's done, send is lit again (Amendment 202).
+             */}
             <button
               type="button"
-              className={`ag-later-btn${later ? ' is-on' : ''}`}
+              className={`ag-later-btn${later ? ' is-on' : ''}${busyNow ? ' is-hot' : ''}`}
               aria-expanded={later}
               onClick={() => setLater((v) => !v)}
               title="Send this message at a time you choose"
@@ -611,7 +619,7 @@ export function Composer({ agent }: { agent: Agent }) {
             </button>
             <button
               type="button"
-              className="ag-later-btn"
+              className={`ag-later-btn${busyNow ? ' is-hot' : ''}`}
               onClick={() => void whenDone()}
               disabled={send.busy || text.trim().length === 0 || doneRefused !== null}
               title={
@@ -625,7 +633,7 @@ export function Composer({ agent }: { agent: Agent }) {
             </button>
             <button
               type="button"
-              className="fl-btn is-primary"
+              className={busyNow ? 'fl-btn' : 'fl-btn is-primary'}
               onClick={() => void submit()}
               disabled={send.busy || text.trim().length === 0}
             >

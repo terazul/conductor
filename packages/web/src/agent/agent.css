@@ -452,37 +452,41 @@
 }
 
 /*
- * A reply's ⧉ copy (Amendment 201): just before its time, quiet and mono as the time is, and a
- * sibling of it and of the body, so it sits on the reply's first line and never on the time or
- * the Read it box, which is inside the body.
+ * A reply's ⧉ copy (Amendment 201): just before its time, and a sibling of it and of the body,
+ * so it sits on the reply's first line and never on the time or the Read it box, which is
+ * inside the body. A bordered chip in the live colour, not muted text (Amendment 202): as quiet
+ * as the time, it was lost among the stamps and labels around it.
  */
 .ag-reply-copy {
   flex: none;
   align-self: flex-start;
-  padding: 3px 0 0;
+  padding: 2px 9px;
   background: none;
-  border: 0;
+  border: 1px solid var(--live);
+  border-radius: 5px;
   font-family: var(--mono);
   font-size: var(--fs-sm);
+  font-weight: 600;
   line-height: inherit;
   white-space: nowrap;
   /* As wide as "✓ copied", so saying it doesn't move the reply. */
-  min-width: 8ch;
-  text-align: right;
+  min-width: 10ch;
+  text-align: center;
   user-select: none;
-  color: var(--ink3);
+  color: var(--live);
   cursor: pointer;
-  transition: color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 
 .ag-reply-copy:hover,
 .ag-reply-copy:focus-visible {
   outline: none;
-  color: var(--ink);
+  background: color-mix(in srgb, var(--live) 16%, transparent);
 }
 
 .ag-reply-copy.is-failed {
   color: var(--fail);
+  border-color: var(--fail);
 }
 
 /*
@@ -2068,8 +2072,27 @@ a.ag-files-p:focus-visible {
   border-color: var(--ink3);
 }
 
+/*
+ * While the agent is working, the waiting buttons are the lit ones, as send is otherwise
+ * (`.fl-btn.is-primary`'s colours), and send goes plain (Amendment 202). After `.is-on` on
+ * purpose: lit wins over open, at the same specificity, by coming later.
+ */
+.ag-later-btn.is-hot {
+  background: color-mix(in srgb, var(--live) 14%, var(--surf));
+  border-color: color-mix(in srgb, var(--live) 55%, transparent);
+  color: var(--live);
+  font-weight: 600;
+}
+
+.ag-later-btn.is-hot:hover {
+  background: color-mix(in srgb, var(--live) 22%, var(--surf));
+  border-color: var(--live);
+}
+
 /* "⏲ when done" with nothing typed, or for an agent with no turn left (Amendment 157). */
 .ag-later-btn:disabled {
+  background: none;
+  font-weight: inherit;
   color: var(--ink3);
   border-color: var(--line2);
   cursor: default;
