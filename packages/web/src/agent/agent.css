@@ -2074,7 +2074,8 @@ a.ag-files-p:focus-visible {
 
 /*
  * While the agent is working, the waiting buttons are the lit ones, as send is otherwise
- * (`.fl-btn.is-primary`'s colours), and send goes plain (Amendment 202).
+ * (`.fl-btn.is-primary`'s colours), and send goes plain (Amendment 202). After `.is-on` on
+ * purpose: lit wins over open, at the same specificity, by coming later.
  */
 .ag-later-btn.is-hot {
   background: color-mix(in srgb, var(--live) 14%, var(--surf));

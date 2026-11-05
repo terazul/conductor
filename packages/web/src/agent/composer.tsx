@@ -323,9 +323,10 @@ export function Composer({ agent }: { agent: Agent }) {
   // Send it when the agent is done (Amendment 157): the same text, once its turn ends as `done`.
   // An orchestrator's goes sooner, at its next wake, with its helpers' report (Amendment 174).
   const doneRefused = whenDoneRefusal(agent.status);
-  // Working: the waiting buttons are lit and send isn't; not working, send is (Amendment 202).
-  const busyNow = agent.status === 'working';
   const orchestrator = (agent.helperCap ?? 0) > 0;
+  // Working: the waiting buttons are lit and send isn't; not working, send is (Amendment 202).
+  // An orchestrator queued on its helpers is still at work, as the scheduled list says of it.
+  const busyNow = agent.status === 'working' || (orchestrator && agent.status === 'queued');
   const whenDone = async () => {
     const body = text.trim();
     if (body.length === 0) return;

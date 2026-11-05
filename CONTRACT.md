@@ -210,7 +210,7 @@ later buttons. When complete, go back to just highlighting send."*
 - **⧉ copy** (Amendment 201) was muted mono text in `--ink3`, the time stamp's colour, and was lost beside
   it. It is now a bordered chip in `--live`, bold, as wide as **✓ copied**, tinted on hover and focus; red
   when it couldn't copy. Where it sits, what it copies and how are unchanged.
-- **The composer's lit button follows the agent.** While its status is `working`, **⏲ later** and **⏲ when
+- **The composer's lit button follows the agent.** While its status is `working`, or it is an orchestrator `queued` on its helpers, **⏲ later** and **⏲ when
   done** (**⏲ next wake** on an orchestrator) take the primary button's colours (`.ag-later-btn.is-hot`,
   the same mix of `--live` as `.fl-btn.is-primary`) and **send** goes plain (`fl-btn`). Any other status,
   **send** is the primary button again. A disabled waiting button (nothing typed) stays plain. What each

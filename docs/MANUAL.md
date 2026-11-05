@@ -1725,7 +1725,7 @@ survive a restart, and go at the agent's next turn that ends done. The button is
 that is already done or was stopped, since no turn of its would end: send the message now
 instead.
 
-**Which button is lit.** While the agent is working, **send** would interrupt it, so **⏲ later** and
+**Which button is lit.** While the agent is working (or, for an orchestrator, waiting on its helpers), **send** would interrupt it, so **⏲ later** and
 **⏲ when done** (**⏲ next wake** on an orchestrator) are the lit buttons and **send** is plain. Once it
 stops, **send** is lit again. Nothing else changes: send still sends at once while it works.
 

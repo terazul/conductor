@@ -2694,7 +2694,7 @@ console.log('\n48 · while an agent works, next wake and later are the lit butto
   const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
   const comp = src('../agent/composer.tsx');
   const css = src('../agent/agent.css');
-  check('working is the agent working', /const busyNow = agent\.status === 'working';/.test(comp));
+  check('working is the agent working, or an orchestrator queued on its helpers', /const busyNow = agent\.status === 'working' \|\| \(orchestrator && agent\.status === 'queued'\);/.test(comp) && comp.indexOf('const orchestrator =') < comp.indexOf('const busyNow ='));
   check('⏲ later and next wake / when done are lit while it works', (comp.match(/\$\{busyNow \? ' is-hot' : ''\}/g) ?? []).length === 2);
   check('send is the primary button only when it is not working', /className=\{busyNow \? 'fl-btn' : 'fl-btn is-primary'\}/.test(comp));
   const hot = /\.ag-later-btn\.is-hot \{([^}]*)\}/.exec(css)?.[1] ?? '';
