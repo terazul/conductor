@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **⏎ doesn't send, when I have a lot to type.** Asked for (5 Nov): *"add a check box to allow me to type
+  with CR and not send, default is to send on CR … To send in that case, you have to hit Send."*
+  *Done (5 Nov): Amendment 203 (**⏎ new line** under the message box; ticked, ⏎ is a new line and only send
+  sends; one setting for every agent, in Settings).*
+
 - [x] **The reply's copy button blends in; light the waiting buttons while an agent works.** Asked for (5 Nov):
   *"make the copy button more noticeable. Also, when we have the agent busy doing work, make the "send" not
   highlighted and highlight next wake and later buttons. When complete, go back to just highlighting send."*

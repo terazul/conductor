@@ -1281,6 +1281,36 @@ a.ag-tool-subj:focus-visible {
 }
 
 /*
+ * ⏎ new line (Amendment 203): ticked, ⏎ is a new line in the message box and only send sends.
+ * Where the "⇧⏎ newline" hint was; quiet unless ticked, then in the live colour so you can see
+ * ⏎ won't send.
+ */
+.ag-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ag-enter input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--live);
+  cursor: inherit;
+}
+
+.ag-enter.is-on {
+  color: var(--live);
+  font-weight: 600;
+}
+
+/*
  * The settings fold (Amendments 96, 110): a header with the navigator's chevron, like every
  * other fold, not a bordered button. Folded, it carries the one line of what is set.
  */

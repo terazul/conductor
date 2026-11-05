@@ -2703,6 +2703,25 @@ console.log('\n48 · while an agent works, next wake and later are the lit butto
   check('…and a disabled one (nothing typed) is plain, not lit', /background: none;/.test(off) && css.indexOf('.ag-later-btn:disabled {') > css.indexOf('.ag-later-btn.is-hot {'), off);
 })();
 
+console.log('\n49 · ⏎ new line: ticked, ⏎ makes a new line in the message box and only send sends; unticked, ⏎ sends as before (Amendment 203)');
+await (async () => {
+  const { ENTER_KEY, enterAction, enterSends } = await import('../agent/settingsfold.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const key = (k: string, shift = false, alt = false) => ({ key: k, shiftKey: shift, altKey: alt });
+  check('the setting is one for every agent, kept in Settings', ENTER_KEY === 'conductor.enterNewline');
+  check('absent, or anything but newline, is ⏎ sends: the default', enterSends(null) && enterSends('send') && enterSends('') && !enterSends('newline'));
+  check('⏎ sends while it sends', enterAction(key('Enter'), true) === 'send');
+  check('…and is a new line when ticked', enterAction(key('Enter'), false) === 'type');
+  check('⇧⏎ and ⌥⏎ are a new line either way', ['type', 'type', 'type', 'type'].join() === [enterAction(key('Enter', true), true), enterAction(key('Enter', false, true), true), enterAction(key('Enter', true), false), enterAction(key('Enter', false, true), false)].join());
+  check('other keys are typed', enterAction(key('a'), true) === 'type' && enterAction(key('a'), false) === 'type');
+  const comp = src('../agent/composer.tsx');
+  check('the box asks enterAction, with the setting', /if \(enterAction\(e, enterSendsNow\) === 'send'\)/.test(comp) && /const enterSendsNow = enterSends\(useSetting\(ENTER_KEY\)\);/.test(comp));
+  check('a real checkbox, ticked when ⏎ is a new line, writing the setting', /<input\s+type="checkbox"\s+checked=\{!enterSendsNow\}\s+onChange=\{\(e\) => writeSetting\(ENTER_KEY, e\.target\.checked \? 'newline' : 'send'\)\}/.test(comp) && /⏎ new line\s*<\/label>/.test(comp));
+  check('send still sends, whatever the box', /onClick=\{\(\) => void submit\(\)\}/.test(comp));
+  const css = src('../agent/agent.css');
+  check('styled with tokens only, live when ticked', /\.ag-enter\.is-on \{[^}]*color: var\(--live\);/.test(css) && !/\.ag-enter[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
+})();
+
 console.log(
   failures === 0
     ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C.\n'

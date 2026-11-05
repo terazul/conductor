@@ -20,6 +20,26 @@ export function settingsToggled(raw: string | null): 'hidden' | 'shown' {
   return settingsShown(raw) ? 'hidden' : 'shown';
 }
 
+/**
+ * What ⏎ does in the message box (Amendment 203). Absent is send, as it always was; ticking
+ * **⏎ new line** makes ⏎ a new line, for a long message, and then only **send** sends. One
+ * setting for every agent, kept in Settings, so it's the same in every browser.
+ */
+export const ENTER_KEY = 'conductor.enterNewline';
+
+/** Whether ⏎ sends. Anything but `newline` is send. */
+export function enterSends(raw: string | null): boolean {
+  return raw !== 'newline';
+}
+
+/**
+ * What a key press in the message box does: send it, or leave the key to the box (a new line).
+ * ⇧⏎ and ⌥⏎ are always a new line; plain ⏎ sends only while ⏎ sends.
+ */
+export function enterAction(e: { key: string; shiftKey: boolean; altKey: boolean }, sends: boolean): 'send' | 'type' {
+  return e.key === 'Enter' && !e.shiftKey && !e.altKey && sends ? 'send' : 'type';
+}
+
 export interface SettingsLine {
   /** The interaction mode's label, e.g. `ask me`. */
   mode: string;
