@@ -2684,8 +2684,23 @@ await (async () => {
   check('the transcript cleans what Cmd-C copies', /<div className="ag-trans" onCopy=\{copySelection\}>/.test(src('../agent/transcript.tsx')) && /e\.clipboardData\.setData\('text\/html', html\);\s*e\.clipboardData\.setData\('text\/plain', text\);\s*e\.preventDefault\(\);\s*\} catch/.test(src('../agent/transcript.tsx')));
   const css = src('../agent/agent.css');
   const rule = /\.ag-reply-copy \{([^}]*)\}/.exec(css)?.[1] ?? '';
-  check('it is a sibling of the body and the time in the turn\'s row, its own width, top-aligned and quiet', /flex: none;/.test(rule) && /align-self: flex-start;/.test(rule) && /white-space: nowrap;/.test(rule) && /color: var\(--ink3\);/.test(rule) && !/position: absolute/.test(rule), rule);
+  check('it is a sibling of the body and the time in the turn\'s row, its own width, top-aligned', /flex: none;/.test(rule) && /align-self: flex-start;/.test(rule) && /white-space: nowrap;/.test(rule) && !/position: absolute/.test(rule), rule);
+  check('and stands out: a bordered chip in the live colour, not muted text (Amendment 202)', /border: 1px solid var\(--live\);/.test(rule) && /color: var\(--live\);/.test(rule) && /font-weight: 600;/.test(rule) && !/var\(--ink3\)/.test(rule), rule);
   check('…not inside the body, where the Read it box is, nor on the time', !/\.ag-body .ag-reply-copy|\.ag-when .ag-reply-copy|\.ag-ack .ag-reply-copy/.test(css));
+})();
+
+console.log('\n48 · while an agent works, next wake and later are the lit buttons and send is plain; once it is done, send is lit again (Amendment 202)');
+(() => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const comp = src('../agent/composer.tsx');
+  const css = src('../agent/agent.css');
+  check('working is the agent working', /const busyNow = agent\.status === 'working';/.test(comp));
+  check('⏲ later and next wake / when done are lit while it works', (comp.match(/\$\{busyNow \? ' is-hot' : ''\}/g) ?? []).length === 2);
+  check('send is the primary button only when it is not working', /className=\{busyNow \? 'fl-btn' : 'fl-btn is-primary'\}/.test(comp));
+  const hot = /\.ag-later-btn\.is-hot \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  check('lit in the primary button\'s live colour, tokens only', /color: var\(--live\);/.test(hot) && /font-weight: 600;/.test(hot) && !/#[0-9a-fA-F]{3,8}\b/.test(hot), hot);
+  const off = /\.ag-later-btn:disabled \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  check('…and a disabled one (nothing typed) is plain, not lit', /background: none;/.test(off) && css.indexOf('.ag-later-btn:disabled {') > css.indexOf('.ag-later-btn.is-hot {'), off);
 })();
 
 console.log(

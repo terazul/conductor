@@ -200,6 +200,26 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 202 — post-merge, applied. **The reply's ⧉ copy stands out, and while an agent works its waiting buttons are lit, not send.**
+
+Web only (`agent/agent.css`, `agent/composer.tsx`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 5 Nov:
+*"I see the button but it blends in with the other stuff … make the copy button more noticeable. Also,
+when we have the agent busy doing work, make the "send" not highlighted and highlight next wake and
+later buttons. When complete, go back to just highlighting send."*
+
+- **⧉ copy** (Amendment 201) was muted mono text in `--ink3`, the time stamp's colour, and was lost beside
+  it. It is now a bordered chip in `--live`, bold, as wide as **✓ copied**, tinted on hover and focus; red
+  when it couldn't copy. Where it sits, what it copies and how are unchanged.
+- **The composer's lit button follows the agent.** While its status is `working`, **⏲ later** and **⏲ when
+  done** (**⏲ next wake** on an orchestrator) take the primary button's colours (`.ag-later-btn.is-hot`,
+  the same mix of `--live` as `.fl-btn.is-primary`) and **send** goes plain (`fl-btn`). Any other status,
+  **send** is the primary button again. A disabled waiting button (nothing typed) stays plain. What each
+  button does is unchanged: send still sends at once.
+
+**Verified:** `lib/verify.ts` §47's placement check now asserts the chip (border and colour in `--live`, bold,
+no `--ink3`), and a new §48 asserts the working rule, the two lit buttons, send's class by status, the lit
+style in tokens, and that a disabled waiting button is plain. Not looked at in a browser.
+
 ### Amendment 201 — post-merge, applied. **A reply copies without the app's colours, from its ⧉ copy and from ⌘C.**
 
 Web only (`lib/clipboard.ts`, the new `agent/replycopy.tsx`, `agent/transcript.tsx`, `agent/agent.css`,
