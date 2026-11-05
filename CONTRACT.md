@@ -200,6 +200,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 203 — post-merge, applied. **⏎ new line: a box to make ⏎ a new line in the message box, so only send sends.**
+
+Web only (`agent/settingsfold.ts`, `agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and
+`docs/MANUAL.md`. Asked 5 Nov: *"to the reply box, add a check box to allow me to type with CR and not
+send, default is to send on CR, but allow me to override this when I have many things to type. To send
+in that case, you have to hit Send."*
+
+- **⏎ new line**, a checkbox where the *⇧⏎ newline* hint was, in the row under the message box. Unticked
+  (the default, and what an absent setting means) ⏎ sends, as before. Ticked, ⏎ is a new line and only
+  **send** sends; the label turns the live colour so it's plain that ⏎ won't send. ⇧⏎ and ⌥⏎ are a new
+  line either way, and a ⏎ that picks a word in a Japanese or Chinese input method never sends
+  (`isComposing`, which the old handler didn't check).
+- One setting for every agent, `conductor.enterNewline` (`newline` or `send`), kept in Settings like the
+  agent settings fold (Amendment 96), so it's the same in every browser.
+- The rule is `enterAction(e, sends)` in `agent/settingsfold.ts`, pure, so it's checked under Node. Other
+  boxes on the screen (the later row's date and time) are unchanged.
+
+**Verified:** `lib/verify.ts` §49: the key and default; ⏎, ⇧⏎, ⌥⏎ and other keys with the box ticked and
+unticked; the composer asking the rule with the setting; the real checkbox writing the setting; send
+unchanged; tokens only. Not looked at in a browser.
+
 ### Amendment 202 — post-merge, applied. **The reply's ⧉ copy stands out, and while an agent works its waiting buttons are lit, not send.**
 
 Web only (`agent/agent.css`, `agent/composer.tsx`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 5 Nov:

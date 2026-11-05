@@ -51,7 +51,7 @@ import { queueWhenDone, restoreFolder, scheduleMessage, sendMessage, sentText, s
 import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
-import { SETTINGS_KEY, WORKING_SAYS, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { ENTER_KEY, SETTINGS_KEY, WORKING_SAYS, enterAction, enterSends, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
   id: string;
@@ -502,6 +502,8 @@ export function Composer({ agent }: { agent: Agent }) {
 
   // Folded or open, for every agent (Amendment 96). Folded keeps one line of what's set.
   const open = settingsShown(useSetting(SETTINGS_KEY));
+  // What ⏎ does in the box (Amendment 203): sends unless you ticked ⏎ new line.
+  const enterSendsNow = enterSends(useSetting(ENTER_KEY));
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
   // Past the budget it says so (Amendment 124), and nothing stops it (Amendment 180).
@@ -544,8 +546,9 @@ export function Composer({ agent }: { agent: Agent }) {
           }
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            // ⏎ sends, ⌥⏎ / ⇧⏎ makes a newline.
-            if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+            // ⏎ sends, ⌥⏎ / ⇧⏎ makes a newline; with ⏎ new line ticked, ⏎ is a newline too and
+            // only send sends (Amendment 203).
+            if (enterAction({ key: e.key, shiftKey: e.shiftKey, altKey: e.altKey, composing: e.nativeEvent.isComposing }, enterSendsNow) === 'send') {
               e.preventDefault();
               void submit();
             }
@@ -602,7 +605,17 @@ export function Composer({ agent }: { agent: Agent }) {
           )}
 
           <div className="ag-crow-r">
-            <span className="ui-lab">⇧⏎ newline</span>
+            <label
+              className={`ag-enter${enterSendsNow ? '' : ' is-on'}`}
+              title={enterSendsNow ? '⏎ sends, ⇧⏎ makes a new line. Tick it to make ⏎ a new line, for a long message' : '⏎ makes a new line; press send to send. Untick it for ⏎ to send again'}
+            >
+              <input
+                type="checkbox"
+                checked={!enterSendsNow}
+                onChange={(e) => writeSetting(ENTER_KEY, e.target.checked ? 'newline' : 'send')}
+              />
+              ⏎ new line
+            </label>
             {/*
              * While the agent is working, a message you send now interrupts what it's doing, so
              * the waiting kinds (next wake / when done, and later) are the ones lit, and send goes
