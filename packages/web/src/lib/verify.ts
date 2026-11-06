@@ -2723,6 +2723,35 @@ await (async () => {
   check('styled with tokens only, live when ticked', /\.ag-enter\.is-on \{[^}]*color: var\(--live\);/.test(css) && !/\.ag-enter[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
 })();
 
+console.log('\n50 · a quote in a reply has its own ⧉ copy, of the message inside it without the quote bar or the > marks; the reply\'s copy is unchanged (Amendment 204)');
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement, Fragment } = await import('react');
+  const { renderMarkdown } = await import('../agent/markdown.js');
+  const { replyClipboard } = await import('../agent/replycopy.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const reply = 'Added the channel name:\n\n> Hi all,\n>\n> We are moving to **a new channel**.\n>\n> Thanks,\n> Durval';
+  const shown = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown(reply)));
+  check('the quote is drawn as before, with a ⧉ copy beside it', /<div class="ag-quote"><button type="button" class="ag-quote-copy"[^>]*>⧉ copy<\/button><blockquote><p>Hi all,<\/p>/.test(shown), shown);
+  const qb = src('../agent/QuoteBlock.tsx');
+  check('it copies the quote\'s own source, unquoted, and that drawn as a reply is', /const text = unquoted\(source\);/.test(qb) && /copyRich\(text, html\)/.test(qb) && /replyClipboard\(\[\{ kind: 'prose', text \}\]\)\.html/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
+  const { unquoted } = await import('../agent/QuoteBlock.js');
+  check('a quote inside the quote is unquoted too, every level', unquoted('outer line\n> inner line\n>> deeper\n  > spaced') === 'outer line\ninner line\ndeeper\nspaced' && unquoted('plain\nnot > a mark') === 'plain\nnot > a mark');
+  check('inside a code fence, a > that is the code\'s stays', unquoted('Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter') === 'Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter');
+  check('…and in a quote within the quote, only the quote\'s own marks come off the fence', unquoted('> ```sh\n> > echo hi\n> ```\n> done') === '```sh\n> echo hi\n```\ndone');
+  const nested = replyClipboard([{ kind: 'prose', text: unquoted('outer line\n> inner line') }]);
+  check('…so the outer copy of a nested quote has no blockquote and no > mark', !nested.html.includes('<blockquote') && !/^>/m.test(nested.text) && nested.html.includes('inner line'), nested.html);
+  const inside = replyClipboard([{ kind: 'prose', text: 'Hi all,\n\nWe are moving to **a new channel**.\n\nThanks,\nDurval' }]);
+  check('what it copies has no quote and no colour: plain paragraphs', !inside.html.includes('<blockquote') && inside.html.includes('<p>Hi all,</p>') && inside.html.includes('<strong>a new channel</strong>') && !/style="(?!font-family: monospace)|class=/.test(inside.html), inside.html);
+  check('…and its text has no > marks', !/^>/m.test(inside.text));
+  const whole = replyClipboard([{ kind: 'prose', text: reply }]);
+  check('the reply\'s own copy keeps the quote, and leaves the quote\'s button out', whole.html.includes('<blockquote><p>Hi all,</p>') && !whole.html.includes('⧉ copy') && !whole.html.includes('ag-quote'), whole.html);
+  check('the button is one of the app\'s controls a copy leaves out', /ag-quote-copy/.test(src('./clipboard.ts')));
+  const css = src('../agent/agent.css');
+  const rule = /\.ag-quote-copy \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  check('the button is the reply copy\'s chip, in tokens, and the quote keeps clear of it', /border: 1px solid var\(--live\);/.test(rule) && /color: var\(--live\);/.test(rule) && /position: absolute;/.test(rule) && /\.ag-quote > blockquote \{\s*padding-right: 96px;/.test(css) && !/#[0-9a-fA-F]{3,8}\b/.test(rule), rule);
+})();
+
 console.log(
   failures === 0
     ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C.\n'

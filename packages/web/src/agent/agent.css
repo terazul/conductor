@@ -224,6 +224,50 @@
   color: var(--ink3);
 }
 
+/*
+ * A quote with its own ⧉ copy (Amendment 204), top right like a code block's, in the reply copy's
+ * chip so it is easy to see; the quote keeps clear of it.
+ */
+.ag-quote {
+  position: relative;
+}
+
+.ag-quote > blockquote {
+  padding-right: 96px;
+}
+
+.ag-quote-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px 9px;
+  background: none;
+  border: 1px solid var(--live);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  min-width: 10ch;
+  text-align: center;
+  color: var(--live);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.14s;
+}
+
+.ag-quote-copy:hover,
+.ag-quote-copy:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--live) 16%, transparent);
+}
+
+.ag-quote-copy.is-failed {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
 .ag-md pre {
   font-family: var(--mono);
   font-size: var(--fs-md);

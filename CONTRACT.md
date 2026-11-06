@@ -200,6 +200,31 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 204 — post-merge, applied. **A quote in a reply has its own ⧉ copy, of the message inside it, unquoted.**
+
+Web only (`agent/QuoteBlock.tsx` new, `agent/markdown.tsx`, `lib/clipboard.ts`, `agent/agent.css`,
+`lib/verify.ts`) and `docs/MANUAL.md`. Asked 6 Nov: *"why is it that when I ask for a message it gives
+me a vertical line on the left side when I use the Copy button"*. An agent had put the message it wrote
+in a markdown quote (`> ` lines); the reply's ⧉ copy (Amendment 201) keeps a quote a quote, `<blockquote>`
+in the HTML and `> ` in the text, and mail and Teams draw a blockquote as a bar down the left. Decided
+with the user: a copy on the quote itself, and the reply's copy left as it is.
+
+- **A quote's ⧉ copy** (`QuoteBlock`), top right of the quote, in the reply copy's chip (Amendment 202).
+  It copies the quote's own source, the lines without their `> `, as `text/plain`, and that rendered as
+  a reply is (`replyClipboard`, through `cleanHtml`) as `text/html`: plain paragraphs, bold and lists as
+  they were, no `<blockquote>`, no colour. A quote inside a quote has its own, and is unquoted in the outer one's copy too
+  (`unquoted` takes every level of `> ` off), so no level pastes with a bar. Inside a code fence only the
+  quote's own marks come off, so a `>` that is the code's, a diff's line or a shell prompt, stays.
+- **The quote's markup is unchanged**: the button sits beside the `<blockquote>` in a `div.ag-quote`, so
+  the transcript draws it as before (the quote keeps 96px clear on the right for the button), and the
+  reply's copy leaves the button out with the app's other controls (`ag-quote-copy` in CHROME). ⌘C on a
+  selection is unchanged.
+
+**Verified:** `lib/verify.ts` §50: the quote drawn with the button beside it; the copy of its source;
+what it copies has no `<blockquote>`, no colour and no `>`; the reply's copy keeps the quote and drops the
+button; the button's chip in tokens. `agent/verify.ts`' quote checks (Amendment 62) pass unchanged. Not
+looked at in a browser, nor pasted into mail.
+
 ### Amendment 203 — post-merge, applied. **⏎ new line: a box to make ⏎ a new line in the message box, so only send sends.**
 
 Web only (`agent/settingsfold.ts`, `agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and

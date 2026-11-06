@@ -47,6 +47,7 @@ import type { ReactNode } from 'react';
 import { isMermaid } from '../lib/mermaid.js';
 import { MermaidBlock } from './Mermaid.js';
 import { CodeBlock } from './CodeBlock.js';
+import { QuoteBlock } from './QuoteBlock.js';
 
 export function lineCount(text: string): number {
   return text.split('\n').length;
@@ -453,7 +454,13 @@ export function renderMarkdown(text: string, linkFile?: LinkFile, keyBase = ''):
       }
       const k = key('q');
       // A quote holds blocks too: a list, code, a second paragraph.
-      out.push(<blockquote key={k}>{renderMarkdown(quoted.join('\n'), linkFile, `${k}x`)}</blockquote>);
+      // With a ⧉ copy of its own, for the message an agent so often hands you in one (Amendment 204).
+      const source = quoted.join('\n');
+      out.push(
+        <QuoteBlock key={k} source={source}>
+          {renderMarkdown(source, linkFile, `${k}x`)}
+        </QuoteBlock>,
+      );
       continue;
     }
 
