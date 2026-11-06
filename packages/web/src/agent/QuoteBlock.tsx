@@ -12,9 +12,45 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { copyRich } from '../lib/clipboard.js';
 
-/** A quote's text with every level of `> ` taken off its lines: what its ⧉ copy copies. */
+/** A fence's opening or closing line, as markdown.tsx reads one. */
+const FENCE = /^\s*(`{3,}|~{3,})/;
+/** One level of quote mark at the start of a line. */
+const MARK = /^[ \t]*>[ \t]?/;
+
+/** `line` with up to `most` levels of `> ` taken off, and how many were. */
+function strip(line: string, most: number): { depth: number; rest: string } {
+  let rest = line;
+  let depth = 0;
+  while (depth < most && MARK.test(rest)) {
+    rest = rest.replace(MARK, '');
+    depth += 1;
+  }
+  return { depth, rest };
+}
+
+/**
+ * A quote's text with every level of `> ` taken off its lines: what its ⧉ copy copies. Inside a
+ * code fence only the quote's own marks come off, as many as the fence's opening line had, so a
+ * `>` that is the code's (a diff's line, a shell prompt) stays.
+ */
 export function unquoted(source: string): string {
-  return source.replace(/^(?:[ \t]*>[ \t]?)+/gm, '');
+  const out: string[] = [];
+  /** Inside a fence: how many marks its opening line had, and the fence itself. */
+  let open: { depth: number; mark: string } | null = null;
+  for (const line of source.split('\n')) {
+    if (open === null) {
+      const { depth, rest } = strip(line, Infinity);
+      const f = FENCE.exec(rest);
+      if (f) open = { depth, mark: f[1]! };
+      out.push(rest);
+    } else {
+      const { rest } = strip(line, open.depth);
+      const f = FENCE.exec(rest);
+      if (f && f[1]![0] === open.mark[0] && f[1]!.length >= open.mark.length && rest.trim() === f[1]) open = null;
+      out.push(rest);
+    }
+  }
+  return out.join('\n');
 }
 
 export function QuoteBlock({ source, children }: { source: string; children: ReactNode }) {

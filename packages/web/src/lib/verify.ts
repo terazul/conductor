@@ -2737,6 +2737,8 @@ await (async () => {
   check('it copies the quote\'s own source, unquoted, and that drawn as a reply is', /const text = unquoted\(source\);/.test(qb) && /copyRich\(text, html\)/.test(qb) && /replyClipboard\(\[\{ kind: 'prose', text \}\]\)\.html/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
   const { unquoted } = await import('../agent/QuoteBlock.js');
   check('a quote inside the quote is unquoted too, every level', unquoted('outer line\n> inner line\n>> deeper\n  > spaced') === 'outer line\ninner line\ndeeper\nspaced' && unquoted('plain\nnot > a mark') === 'plain\nnot > a mark');
+  check('inside a code fence, a > that is the code\'s stays', unquoted('Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter') === 'Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter');
+  check('…and in a quote within the quote, only the quote\'s own marks come off the fence', unquoted('> ```sh\n> > echo hi\n> ```\n> done') === '```sh\n> echo hi\n```\ndone');
   const nested = replyClipboard([{ kind: 'prose', text: unquoted('outer line\n> inner line') }]);
   check('…so the outer copy of a nested quote has no blockquote and no > mark', !nested.html.includes('<blockquote') && !/^>/m.test(nested.text) && nested.html.includes('inner line'), nested.html);
   const inside = replyClipboard([{ kind: 'prose', text: 'Hi all,\n\nWe are moving to **a new channel**.\n\nThanks,\nDurval' }]);
