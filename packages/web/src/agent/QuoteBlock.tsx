@@ -12,6 +12,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { copyRich } from '../lib/clipboard.js';
 
+/** A quote's text with every level of `> ` taken off its lines: what its ⧉ copy copies. */
+export function unquoted(source: string): string {
+  return source.replace(/^(?:[ \t]*>[ \t]?)+/gm, '');
+}
+
 export function QuoteBlock({ source, children }: { source: string; children: ReactNode }) {
   const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -24,9 +29,11 @@ export function QuoteBlock({ source, children }: { source: string; children: Rea
     timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
   };
   const copy = (): void => {
-    // The quote's own text, drawn as a reply is: the renderer loads on the first copy.
-    const html = import('./replycopy.js').then((m) => m.replyClipboard([{ kind: 'prose', text: source }]).html);
-    void copyRich(source, html).then(
+    // The quote's own text, drawn as a reply is: the renderer loads on the first copy. A quote
+    // inside it is unquoted too, so no level of it pastes with a bar or a > mark.
+    const text = unquoted(source);
+    const html = import('./replycopy.js').then((m) => m.replyClipboard([{ kind: 'prose', text }]).html);
+    void copyRich(text, html).then(
       () => say({ ok: true }),
       (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
     );

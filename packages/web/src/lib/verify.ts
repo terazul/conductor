@@ -2734,7 +2734,11 @@ await (async () => {
   const shown = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown(reply)));
   check('the quote is drawn as before, with a ⧉ copy beside it', /<div class="ag-quote"><button type="button" class="ag-quote-copy"[^>]*>⧉ copy<\/button><blockquote><p>Hi all,<\/p>/.test(shown), shown);
   const qb = src('../agent/QuoteBlock.tsx');
-  check('it copies the quote\'s own source, without the > marks, and that drawn as a reply is', /copyRich\(source, html\)/.test(qb) && /replyClipboard\(\[\{ kind: 'prose', text: source \}\]\)\.html/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
+  check('it copies the quote\'s own source, unquoted, and that drawn as a reply is', /const text = unquoted\(source\);/.test(qb) && /copyRich\(text, html\)/.test(qb) && /replyClipboard\(\[\{ kind: 'prose', text \}\]\)\.html/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
+  const { unquoted } = await import('../agent/QuoteBlock.js');
+  check('a quote inside the quote is unquoted too, every level', unquoted('outer line\n> inner line\n>> deeper\n  > spaced') === 'outer line\ninner line\ndeeper\nspaced' && unquoted('plain\nnot > a mark') === 'plain\nnot > a mark');
+  const nested = replyClipboard([{ kind: 'prose', text: unquoted('outer line\n> inner line') }]);
+  check('…so the outer copy of a nested quote has no blockquote and no > mark', !nested.html.includes('<blockquote') && !/^>/m.test(nested.text) && nested.html.includes('inner line'), nested.html);
   const inside = replyClipboard([{ kind: 'prose', text: 'Hi all,\n\nWe are moving to **a new channel**.\n\nThanks,\nDurval' }]);
   check('what it copies has no quote and no colour: plain paragraphs', !inside.html.includes('<blockquote') && inside.html.includes('<p>Hi all,</p>') && inside.html.includes('<strong>a new channel</strong>') && !/style="(?!font-family: monospace)|class=/.test(inside.html), inside.html);
   check('…and its text has no > marks', !/^>/m.test(inside.text));

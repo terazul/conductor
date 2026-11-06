@@ -212,7 +212,8 @@ with the user: a copy on the quote itself, and the reply's copy left as it is.
 - **A quote's ⧉ copy** (`QuoteBlock`), top right of the quote, in the reply copy's chip (Amendment 202).
   It copies the quote's own source, the lines without their `> `, as `text/plain`, and that rendered as
   a reply is (`replyClipboard`, through `cleanHtml`) as `text/html`: plain paragraphs, bold and lists as
-  they were, no `<blockquote>`, no colour. A quote inside a quote has its own.
+  they were, no `<blockquote>`, no colour. A quote inside a quote has its own, and is unquoted in the outer one's copy too
+  (`unquoted` takes every level of `> ` off), so no level pastes with a bar.
 - **The quote's markup is unchanged**: the button sits beside the `<blockquote>` in a `div.ag-quote`, so
   the transcript draws it as before (the quote keeps 96px clear on the right for the button), and the
   reply's copy leaves the button out with the app's other controls (`ag-quote-copy` in CHROME). ⌘C on a
