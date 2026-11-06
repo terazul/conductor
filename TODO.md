@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **A message copied from a quote pastes with a bar down the left.** Asked for (6 Nov): *"when I ask for a
+  message it gives me a vertical line on the left side when I use the Copy button"*. The agent had quoted it.
+  *Done (6 Nov): Amendment 204 (a quote in a reply has its own ⧉ copy, of the message inside it, without
+  the bar or the > marks; the reply's copy is unchanged).*
+
 - [x] **⏎ doesn't send, when I have a lot to type.** Asked for (5 Nov): *"add a check box to allow me to type
   with CR and not send, default is to send on CR … To send in that case, you have to hit Send."*
   *Done (5 Nov): Amendment 203 (**⏎ new line** under the message box; ticked, ⏎ is a new line and only send

@@ -49,7 +49,7 @@ const KEEP = new Set([
 const DROP = new Set(['svg', 'style', 'script', 'template', 'textarea', 'select', 'img', 'math', 'canvas']);
 const VOID = new Set(['br', 'hr', 'input', 'img', 'wbr', 'col', 'source', 'meta', 'link', 'area', 'embed', 'track']);
 /** The app's own controls, which are not what you copied: their buttons, the Read it box. */
-const CHROME = /(?:^|\s)(?:ag-code-copy|ag-reply-copy|ag-ack|md-diagram-toggle|md-diagram-err|ag-cursor)(?:\s|$)/;
+const CHROME = /(?:^|\s)(?:ag-code-copy|ag-reply-copy|ag-quote-copy|ag-ack|md-diagram-toggle|md-diagram-err|ag-cursor)(?:\s|$)/;
 const MONO = ' style="font-family: monospace"';
 
 const TOKEN = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
