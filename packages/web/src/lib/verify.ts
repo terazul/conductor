@@ -2840,6 +2840,10 @@ await (async () => {
   check('the menu to pause has its six lines, until I resume it first', items(menu('pause')) === 6 && menu('pause').indexOf('until I resume it') < menu('pause').indexOf('15 min'), menu('pause'));
   check('the menu to change a time has no until I resume it: clear says that', items(menu('set')) === 5 && !menu('set').includes('until I resume it'));
   check('each timed line shows when it wakes, in the menu\'s mono', (menu('pause').match(/class="ag-pause-when"/g) ?? []).length === 4);
+  {
+    const ag = readFileSync(new URL('../agent/agent.tsx', import.meta.url), 'utf8');
+    check('the ⏸ menu closes on a click outside it, as a Fleet card\'s menu does', /<span className="ag-pause" ref=\{pauseWrap\}>/.test(ag) && /if \(!pauseWrap\.current\?\.contains\(e\.target as Node\)\) setMenu\(null\);/.test(ag) && /document\.addEventListener\('mousedown', onDown\);\s*return \(\) => document\.removeEventListener\('mousedown', onDown\);\s*\}, \[menu\]\);/.test(ag));
+  }
 })();
 
 console.log(

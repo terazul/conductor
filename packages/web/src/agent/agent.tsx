@@ -150,6 +150,17 @@ function StopControls({
   // ⏸'s menu (Amendment 205): pause, or set the time of one already paused.
   const [menu, setMenu] = useState<'pause' | 'set' | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // The ⏸ menu closes on a click outside it as on Esc, as a Fleet card's … menu does (fleet/card.tsx):
+  // a menu that only closes from its own button is one you leave open by accident.
+  const pauseWrap = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (menu === null) return;
+    const onDown = (e: MouseEvent): void => {
+      if (!pauseWrap.current?.contains(e.target as Node)) setMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menu]);
   const job = useAgents(agent.jobId);
 
   const ended = ENDED.has(agent.status);
@@ -241,7 +252,7 @@ function StopControls({
   return (
     <>
       {sleep && (
-        <span className="ag-pause">
+        <span className="ag-pause" ref={pauseWrap}>
           {/*
            * ⏸ opens its menu: until you resume it, or a time it resumes by itself at (Amendment
            * 205). Not for a blocked agent: pausing it only lets go of its slot, and answering is
