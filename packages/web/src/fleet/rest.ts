@@ -57,7 +57,12 @@ export interface HeadTag {
  * Amber only when a human is actually required: **needs you**. Else **N working** while any
  * agent works. Either way, **finished** beside it when a job finished unseen, red when one of
  * them failed. With neither, **finished** alone, or the rest's quiet word (`restOf`): **no
- * agents**, **done**, or the rolled-up status in its own colour (failed, paused, queued…).
+ * agents**, **done**, or the rolled-up status in its own colour (failed, queued…).
+ *
+ * **N paused**, filled in `--idle` (Amendment 205), whenever any agent of it is paused: after
+ * the lead and before finished, or beside a loud rest (failed, queued). It is the rest when
+ * paused is the worst there is, in place of the plain word. An agent paused waiting for the
+ * model isn't counted: the rollup has it working.
  */
 export function headlineTags(
   statuses: readonly AgentStatus[],
@@ -72,9 +77,12 @@ export function headlineTags(
     : working > 0
       ? { word: `${working} working`, tone: 'live' }
       : null;
-  if (lead) return finished ? [lead, finished] : [lead];
-  if (finished) return [finished];
+  const n = statuses.filter((s) => s === 'paused').length;
+  const paused: HeadTag | null = n > 0 ? { word: `${n} paused`, tone: 'pause' } : null;
+  const of = (...tags: (HeadTag | null)[]): HeadTag[] => tags.filter((t): t is HeadTag => t !== null);
+  if (lead || finished) return of(lead, paused, finished);
   const status = rollupStatus(statuses);
+  if (status === 'paused') return of(paused);
   const rest = restOf(status, statuses.length, false);
-  return [{ word: restWord(rest) ?? STATUS_WORD[status], tone: rest === 'status' ? STATUS_KEY[status] : 'idle' }];
+  return of({ word: restWord(rest) ?? STATUS_WORD[status], tone: rest === 'status' ? STATUS_KEY[status] : 'idle' }, paused);
 }

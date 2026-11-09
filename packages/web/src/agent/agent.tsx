@@ -23,7 +23,8 @@ import { agentTabs } from './tabs.js';
 import { useReplyAcks, useToRead } from '../lib/replies.js';
 import { TermPanel } from './TermPanel.js';
 import { useElapsedMs } from '../shell/clock.js';
-import { currentAction, dependencyNames, shownStatus, startedMs } from '../shell/describe.js';
+import { currentAction, dependencyNames, isOutage, shownStatus, startedMs } from '../shell/describe.js';
+import { fullStamp } from '../lib/when.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Chevron, Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
@@ -49,7 +50,8 @@ import { NeedsPanel } from '../attention/NeedsPanel.js';
 import { Reconnect } from './Reconnect.js';
 import { fileLinks, filesIn } from './links.js';
 import { FOLLOW_PX, scrollIntent } from './scroll.js';
-import { sleepControl } from './sleep.js';
+import { pausedByYou, pausedChip, pausedPill, resumesAt, sleepControl } from './sleep.js';
+import { PauseMenu } from './PauseMenu.js';
 import { rerunControl, rerunDone } from './rerun.js';
 import {
   interruptAgent,
@@ -57,6 +59,7 @@ import {
   removeAgent,
   rerunAfter,
   resumeAgent,
+  setResumeAt,
   terminateAgent,
   useCommand,
   type CommandHandle,
@@ -133,15 +136,31 @@ const ENDED: ReadonlySet<string> = new Set(['done', 'failed', 'stopped']);
  */
 function StopControls({
   agent,
+  events,
   cmd,
   onAsk,
 }: {
   agent: Agent;
+  events: readonly Event[];
   cmd: CommandHandle;
   /** What removing it does to the rest of its job, for the banner under the header; null when not asked. */
   onAsk: (consequence: string | null) => void;
 }) {
   const [armed, setArmed] = useState(false);
+  // ⏸'s menu (Amendment 205): pause, or set the time of one already paused.
+  const [menu, setMenu] = useState<'pause' | 'set' | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // The ⏸ menu closes on a click outside it as on Esc, as a Fleet card's … menu does (fleet/card.tsx):
+  // a menu that only closes from its own button is one you leave open by accident.
+  const pauseWrap = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (menu === null) return;
+    const onDown = (e: MouseEvent): void => {
+      if (!pauseWrap.current?.contains(e.target as Node)) setMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menu]);
   const job = useAgents(agent.jobId);
 
   const ended = ENDED.has(agent.status);
@@ -233,19 +252,77 @@ function StopControls({
   return (
     <>
       {sleep && (
-        <button
-          type="button"
-          className="fl-btn is-ghost"
-          disabled={cmd.busy}
-          title={sleep.title}
-          onClick={() =>
-            void cmd.run(sleep.doing, () =>
-              sleep.action === 'resume' ? resumeAgent(agent.id) : pauseAgent(agent.id),
-            )
-          }
-        >
-          {sleep.label}
-        </button>
+        <span className="ag-pause" ref={pauseWrap}>
+          {/*
+           * ⏸ opens its menu: until you resume it, or a time it resumes by itself at (Amendment
+           * 205). Not for a blocked agent: pausing it only lets go of its slot, and answering is
+           * what wakes it, so there is no time to choose.
+           */}
+          <button
+            type="button"
+            className={`fl-btn is-ghost${menu === 'pause' ? ' is-on' : ''}`}
+            disabled={cmd.busy}
+            title={sleep.title}
+            aria-haspopup={sleep.action === 'pause' && agent.status !== 'blocked' ? 'menu' : undefined}
+            aria-expanded={sleep.action === 'pause' && agent.status !== 'blocked' ? menu === 'pause' : undefined}
+            onClick={() => {
+              if (sleep.action === 'pause' && agent.status !== 'blocked') {
+                setMenu(menu === 'pause' ? null : 'pause');
+                return;
+              }
+              void cmd.run(sleep.doing, () => (sleep.action === 'resume' ? resumeAgent(agent.id) : pauseAgent(agent.id)));
+            }}
+          >
+            {sleep.label}
+          </button>
+          {/* When it resumes by itself, and change or clear; only a pause of yours has one. */}
+          {sleep.action === 'resume' && pausedByYou(events) && (
+            <>
+              {agent.resumeAt ? (
+                <>
+                  <span className="ag-pause-due" title={`It resumes by itself ${fullStamp(agent.resumeAt)}`}>
+                    {resumesAt(agent)}
+                  </span>
+                  <button type="button" className="ag-pill" disabled={cmd.busy} onClick={() => setMenu(menu === 'set' ? null : 'set')}>
+                    change
+                  </button>
+                  <button
+                    type="button"
+                    className="ag-pill"
+                    disabled={cmd.busy}
+                    title="It sleeps until you press ▶ resume"
+                    onClick={() => void cmd.run('Clearing its time', () => setResumeAt(agent.id, null))}
+                  >
+                    clear
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="ag-pill"
+                  disabled={cmd.busy}
+                  title="Choose a time it resumes by itself"
+                  onClick={() => setMenu(menu === 'set' ? null : 'set')}
+                >
+                  set a time
+                </button>
+              )}
+            </>
+          )}
+          {menu && (
+            <PauseMenu
+              mode={menu}
+              busy={cmd.busy}
+              onClose={closeMenu}
+              onPick={(until) => {
+                const call = menu === 'pause' ? () => pauseAgent(agent.id, until ?? undefined) : () => setResumeAt(agent.id, until);
+                void cmd.run(menu === 'pause' ? 'Pausing' : 'Setting its time', call).then((ok) => {
+                  if (ok) setMenu(null);
+                });
+              }}
+            />
+          )}
+        </span>
       )}
       {/*
        * One button, two meanings, because they are two stages of one intention: stop the
@@ -624,7 +701,13 @@ export function AgentScreen() {
   const siblings = agents.filter((a) => a.jobId === agent.jobId);
   const pending = allPending.filter((p) => p.agentId === agent.id);
   const shown = shownStatus(agent, pending);
-  const key = STATUS_KEY[shown];
+  /*
+   * Paused by you, or by anything but the model (Amendment 205): filled in --idle, with the time
+   * it resumes at. One paused waiting for the model keeps its own display (Amendment 192).
+   */
+  const modelWait = allAlerts.some((a) => isOutage(a) && a.agentIds.includes(agent.id));
+  const asleep = shown === 'paused' && pausedChip(agent, modelWait) !== null;
+  const key = asleep ? 'pause' : STATUS_KEY[shown];
   const action = currentAction(agent, events, pending, dependencyNames(agent, siblings));
 
   const elapsed = elapsedMs === null ? null : fmtElapsed(elapsedMs);
@@ -680,6 +763,8 @@ export function AgentScreen() {
                 {/* Filled, the same look as the status Tag (Amendment 94); working
                     already pulses via the Dot above. Its latest reply, until you tick it
                     read, whatever it is doing now (Amendment 193, of 105's finished). */}
+                {/* An agent you paused, filled in --idle, with when it resumes (Amendment 205). */}
+                {t.paused && <span className="ag-tab-tag is-pause">{t.paused}</span>}
                 {toRead.has(t.id) && <span className="ag-tab-tag">to read</span>}
                 {/* How full its budget is, along the foot of the tab, in the daily meter's colours (Amendment 125). */}
                 {t.budget && (
@@ -719,8 +804,8 @@ export function AgentScreen() {
           </button>
           <Dot status={shown} />
           <Tag tone={key}>
-            {STATUS_WORD[shown]}
-            {elapsed && agent.status !== 'queued' ? ` · ${elapsed}` : ''}
+            {asleep && agent.resumeAt ? pausedPill(agent) : STATUS_WORD[shown]}
+            {elapsed && agent.status !== 'queued' && !(asleep && agent.resumeAt) ? ` · ${elapsed}` : ''}
           </Tag>
           {agent.blockMode && <Tag tone="need">{agent.blockMode}</Tag>}
           {needsHere > 0 && (
@@ -800,7 +885,7 @@ export function AgentScreen() {
               </>
             )}
             <RerunControl agent={agent} events={events} cmd={control} hidden={ask !== null} onAsk={setRerunAsk} />
-            {rerunAsk === null && <StopControls agent={agent} cmd={control} onAsk={setAsk} />}
+            {rerunAsk === null && <StopControls agent={agent} events={events} cmd={control} onAsk={setAsk} />}
           </div>
         </div>
 

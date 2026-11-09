@@ -475,8 +475,9 @@ console.log('\n9 · both themes are readable, measured from tokens.css');
 
   const TEXT = ['ink', 'ink2', 'ink3', 'live', 'need', 'fail', 'done', 'queue', 'idle', 'you'];
   const SURFACES = ['bg', 'bg2', 'surf', 'surf2', 'surf3', 'well'];
-  // Buttons and badges that put --bg text on a status fill (.sp-go, .sh-alert-n, …).
-  const FILLS = ['live', 'need', 'fail', 'done'];
+  // Buttons and badges that put --bg text on a status fill (.sp-go, .sh-alert-n, …), and
+  // a paused agent's chip on --idle (.ui-tag.t-pause, .sh-nav-tag.is-pause; Amendment 205).
+  const FILLS = ['live', 'need', 'fail', 'done', 'idle'];
 
   check('dark: every colour token parsed', TEXT.concat(SURFACES).every((t) => dark.has(t)), [...dark.keys()].join(' '));
   const lightOwn = block(":root[data-theme='light'], [data-theme='light']");
@@ -2306,14 +2307,15 @@ console.log('\n43 · the project\'s and the stack\'s status, one rule for the Fl
   check('needs you: amber, and it outranks working', head(['working', 'blocked'], true, []) === 'needs you/need');
   check('done, and seen: the quiet "done"', head(['done', 'done'], false, []) === 'done/idle');
   check('failed: the status in its own colour', head(['failed', 'done'], false, []) === 'failed/fail');
-  check('paused, queued and stopped: their own words and tones', head(['paused'], false, []) === 'paused/idle' && head(['queued', 'done'], false, []) === 'queued/queue' && head(['stopped'], false, []) === 'stopped/idle');
+  // Amendment 205: paused is "N paused", filled, where it read the plain "paused" in --idle.
+  check('paused, queued and stopped: their own words and tones', head(['paused'], false, []) === '1 paused/pause' && head(['queued', 'done'], false, []) === 'queued/queue' && head(['stopped'], false, []) === 'stopped/idle');
   check('finished unseen: the loud finished alone, red when its job failed', head(['done'], false, [{ status: 'done' }]) === 'finished/done' && head(['failed'], false, [{ status: 'failed' }]) === 'finished/fail');
   check('working and finished: both, working first', head(['working', 'done'], false, [{ status: 'done' }]) === '1 working/live,finished/done');
   check('needs you and finished: both, needs you first', head(['blocked'], true, [{ status: 'failed' }, { status: 'done' }]) === 'needs you/need,finished/fail');
   check('a blocked agent with no request still reads needs you, by its status', head(['blocked', 'done'], false, []) === 'needs you/need');
   const waiting = [{ id: 'w1', status: 'paused' as const }];
   const outageAlert = { kind: 'connection' as const, waiting: 1, agentIds: ['w1'] };
-  check('an agent waiting for the model counts as working (Amendment 192), through rollupStatuses', head(rollupStatuses(waiting, [outageAlert]), false, []) === '1 working/live' && head(rollupStatuses(waiting, []), false, []) === 'paused/idle');
+  check('an agent waiting for the model counts as working (Amendment 192), through rollupStatuses', head(rollupStatuses(waiting, [outageAlert]), false, []) === '1 working/live' && head(rollupStatuses(waiting, []), false, []) === '1 paused/pause');
 
   // Who calls it: the card, and the navigator's tree for its project and stack rows.
   const card = src('../fleet/card.tsx');
@@ -2752,9 +2754,101 @@ await (async () => {
   check('the button is the reply copy\'s chip, in tokens, and the quote keeps clear of it', /border: 1px solid var\(--live\);/.test(rule) && /color: var\(--live\);/.test(rule) && /position: absolute;/.test(rule) && /\.ag-quote > blockquote \{\s*padding-right: 96px;/.test(css) && !/#[0-9a-fA-F]{3,8}\b/.test(rule), rule);
 })();
 
+console.log('\n51 · ⏸ pause until a time: the headline says N paused, the chip is filled in --idle, the transcript says until when (Amendment 205)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const head = (...a: Parameters<typeof headlineTags>): string => headlineTags(...a).map((t) => `${t.word}/${t.tone}`).join();
+
+  // N paused: after the lead, before finished, beside a loud rest, or the rest itself.
+  check('paused is the worst there is: N paused, filled, in place of the plain word', head(['paused', 'paused', 'done'], false, []) === '2 paused/pause' && head(['paused', 'stopped'], false, []) === '1 paused/pause');
+  check('beside N working, after it', head(['working', 'paused', 'paused'], false, []) === '1 working/live,2 paused/pause');
+  check('beside needs you, after it', head(['blocked', 'paused'], true, []) === 'needs you/need,1 paused/pause');
+  check('between the lead and finished, and before finished alone', head(['working', 'paused', 'done'], false, [{ status: 'done' }]) === '1 working/live,1 paused/pause,finished/done' && head(['paused', 'done'], false, [{ status: 'failed' }]) === '1 paused/pause,finished/fail');
+  check('beside a loud rest, which keeps its word: failed, queued', head(['failed', 'paused'], false, []) === 'failed/fail,1 paused/pause' && head(['queued', 'paused'], false, []) === 'queued/queue,1 paused/pause');
+  check('none paused: no tag for it, the rule as it was', head(['done'], false, []) === 'done/idle' && head(['stopped'], false, []) === 'stopped/idle' && head([], false, []) === 'no agents/idle');
+  const two = [{ id: 'w1', status: 'paused' as const }, { id: 'u1', status: 'paused' as const }];
+  check(
+    'one waiting for the model is not counted: the rollup has it working (Amendment 192)',
+    head(rollupStatuses(two, [{ kind: 'connection', waiting: 1, agentIds: ['w1'] }]), false, []) === '1 working/live,1 paused/pause',
+    head(rollupStatuses(two, [{ kind: 'connection', waiting: 1, agentIds: ['w1'] }]), false, []),
+  );
+
+  // Filled in --idle, with --bg as the ink: section 9 checks --bg on --idle ≥ 4.5:1 in both themes.
+  const ui = src('../shell/ui.css');
+  const rule = (css: string, sel: string): string => css.match(new RegExp(`${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+  for (const [file, sel] of [['../shell/ui.css', '.ui-tag.t-pause'], ['../shell/shell.css', '.sh-nav-tag.is-pause']] as const) {
+    const r = rule(src(file), sel);
+    check(`${sel} is filled: --bg on --idle, weight 700, no fixed colour`, /color: var\(--bg\);/.test(r) && /background: var\(--idle\);/.test(r) && /border-color: var\(--idle\);/.test(r) && /font-weight: 700;/.test(r) && !/#[0-9a-f]{3,6}\b/i.test(r), r);
+  }
+  const tab = src('../agent/agent.css');
+  check('.ag-tab-tag.is-pause is the tab\'s filled tag on --idle', /\.ag-tab-tag \{[^}]*color: var\(--bg\);/.test(tab) && /background: var\(--idle\);/.test(rule(tab, '.ag-tab-tag.is-pause')));
+  check('--bg on --idle is one of the fills section 9 measures', /const FILLS = \['live', 'need', 'fail', 'done', 'idle'\];/.test(src('./verify.ts')));
+  check('t-idle stays the plain outline, for a model\'s wait and a stopped agent', !/background/.test(rule(ui, '.ui-tag.t-idle')));
+
+  // The transcript says until when, and the wake.
+  const { buildTranscript: build } = await import('../agent/transcript.js');
+  const { fmtStamp } = await import('./when.js');
+  const at = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+  const ev = (n: number, payload: EventPayload): Event => ({ seq: n, ts: new Date(Date.UTC(2026, 10, 9, 14, 0, n)).toISOString(), projectId: 'p', jobId: 'j', agentId: 'a', payload });
+  const notes = build([
+    ev(1, { kind: 'status', status: 'working' }),
+    ev(2, { kind: 'status', status: 'paused', error: `paused by the user until ${at}` }),
+    ev(3, { kind: 'status', status: 'queued', error: 'resumed at the time you chose' }),
+    ev(4, { kind: 'status', status: 'working' }),
+    ev(5, { kind: 'status', status: 'paused', error: 'paused by the user' }),
+    ev(6, { kind: 'status', status: 'paused' }),
+  ])
+    .flatMap((t) => t.blocks)
+    .filter((b) => b.kind === 'note')
+    .map((b) => (b as { text: string }).text);
+  check(
+    'the transcript: paused by you until its time, resumed at the time you chose, and a pause with none as before',
+    notes.includes(`paused by you until ${fmtStamp(at)}`) && notes.includes('resumed at the time you chose') && notes.filter((n) => n === 'paused by you').length >= 1 && !notes.some((n) => n.includes('paused — paused by the user')),
+    notes.join(' | '),
+  );
+
+  // The calls the menu makes: the daemon's bodies (wire.ts PauseAgentRequest, ResumeAtRequest).
+  const calls: { path: string; body: unknown }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ path: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({ ok: true, resumeAt: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const { pauseAgent, setResumeAt } = await import('../agent/endpoints.js');
+    await pauseAgent('a1');
+    await pauseAgent('a1', at);
+    await setResumeAt('a1', at);
+    await setResumeAt('a1', null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  check(
+    '⏸ sends no time for until I resume it, and the time for the rest; change and clear post resume-at',
+    calls.length === 4 &&
+      /\/api\/agents\/a1\/pause$/.test(calls[0]!.path) && JSON.stringify(calls[0]!.body) === '{}' &&
+      JSON.stringify(calls[1]!.body) === JSON.stringify({ until: at }) &&
+      /\/api\/agents\/a1\/resume-at$/.test(calls[2]!.path) && JSON.stringify(calls[2]!.body) === JSON.stringify({ until: at }) &&
+      JSON.stringify(calls[3]!.body) === '{"until":null}',
+    JSON.stringify(calls),
+  );
+
+  // The menu, rendered: six lines to pause, five to change a time (clear is beside it).
+  const { PauseMenu } = await import('../agent/PauseMenu.js');
+  const menu = (mode: 'pause' | 'set'): string => renderToStaticMarkup(createElement(PauseMenu, { mode, busy: false, onPick: () => {}, onClose: () => {} }));
+  const items = (html: string): number => (html.match(/role="menuitem"/g) ?? []).length;
+  check('the menu to pause has its six lines, until I resume it first', items(menu('pause')) === 6 && menu('pause').indexOf('until I resume it') < menu('pause').indexOf('15 min'), menu('pause'));
+  check('the menu to change a time has no until I resume it: clear says that', items(menu('set')) === 5 && !menu('set').includes('until I resume it'));
+  check('each timed line shows when it wakes, in the menu\'s mono', (menu('pause').match(/class="ag-pause-when"/g) ?? []).length === 4);
+  {
+    const ag = readFileSync(new URL('../agent/agent.tsx', import.meta.url), 'utf8');
+    check('the ⏸ menu closes on a click outside it, as a Fleet card\'s menu does', /<span className="ag-pause" ref=\{pauseWrap\}>/.test(ag) && /if \(!pauseWrap\.current\?\.contains\(e\.target as Node\)\) setMenu\(null\);/.test(ag) && /document\.addEventListener\('mousedown', onDown\);\s*return \(\) => document\.removeEventListener\('mousedown', onDown\);\s*\}, \[menu\]\);/.test(ag));
+  }
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C.\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

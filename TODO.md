@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Pause an agent until a time, and see it's paused.** Asked for (9 Nov): *"when I put an agent on pause,
+  allow me to specify when to unpause. Also update the status on the left menu bar and highlight the pause state."*
+  *Done (9 Nov): Amendment 205 (⏸ pause asks until when: until you resume it, 15 min, 1 hour, 4 hours, tomorrow
+  09:00 or a time, and the daemon resumes it then, across a restart; a filled ⏸ chip, with the time, on its
+  navigator row and tab, and N paused on its job, project and Fleet card).*
+
 - [x] **A message copied from a quote pastes with a bar down the left.** Asked for (6 Nov): *"when I ask for a
   message it gives me a vertical line on the left side when I use the Copy button"*. The agent had quoted it.
   *Done (6 Nov): Amendment 204 (a quote in a reply has its own ⧉ copy, of the message inside it, without

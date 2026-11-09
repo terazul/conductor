@@ -2291,3 +2291,74 @@ a.ag-files-p:focus-visible {
   max-height: 14em;
   overflow-y: auto;
 }
+
+/* ── ⏸ pause until a time (Amendment 205) ─────────────────────────────────── */
+
+/* A paused agent's tab, as `.sh-nav-tag.is-pause` is its navigator row: `--bg` on `--idle`. */
+.ag-tab-tag.is-pause {
+  background: var(--idle);
+}
+
+.ag-pause {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ag-pause-due {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+
+/* Under ⏸, its right edge on the button's: the header's controls sit at the pane's right. */
+.ag-pause-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 240px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px var(--shadow);
+}
+
+.ag-pause-menu > .ui-lab {
+  padding: 0 6px 4px;
+}
+
+.ag-pause-opt {
+  font: inherit;
+  font-size: var(--fs-sm);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ag-pause-opt:hover:not(:disabled),
+.ag-pause-opt:focus-visible,
+.ag-pause-opt.is-on {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.ag-pause-when {
+  font-family: var(--mono);
+  color: var(--ink3);
+}
+
+.ag-pause-at {
+  margin: 4px 6px 0;
+}

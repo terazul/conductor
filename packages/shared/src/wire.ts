@@ -178,6 +178,12 @@ export interface Agent {
    * transcript. Absent until it has replied, and from a daemon before this.
    */
   replySeq?: number;
+  /**
+   * Amendment 205. When a paused agent wakes by itself, an ISO instant: you paused it until then.
+   * The daemon resumes it once it has passed, as ▶ resume would. Present only while it is paused
+   * with one; a pause for the fleet hold or a model that can't be reached never has one.
+   */
+  resumeAt?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -997,6 +1003,31 @@ export interface ScheduleMessageRequest {
   /** Default `at`. `slot` is refused: only the daemon makes one (Amendment 168). */
   trigger?: ScheduleTrigger;
   text: string;
+}
+
+/**
+ * POST /api/agents/:agentId/pause (Amendment 205). With no body, or no `until`, it is paused
+ * until you resume it, as it always was. `until`, an ISO instant, is when it wakes by itself.
+ */
+export interface PauseAgentRequest {
+  until?: string;
+}
+
+/**
+ * The answer to a pause: `resumeAt` is the time it wakes, null when there is none — or when it
+ * kept a question it was waiting on, which your answer wakes instead (Amendment 205).
+ */
+export interface PauseAgentResponse {
+  ok: true;
+  resumeAt: string | null;
+}
+
+/**
+ * POST /api/agents/:agentId/resume-at (Amendment 205): change when an agent you paused wakes, or
+ * with null clear it. 409 when it isn't paused, or wasn't paused by you.
+ */
+export interface ResumeAtRequest {
+  until: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

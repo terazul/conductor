@@ -51,6 +51,7 @@ import {
 import { canUntick, isRead, markReply, useReplyAcks, type ReplyAcks } from '../lib/replies.js';
 import { lineCount, renderMarkdown } from './markdown.js';
 import { fmtStamp, fullStamp } from '../lib/when.js';
+import { userPause } from './sleep.js';
 import { Chevron, ChevronSpace } from '../shell/chevron.js';
 import { cleanHtml, copyRich } from '../lib/clipboard.js';
 
@@ -327,7 +328,9 @@ function statusNote(
   if (status === 'paused') {
     // Not every pause is yours: a budget, the job's cap and a daemon restart pause too,
     // and saying "by you" for those sent people looking for a click they never made.
-    if (!error || error === 'paused by the user') return { kind: 'note', text: 'paused by you', tone: 'idle' };
+    // With the time you chose it to wake at, when you chose one (Amendment 205).
+    const mine = userPause(error);
+    if (mine || !error) return { kind: 'note', text: mine?.until ? `paused by you until ${fmtStamp(mine.until)}` : 'paused by you', tone: 'idle' };
     return { kind: 'note', text: `paused — ${error}`, tone: /^(job )?budget/.test(error) ? 'need' : 'idle' };
   }
   if (status === 'stopped') {

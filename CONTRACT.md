@@ -200,6 +200,49 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 205 — post-merge, applied. **⏸ pause asks until when, and a paused agent wears a filled ⏸ chip in the navigator and on its tab.**
+
+Daemon (migration `340_agent_resume_at.sql`, `session/store.ts`, `session/schedule.ts`,
+`session/supervisor.ts`, `routes/session.ts`, `session/verify.ts`), shared (`wire.ts`), web
+(`agent/PauseMenu.tsx` new, `agent/sleep.ts`, `agent/agent.tsx`, `agent/endpoints.ts`, `agent/tabs.ts`,
+`agent/transcript.tsx`, `agent/agent.css`, `fleet/rest.ts`, `shell/navtree.ts`, `shell/Navigator.tsx`,
+`shell/status.ts`, `shell/ui.css`, `shell/shell.css`, and the three `verify.ts`), `docs/MANUAL.md`. Asked
+9 Nov: *"when I put an agent on pause, allow me to specify when to unpause. Also update the status on the
+left menu bar and highlight the pause state."*
+
+- **A time to wake at.** `agents.resume_at` (migration 340; existing paused agents get none, so they wait
+  for you as before), on the wire as `Agent.resumeAt?`. `POST /api/agents/:id/pause` takes `{until?}`
+  (400 on a time `timeProblem` refuses) and answers `{ok, resumeAt}`; `POST /api/agents/:id/resume-at`
+  takes `{until: time | null}` to set, change or clear it on one already paused (409 if it isn't paused, or
+  was paused by the fleet hold or a model wait). ▶ resume, stop, delete and any status but paused clear it.
+- **The clock wakes it.** The schedule tick (every 5 s) resumes each agent whose time has come, through
+  `Supervisor.resumeAgent`, as ▶ resume would. Not while Pause all holds: it waits, and wakes at the next
+  look after the hold ends. A restart keeps the time, and the first look wakes one whose time passed while
+  the daemon was down. Only a pause of yours is timed: the note is `paused by the user until <ISO>`
+  (`userPauseNote`), and one with any other note is cleared, never woken. The transcript reads **paused by
+  you until 14:05**, then **resumed at the time you chose** (`RESUME_AT_NOTE`).
+- **⏸'s menu** (`PauseMenu`, the send-later row's picker for **at…**): until I resume it, 15 min, 1 hour,
+  4 hours, tomorrow 09:00 (the next calendar day) or at…, each with the time it wakes at (`fmtStamp`).
+  A paused agent of yours shows **resumes 14:05** with change and clear beside ▶ resume, or **set a
+  time**; the header's pill reads **paused · resumes 14:05**. A blocked agent's ⏸ pauses at once, with no
+  menu: answering it is what wakes it. The rules are pure in `agent/sleep.ts` (`pauseOptions`,
+  `pauseUntil`, `pausedChip`, `pausedPill`, `resumesAt`, `userPause`, `pausedByYou`).
+- **The highlight.** A new tone, `pause`: `--bg` on a fill of `--idle`, weight 700, drawn like the filled
+  live tag (7.04:1 dark, 5.73:1 light). A paused agent's navigator row and Agent tab wear **⏸ paused**, or
+  **⏸ until 14:05**; `headlineTags` adds **N paused**, filled, after the lead and before finished, so a
+  job group, a project and a Fleet card say it. An agent waiting for the model keeps its own display and
+  isn't counted. Pause all itself is unchanged.
+
+**Verified:** `session/verify.ts` §37 (34): a time kept, answered and broadcast; the note; an offset kept
+as its instant; not a second early, woken at it once with the wake nudge, the time cleared; resume-at
+setting, changing, clearing, 400, 409 and 404; ▶ resume and stop clearing it; held by Pause all and woken
+after; the fleet hold's and a model wait's pause refused a time; a restart, and migration 340 on an
+existing database. `lib/verify.ts` §51 (17) and §9 measuring `--bg` on `--idle` in both themes;
+`agent/verify.ts` §8b (22): the menu's times with a fixed now, tomorrow across midnight, the chip, pill and
+transcript rules, the tab's chip; `shell/verify.ts` §17 (8): the navigator row's chip and N paused on its
+stack and project. Two §43 checks changed from `paused/idle` to `1 paused/pause` for a stack of one paused
+agent. Looked at in headless Chrome on a scratch page, both themes.
+
 ### Amendment 204 — post-merge, applied. **A quote in a reply has its own ⧉ copy, of the message inside it, unquoted.**
 
 Web only (`agent/QuoteBlock.tsx` new, `agent/markdown.tsx`, `lib/clipboard.ts`, `agent/agent.css`,

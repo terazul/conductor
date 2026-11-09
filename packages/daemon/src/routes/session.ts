@@ -35,6 +35,9 @@ import type {
   SetAutonomyRequest,
   SetAutonomyResponse,
   SetModelRequest,
+  PauseAgentRequest,
+  PauseAgentResponse,
+  ResumeAtRequest,
   SetModelResponse,
   StackLaunch,
   StopRetryingResponse,
@@ -44,7 +47,7 @@ import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, pipeli
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
-import { initScheduler } from '../session/schedule.js';
+import { initScheduler, scheduler, timeProblem, userPauseNote } from '../session/schedule.js';
 import { openDb } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
 import { hub } from '../hub.js';
@@ -878,8 +881,36 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/pause', async (req, reply) => {
     if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
-    await sup.pauseAgent(req.params.agentId);
-    return reply.send({ ok: true });
+    // Until a time (Amendment 205), or with none until you resume it.
+    const raw = asRecord(req.body as PauseAgentRequest | undefined)['until'];
+    let until: string | null = null;
+    if (raw !== undefined && raw !== null) {
+      const why = timeProblem(raw);
+      if (why) return fail(reply, 400, why);
+      until = new Date(Date.parse(raw as string)).toISOString();
+    }
+    await sup.pauseAgent(req.params.agentId, userPauseNote(until), until);
+    // A time a moment ago wakes it now rather than on the next look.
+    if (until) void scheduler().tick();
+    const answer: PauseAgentResponse = { ok: true, resumeAt: getAgent(db, req.params.agentId)?.resumeAt ?? null };
+    return reply.send(answer);
+  });
+
+  app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/resume-at', async (req, reply) => {
+    if (!getAgent(db, req.params.agentId)) return fail(reply, 404, 'no such agent');
+    const body = asRecord(req.body as ResumeAtRequest | undefined);
+    if (!('until' in body)) return fail(reply, 400, 'until is required: a time, or null for none');
+    let until: string | null = null;
+    if (body['until'] !== null) {
+      const why = timeProblem(body['until']);
+      if (why) return fail(reply, 400, why);
+      until = new Date(Date.parse(body['until'] as string)).toISOString();
+    }
+    const refused = sup.setResumeAt(req.params.agentId, until);
+    if (refused) return fail(reply, 409, refused);
+    if (until) void scheduler().tick();
+    const answer: PauseAgentResponse = { ok: true, resumeAt: until };
+    return reply.send(answer);
   });
 
   app.post<{ Params: { agentId: string } }>('/api/agents/:agentId/resume', async (req, reply) => {

@@ -42,6 +42,7 @@ import type { ModelInfo, Options, Query, SDKUserMessage } from '@anthropic-ai/cl
 import type {
   Agent,
   ModelCatalog,
+  PauseAgentResponse,
   Alert,
   DiffResponse,
   FileContentResponse,
@@ -171,8 +172,8 @@ import { BUILT_IN_PERSONAS, PERSONAS_KEY, resetPersona, withPersona, withoutPers
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
-import { deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone } from './schedule.js';
-import { FolderGoneError, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
+import { RESUME_AT_NOTE, Scheduler, deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone, scheduler, userPauseNote } from './schedule.js';
+import { FolderGoneError, HOLD_NOTE, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
 import { STACKS_KEY, stacksLimit } from '../slots.js';
 import { terminals } from '../terminal/service.js';
 import { stubPty } from '../terminal/pty.js';
@@ -9341,13 +9342,173 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n37 · ⏸ pause until a time, and woken at it by the clock (Amendment 205)');
+  {
+    /*
+     * "When I put an agent on pause, allow me to specify when to unpause." ⏸ takes a time, kept
+     * as the agent's resume_at; the scheduler's tick resumes it then, as ▶ resume would. The
+     * supervisor and the scheduler are the daemon's own; the clock is moved by passing `now`.
+     */
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    db.prepare("UPDATE agents SET status = 'done' WHERE status IN ('working', 'queued')").run();
+    check('nothing holds the fleet as this starts', !sup.held);
+    const ppid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'pause205' })).body.project.id;
+    insertJob(db, { id: 'job_p205', projectId: ppid, prompt: 'the job_p205 prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    const sleeper = (id: string, a: Partial<Agent> = {}): void =>
+      void insertAgent(db, { id, jobId: 'job_p205', projectId: ppid, role: 'builder', model: 'opus', sdkSessionId: `sess_${id}`, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY, ...a });
+    const st = (id: string) => getAgent(db, id)?.status;
+    const resumeAt = (id: string) => getAgent(db, id)?.resumeAt;
+    const column = (id: string) => (db.prepare('SELECT resume_at AS r FROM agents WHERE id = ?').get(id) as { r: string | null }).r;
+    const wokenAtTime = (id: string) => eventLog().forAgent(id).filter((e) => e.payload.kind === 'status' && e.payload.status === 'queued' && e.payload.error === RESUME_AT_NOTE).length;
+    // Drain a tick the interval may have in flight, so the next one reads this `now`.
+    const tickAt = async (now: number, sched: Scheduler = scheduler()): Promise<void> => {
+      await sched.tick();
+      await sched.tick(now);
+    };
+    const inAnHour = new Date(Date.now() + 3_600_000).toISOString();
+    const at = Date.parse(inAnHour);
+
+    sleeper('agt_p205');
+    const eyes = await connect();
+    const paused = await send<PauseAgentResponse>('POST', '/api/agents/agt_p205/pause', { until: inAnHour });
+    check('paused until a time: it is paused, and the time kept', paused.status === 200 && st('agt_p205') === 'paused' && column('agt_p205') === inAnHour, `${paused.status} ${st('agt_p205')} ${column('agt_p205')}`);
+    check('and answered, and on the wire', paused.body.resumeAt === inAnHour && resumeAt('agt_p205') === inAnHour, JSON.stringify(paused.body));
+    check('every browser hears it at once', await until(() => eyes.frames.some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'agt_p205' && a.resumeAt === inAnHour))));
+    check('its transcript says until when', lastStatusNote(db, 'agt_p205') === userPauseNote(inAnHour) && userPauseNote(inAnHour) === `paused by the user until ${inAnHour}`, String(lastStatusNote(db, 'agt_p205')));
+    const inThree = Math.floor(Date.now() / 1000) * 1000 + 3 * 3_600_000;
+    const withOffset = new Date(inThree + 3_600_000).toISOString().replace('Z', '+01:00');
+    const offset = await send<PauseAgentResponse>('POST', '/api/agents/agt_p205/resume-at', { until: withOffset });
+    check('a time with an offset is kept as the instant it is', offset.status === 200 && column('agt_p205') === new Date(inThree).toISOString(), `${offset.status} ${withOffset} → ${column('agt_p205')}`);
+    await send('POST', '/api/agents/agt_p205/resume-at', { until: inAnHour });
+    await tickAt(at - 1_000);
+    check('a second before its time it still sleeps', st('agt_p205') === 'paused' && wokenAtTime('agt_p205') === 0);
+    await tickAt(at + 1_000);
+    check('at its time it is resumed', await until(() => st('agt_p205') === 'working'), String(st('agt_p205')));
+    check('as ▶ resume would: its own session, told it was paused', (await until(() => runs.some((r) => r.options.resume === 'sess_agt_p205' && r.prompts[0] === WAKE_NUDGE))));
+    const heardCleared = await until(() => eyes.frames.some((f) => f.type === 'entities' && (f.agents ?? []).some((a) => a.id === 'agt_p205' && a.status !== 'paused' && a.resumeAt === undefined)));
+    check('its time cleared, there and on the wire', column('agt_p205') === null && resumeAt('agt_p205') === undefined && heardCleared, `${column('agt_p205')} ${resumeAt('agt_p205')} ${heardCleared}`);
+    check('its transcript says it was the time you chose', wokenAtTime('agt_p205') === 1);
+    await tickAt(at + 10_000);
+    check('and it is resumed once', wokenAtTime('agt_p205') === 1 && runs.filter((r) => r.options.resume === 'sess_agt_p205').length === 1);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+
+    sleeper('agt_p205_bad');
+    const refusals = await Promise.all([
+      send<{ error: string }>('POST', '/api/agents/agt_p205_bad/pause', { until: 'tomorrow' }),
+      send<{ error: string }>('POST', '/api/agents/agt_p205_bad/pause', { until: new Date(Date.now() - 3_600_000).toISOString() }),
+      send<{ error: string }>('POST', '/api/agents/agt_p205_bad/pause', { until: new Date(Date.now() + 400 * 86_400_000).toISOString() }),
+      send<{ error: string }>('POST', '/api/agents/agt_p205_bad/pause', { until: 1234 }),
+    ]);
+    check(
+      'a time that is not one is refused, saying why',
+      refusals.map((r) => `${r.status} ${r.body.error}`).join(' | ') === '400 not a time: use an ISO date and time, such as 2026-10-09T18:00:00Z | 400 that time has passed | 400 more than a year ahead | 400 a time is required',
+      refusals.map((r) => `${r.status} ${r.body.error}`).join(' | '),
+    );
+    check('and nothing is paused for it', st('agt_p205_bad') === 'done' && column('agt_p205_bad') === null);
+    check('a pause with no time is until you resume it, as before', (await send<PauseAgentResponse>('POST', '/api/agents/agt_p205_bad/pause')).body.resumeAt === null && st('agt_p205_bad') === 'paused' && lastStatusNote(db, 'agt_p205_bad') === 'paused by the user');
+
+    const later = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const set = await send<PauseAgentResponse>('POST', '/api/agents/agt_p205_bad/resume-at', { until: inAnHour });
+    check('resume-at sets a time on one you paused', set.status === 200 && set.body.resumeAt === inAnHour && resumeAt('agt_p205_bad') === inAnHour && lastStatusNote(db, 'agt_p205_bad') === userPauseNote(inAnHour));
+    await send('POST', '/api/agents/agt_p205_bad/resume-at', { until: later });
+    check('changes it', resumeAt('agt_p205_bad') === later && lastStatusNote(db, 'agt_p205_bad') === userPauseNote(later));
+    const notes = eventLog().forAgent('agt_p205_bad').filter((e) => e.payload.kind === 'status').length;
+    await send('POST', '/api/agents/agt_p205_bad/resume-at', { until: later });
+    check('the same time again changes nothing, not even the transcript', eventLog().forAgent('agt_p205_bad').filter((e) => e.payload.kind === 'status').length === notes);
+    const cleared = await send<PauseAgentResponse>('POST', '/api/agents/agt_p205_bad/resume-at', { until: null });
+    check('and with null clears it: until you resume it', cleared.status === 200 && column('agt_p205_bad') === null && resumeAt('agt_p205_bad') === undefined && st('agt_p205_bad') === 'paused' && lastStatusNote(db, 'agt_p205_bad') === 'paused by the user');
+    await tickAt(Date.parse(later) + 1_000);
+    check('so the clock leaves it asleep', st('agt_p205_bad') === 'paused');
+    const noUntil = await send<{ error: string }>('POST', '/api/agents/agt_p205_bad/resume-at', {});
+    const badUntil = await send<{ error: string }>('POST', '/api/agents/agt_p205_bad/resume-at', { until: 'soon' });
+    check('resume-at wants until, a time or null', noUntil.status === 400 && badUntil.status === 400 && badUntil.body.error.startsWith('not a time'), `${noUntil.status} ${badUntil.status} ${badUntil.body.error}`);
+    sleeper('agt_p205_done');
+    const notPaused = await send<{ error: string }>('POST', '/api/agents/agt_p205_done/resume-at', { until: inAnHour });
+    const noAgent = await send<{ error: string }>('POST', '/api/agents/agt_nobody/resume-at', { until: inAnHour });
+    check('one that is not paused is a 409 that says so', notPaused.status === 409 && notPaused.body.error.startsWith('it is not paused') && column('agt_p205_done') === null, `${notPaused.status} ${notPaused.body.error}`);
+    check('one that is not there a 404', noAgent.status === 404);
+
+    await send('POST', '/api/agents/agt_p205_bad/resume-at', { until: later });
+    await send('POST', '/api/agents/agt_p205_bad/resume');
+    check('▶ resume clears the time', column('agt_p205_bad') === null && st('agt_p205_bad') !== 'paused', `${st('agt_p205_bad')} ${column('agt_p205_bad')}`);
+    check('and is not told it was the time you chose', wokenAtTime('agt_p205_bad') === 0);
+    await until(() => runs.some((r) => r.options.resume === 'sess_agt_p205_bad'));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    sleeper('agt_p205_stop');
+    await send('POST', '/api/agents/agt_p205_stop/pause', { until: later });
+    await send('POST', '/api/agents/agt_p205_stop/terminate');
+    check('so does ⏹ stop', column('agt_p205_stop') === null && st('agt_p205_stop') === 'stopped', `${st('agt_p205_stop')} ${column('agt_p205_stop')}`);
+
+    // While everything is paused, a time that comes waits for the pause to end.
+    sleeper('agt_p205_held');
+    await send('POST', '/api/agents/agt_p205_held/pause', { until: inAnHour });
+    await sup.hold();
+    await tickAt(at + 1_000);
+    check('a time that comes while everything is paused waits', st('agt_p205_held') === 'paused' && column('agt_p205_held') === inAnHour && wokenAtTime('agt_p205_held') === 0);
+    sup.release();
+    check('the end of the pause does not wake it: it was not the pause\'s', st('agt_p205_held') === 'paused');
+    await tickAt(at + 2_000);
+    check('the next look after it does, at the time you chose', await until(() => st('agt_p205_held') === 'working') && wokenAtTime('agt_p205_held') === 1, String(st('agt_p205_held')));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+
+    // Paused by what isn't you, with a time somehow on the row: never woken by it, and the time dropped.
+    const past = new Date(Date.now() - 60_000).toISOString();
+    for (const [id, note] of [['agt_p205_hold', HOLD_NOTE], ['agt_p205_model', modelWaitNote('unreachable')]] as const) {
+      sleeper(id, { status: 'paused' });
+      eventLog().emit({ projectId: ppid, jobId: 'job_p205', agentId: id }, { kind: 'status', status: 'paused', error: note });
+      db.prepare('UPDATE agents SET resume_at = ? WHERE id = ?').run(past, id);
+    }
+    const holdRefused = await send<{ error: string }>('POST', '/api/agents/agt_p205_hold/resume-at', { until: inAnHour });
+    const modelRefused = await send<{ error: string }>('POST', '/api/agents/agt_p205_model/resume-at', { until: inAnHour });
+    check('the fleet hold\'s pause and a model wait take no time of yours: 409', holdRefused.status === 409 && modelRefused.status === 409 && modelRefused.body.error.startsWith('it was not paused by you'), `${holdRefused.status} ${modelRefused.status} ${modelRefused.body.error}`);
+    await tickAt(Date.now());
+    check(
+      'and the clock wakes neither, and drops the time',
+      st('agt_p205_hold') === 'paused' && st('agt_p205_model') === 'paused' && column('agt_p205_hold') === null && column('agt_p205_model') === null && lastStatusNote(db, 'agt_p205_model') === modelWaitNote('unreachable'),
+      `${st('agt_p205_hold')} ${st('agt_p205_model')} ${column('agt_p205_hold')} ${column('agt_p205_model')}`,
+    );
+
+    // Its time passed while the daemon was down: the first look of a fresh scheduler wakes it.
+    sleeper('agt_p205_restart', { status: 'paused' });
+    eventLog().emit({ projectId: ppid, jobId: 'job_p205', agentId: 'agt_p205_restart' }, { kind: 'status', status: 'paused', error: userPauseNote(past) });
+    db.prepare('UPDATE agents SET resume_at = ? WHERE id = ?').run(past, 'agt_p205_restart');
+    const reopened = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    check('a daemon that opens the file afresh has the time', getAgent(reopened as unknown as Db, 'agt_p205_restart')?.resumeAt === past);
+    reopened.close();
+    const fresh = new Scheduler(db, sup);
+    await fresh.tick();
+    fresh.stop();
+    check('a restart after its time resumes it on the first look', await until(() => st('agt_p205_restart') === 'working') && wokenAtTime('agt_p205_restart') === 1, String(st('agt_p205_restart')));
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    eyes.close();
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '340').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p340', 'old', '/tmp/p340', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j340', 'p340', 'old prompt', 'in_place', '/tmp/p340', 'main', 'done', 'x')`);
+    insertAgent(old as unknown as Db, { id: 'a340', jobId: 'j340', projectId: 'p340', role: 'builder', model: 'opus', sdkSessionId: null, status: 'paused', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY });
+    old.exec(readFileSync(new URL('340_agent_resume_at.sql', dir), 'utf8'));
+    check('migration 340 gives an existing paused agent no time, so it waits for you as it did', getAgent(old as unknown as Db, 'a340')?.status === 'paused' && getAgent(old as unknown as Db, 'a340')?.resumeAt === undefined);
+    old.close();
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

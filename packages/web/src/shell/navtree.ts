@@ -86,6 +86,8 @@ export interface NavAgent {
   orchestrator: boolean;
   /** Today's spend against its own daily budget, as the Fleet lane's meter; null for none (Amendment 140). */
   budget: Budget | null;
+  /** `⏸ paused` or `⏸ until 14:05`, the Agent tab's own chip (agent/tabs.ts, Amendment 205); null when it isn't one you paused. */
+  paused: string | null;
 }
 
 /**
@@ -202,11 +204,13 @@ export function navTree(
   toRead: ReadonlySet<string> = new Set(),
   /** The day the meters read; this browser's unless a check says. */
   today?: string,
+  /** What a paused agent's time to wake is shown against (Amendment 205); this browser's clock unless a check says. */
+  now: Date = new Date(),
 ): NavProject[] {
   const jobOrder = [...jobs].sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt)).map((j) => j.id);
 
   return projects.map((p) => {
-    const tabs = agentTabs(agents, p.id, jobOrder, pending, alerts);
+    const tabs = agentTabs(agents, p.id, jobOrder, pending, alerts, now);
     const label = (agentId: string, role: string): string => tabs.find((t) => t.id === agentId)?.label ?? role;
 
     const requests: NavNeed[] = pending
@@ -234,6 +238,7 @@ export function navTree(
         toRead: toRead.has(t.id),
         orchestrator: t.orchestrator,
         budget: agent ? budgetOf(agent, today) : null,
+        paused: t.paused,
       };
     });
 
