@@ -292,6 +292,8 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
         {/* Filled, the same look as the Fleet lane's Tag (Amendment 94). To read until you
             tick its latest reply read, in the transcript (Amendment 193, of 105's finished). */}
         {a.status === 'working' && <span className="sh-nav-tag is-live">working</span>}
+        {/* An agent you paused, filled in --idle, with the time it wakes at (Amendment 205). */}
+        {a.paused && <span className="sh-nav-tag is-pause">{a.paused}</span>}
         {a.toRead && <span className="sh-nav-tag is-done">to read</span>}
         <NavMeter budget={a.budget} whose={`${a.label}'s daily budget`} />
         {a.needs > 0 && <span className="sh-nav-need">{a.needs}</span>}

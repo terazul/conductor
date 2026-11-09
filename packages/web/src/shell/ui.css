@@ -163,6 +163,18 @@
   border-color: var(--line2);
 }
 
+/*
+ * A paused agent, paused by you (Amendment 205): filled as `.t-live`/`.t-done` are, in
+ * `--idle`, so a sleeping agent stands out from one that ended. `--bg` on `--idle` clears
+ * 4.5:1 in both themes (lib/verify.ts). One paused waiting for the model keeps `t-idle`.
+ */
+.ui-tag.t-pause {
+  color: var(--bg);
+  border-color: var(--idle);
+  background: var(--idle);
+  font-weight: 700;
+}
+
 /* ── provider badge (Amendment 80) ──────────────────────────────────────────── */
 
 .ui-prov {

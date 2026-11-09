@@ -12,6 +12,7 @@
 import type { Agent, AgentStatus } from '@conductor/shared';
 import { marksOrchestrator } from '@conductor/shared';
 import { budgetOf, type Budget } from '../shell/autonomy.js';
+import { pausedChip } from './sleep.js';
 
 export interface AgentTab {
   id: string;
@@ -33,15 +34,23 @@ export interface AgentTab {
    * a stack of one.
    */
   orchestrator: boolean;
+  /**
+   * The filled chip of an agent you paused (Amendment 205): `⏸ paused`, or `⏸ until 14:05`
+   * with a time to wake at (`pausedChip`, agent/sleep.ts). Null for every other agent, and for
+   * one paused waiting for the model, which an outage alert names.
+   */
+  paused: string | null;
 }
 
 export function agentTabs(
   agents: (Pick<Agent, 'id' | 'projectId' | 'jobId' | 'role' | 'status'> &
-    Partial<Pick<Agent, 'spentToday' | 'autonomy' | 'pipelineRoles' | 'parentId' | 'name'>>)[],
+    Partial<Pick<Agent, 'spentToday' | 'autonomy' | 'pipelineRoles' | 'parentId' | 'name' | 'resumeAt'>>)[],
   projectId: string,
   jobOrder: string[],
   pending: { agentId: string }[],
-  alerts: { agentIds: string[]; kind?: string }[],
+  alerts: { agentIds: string[]; kind?: string; waiting?: number }[],
+  /** What the paused chip's time is shown against; this browser's clock unless a check says. */
+  now: Date = new Date(),
 ): AgentTab[] {
   const mine = agents.filter((a) => a.projectId === projectId);
   const rank = (jobId: string): number => {
@@ -75,6 +84,8 @@ export function agentTabs(
       budget: b === null ? null : { tone: b.tone, fraction: b.fraction, pct: b.pct, state: b.state },
       // Its stack is the agents of its own job (Amendment 128).
       orchestrator: marksOrchestrator(a, ordered.filter((x) => x.jobId === a.jobId)),
+      // An outage alert counting `waiting` names the agents paused for the model (Amendment 192).
+      paused: pausedChip(a, mine.some((x) => x.kind === 'connection' && x.waiting !== undefined), now),
     };
   });
 }

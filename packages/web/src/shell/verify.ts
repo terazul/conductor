@@ -361,7 +361,7 @@ console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
   check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
   check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'working' && calm.jobs[1]!.status === 'done', calm.jobs.map((j) => j.status).join());
-  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, toRead: false, orchestrator: false, budget: null }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, toRead: false, orchestrator: false, budget: null }], []);
+  const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }], []);
   check('a failure outranks working, by the Fleet\'s SORT_RANK', failed.length === 1 && failed[0]!.status === 'failed' && SORT_RANK.failed < SORT_RANK.working);
   check('a project with one job still gets its group', api.jobs.length === 1 && api.jobs[0]!.agents.length === 1);
   const unknown = navTree(projects, agents, [], [])[0]!;
@@ -625,7 +625,7 @@ console.log('\n14 · an ended orchestrator\'s ended helpers fold into one row (A
   check("a helper's own helpers fold with the rest", shape(deep) === 'o,[h1 g1 h2]', shape(deep));
   const two = rowsOf([...stack('done', helper('h1', 'done'), helper('h2', 'done')), agent('v', 'p', 'jS', 'validator', 'done')]);
   check('an agent of the job that is no one\'s helper keeps its row', shape(two) === 'o,[h1 h2],v', shape(two));
-  check('groupByJob alone folds nothing: rows are the agents', groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null }], [])[0]!.rows.map((r) => r.kind).join() === 'agent');
+  check('groupByJob alone folds nothing: rows are the agents', groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }], [])[0]!.rows.map((r) => r.kind).join() === 'agent');
   check('foldHelpers without the agents behind the rows folds nothing', foldHelpers(ended.agents, []).length === ended.agents.length);
 
   // Display only.
@@ -703,9 +703,50 @@ console.log('\n16 · a project\'s and a stack\'s status show in the navigator, a
   check('the need and queue chips are in the theme\'s tokens, no fixed colour', /var\(--need\)/.test(rule('.sh-nav-tag.is-need')) && /var\(--queue\)/.test(rule('.sh-nav-tag.is-queue')) && !/#[0-9a-f]{3,6}\b/i.test(rule('.sh-nav-tag.is-need') + rule('.sh-nav-tag.is-queue')));
 }
 
+console.log('\n17 · an agent you paused wears a filled chip in the navigator, and its stack and project count it (Amendment 205)');
+{
+  const words = (tags: readonly { word: string; tone: string }[]): string => tags.map((t) => `${t.word}/${t.tone}`).join();
+  const now = new Date(2026, 10, 9, 14, 5);
+  const wake = new Date(2026, 10, 9, 16, 30).toISOString();
+  // web: p1 paused until 16:30 and p2 paused with no time (jNew); w1 paused waiting for the model (jOld).
+  const sleepy = [
+    { ...agent('p1', 'web', 'jNew', 'builder', 'paused'), resumeAt: wake },
+    agent('p2', 'web', 'jNew', 'reviewer', 'paused'),
+    agent('w1', 'web', 'jOld', 'scribe', 'paused'),
+    agent('b1', 'api', 'jApi', 'builder', 'working'),
+  ];
+  const outage = { ...alert('out', null, ['w1']), kind: 'connection', waiting: 1 } as Alert;
+  const t = navTree(projects, sleepy, [], [outage], jobs, new Set(), new Set(), undefined, now);
+  const row = (id: string) => t.flatMap((p) => p.agents).find((a) => a.id === id)!;
+  check('a row paused until a time wears ⏸ until 16:30, one with none ⏸ paused', row('p1').paused === '⏸ until 16:30' && row('p2').paused === '⏸ paused', `${row('p1').paused} | ${row('p2').paused}`);
+  check('one waiting for the model wears none, and a working one none', row('w1').paused === null && row('b1').paused === null);
+  check('it is the Agent tab\'s own chip', t.every((p) => p.agents.every((a) => a.paused === agentTabs(sleepy, p.id, ['jNew', 'jOld', 'jApi'], [], [outage], now).find((x) => x.id === a.id)!.paused)));
+  const web = t.find((p) => p.id === 'web')!;
+  check(
+    'the stack of two paused agents is headed 2 paused, filled, in place of the plain word',
+    words(web.jobs.find((j) => j.id === 'jNew')!.tags) === '2 paused/pause',
+    words(web.jobs.find((j) => j.id === 'jNew')!.tags),
+  );
+  check(
+    'the model\'s wait is not counted: its stack reads working, and the project 1 working beside 2 paused',
+    words(web.jobs.find((j) => j.id === 'jOld')!.tags) === '1 working/live' && words(web.tags) === '1 working/live,2 paused/pause',
+    words(web.tags),
+  );
+  check('rendered, the headline\'s chip is is-pause', renderToStaticMarkup(createElement(NavTags, { tags: web.tags, needs: 0 })) === '<span class="sh-nav-tag is-live">1 working</span><span class="sh-nav-tag is-pause">2 paused</span>');
+  const nav = src('./Navigator.tsx');
+  check('the agent row draws its chip, filled, after working and before to read', /a\.status === 'working' && <span className="sh-nav-tag is-live">working<\/span>\}[\s\S]*?\{a\.paused && <span className="sh-nav-tag is-pause">\{a\.paused\}<\/span>\}\s*\{a\.toRead/.test(nav));
+  const css = src('./shell.css');
+  const rule = (sel: string): string => css.match(new RegExp(`${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+  check(
+    '.sh-nav-tag.is-pause is filled as is-live is: --bg ink on --idle, heavier, no fixed colour (lib/verify.ts checks the pair in both themes)',
+    /color: var\(--bg\);/.test(rule('.sh-nav-tag.is-pause')) && /background: var\(--idle\);/.test(rule('.sh-nav-tag.is-pause')) && /font-weight: 700;/.test(rule('.sh-nav-tag.is-pause')) && !/#[0-9a-f]{3,6}\b/i.test(rule('.sh-nav-tag.is-pause')),
+    rule('.sh-nav-tag.is-pause'),
+  );
+}
+
 console.log(
   failures === 0
-    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it; and an agent or a project can be renamed from it; and a project\'s and a stack\'s status show beside their names, by the Fleet card\'s rule.\n'
+    ? '\nShell verify: PASS — each project lists only its own agents, needs and folders, in order; Needs you lights only when something waits; every node opens on its own and a broken setting opens nothing; the right-panel icon shows only on the Agent screen; the projects follow the Fleet\'s Sort by, and a drag sets your order; the agents are grouped by job, open to start with; a folder opens into its directories as a tree, and a file row\'s link matches what applyLink reads; working and finished are filled in the navigator too, and a nested repo\'s branch shows beside its folder; an orchestrator wears the Agent tab\'s mark; each agent row has its budget meter in the Fleet\'s tones, and a job row the sum; a file or folder can be renamed and deleted from the navigator, and a project\'s drag takes no file\'s; an ended orchestrator\'s ended helpers fold into one row, closed to start with, and nothing waiting on you is in it; and an agent or a project can be renamed from it; and a project\'s and a stack\'s status show beside their names, by the Fleet card\'s rule; and an agent you paused wears a filled ⏸ chip with the time it wakes, and its stack and project say N paused (Amendment 205).\n'
     : `\nShell verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

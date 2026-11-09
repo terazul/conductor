@@ -683,6 +683,17 @@ summary:has(> .sh-nav-chev)::-webkit-details-marker {
   font-weight: 700;
 }
 
+/*
+ * An agent you paused (Amendment 205), and a headline's "N paused": filled in `--idle`, as
+ * `.ui-tag.t-pause` is, so a sleeping agent can't be read for one that stopped.
+ */
+.sh-nav-tag.is-pause {
+  color: var(--bg);
+  border-color: var(--idle);
+  background: var(--idle);
+  font-weight: 700;
+}
+
 /* Failed stays tonal, as `.ui-tag.t-fail` does: red reads loud enough unfilled. */
 .sh-nav-tag.is-fail {
   color: var(--fail);

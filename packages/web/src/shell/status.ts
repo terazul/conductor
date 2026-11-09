@@ -8,8 +8,11 @@
 
 import type { AgentStatus } from '@conductor/shared';
 
-/** The token families a tag can be drawn in. */
-export type Tone = 'live' | 'need' | 'fail' | 'done' | 'queue' | 'idle';
+/**
+ * The token families a tag can be drawn in. `pause` is `--idle` filled (Amendment 205): an
+ * agent you paused, which no status maps to by itself — a model's wait keeps `idle`.
+ */
+export type Tone = 'live' | 'need' | 'fail' | 'done' | 'queue' | 'idle' | 'pause';
 
 /** AgentStatus → token family. The single place the mapping is decided. */
 export const STATUS_KEY: Record<AgentStatus, Tone> = {

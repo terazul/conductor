@@ -51,7 +51,7 @@ import { agentTabs } from './tabs.js';
 import { appendOutput, endLine, mergeRun, stripAnsi, type RunView } from '../lib/terminal.js';
 import { readFileSync } from 'node:fs';
 import { SETTINGS_KEY, WORKING_SAYS, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
-import { sleepControl } from './sleep.js';
+import { PAUSE_CHOICES, pauseOptions, pauseUntil, pausedByYou, pausedChip, pausedPill, resumesAt, sleepControl, userPause } from './sleep.js';
 import {
   TERM_TOKENS,
   binaryFrame,
@@ -489,6 +489,107 @@ check(
   sleepControl('blocked')?.title,
 );
 check('an agent that has ended has nothing to pause', ['done', 'failed', 'stopped'].every((s) => sleepControl(s as Agent['status']) === null));
+
+console.log('\n8b · ⏸ pause until a time: the menu, its times, and the chip a paused agent wears (Amendment 205)');
+{
+  // A fixed now, in this machine's own zone, as the browser's is: Mon 9 Nov 2026 14:05.
+  const now = new Date(2026, 10, 9, 14, 5);
+  const opts = pauseOptions(now);
+  check(
+    'the menu: until I resume it first, then 15 min, 1 hour, 4 hours, tomorrow 09:00 and at…',
+    opts.map((o) => o.key).join() === 'none,15m,1h,4h,tomorrow,at' && opts[0]!.label === 'until I resume it' && PAUSE_CHOICES.length === 6,
+    opts.map((o) => `${o.key}:${o.label}`).join(),
+  );
+  check('until I resume it has no time, and at… is the picker\'s', pauseUntil('none', now) === null && pauseUntil('at', now) === null && opts[0]!.when === '' && opts[5]!.when === '');
+  const at = (key: Parameters<typeof pauseUntil>[0], from = now): number => Date.parse(pauseUntil(key, from)!) - from.getTime();
+  check('15 min, 1 hour and 4 hours are that long from now', at('15m') === 15 * 60_000 && at('1h') === 60 * 60_000 && at('4h') === 4 * 60 * 60_000);
+  check(
+    'each line says when it wakes: 14:20, 15:05, 18:05, and tomorrow with its day',
+    opts.map((o) => o.when).join('|') === '|14:20|15:05|18:05|10 Nov 09:00|',
+    opts.map((o) => o.when).join('|'),
+  );
+  const lateEvening = new Date(2026, 10, 9, 23, 50);
+  const justAfter = new Date(2026, 10, 10, 0, 10);
+  check(
+    'tomorrow 09:00 across midnight: at 23:50 it is the next morning, nine hours ten away',
+    pauseOptions(lateEvening).find((o) => o.key === 'tomorrow')!.when === '10 Nov 09:00' && at('tomorrow', lateEvening) === (9 * 60 + 10) * 60_000,
+  );
+  check(
+    '…and at 00:10 it is the day after, not the same morning: the next calendar day, said as one',
+    pauseOptions(justAfter).find((o) => o.key === 'tomorrow')!.when === '11 Nov 09:00' && at('tomorrow', justAfter) === (32 * 60 + 50) * 60_000,
+    pauseOptions(justAfter).find((o) => o.key === 'tomorrow')!.when,
+  );
+  check('4 hours from 23:50 says its day too', pauseOptions(lateEvening).find((o) => o.key === '4h')!.when === '10 Nov 03:50');
+
+  const wake = new Date(2026, 10, 9, 16, 30).toISOString();
+  check('a paused agent wears ⏸ paused, and ⏸ until 16:30 with a time', pausedChip({ status: 'paused' }, false, now) === '⏸ paused' && pausedChip({ status: 'paused', resumeAt: wake }, false, now) === '⏸ until 16:30');
+  check('one paused waiting for the model wears none: it keeps its own display', pausedChip({ status: 'paused', resumeAt: wake }, true, now) === null && pausedChip({ status: 'paused' }, true, now) === null);
+  check('no other status wears it, a stale time or not', (['working', 'queued', 'blocked', 'done', 'failed', 'stopped'] as const).every((st) => pausedChip({ status: st, resumeAt: wake }, false, now) === null));
+  check('a time on another day says the day', pausedChip({ status: 'paused', resumeAt: new Date(2026, 10, 10, 9, 0).toISOString() }, false, now) === '⏸ until 10 Nov 09:00');
+  check('the pill: paused · resumes 16:30, or the plain word', pausedPill({ status: 'paused', resumeAt: wake }, now) === 'paused · resumes 16:30' && pausedPill({ status: 'paused' }, now) === 'paused');
+  check('beside ▶ resume: resumes 16:30, nothing with no time', resumesAt({ status: 'paused', resumeAt: wake }, now) === 'resumes 16:30' && resumesAt({ status: 'paused' }, now) === '' && resumesAt({ status: 'working', resumeAt: wake }, now) === '');
+
+  // Only a pause of yours takes a time: the daemon's notes, as session/schedule.ts writes them.
+  check(
+    "a pause of yours is read from its note, with the time in it",
+    userPause(undefined)?.until === null && userPause('paused by the user')?.until === null && userPause(`paused by the user until ${wake}`)?.until === wake,
+  );
+  check(
+    'Pause all, a budget and the model\'s wait are not yours',
+    userPause('paused with everything until the scheduled time — it carries on by itself then') === null &&
+      userPause('budget reached') === null &&
+      userPause('paused: claude is unreachable — waiting for it to come back; it carries on by itself then') === null &&
+      userPause('paused by the user until soon') === null,
+  );
+  const st = (seq: number, status: Agent['status'], error?: string): Event => ev(seq, { kind: 'status', status, ...(error ? { error } : {}) });
+  check(
+    'so set a time is offered by its latest status: yours, and not once it is working again or held',
+    pausedByYou([st(1, 'working'), st(2, 'paused', 'paused by the user')]) &&
+      !pausedByYou([st(1, 'paused', 'paused by the user'), st(2, 'queued')]) &&
+      !pausedByYou([st(1, 'paused', 'paused with everything until the scheduled time — it carries on by itself then')]) &&
+      !pausedByYou([]),
+  );
+
+  // The tab wears the chip; an outage alert counting `waiting` names the one waiting for the model.
+  const tabs = agentTabs(
+    [
+      { id: 'p1', projectId: 'p', jobId: 'j', role: 'builder', status: 'paused', resumeAt: wake },
+      { id: 'p2', projectId: 'p', jobId: 'j', role: 'reviewer', status: 'paused' },
+      { id: 'w1', projectId: 'p', jobId: 'j', role: 'scribe', status: 'paused' },
+      { id: 'r1', projectId: 'p', jobId: 'j', role: 'validator', status: 'working' },
+    ],
+    'p',
+    ['j'],
+    [],
+    [{ agentIds: ['w1'], kind: 'connection', waiting: 1 }],
+    now,
+  );
+  check(
+    'a tab wears ⏸ until 16:30 or ⏸ paused, and none waiting for the model or working',
+    tabs.map((t) => `${t.id}:${t.paused}`).join() === 'p1:⏸ until 16:30,p2:⏸ paused,w1:null,r1:null',
+    tabs.map((t) => `${t.id}:${t.paused}`).join(),
+  );
+  check(
+    'a connection alert without a count is the SDK\'s own retry, not the model\'s wait: the chip stays',
+    agentTabs([{ id: 'p2', projectId: 'p', jobId: 'j', role: 'x', status: 'paused' }], 'p', ['j'], [], [{ agentIds: ['p2'], kind: 'connection' }], now)[0]!.paused === '⏸ paused',
+  );
+  const page = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
+  check('the tab draws it, filled', /\{t\.paused && <span className="ag-tab-tag is-pause">\{t\.paused\}<\/span>\}/.test(page));
+  check(
+    'the header pill reads it in the filled tone, and a model\'s wait keeps --idle',
+    /const asleep = shown === 'paused' && pausedChip\(agent, modelWait\) !== null;/.test(page) &&
+      /const key = asleep \? 'pause' : STATUS_KEY\[shown\];/.test(page) &&
+      /asleep && agent\.resumeAt \? pausedPill\(agent\) : STATUS_WORD\[shown\]/.test(page),
+  );
+  check(
+    '⏸ opens the menu, except for a blocked agent, whose pause only frees its slot',
+    /if \(sleep\.action === 'pause' && agent\.status !== 'blocked'\) \{\s*setMenu/.test(page) && /<PauseMenu/.test(page),
+  );
+  check(
+    'a paused agent of yours shows when it resumes with change and clear, or set a time',
+    /sleep\.action === 'resume' && pausedByYou\(events\)/.test(page) && /\{resumesAt\(agent\)\}/.test(page) && />\s*change\s*</.test(page) && />\s*clear\s*</.test(page) && />\s*set a time\s*</.test(page) && /setResumeAt\(agent\.id, null\)/.test(page),
+  );
+}
 
 console.log('\nTabs · one per agent in the project (Amendment 49)');
 {
@@ -1257,7 +1358,7 @@ console.log("\n· an orchestrator's transcript says its finished helpers were re
 
 console.log(
   failures === 0
-    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps; a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed; a working agent is told which of its changes its run took (Amendment 178).\n'
+    ? '\nTrack B agent: PASS — the terminal’s keys, path links, settings and dock hold (Amendment 141); agent markdown renders as a document and cannot become markup; the budget field sends what it shows; file links stay inside the worktree; an agent opens at its latest reply; pause and resume say what sleeping keeps, and ⏸ pause can say until when, its menu\'s times right across midnight, a paused agent\'s tab wearing the time it wakes (Amendment 205); a non-Claude agent shows only the controls its engine has, with its budget in tokens; its settings fold to one line; an orchestrator’s auto turns start folded, one you open stays open, and fold all reaches them; and it says when its finished helpers were removed; a working agent is told which of its changes its run took (Amendment 178).\n'
     : `\nTrack B agent: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

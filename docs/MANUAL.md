@@ -957,7 +957,11 @@ and in the Agent screen's header, plainly — not just the job it belongs to.
 
 The same filled look reaches the navigator and the Agent screen's own tabs: an agent's
 row in the navigator reads filled **working**, and a job group there reads filled
-**N working** or **finished**. An agent whose latest reply you haven't ticked **Read it**
+**N working** or **finished**. A paused agent wears a filled grey chip on its row and on its
+tab: **⏸ paused**, or **⏸ until 14:05** when you gave it a time (one **pause all** paused
+says **⏸ paused**); its job group, its
+project and its Fleet card say **N paused**, filled the same, beside their other tags. An agent
+waiting for the model to come back isn't counted: it says so as before. An agent whose latest reply you haven't ticked **Read it**
 (see the Agent screen, below) says **to read** on its row, on the folded line of the
 helpers it is among, and on its tab on the Agent screen. Opening the agent doesn't clear it,
 and neither does answering it: only the box does, or **mark all read**, so a reply you skimmed past still shows.
@@ -1673,7 +1677,7 @@ agent.
 | | |
 |---|---|
 | **⎋ interrupt** | Stops the current run. The agent stays and can be redirected. |
-| **⏸ pause** | Puts it to sleep: frees its slot and keeps its conversation. **▶ resume** wakes it in the same session, once a slot is free. |
+| **⏸ pause** | Puts it to sleep: frees its slot and keeps its conversation. It asks until when: until you resume it, or a time at which it resumes by itself (below). **▶ resume** wakes it in the same session, once a slot is free. |
 | **✕ terminate** | Ends it for good. Confirms first, and is not undoable. |
 
 **Pausing is sleeping.** A paused agent holds no slot and costs nothing, and it keeps
@@ -1683,6 +1687,22 @@ paused is stopped, and its transcript shows **stopped before it finished**, so t
 agent is told to check what that call did. If the agent was waiting on your answer,
 pausing keeps the question in Needs You, and answering it wakes the agent. If its job
 was paused, waking the agent reopens the job.
+
+**Pausing until a time.** **⏸ pause** opens a short menu: **until I resume it** (as it always
+was), **15 min**, **1 hour**, **4 hours**, **tomorrow 09:00** or **at…**, which asks for a date and
+time in your own time zone. Each line says the time it wakes at, so **tomorrow 09:00** after midnight
+reads as the morning of that day, not the next. **Esc** closes it. At its time the agent is
+resumed as **▶ resume** would, in its own session, within a few seconds, and its transcript says
+**paused by you until 14:05**, then **resumed at the time you chose**. While it sleeps the header
+reads **paused · resumes 14:05** and, beside **▶ resume**, **resumes 14:05** with **change** (the
+same menu, without until I resume it) and **clear** (it stays asleep until you resume it); one you
+paused with no time has **set a time** there. **▶ resume**, **✕ terminate**, deleting it or its
+ending clears the time. While **pause all** holds, a time that comes waits for it to end, and the
+agent resumes at the next look after. The time is kept with the agent, so it survives a restart;
+if the daemon was off at its time, it resumes the agent as it starts. An agent waiting on your
+answer is paused at once, without the menu, as before: answering it is what wakes it. Only your
+own pause takes a time: an agent paused by **pause all**, or waiting for the model to come back,
+carries on by itself already.
 
 **Pausing everything until a time.** **⏸ pause all…** in the status bar, on every screen,
 asks for a date and time in your own time zone, with **1 h** and **tomorrow 09:00** as

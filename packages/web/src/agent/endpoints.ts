@@ -22,8 +22,11 @@ import type {
   Agent,
   HandOffRequest,
   Job,
+  PauseAgentRequest,
+  PauseAgentResponse,
   RemoveAgentResponse,
   RerunResponse,
+  ResumeAtRequest,
   ScheduleMessageRequest,
   ScheduledMessage,
   SendMessageRequest,
@@ -60,8 +63,16 @@ export function interruptAgent(agentId: string): Promise<unknown> {
  * Wired in the daemon and documented in the manual since I1, and until now unreachable
  * from the UI: an endpoint with no button is a feature nobody has.
  */
-export function pauseAgent(agentId: string): Promise<unknown> {
-  return api(agentPath(agentId, 'pause'), { method: 'POST', body: {} });
+export function pauseAgent(agentId: string, until?: string): Promise<PauseAgentResponse> {
+  // With a time it wakes by itself then (Amendment 205); without one, when you resume it.
+  const body: PauseAgentRequest = until ? { until } : {};
+  return api(agentPath(agentId, 'pause'), { method: 'POST', body });
+}
+
+/** Change a paused agent's time to wake at, or clear it with null (Amendment 205). */
+export function setResumeAt(agentId: string, until: string | null): Promise<PauseAgentResponse> {
+  const body: ResumeAtRequest = { until };
+  return api(agentPath(agentId, 'resume-at'), { method: 'POST', body });
 }
 
 export function resumeAgent(agentId: string): Promise<unknown> {
