@@ -45,6 +45,7 @@ import {
   type RetryCause,
   type StatusPayload,
   PROVIDER_BUDGETS_KEY,
+  MONTH_CORRECTION_KEY,
 } from '@conductor/shared';
 import { row, type Db } from '../db/index.js';
 import { eventLog } from '../eventlog.js';
@@ -136,11 +137,11 @@ export class Alerts {
     // The daily budget (Amendment 59), and the monthly ones (Amendment 182): checked when the
     // spend grows or a budget moves. A project's is set by its PATCH, which refreshes.
     this.#off.push(onCostChanged(() => this.refresh()));
-    // An engine's or a route's (Amendment 188) too.
+    // An engine's or a route's (Amendment 188) too, and the fleet's month set to the gateway's (Amendment 206).
     this.#off.push(
       onSettingsChanged(
         (changed) =>
-          (changed.includes(DAILY_KEY) || changed.includes(MONTHLY_KEY) || changed.includes(PROVIDER_BUDGETS_KEY)) && this.refresh(),
+          (changed.includes(DAILY_KEY) || changed.includes(MONTHLY_KEY) || changed.includes(PROVIDER_BUDGETS_KEY) || changed.includes(MONTH_CORRECTION_KEY)) && this.refresh(),
       ),
     );
     // An agent starts or stops waiting to be tried again (Amendment 123).

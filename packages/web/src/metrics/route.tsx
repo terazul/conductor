@@ -26,7 +26,8 @@ import { PROVIDER_BUDGETS_KEY, parseProviderBudgets, type MetricsRange, type Met
 import type { ScreenDef } from '../lib/screens.js';
 import { errorText } from '../lib/errors.js';
 import { useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useProjectSpend, useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
+import { useAgents, useMonthCorrection, useProjectSpend, useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
+import { ProviderCorrectionNote } from '../shell/monthfix.js';
 import { CostChart } from './chart.js';
 import { getMetrics } from './endpoints.js';
 import {
@@ -353,12 +354,17 @@ export function ProjectSpendTable({ rows }: { rows: ReadonlyArray<ProjectSpendRo
   );
 }
 
-/** Amendment 188: each engine's today and this month in its unit, Claude's routes under it, beside its monthly budget. Exported for a check. */
+/**
+ * Amendment 188: each engine's today and this month in its unit, Claude's routes under it, beside its monthly budget.
+ * While the fleet's month is set to the AI gateway's (Amendment 206), a line above says these are as counted. Exported for a check.
+ */
 export function ProviderSpendTable({ rows }: { rows: ReadonlyArray<ProviderSpendRow> }) {
+  const correction = useMonthCorrection();
   if (rows.length === 0) return null;
   return (
     <section aria-label="by provider">
       <h2 className="mt-h">By provider</h2>
+      <ProviderCorrectionNote correction={correction} className="mt-quiet" />
       <table className="mt-table">
         <thead>
           <tr>

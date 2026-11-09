@@ -48,6 +48,7 @@ import type {
   FileContentResponse,
   FileTreeResponse,
   Job,
+  MonthCorrectionResponse,
   Project,
   ServerFrame,
   Snapshot,
@@ -78,6 +79,8 @@ import {
   addSpendToday,
   agentsThatSpentOn,
   costMonth,
+  costMonthRaw,
+  monthCorrection,
   costToday,
   costTotal,
   listProjects,
@@ -140,7 +143,7 @@ import {
   type Clock,
 } from './retry.js';
 import { HEARTBEAT_MS, OUTAGE_CHECKS_MS, OUTAGE_EVERY_MS, OutageBook, STAGGER_MS, onOutageResume, outages, probes, resetOutages, type ResumeAnswer } from './outage.js';
-import { BUDGET_ENGINES, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
+import { BUDGET_ENGINES, MONTH_CORRECTION_KEY, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, probeGateway, providerModels, refusal } from './models.js';
 import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
@@ -9501,6 +9504,123 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n38 · the fleet\'s month set to the AI gateway\'s figure, kept as a correction Conductor counts on top of (Amendment 206)');
+  {
+    /*
+     * "Sometimes there is a gap on spend to month and the actual calculated by the AI gateway, allow
+     * me to update the spend to month to align with the AI gateway." The fleet's month only; the
+     * difference is kept as a setting, `cost_daily` is not rewritten, and a new month starts with none.
+     */
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
+    await until(() => sup.slots.used === 0);
+    const eyes = await connect();
+    const watch = dayWatch();
+    watch?.stop();
+    let now = new Date(2036, 9, 15, 12, 0, 0); // October 2036: a month no section before has spent in
+    setDayClock(() => now);
+    watch?.check();
+    const cpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'gateway206' })).body.project.id;
+    insertJob(db, { id: 'job_g206', projectId: cpid, prompt: 'the gateway prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
+    fixture('g_a', 'job_g206', { projectId: cpid });
+    const credit = (usd: number): void => {
+      addCostToday(db, usd);
+      addSpendToday(db, 'g_a', { usd, tokens: 100 });
+      broadcastSpend(db);
+    };
+    const correct = (gatewayUsd: unknown) => send<MonthCorrectionResponse & { error?: string }>('POST', '/api/spend/month-correction', { gatewayUsd });
+    const mine = (): ProjectSpend | undefined => projectSpend(db).find((p) => p.projectId === cpid);
+    const claudeMonth = (): number | undefined => providerSpend(db).find((p) => p.key === 'claude')?.month;
+    const stored = (): string | undefined => readSettings()[MONTH_CORRECTION_KEY];
+    const fleetAlert = async () => (await get<Snapshot>('/api/snapshot')).body.alerts.filter((a) => a.kind === 'monthly_budget' && a.projectId === null && a.provider === undefined);
+    credit(40);
+    check('as counted, with none set: the month is the sum of its days', near(costMonth(db), 40) && near(costMonthRaw(db), 40) && monthCorrection() === null && stored() === undefined);
+
+    // ── set to the gateway's figure: the difference is kept, for this month ──
+    const mark = eyes.frames.length;
+    const set = await correct(52.4);
+    check(
+      'set to the gateway\'s $52.40: the answer has the month corrected and as counted',
+      set.status === 200 && near(set.body.costMonth, 52.4) && near(set.body.counted, 40) && set.body.monthCorrection?.month === '2036-10' && near(set.body.monthCorrection?.usd, 12.4) && set.body.monthCorrection?.gatewayUsd === 52.4,
+      JSON.stringify(set.body),
+    );
+    const kept = JSON.parse(stored() ?? '{}') as Record<string, unknown>;
+    check('kept as the setting: the month, the difference, your figure and when', kept['month'] === '2036-10' && near(kept['usd'] as number, 12.4) && kept['gatewayUsd'] === 52.4 && Number.isFinite(Date.parse(String(kept['at']))), JSON.stringify(kept));
+    check('costMonth reads it, and the count beneath is left as it was', near(costMonth(db), 52.4) && near(costMonthRaw(db), 40) && near((db.prepare("SELECT SUM(cost_usd) AS t FROM cost_daily WHERE day LIKE '2036-10-%'").get() as { t: number }).t, 40));
+    check('every tab hears the corrected month, with the correction beside it', await until(() => eyes.frames.slice(mark).some((f) => f.type === 'cost' && near(f.costMonth, 52.4) && near(f.monthCorrection?.usd, 12.4) && f.monthCorrection?.gatewayUsd === 52.4)));
+    check('and the setting, so Settings follows', eyes.frames.slice(mark).some((f) => f.type === 'settings' && f.settings[MONTH_CORRECTION_KEY] === stored()));
+    const hello = (await get<Snapshot>('/api/snapshot')).body;
+    check('a fresh tab has both from the snapshot', near(hello.costMonth, 52.4) && near(hello.monthCorrection?.usd, 12.4), JSON.stringify({ m: hello.costMonth, c: hello.monthCorrection }));
+
+    // ── spend after it adds on top ──
+    credit(5);
+    check('spend after it adds on top of the gateway\'s figure', near(costMonth(db), 57.4) && near(costMonthRaw(db), 45));
+    check("the engine's month and the project's are as counted", near(claudeMonth(), 45) && near(mine()?.month, 45), `${claudeMonth()} ${mine()?.month}`);
+
+    // ── the gateway lower than the count ──
+    const lower = await correct(30);
+    check('a gateway figure under the count is a negative correction', lower.status === 200 && near(lower.body.monthCorrection?.usd, -15) && near(costMonth(db), 30) && near(lower.body.counted, 45), JSON.stringify(lower.body));
+    credit(2);
+    check('and spend after it still adds on top', near(costMonth(db), 32) && near(claudeMonth(), 47) && near(mine()?.month, 47));
+
+    // ── the fleet's monthly budget reads the corrected month ──
+    await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': '50' } });
+    check('$32 corrected against a $50 budget: no alert, though $47 was counted', (await fleetAlert()).length === 0);
+    await correct(60);
+    let alerted = await fleetAlert();
+    check('set to $60, the fleet\'s monthly budget is reached, and says $60', alerted.length === 1 && alerted[0]!.id === 'monthly:2036-10' && near(alerted[0]!.spent, 60) && alerted[0]!.budget === 50, JSON.stringify(alerted));
+
+    // ── clear ──
+    const cleared = await correct(null);
+    check('null clears it: the setting is gone and the month is as counted', cleared.status === 200 && cleared.body.monthCorrection === null && near(cleared.body.costMonth, 47) && near(cleared.body.counted, 47) && stored() === undefined && near(costMonth(db), 47), JSON.stringify(cleared.body));
+    alerted = await fleetAlert();
+    check('and the alert goes with it, $47 being under $50', alerted.length === 0, JSON.stringify(alerted));
+    check('every tab hears the month without a correction', await until(() => eyes.frames.some((f) => f.type === 'cost' && near(f.costMonth, 47) && f.monthCorrection === null)));
+    check('clearing none is not an error', (await correct(null)).status === 200);
+
+    // ── refused ──
+    const refused = await Promise.all([correct(-1), correct('52'), correct(2_000_000), send<{ error?: string }>('POST', '/api/spend/month-correction', { other: 1 }), correct(true)]);
+    check('a figure below 0, a string, over a million, none or not a number is a 400 that says why', refused.every((r) => r.status === 400 && /gatewayUsd/.test(r.body.error ?? '')) && stored() === undefined, refused.map((r) => r.status).join(' '));
+    const badSettings = await Promise.all(
+      ['lots', '{"month":"2036-13","usd":1,"gatewayUsd":1,"at":"2036-10-15T12:00:00Z"}', '{"month":"2036-10","usd":"1","gatewayUsd":1,"at":"2036-10-15T12:00:00Z"}', '{"month":"2036-10","usd":1,"gatewayUsd":-1,"at":"2036-10-15T12:00:00Z"}', '{"month":"2036-10","usd":1,"gatewayUsd":1,"at":"soon"}'].map((v) =>
+        send('PATCH', '/api/settings', { settings: { [MONTH_CORRECTION_KEY]: v } }),
+      ),
+    );
+    check('the setting has a rule: a PATCH of one that is not a correction is a 400', badSettings.every((r) => r.status === 400) && stored() === undefined, badSettings.map((r) => r.status).join(' '));
+    const sandboxed = await fetch(`${BASE}/api/spend/month-correction`, { method: 'POST', headers: { origin: 'null', 'content-type': 'application/json' }, body: JSON.stringify({ gatewayUsd: 10 }) });
+    check('Origin: null (a sandboxed page) → 403, and nothing kept', sandboxed.status === 403 && stored() === undefined, String(sandboxed.status));
+
+    // ── a new month starts with none ──
+    await correct(100);
+    check('set again for October', near(costMonth(db), 100));
+    const turn = eyes.frames.length;
+    now = new Date(2036, 10, 1, 0, 0, 20);
+    check('the month turns with the day', watch?.check() === true && localMonth() === '2036-11');
+    check("October's correction is not November's: the month reads as counted, 0", monthCorrection() === null && costMonth(db) === 0 && costMonthRaw(db) === 0);
+    check('and it is left, not written at the turn', (JSON.parse(stored() ?? '{}') as { month?: string }).month === '2036-10');
+    check("the turn's cost frame carries 0 and no correction", await until(() => eyes.frames.slice(turn).some((f) => f.type === 'cost' && f.costMonth === 0 && f.monthCorrection === null)));
+    credit(3);
+    const nov = await correct(4.5);
+    check("November's own is kept over October's", nov.status === 200 && nov.body.monthCorrection?.month === '2036-11' && near(nov.body.monthCorrection?.usd, 1.5) && near(costMonth(db), 4.5));
+
+    // A correction can't take the month below 0, should the count it was made against lose days.
+    await correct(1);
+    db.prepare("DELETE FROM cost_daily WHERE day LIKE '2036-11-%'").run();
+    check('a month with its days gone and a negative correction reads 0, not less', near(monthCorrection()?.usd, -2) && costMonth(db) === 0, `${monthCorrection()?.usd} ${costMonth(db)}`);
+
+    await correct(null);
+    await send('PATCH', '/api/settings', { settings: { 'conductor.monthlyBudget': null } });
+    setDayClock();
+    watch?.check();
+    watch?.start();
+    db.prepare("DELETE FROM cost_daily WHERE day >= '2036-10-01'").run();
+    db.prepare("DELETE FROM project_spend_daily WHERE day >= '2036-10-01'").run();
+    db.prepare("DELETE FROM agent_spend_daily WHERE day >= '2036-10-01'").run();
+    db.prepare("DELETE FROM provider_spend_daily WHERE day >= '2036-10-01'").run();
+    eyes.close();
+    sdk.query = realQuery;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -9508,7 +9628,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

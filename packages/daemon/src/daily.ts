@@ -4,7 +4,7 @@
  * stopped or paused. "Today" is local, midnight to midnight, as `cost_daily` counts it.
  */
 
-import { PROVIDER_BUDGETS_KEY, parseProviderBudgets, providerBudgetsProblem } from '@conductor/shared';
+import { MONTH_CORRECTION_KEY, PROVIDER_BUDGETS_KEY, monthCorrectionProblem, parseProviderBudgets, providerBudgetsProblem } from '@conductor/shared';
 import type { Db } from './db/index.js';
 import { hub } from './hub.js';
 import { localDay, spendFigures } from './session/store.js';
@@ -46,6 +46,13 @@ export function monthlyBudgetProblem(n: unknown): string | null {
 settingRule(MONTHLY_KEY, (v) => monthlyBudgetProblem(Number(v)));
 
 /**
+ * The fleet's month set to the AI gateway's figure (Amendment 206): `{ month, usd, gatewayUsd, at }`,
+ * written by POST /api/spend/month-correction (routes/spend.ts). `costMonth` adds `usd` for its month
+ * only, so an earlier month's is ignored and left, never removed at the turn.
+ */
+settingRule(MONTH_CORRECTION_KEY, monthCorrectionProblem);
+
+/**
  * A monthly budget for each engine and each Claude route (Amendment 188), beside the fleet's: one
  * setting, `conductor.monthlyBudget.providers`, a JSON object of key → number. Claude and its routes
  * are in dollars, Copilot and OpenRouter in tokens; the rule (shared, so the page says the same)
@@ -73,7 +80,8 @@ export function costChanged(): void {
 /**
  * Every open page is told what has been spent: today's figure (Amendment 59), the fleet's
  * all-time total and each project's today and total (Amendment 146), and the month's, the fleet's
- * and each project's (Amendment 182), and each engine's and Claude route's (Amendment 188). Called whenever spend is
+ * and each project's (Amendment 182), and each engine's and Claude route's (Amendment 188), and the
+ * fleet's month's correction to the gateway's figure (Amendment 206). Called whenever spend is
  * credited, in either unit, and at the day change. No hub outside the daemon is not fatal.
  */
 export function broadcastSpend(db: Db): void {

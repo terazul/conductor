@@ -200,6 +200,50 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 206 — post-merge, applied. **The fleet's month can be set to the AI gateway's figure, and Conductor counts on top of it.**
+
+Daemon (`routes/spend.ts` new, `session/store.ts`, `daily.ts`, `hub.ts`, `session/alerts.ts`,
+`session/verify.ts`), shared (`budget.ts`, `wire.ts`), web (`shell/monthfix.tsx` new, `shell/spend.ts`,
+`shell/shell.tsx`, `shell/shell.css`, `settings/route.tsx`, `settings/settings.css`, `metrics/route.tsx`,
+`lib/store.ts`, `lib/verify.ts`), `docs/MANUAL.md`. Asked 9 Nov: *"sometimes there is a gap on spend to
+month and the actual calculated by the ai gateway, allow me to update the spend to month to align with the
+ai gateway."*
+
+- **A correction, not a rewrite.** The setting `conductor.monthCorrection` is
+  `{month, usd, gatewayUsd, at}` (`MonthCorrection`, checked by `monthCorrectionProblem` as a
+  `settingRule`). `costMonth` is the month as counted (`costMonthRaw`, the sum of `cost_daily`) plus
+  `usd`, never below 0; the spend counted after it adds on top. One for another month is ignored
+  (`parseMonthCorrection`), so the 1st starts with none, and it is left in the file until the next is set.
+  Nothing in `cost_daily` changes.
+- **`POST /api/spend/month-correction`** takes `{gatewayUsd: number | null}`. A figure from 0 to
+  1,000,000 stores `usd = gatewayUsd − costMonthRaw` for this local month; null clears it. Anything else is
+  400. It answers `MonthCorrectionResponse {costMonth, counted, monthCorrection}`, and it goes through the
+  guard like every route (Origin `null` is 403). Whenever the setting changes, here or by
+  `PATCH /api/settings`, the daemon broadcasts the spend and looks at the budgets again, so every page's
+  month and the fleet's monthly alert follow. `Snapshot.monthCorrection?` and the cost frame's
+  `monthCorrection?` carry it, null when there is none.
+- **Only the fleet's month.** The status bar's month, Settings' figure under the monthly budget and the
+  fleet's **Monthly budget** alert use the corrected figure. Each engine's, route's and project's month,
+  and Metrics' days, are as counted.
+- **The web.** In the status bar the month ends in a **\*** (`MONTH_CORRECTED_MARK`), and its hover adds
+  **corrected +$12.40 to match the AI gateway, set 14:05** (`monthCorrectionTitle`, with `fmtStamp`).
+  Under Settings' monthly budget, **this month $40.00 · match the AI gateway** opens **the gateway says $
+  [ ] · set · cancel** (`gatewayDraft` takes `52.40` or `$1,052.40`). With a correction it reads **this
+  month $52.40 (corrected +$12.40 from $40.00 counted, set 9 Nov 14:05) · change · clear**
+  (`monthCorrectionWords`). The **By provider** tables on Metrics and Settings say **The fleet's month is
+  corrected +$12.40 to match the gateway; the rows below are as counted.** (`providerCorrectionNote`) while
+  there is one.
+
+**Verified:** `session/verify.ts` §38 (27): set over what was counted, then stored, broadcast and in the
+snapshot; spend after it adding on top; the engines' and projects' months as counted; a correction below
+what was counted; the monthly alert at the corrected figure, and gone on clear; clear, and clear with
+none; 400s for bad bodies and for a bad setting by PATCH; Origin `null` 403; the month turning, with
+October's ignored and November's kept; never below 0. `lib/verify.ts` §52 (26): the status bar's mark and
+its hover with and without a budget, rendered; the Settings line with none, open, and with one; the
+gateway's figure as typed; set and clear posting to the route; the store's snapshot and cost frames; the
+provider note, rendered, and where Metrics and Settings draw it. §39's Amendment 187 check now reads the
+month's span in `shell/monthfix.tsx`, where `MonthFigure` draws it, instead of in `shell/shell.tsx`.
+
 ### Amendment 205 — post-merge, applied. **⏸ pause asks until when, and a paused agent wears a filled ⏸ chip in the navigator and on its tab.**
 
 Daemon (migration `340_agent_resume_at.sql`, `session/store.ts`, `session/schedule.ts`,
