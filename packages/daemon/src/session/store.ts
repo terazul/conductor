@@ -19,6 +19,7 @@ import type {
   HelperRole,
   Isolation,
   Job,
+  MonthCorrection,
   PendingRequest,
   PermissionSuggestion,
   Project,
@@ -29,10 +30,12 @@ import type {
 } from '@conductor/shared';
 import {
   BUDGET_ENGINES,
+  MONTH_CORRECTION_KEY,
   PROVIDER_BUDGETS_KEY,
   claudeRoute,
   closingHeadingsOf,
   helperSlug,
+  parseMonthCorrection,
   parseProviderBudgets,
   providerBudgetKey,
   providerBudgetUnit,
@@ -908,12 +911,28 @@ export function costToday(db: Db): number {
   return r?.cost_usd ?? 0;
 }
 
-/** What the fleet has spent this local month: the month's days of `cost_daily`, summed (Amendment 182). */
+/**
+ * What the fleet has spent this local month: the month's days of `cost_daily`, summed (Amendment
+ * 182), and the correction to the AI gateway's figure when there is one for this month (Amendment
+ * 206). The status bar, Settings and the fleet's monthly budget read this; never below 0.
+ */
 export function costMonth(db: Db): number {
+  const c = monthCorrection();
+  const raw = costMonthRaw(db);
+  return c === null ? raw : Math.max(0, raw + c.usd);
+}
+
+/** The month as Conductor counted it, without the correction: what a correction is worked out from (Amendment 206). */
+export function costMonthRaw(db: Db): number {
   const r = row<{ total: number }>(
     db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_daily WHERE substr(day, 1, 7) = ?').get(localMonth()),
   );
   return r?.total ?? 0;
+}
+
+/** This month's correction to the gateway's figure, or null: none set, or the one set is an earlier month's (Amendment 206). */
+export function monthCorrection(): MonthCorrection | null {
+  return parseMonthCorrection(readSettings()[MONTH_CORRECTION_KEY], localMonth());
 }
 
 /** Cumulative spend for a job over its whole life. Information: no cap reads it (Amendment 129). */
@@ -1111,13 +1130,17 @@ export function providerSpend(db: Db, budgeted: Iterable<string> = []): Provider
   return out;
 }
 
-/** The `cost` frame's figures, and the snapshot's: today, this month, the fleet's all-time total, each project's three, each engine's two. */
+/**
+ * The `cost` frame's figures, and the snapshot's: today, this month, the fleet's all-time total, each
+ * project's three, each engine's two, and the month's correction to the gateway's figure.
+ */
 export function spendFigures(db: Db): {
   costToday: number;
   costMonth: number;
   costTotal: number;
   projectSpend: ProjectSpend[];
   providerSpend: ProviderSpend[];
+  monthCorrection: MonthCorrection | null;
 } {
   const budgeted = Object.keys(parseProviderBudgets(readSettings()[PROVIDER_BUDGETS_KEY]));
   return {
@@ -1126,6 +1149,7 @@ export function spendFigures(db: Db): {
     costTotal: costTotal(db),
     projectSpend: projectSpend(db),
     providerSpend: providerSpend(db, budgeted),
+    monthCorrection: monthCorrection(),
   };
 }
 

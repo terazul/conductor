@@ -18,6 +18,7 @@
  */
 
 import type { DaySpend, UsagePayload } from './events.js';
+import type { MonthCorrection } from './wire.js';
 import type { Agent } from './wire.js';
 
 /**
@@ -207,4 +208,48 @@ export function parseProviderBudgets(raw: string | undefined | null): Record<str
     if (unit !== null && providerBudgetValueProblem(n, unit) === null) out[key] = n as number;
   }
   return out;
+}
+
+// ── the fleet's month, set to the AI gateway's figure (Amendment 206) ──
+
+/**
+ * The setting that holds it: a JSON `MonthCorrection`, or absent for none. Only the fleet's month
+ * reads it; a correction for another month than this one is none, so a new month starts clean
+ * without anything being written at the turn.
+ */
+export const MONTH_CORRECTION_KEY = 'conductor.monthCorrection';
+
+/** The most the gateway's figure may be, in dollars: a budget's ceiling. */
+export const MONTH_CORRECTION_MAX = 1_000_000;
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function readCorrection(raw: string): MonthCorrection | string {
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    v = undefined;
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return 'a JSON object: {"month": "2026-11", "usd": 12.4, "gatewayUsd": 80, "at": "<ISO time>"}';
+  const c = v as Record<string, unknown>;
+  if (typeof c['month'] !== 'string' || !MONTH.test(c['month'])) return 'month: a month, YYYY-MM';
+  if (typeof c['usd'] !== 'number' || !Number.isFinite(c['usd'])) return 'usd: dollars, a number';
+  const g = c['gatewayUsd'];
+  if (typeof g !== 'number' || !Number.isFinite(g) || g < 0 || g > MONTH_CORRECTION_MAX) return `gatewayUsd: dollars, from 0 up to ${MONTH_CORRECTION_MAX.toLocaleString('en')}`;
+  if (typeof c['at'] !== 'string' || !Number.isFinite(Date.parse(c['at']))) return 'at: an ISO date and time';
+  return { month: c['month'], usd: c['usd'], gatewayUsd: g, at: c['at'] };
+}
+
+/** Why the setting's value can't be stored, or null when it can: the daemon's rule. */
+export function monthCorrectionProblem(raw: string): string | null {
+  const c = readCorrection(raw);
+  return typeof c === 'string' ? c : null;
+}
+
+/** The correction the setting holds for `month`, or null: none, unreadable, or another month's. */
+export function parseMonthCorrection(raw: string | undefined | null, month: string): MonthCorrection | null {
+  if (!raw) return null;
+  const c = readCorrection(raw);
+  return typeof c === 'string' || c.month !== month ? null : c;
 }

@@ -22,7 +22,8 @@ import {
   type RuleView,
 } from '@conductor/shared';
 import type { ScreenDef } from '../lib/screens.js';
-import { useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
+import { useMonthCorrection, useProjects, useProviderSpend, useStatusBar } from '../lib/store.js';
+import { MonthCorrectionLine, ProviderCorrectionNote } from '../shell/monthfix.js';
 import { highlight, recall } from '../shell/nav.js';
 import { REVOKE_NOTE, copyLine, listRules, revokeRule, ruleOrigin, ruleTitle } from './rules.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
@@ -449,11 +450,13 @@ function SpendSection() {
 
 /**
  * The fleet's monthly budget (Amendment 182), beside the daily one and the same field. A project's
- * own is set from its Fleet card's Edit.
+ * own is set from its Fleet card's Edit. Under it the month, which can be set to the AI gateway's
+ * figure (Amendment 206).
  */
 function MonthlyField() {
   const stored = useSetting(MONTHLY_KEY);
   const { costMonth } = useStatusBar();
+  const correction = useMonthCorrection();
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? stored ?? '';
   const problem = draft === null ? null : budgetProblem(draft);
@@ -489,6 +492,7 @@ function MonthlyField() {
           stopped. The month is yours too: it resets on the 1st. Each project can have its own, from its Fleet card's Edit.
         </p>
       )}
+      {costMonth !== null && <MonthCorrectionLine costMonth={costMonth} correction={correction} />}
     </>
   );
 }
@@ -502,6 +506,7 @@ function MonthlyField() {
 function ProviderBudgets() {
   const stored = useSetting(PROVIDER_BUDGETS_KEY);
   const budgets = parseProviderBudgets(stored);
+  const correction = useMonthCorrection();
   // A daemon from before it sends no figures: the engines alone, at nothing spent.
   const rows: ProviderSpend[] =
     useProviderSpend() ??
@@ -509,6 +514,7 @@ function ProviderBudgets() {
   return (
     <div className="st-field" role="group" aria-label="monthly budget by provider">
       <span>monthly budget by provider — empty for none</span>
+      <ProviderCorrectionNote correction={correction} className="st-dim" />
       {rows.map((r) => (
         <ProviderBudgetRow key={r.key} row={r} budget={budgets[r.key] ?? null} stored={stored} />
       ))}

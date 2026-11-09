@@ -12,15 +12,18 @@
  */
 
 import {
+  MONTH_CORRECTION_MAX,
   PROVIDER_BUDGET_MAX,
   localDayOf,
   parseProviderBudgets,
   spentOn,
   type Agent,
   type BudgetUnit,
+  type MonthCorrection,
   type ProjectSpend,
 } from '@conductor/shared';
 import { parseTokens, tokenWords } from '../lib/providers.js';
+import { fmtStamp } from '../lib/when.js';
 
 export const DAILY_KEY = 'conductor.dailyBudget';
 /** The fleet's monthly budget (Amendment 182), beside the daily one and read the same way. */
@@ -100,6 +103,53 @@ export function monthlyDraft(draft: string, current: number | null | undefined):
   if (problem !== null) return { problem };
   const next = draft.trim() === '' ? null : Number(draft);
   return { send: next === (current ?? null) ? undefined : next };
+}
+
+// ── the fleet's month set to the AI gateway's (Amendment 206) ───────────────
+
+/** The status bar's mark beside a month that is corrected. */
+export const MONTH_CORRECTED_MARK = '*';
+
+/** A correction's dollars with their sign: `+$12.40`, `−$3.00`. */
+export function signedMoney(usd: number): string {
+  return `${usd < 0 ? '−' : '+'}$${Math.abs(usd).toFixed(2)}`;
+}
+
+/** What the mark says on hover: `corrected +$12.40 to match the AI gateway, set 9 Nov 14:05`. */
+export function monthCorrectionTitle(c: MonthCorrection, now: Date = new Date()): string {
+  return `corrected ${signedMoney(c.usd)} to match the AI gateway, set ${fmtStamp(c.at, now)}`;
+}
+
+/** A month's hover, and on the line under it what the correction is, when there is one. */
+export function monthTitle(base: string, c: MonthCorrection | null, now: Date = new Date()): string {
+  return c === null ? base : `${base}\n${monthCorrectionTitle(c, now)}`;
+}
+
+/**
+ * The month under Settings' monthly budget: `this month $52.40`, and with a correction
+ * `this month $52.40 (corrected +$12.40 from $40.00 counted, set 9 Nov 14:05)`. What was counted
+ * is the month less the correction, so it is what Conductor has counted by now.
+ */
+export function monthCorrectionWords(costMonth: number, c: MonthCorrection | null, now: Date = new Date()): string {
+  const month = `this month $${costMonth.toFixed(2)}`;
+  if (c === null) return month;
+  const counted = Math.max(0, costMonth - c.usd);
+  return `${month} (corrected ${signedMoney(c.usd)} from $${counted.toFixed(2)} counted, set ${fmtStamp(c.at, now)})`;
+}
+
+/** Under the tables by provider, while the fleet's month is corrected: they are not. */
+export function providerCorrectionNote(c: MonthCorrection): string {
+  return `The fleet's month is corrected ${signedMoney(c.usd)} to match the gateway; the rows below are as counted.`;
+}
+
+/** The gateway's figure as typed (`52.40`, `$1,052.40`): the dollars, or why not. */
+export function gatewayDraft(draft: string): { gatewayUsd: number } | { problem: string } {
+  const t = draft.trim().replace(/^\$/, '').replace(/,/g, '').trim();
+  const n = Number(t);
+  if (t === '' || !Number.isFinite(n) || n < 0 || n > MONTH_CORRECTION_MAX) {
+    return { problem: `The gateway's figure for this month, in dollars from 0 up to ${MONTH_CORRECTION_MAX.toLocaleString('en-US')}.` };
+  }
+  return { gatewayUsd: n };
 }
 
 // ── a monthly budget by provider (Amendment 188) ──────────────────────────────

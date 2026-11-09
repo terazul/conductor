@@ -924,6 +924,11 @@ export interface Snapshot {
   costMonth?: number;
   /** Amendment 188: each engine's today and month, and each Claude route's. Optional for the same reason. */
   providerSpend?: ProviderSpend[];
+  /**
+   * Amendment 206: the correction in `costMonth`, which sets the fleet's month to the AI gateway's
+   * figure; null when there is none this month. Absent from a daemon before it.
+   */
+  monthCorrection?: MonthCorrection | null;
   /** Amendment 46. Optional so a recording made before it still replays. */
   settings?: Record<string, string>;
   /** Amendment 111: messages waiting for their time. Optional for the same reason. */
@@ -963,6 +968,33 @@ export interface ProviderSpend {
   unit: 'usd' | 'tokens';
   today: number;
   month: number;
+}
+
+/**
+ * Amendment 206. The fleet's month set to what the AI gateway says it is. `gatewayUsd` is the figure
+ * you typed, `usd` what was added to Conductor's own count then to reach it (negative when the
+ * gateway's is lower), and `at` when. It is for `month` alone: the setting
+ * `conductor.monthCorrection` holds it, and a new month starts with none. Conductor's records are
+ * not rewritten, and the engines', routes' and projects' months are as counted.
+ */
+export interface MonthCorrection {
+  /** `YYYY-MM`, the local month it corrects. */
+  month: string;
+  usd: number;
+  gatewayUsd: number;
+  at: string;
+}
+
+/** POST /api/spend/month-correction (Amendment 206): the gateway's figure for this month, or null to clear the correction. */
+export interface MonthCorrectionRequest {
+  gatewayUsd: number | null;
+}
+
+/** Its answer: the month as corrected, as Conductor counted it, and the correction now (null when cleared). */
+export interface MonthCorrectionResponse {
+  costMonth: number;
+  counted: number;
+  monthCorrection: MonthCorrection | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1244,9 +1276,10 @@ export type ServerFrame =
   /**
    * Today's spend, each time it grows (Amendment 59). It used to arrive only with a snapshot.
    * Amendment 146 adds the fleet's all-time total and each project's today and total, optional
-   * so a page from before reads the frame as it did.
+   * so a page from before reads the frame as it did. Amendment 206 adds the month's correction to
+   * the gateway's figure, null when there is none, with every `costMonth`.
    */
-  | { type: 'cost'; costToday: number; costMonth?: number; costTotal?: number; projectSpend?: ProjectSpend[]; providerSpend?: ProviderSpend[] }
+  | { type: 'cost'; costToday: number; costMonth?: number; costTotal?: number; projectSpend?: ProjectSpend[]; providerSpend?: ProviderSpend[]; monthCorrection?: MonthCorrection | null }
   /** Slots in use and the limit, each time either changes (Amendment 47). */
   | { type: 'slots'; slots: { used: number; total: number } }
   /** A terminal command started, or ended (Amendment 58). */

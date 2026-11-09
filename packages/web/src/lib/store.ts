@@ -26,6 +26,7 @@ import {
   type DiffStat,
   type Event,
   type Job,
+  type MonthCorrection,
   type PendingRequest,
   type Project,
   type ProjectSpend,
@@ -63,6 +64,8 @@ interface State {
   costTotal: number | null;
   /** The fleet's spend this local month (Amendment 182); null when the daemon has not said. */
   costMonth: number | null;
+  /** The correction in that month, set to match the AI gateway (Amendment 206); null when there is none. */
+  monthCorrection: MonthCorrection | null;
   /** Each project's spend today and in total (Amendment 146); null when the daemon has not said. */
   projectSpend: ProjectSpend[] | null;
   /** Each engine's and Claude route's spend today and this month (Amendment 188); null when the daemon has not said. */
@@ -88,6 +91,7 @@ function initialState(): State {
     costToday: 0,
     costTotal: null,
     costMonth: null,
+    monthCorrection: null,
     projectSpend: null,
     providerSpend: null,
     scheduled: [],
@@ -196,6 +200,8 @@ class Store {
         // them leaves what the tab had.
         if (frame.costTotal !== undefined) s.costTotal = frame.costTotal;
         if (frame.costMonth !== undefined) s.costMonth = frame.costMonth;
+        // Sent with every month (Amendment 206); a daemon from before it has none.
+        if (frame.costMonth !== undefined) s.monthCorrection = frame.monthCorrection ?? null;
         if (frame.projectSpend !== undefined) s.projectSpend = frame.projectSpend;
         if (frame.providerSpend !== undefined) s.providerSpend = frame.providerSpend;
         break;
@@ -245,6 +251,7 @@ class Store {
     s.costTotal = snap.costTotal ?? null;
     // And one from before Amendment 182 no month: the status bar leaves it out.
     s.costMonth = snap.costMonth ?? null;
+    s.monthCorrection = snap.monthCorrection ?? null;
     s.projectSpend = snap.projectSpend ?? null;
     // And one from before Amendment 188 no engine's: Settings and Metrics leave its figures out.
     s.providerSpend = snap.providerSpend ?? null;
@@ -544,6 +551,11 @@ export function useStatusBar(): { slots: State['slots']; costToday: number; cost
     costMonth: s.costMonth,
     seq: s.seq,
   }));
+}
+
+/** The fleet's month's correction, set to match the AI gateway (Amendment 206), or null. */
+export function useMonthCorrection(): MonthCorrection | null {
+  return useSelect('monthCorrection', (s) => s.monthCorrection);
 }
 
 /**

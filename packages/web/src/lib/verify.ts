@@ -18,7 +18,7 @@
  * is pure, so this is fast and has no jsdom dependency.
  */
 
-import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, MonthCorrection, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
 import { MODEL_WAIT_SUFFIX, PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, rollupStatus, sparkline } from '@conductor/shared';
 import { PROVIDER_SPEND_NOTE, providerBudgetCell, providerSpendRows } from '../metrics/rules.js';
 import { alertActions, alertNotice, monthlyNote } from '../attention/alerts.js';
@@ -81,6 +81,7 @@ import { SORTS, applyOrder, fleetSort, moveBefore, moveBy, parseOrder, sortFacts
 import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from '../fleet/notewords.js';
 import {
   MONTHLY_KEY,
+  MONTH_CORRECTED_MARK,
   MONTH_TITLE,
   OVER_AT,
   WARN_AT,
@@ -97,6 +98,11 @@ import {
   projectPairWords,
   projectSpendOf,
   toneOf,
+  gatewayDraft,
+  monthCorrectionTitle,
+  monthCorrectionWords,
+  providerCorrectionNote,
+  signedMoney,
 } from '../shell/spend.js';
 import { budgetOf } from '../shell/autonomy.js';
 import {
@@ -2000,10 +2006,13 @@ console.log('\n39 · this month beside today, and a monthly budget beside the da
   check('in tokens where nothing reported dollars', projectPairWords({ today: 0, month: 0, total: 0, tokensToday: 0, tokensMonth: 3_400, tokensTotal: 9_000 }).month === 'month 3.4k tok');
   check('and none from a daemon before it', projectPairWords({ today: 1, total: 2, tokensToday: 0, tokensTotal: 0 }).month === undefined);
   const shell = src('../shell/shell.tsx');
+  // The figure itself is drawn by MonthFigure, beside its correction's mark (Amendment 206).
+  const figure = src('../shell/monthfix.tsx');
   check(
     'the status bar ends with the month, after today: the meter with a budget, the figure without, nothing from an older daemon; no total follows it (Amendment 187)',
     /function MonthSpend\(\{ costMonth \}/.test(shell) && /parseBudget\(useSetting\(MONTHLY_KEY\)\)/.test(shell) && /if \(costMonth === null\) return null/.test(shell) &&
-      /title=\{MONTH_TITLE\}>\s*\{monthWords\(costMonth\)\}/.test(shell) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{m\.title\}/.test(shell) &&
+      /<MonthFigure costMonth=\{costMonth\} budget=\{budget\}/.test(shell) &&
+      /title=\{monthTitle\(MONTH_TITLE, correction, now\)\}>\s*\{monthWords\(costMonth\)\}/.test(figure) && /className="sh-spend-month" data-tone=\{m\.tone\} title=\{monthTitle\(m\.title, correction, now\)\}/.test(figure) &&
       /\{month\}\s*<\/span>/.test(shell) && !/\{month\}\s*\{total\}/.test(shell) && !/ total`/.test(src('../shell/spend.ts')),
   );
   const css = src('../shell/shell.css');
@@ -2846,9 +2855,129 @@ await (async () => {
   }
 })();
 
+console.log('\n52 · the fleet\'s month set to the AI gateway\'s: the status bar marks it and says by how much, Settings sets, changes and clears it, and the tables by provider say they are as counted (Amendment 206)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const text = (html: string): string => html.replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&#10;/g, '\n');
+  const { MonthFigure, MonthCorrectionLine, ProviderCorrectionNote } = await import('../shell/monthfix.js');
+  const now = new Date(2026, 10, 9, 18, 0);
+  const today: MonthCorrection = { month: '2026-11', usd: 12.4, gatewayUsd: 52.4, at: new Date(2026, 10, 9, 14, 5).toISOString() };
+  const earlier: MonthCorrection = { ...today, at: new Date(2026, 10, 8, 14, 5).toISOString() };
+  const down: MonthCorrection = { ...today, usd: -3, gatewayUsd: 37 };
+
+  check('a correction reads with its sign', signedMoney(12.4) === '+$12.40' && signedMoney(-3) === '−$3.00' && signedMoney(0) === '+$0.00');
+  check('its hover says by how much, to match what, and when', monthCorrectionTitle(today, now) === 'corrected +$12.40 to match the AI gateway, set 14:05' && monthCorrectionTitle(earlier, now) === 'corrected +$12.40 to match the AI gateway, set 8 Nov 14:05');
+
+  // ── the status bar ──
+  const bar = (costMonth: number, budget: number | null, correction: MonthCorrection | null): string =>
+    text(renderToStaticMarkup(createElement(MonthFigure, { costMonth, budget, correction, now })));
+  const plain = bar(40, null, null);
+  check('uncorrected, the month is as it was: no mark, the same hover', plain === `<span class="sh-spend-total" title="${MONTH_TITLE}">· $40.00 this month</span>`, plain);
+  const fixed = bar(52.4, null, today);
+  check(
+    'corrected, the month is the corrected figure, ending in the mark',
+    fixed.includes('>· $52.40 this month<span class="sh-spend-mark">' + MONTH_CORRECTED_MARK + '</span></span>') && MONTH_CORRECTED_MARK === '*',
+    fixed,
+  );
+  check('and its hover says what the month is, then by how much and when', fixed.includes(`title="${MONTH_TITLE}\ncorrected +$12.40 to match the AI gateway, set 14:05"`), fixed);
+  const metered = bar(52.4, 50, today);
+  check(
+    'against a monthly budget too: the meter\'s colour and words, the mark, and the correction under its hover',
+    /^<span class="sh-spend-month" data-tone="over" title="105% of this month's budget — \$2\.40 over\. Agents keep going; it only warns\.\ncorrected \+\$12\.40 to match the AI gateway, set 14:05">· \$52\.40 of \$50\.00 this month<span class="sh-spend-mark">\*<\/span><\/span>$/.test(metered),
+    metered,
+  );
+  const shell = src('../shell/shell.tsx');
+  check('the status bar draws it from the store\'s correction', /const correction = useMonthCorrection\(\);/.test(shell) && /<MonthFigure costMonth=\{costMonth\} budget=\{budget\} correction=\{correction\} \/>/.test(shell));
+  check('the mark has its colour', /\.sh-spend-mark \{[^}]*color: var\(--live\);/.test(src('../shell/shell.css')));
+
+  // ── Settings, under the monthly budget ──
+  const line = (correction: MonthCorrection | null, startOpen = false): string =>
+    text(renderToStaticMarkup(createElement(MonthCorrectionLine, { costMonth: correction === null ? 40 : 52.4, correction, now, startOpen, send: async () => {} })));
+  const offer = line(null);
+  check(
+    'with none: this month $X · match the AI gateway, and no change or clear',
+    offer.includes('this month $40.00 · <button type="button" class="st-link">match the AI gateway</button>') && !offer.includes('>change<') && !offer.includes('>clear<'),
+    offer,
+  );
+  const field = line(null, true);
+  check(
+    'it opens to the gateway says $ [ ] · set · cancel, and set waits for a figure',
+    field.includes('the gateway says $') && /<input inputMode="decimal" class="st-monthfix-input" aria-label="the AI gateway's spend this month, in dollars" placeholder="40\.00"[^>]* value=""\/>/.test(field) &&
+      /<button type="button" class="st-link" disabled="">set<\/button> · <button type="button" class="st-link">cancel<\/button>/.test(field) && !field.includes('match the AI gateway<'),
+    field,
+  );
+  const shown = line(earlier);
+  check(
+    'with one: what it is, from what was counted, and when, · change · clear',
+    shown.includes('this month $52.40 (corrected +$12.40 from $40.00 counted, set 8 Nov 14:05) · <button type="button" class="st-link">change</button> · <button type="button" class="st-link">clear</button>') && !shown.includes('match the AI gateway'),
+    shown,
+  );
+  check('the words, by themselves', monthCorrectionWords(40, null, now) === 'this month $40.00' && monthCorrectionWords(37, down, now) === 'this month $37.00 (corrected −$3.00 from $40.00 counted, set 14:05)');
+  check(
+    'the gateway\'s figure is dollars as typed, from 0',
+    JSON.stringify(gatewayDraft('52.40')) === '{"gatewayUsd":52.4}' && JSON.stringify(gatewayDraft(' $1,052.40 ')) === '{"gatewayUsd":1052.4}' && JSON.stringify(gatewayDraft('0')) === '{"gatewayUsd":0}' &&
+      'problem' in gatewayDraft('') && 'problem' in gatewayDraft('-1') && 'problem' in gatewayDraft('lots') && 'problem' in gatewayDraft('2000000'),
+  );
+  {
+    const { sendMonthCorrection } = await import('../shell/monthfix.js');
+    const realFetch = globalThis.fetch;
+    const calls: { path: string; method: string; body: string }[] = [];
+    globalThis.fetch = (async (path: string, init: RequestInit) => {
+      calls.push({ path, method: init.method ?? 'GET', body: String(init.body) });
+      return new Response(JSON.stringify({ costMonth: 52.4, counted: 40, monthCorrection: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    try {
+      await sendMonthCorrection(52.4);
+      await sendMonthCorrection(null);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    check(
+      'set posts the gateway\'s figure to the daemon, and clear posts null',
+      calls.length === 2 && calls.every((c) => c.path === '/api/spend/month-correction' && c.method === 'POST') && calls[0]!.body === '{"gatewayUsd":52.4}' && calls[1]!.body === '{"gatewayUsd":null}',
+      JSON.stringify(calls),
+    );
+  }
+  const settings = src('../settings/route.tsx');
+  check('Settings draws the line under the monthly budget, once the daemon says a month', /\{costMonth !== null && <MonthCorrectionLine costMonth=\{costMonth\} correction=\{correction\} \/>\}/.test(settings));
+  check('its links and field have their look', /\.st-link \{/.test(src('../settings/settings.css')) && /\.st-monthfix-input \{/.test(src('../settings/settings.css')));
+
+  // ── the store ──
+  let k = 0;
+  const held = (): MonthCorrection | null => store.select(`mc${k++}`, (s) => s.monthCorrection);
+  send({ type: 'hello', seq: 0, snapshot: { ...snapshot, costMonth: 52.4, monthCorrection: today } });
+  check('a snapshot carries the correction', held()?.usd === 12.4);
+  send({ type: 'cost', costToday: 1, costMonth: 57.4, monthCorrection: earlier });
+  check('a cost frame with the month carries it', held()?.at === earlier.at);
+  send({ type: 'cost', costToday: 1 });
+  check('a frame without the month leaves it', held()?.at === earlier.at);
+  send({ type: 'cost', costToday: 1, costMonth: 45, monthCorrection: null });
+  check('a frame with the month and none clears it', held() === null);
+  send({ type: 'cost', costToday: 1, costMonth: 45, monthCorrection: today });
+  send({ type: 'cost', costToday: 1, costMonth: 45 });
+  check('a month from a daemon before it is uncorrected', held() === null);
+  send({ type: 'hello', seq: 0, snapshot: { ...snapshot, costMonth: 45 } });
+  check('and so is its snapshot', held() === null);
+  send({ type: 'hello', seq: 0, snapshot });
+
+  // ── by provider ──
+  check('the note says the fleet\'s month is corrected and the rows are as counted', providerCorrectionNote(today) === "The fleet's month is corrected +$12.40 to match the gateway; the rows below are as counted.");
+  const note = (correction: MonthCorrection | null): string => text(renderToStaticMarkup(createElement(ProviderCorrectionNote, { correction, className: 'mt-quiet' })));
+  check('it shows while there is a correction, and not otherwise', note(down) === '<p class="mt-quiet">The fleet\'s month is corrected −$3.00 to match the gateway; the rows below are as counted.</p>' && note(null) === '', note(down));
+  const metrics = src('../metrics/route.tsx');
+  check(
+    'Metrics\' By provider says it, under its heading, from the store',
+    /export function ProviderSpendTable\(\{ rows \}[^)]*\) \{\s*const correction = useMonthCorrection\(\);/.test(metrics) && /<h2 className="mt-h">By provider<\/h2>\s*<ProviderCorrectionNote correction=\{correction\} className="mt-quiet" \/>/.test(metrics),
+  );
+  check(
+    'and Settings\' monthly budget by provider, above its rows',
+    /const correction = useMonthCorrection\(\);/.test(settings) && /<ProviderCorrectionNote correction=\{correction\} className="st-dim" \/>\s*\{rows\.map\(\(r\) => \(\s*<ProviderBudgetRow/.test(settings),
+  );
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

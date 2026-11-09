@@ -950,6 +950,12 @@ summary:has(> .sh-nav-chev)::-webkit-details-marker {
   color: var(--fail);
 }
 
+/* The month set to the AI gateway's (Amendment 206): a mark after it; its hover says by how much. */
+.sh-spend-mark {
+  margin-left: 1px;
+  color: var(--live);
+}
+
 /* Pause everything until a time (Amendment 111): the bar's control, its panel, and the on state. */
 .sh-pause-btn {
   font: inherit;

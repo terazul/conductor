@@ -20,6 +20,13 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Set the month's spend to the AI gateway's.** Asked for (9 Nov): *"sometimes there is a gap on spend to
+  month and the actual calculated by the ai gateway, allow me to update the spend to month to align with the ai
+  gateway."* *Done (9 Nov): Amendment 206 (Settings, under the monthly budget: match the AI gateway sets the
+  fleet's month to the gateway's figure, kept as a correction Conductor counts on top of, changed or cleared
+  there and gone on the 1st; the status bar marks the month with by how much and when; the engines',
+  routes' and projects' months stay as counted, and the By provider tables say so).*
+
 - [x] **Pause an agent until a time, and see it's paused.** Asked for (9 Nov): *"when I put an agent on pause,
   allow me to specify when to unpause. Also update the status on the left menu bar and highlight the pause state."*
   *Done (9 Nov): Amendment 205 (⏸ pause asks until when: until you resume it, 15 min, 1 hour, 4 hours, tomorrow

@@ -31,6 +31,7 @@ import type { ShellDef } from '../lib/screens.js';
 import {
   useAlerts,
   useFeedStatus,
+  useMonthCorrection,
   usePending,
   useProjects,
   useStatusBar,
@@ -41,7 +42,8 @@ import { openAttention } from './nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { Navigator, useRoute } from './Navigator.js';
 import { DETAILS_KEY, NAV_OPEN_KEY, detailsShown, navShown, rightPanelFor } from './navtree.js';
-import { DAILY_KEY, MONTHLY_KEY, MONTH_TITLE, dailyMeter, monthMeter, monthWords, parseBudget } from './spend.js';
+import { DAILY_KEY, MONTHLY_KEY, dailyMeter, parseBudget } from './spend.js';
+import { MonthFigure } from './monthfix.js';
 import { useNow } from './clock.js';
 import { PauseAll } from './pauseall.js';
 import { fmtAge, fmtMoney } from './ui.js';
@@ -198,24 +200,14 @@ function useBuild(): Build | null {
 
 /**
  * This month's spend, after today's (Amendment 182): against the monthly budget when there is one,
- * in the meter's colours, with no bar. Nothing from a daemon before it.
+ * in the meter's colours, with no bar, and marked when it is set to the AI gateway's (Amendment
+ * 206). Nothing from a daemon before it.
  */
 function MonthSpend({ costMonth }: { costMonth: number | null }) {
   const budget = parseBudget(useSetting(MONTHLY_KEY));
+  const correction = useMonthCorrection();
   if (costMonth === null) return null;
-  if (budget === null) {
-    return (
-      <span className="sh-spend-total" title={MONTH_TITLE}>
-        {monthWords(costMonth)}
-      </span>
-    );
-  }
-  const m = monthMeter(costMonth, budget);
-  return (
-    <span className="sh-spend-month" data-tone={m.tone} title={m.title}>
-      · {m.label}
-    </span>
-  );
+  return <MonthFigure costMonth={costMonth} budget={budget} correction={correction} />;
 }
 
 /**
