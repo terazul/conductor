@@ -428,6 +428,7 @@ interface AgentRow {
   helper_role?: string | null;
   name?: string | null;
   reply_seq?: number | null;
+  resume_at?: string | null;
   /** From `agent_spend_daily` for today (Amendment 129); null when it has spent nothing today. */
   spent_usd?: number | null;
   spent_tokens?: number | null;
@@ -486,6 +487,8 @@ const toAgent = (r: AgentRow, day: string): Agent => ({
   ...(r.name ? { name: r.name } : {}),
   // Only once it has replied (Amendment 193).
   ...(r.reply_seq ? { replySeq: r.reply_seq } : {}),
+  // Only while it is paused with a time to wake at (Amendment 205).
+  ...(r.status === 'paused' && r.resume_at ? { resumeAt: r.resume_at } : {}),
 });
 
 /**
@@ -780,13 +783,30 @@ export function setAgentStatus(
   // `stopped` has ended too (Amendment 85): it isn't coming back, and without an end time
   // its clock kept counting from when it started.
   const ended = status === 'done' || status === 'failed' || status === 'stopped' ? nowIso() : null;
+  // Anything but paused clears the time it would wake at (Amendment 205): ▶ resume, stop, a
+  // run that starts or ends. Pausing leaves it to `setResumeAt`.
   db.prepare(
     `UPDATE agents
         SET status = ?, block_mode = ?,
             started_at = COALESCE(started_at, ?),
-            ended_at = COALESCE(?, ended_at)
+            ended_at = COALESCE(?, ended_at),
+            resume_at = CASE WHEN ? = 'paused' THEN resume_at ELSE NULL END
       WHERE id = ?`,
-  ).run(status, blockMode, started, ended, id);
+  ).run(status, blockMode, started, ended, status, id);
+}
+
+/** When a paused agent wakes by itself, an ISO instant, or with null not until you resume it (Amendment 205). */
+export function setAgentResumeAt(db: Db, id: string, at: string | null): void {
+  db.prepare('UPDATE agents SET resume_at = ? WHERE id = ?').run(at, id);
+}
+
+/** Paused agents whose time to wake has come by `now`, oldest time first (Amendment 205). */
+export function dueResumes(db: Db, now: string): Array<{ id: string; resumeAt: string }> {
+  return rows<{ id: string; resume_at: string }>(
+    db
+      .prepare(`SELECT id, resume_at FROM agents WHERE status = 'paused' AND resume_at IS NOT NULL AND resume_at <= ? ORDER BY resume_at, id`)
+      .all(now),
+  ).map((r) => ({ id: r.id, resumeAt: r.resume_at }));
 }
 
 export function setAgentSession(db: Db, id: string, sdkSessionId: string): void {

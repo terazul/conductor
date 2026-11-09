@@ -21,6 +21,11 @@
  *     agent `queued`. `Supervisor.pump` sends the oldest one when it gives the agent a slot
  *     (`nextForSlot`), so it survives a restart too. Cancelling it puts the agent back.
  *
+ *   - **Resume a paused agent at a time** (Amendment 205). ⏸ pause with a time keeps it as the
+ *     agent's `resume_at`; at that time it is resumed as ▶ resume would, and the time cleared.
+ *     While everything is paused it waits for the pause to end. It survives a restart: the
+ *     first look resumes one whose time passed while the daemon was down.
+ *
  * TIME. Instants are ISO, compared as numbers. The browser turns the local date and time
  * you picked into one; nothing here reads or sets a time zone.
  *
@@ -36,7 +41,7 @@ import { PAUSE_UNTIL_KEY } from '@conductor/shared';
 import { rows, type Db } from '../db/index.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { onSettingsChanged, patchSettings, readSettings, settingRule } from '../settings.js';
-import { newId } from './store.js';
+import { dueResumes, lastStatusNote, newId, setAgentResumeAt } from './store.js';
 import type { Supervisor } from './supervisor.js';
 
 /** How often the clock is looked at. */
@@ -50,6 +55,24 @@ export const SCHEDULE_HORIZON_MS = 366 * 24 * 60 * 60 * 1000;
 
 /** How far in the past a time may be when it is chosen: a minute, for a slow click. */
 export const SCHEDULE_GRACE_MS = 60_000;
+
+/**
+ * Why an agent is paused when you paused it (Amendment 35). With a time to wake at (Amendment
+ * 205) the note says so, `paused by the user until <ISO>`, which the transcript reads as
+ * "paused by you until 14:05". Only a pause with one of these notes is yours to time.
+ */
+export const USER_PAUSE_NOTE = 'paused by the user';
+
+/** The note for a pause of yours, until a time or until you resume it (Amendment 205). */
+export const userPauseNote = (resumeAt: string | null): string =>
+  resumeAt === null ? USER_PAUSE_NOTE : `${USER_PAUSE_NOTE} until ${resumeAt}`;
+
+/** Whether a paused agent's note is one of yours, not the fleet hold's, a model's or a budget's. */
+export const isUserPauseNote = (note: string | null): boolean =>
+  note === null || note === USER_PAUSE_NOTE || note.startsWith(`${USER_PAUSE_NOTE} until `);
+
+/** The queued status's note when the time you paused an agent until has come (Amendment 205). */
+export const RESUME_AT_NOTE = 'resumed at the time you chose';
 
 /** The sentence for a time that isn't one, or is out of range; null when it is fine. */
 export function timeProblem(raw: unknown, now = Date.now()): string | null {
@@ -189,8 +212,8 @@ export function broadcastScheduled(db: Db): void {
 // The clock
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The one thing a message is sent through: `Supervisor.sendMessage`, or a stand-in in verify. */
-type Sup = Pick<Supervisor, 'sendMessage' | 'hold' | 'release' | 'held'>;
+/** What the clock acts through: `Supervisor`'s, or a stand-in in verify. */
+type Sup = Pick<Supervisor, 'sendMessage' | 'hold' | 'release' | 'held' | 'resumeAgent'>;
 
 export class Scheduler {
   readonly #db: Db;
@@ -267,6 +290,10 @@ export class Scheduler {
     this.#first = false;
     if (until) return; // Messages that come due while paused wait for it to end.
 
+    // Agents you paused until a time that has come (Amendment 205), as ▶ resume wakes them.
+    // Not while held by anyone: they wake when the hold ends, at the next look.
+    if (!this.#sup.held) this.#wake(now);
+
     let changed = false;
     for (const m of due(this.#db, now)) {
       try {
@@ -282,6 +309,17 @@ export class Scheduler {
       }
     }
     if (changed) this.broadcast();
+  }
+
+  /**
+   * Resume each paused agent whose time has come. Only a pause of yours: one the hold, a model
+   * or a budget paused never has a time, and if one somehow did it is cleared, not woken.
+   */
+  #wake(now: number): void {
+    for (const r of dueResumes(this.#db, new Date(now).toISOString())) {
+      if (isUserPauseNote(lastStatusNote(this.#db, r.id))) this.#sup.resumeAgent(r.id, RESUME_AT_NOTE);
+      else setAgentResumeAt(this.#db, r.id, null);
+    }
   }
 
   #first = true;

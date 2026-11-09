@@ -148,11 +148,12 @@ import {
   getRerunPending,
   setRerunPending,
   lastStatusNote,
+  setAgentResumeAt,
   type AgentPersona,
 } from './store.js';
 import { reportedWindow } from './windows.js';
 import { finishJob, type Finish } from './finish.js';
-import { broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone } from './schedule.js';
+import { USER_PAUSE_NOTE, broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, isUserPauseNote, listScheduled, nextForSlot, nextWhenDone, userPauseNote } from './schedule.js';
 
 const exec = promisify(execFile);
 
@@ -1096,12 +1097,14 @@ export class Supervisor implements AgentControl {
     budgetChanged();
   }
 
-  #pause(agentId: string, note: string): void {
+  #pause(agentId: string, note: string, resumeAt: string | null = null): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent) return;
     // A pause of any kind ends the bout of waiting for the model (Amendment 123).
     this.#forgetRetries(agentId);
     setAgentStatus(this.#db, agentId, 'paused');
+    // Only a pause of yours has a time to wake at (Amendment 205); any other has none.
+    setAgentResumeAt(this.#db, agentId, resumeAt);
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
       { kind: 'status', status: 'paused', error: note },
@@ -2656,8 +2659,11 @@ export class Supervisor implements AgentControl {
    * asleep already. Either way answering it is what wakes it. Pausing used to expire the
    * question, so one you had not got to yet was lost and a woken agent had to think to
    * ask again.
+   *
+   * `resumeAt`, an ISO instant, is when it wakes by itself (Amendment 205): the scheduler's
+   * tick resumes it then. One that keeps its question is woken by your answer, so has none.
    */
-  async pauseAgent(agentId: string, note = 'paused by the user'): Promise<void> {
+  async pauseAgent(agentId: string, note = USER_PAUSE_NOTE, resumeAt: string | null = null): Promise<void> {
     if (getAgent(this.#db, agentId)?.status === 'blocked' && (await arbiter().parkForAgent(agentId))) {
       return;
     }
@@ -2667,7 +2673,30 @@ export class Supervisor implements AgentControl {
       this.#userStopped.add(agentId);
       await runner.stop();
     }
-    this.#pause(agentId, note);
+    this.#pause(agentId, note, resumeAt);
+  }
+
+  /**
+   * Change when an agent you paused wakes, or with null clear it, so it waits for ▶ resume
+   * (Amendment 205). The sentence when it can't: it isn't paused, or isn't paused by you —
+   * the fleet hold, a model that can't be reached or a budget wake it, not a time. The new
+   * time is a status note in its transcript, as the pause was.
+   */
+  setResumeAt(agentId: string, resumeAt: string | null): string | null {
+    const agent = getAgent(this.#db, agentId);
+    if (!agent) return 'no such agent';
+    if (agent.status !== 'paused') return 'it is not paused: only a paused agent has a time to resume at';
+    if (!isUserPauseNote(lastStatusNote(this.#db, agentId))) {
+      return 'it was not paused by you: what paused it resumes it, so it takes no time of its own';
+    }
+    if ((agent.resumeAt ?? null) === resumeAt) return null;
+    setAgentResumeAt(this.#db, agentId, resumeAt);
+    eventLog().emit(
+      { projectId: agent.projectId, jobId: agent.jobId, agentId },
+      { kind: 'status', status: 'paused', error: userPauseNote(resumeAt) },
+    );
+    this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
+    return null;
   }
 
   // ── a job whose folder is gone (Amendment 114) ───────────────────────────
@@ -2806,8 +2835,11 @@ export class Supervisor implements AgentControl {
   /**
    * ▶ resume. Never refused for a budget (Amendment 180), so it is how an agent the old
    * ceiling paused carries on.
+   *
+   * `note` goes on the queued status, for the transcript: the scheduler's, when the time you
+   * paused it until has come (RESUME_AT_NOTE, Amendment 205). Either way its time is cleared.
    */
-  resumeAgent(agentId: string): void {
+  resumeAgent(agentId: string, note?: string): void {
     const agent = getAgent(this.#db, agentId);
     if (!agent || agent.status !== 'paused') return;
     // ▶ on an agent waiting for the model (Amendment 192): it goes now, out of the outage.
@@ -2827,8 +2859,10 @@ export class Supervisor implements AgentControl {
     setAgentStatus(this.#db, agentId, 'queued');
     eventLog().emit(
       { projectId: agent.projectId, jobId: agent.jobId, agentId },
-      { kind: 'status', status: 'queued' },
+      { kind: 'status', status: 'queued', ...(note ? { error: note } : {}) },
     );
+    // Its time is gone with the pause: every page hears so (Amendment 205).
+    if (agent.resumeAt) this.#pushEntities({ agents: [getAgent(this.#db, agentId)!] });
     this.pump();
   }
 
