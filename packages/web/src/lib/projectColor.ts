@@ -4,31 +4,21 @@
  * in the menu a page is.
  *
  * A project keeps a key of `PROJECT_COLORS`, picked on the Fleet card's edit form, or none for auto.
- * Auto is decided here, so every page agrees without the daemon: in the order the projects were
- * created, each without a key takes the key fewest of the ones before it have, the palette's order
- * breaking a tie. A project you add never changes the ones before it, and the first eight differ.
- * A key you pick wins, and counts for the ones after it.
+ * Auto is `assignProjectColors` (shared/colors.ts): in creation order, each without a key takes the
+ * key fewest before it have, so the first eight differ. The daemon pins what it gives, at a project's
+ * creation, at start for any without one, and when you choose auto, so removing a project never moves
+ * another's colour. A key you pick wins.
  *
  * The pure part has no DOM; lib/verify.ts checks it under Node.
  */
 
-import { PROJECT_COLORS, type Project, type ProjectColor } from '@conductor/shared';
+import { assignProjectColors, type Project, type ProjectColor } from '@conductor/shared';
 import { useMemo } from 'react';
 import { useProjects } from './store.js';
 
-/** Every project's key, kept or auto. */
+/** Every project's key: the one the daemon pinned, or, from a daemon that pins none, the same rule's. */
 export function projectColors(projects: readonly Pick<Project, 'id' | 'createdAt' | 'color'>[]): Map<string, ProjectColor> {
-  const byAge = [...projects].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  const used = new Map<ProjectColor, number>(PROJECT_COLORS.map((k) => [k, 0]));
-  const out = new Map<string, ProjectColor>();
-  for (const p of byAge) {
-    // A key the daemon doesn't send now (one a later palette dropped) is auto, not a missing token.
-    const kept = p.color && (PROJECT_COLORS as readonly string[]).includes(p.color) ? p.color : null;
-    const key = kept ?? PROJECT_COLORS.reduce((best, k) => (used.get(k)! < used.get(best)! ? k : best));
-    used.set(key, used.get(key)! + 1);
-    out.set(p.id, key);
-  }
-  return out;
+  return assignProjectColors(projects);
 }
 
 /** The class that sets `--proj` to its key's token (shell/ui.css). */

@@ -1348,7 +1348,7 @@ already has jobs. Two paths are refused: one that doesn't exist, and one another
 project already holds.
 
 It also sets the project's **colour**, the bar down its left edge (see [the navigator](#4-the-screens)):
-**auto**, the default, edged in the colour it gives now, or one of eight swatches to keep that one.
+**auto**, the default, edged in the colour it gives now, or one of eight swatches to keep that one. A project gets its auto colour when it is added, and keeps it: adding or removing another project never changes it.
 
 Removing asks first either way, and the question tells you what it's about to forget:
 the jobs, the agents and the recorded spend.

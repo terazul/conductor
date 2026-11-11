@@ -121,6 +121,7 @@ import {
   localMonth,
   setDayClock,
   helpersOf,
+  pinProjectColors,
   unreportedHelpers,
 } from './store.js';
 import { AgentRunner, CUT_SHORT, HELPER_TOOLS, sdk } from './runner.js';
@@ -9636,7 +9637,7 @@ async function main(): Promise<void> {
     const kpid = (await send<{ project: Project }>('POST', '/api/projects', { path: ROOT, name: 'colour210' })).body.project.id;
     // ROOT is a project already, so this is that one, under the name it had.
     const was = getProject(db, kpid)!.name;
-    check('a project starts on auto: no colour on the wire', getProject(db, kpid)?.color === undefined && !('color' in (getProject(db, kpid) ?? {})));
+    check('a project gets its auto colour pinned when it is made, so another coming or going can\'t move it', (PROJECT_COLORS as readonly string[]).includes(getProject(db, kpid)?.color ?? ''), JSON.stringify(getProject(db, kpid)));
     const mark = eyes.frames.length;
     const set = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: 'mint' });
     check('a key of the palette is kept and said back', set.status === 200 && set.body.project.color === 'mint' && getProject(db, kpid)?.color === 'mint', JSON.stringify(set.body));
@@ -9651,7 +9652,7 @@ async function main(): Promise<void> {
     const named = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { name: 'renamed210' });
     check('a rename keeps the colour', named.status === 200 && named.body.project.color === 'plum' && named.body.project.name === 'renamed210', JSON.stringify(named.body));
     const auto = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: null });
-    check('null is auto again: no colour on the wire', auto.status === 200 && auto.body.project.color === undefined && getProject(db, kpid)?.color === undefined, JSON.stringify(auto.body));
+    check('null is auto again, pinned at once to the key auto gives it', auto.status === 200 && (PROJECT_COLORS as readonly string[]).includes(auto.body.project.color ?? '') && getProject(db, kpid)?.color === auto.body.project.color, JSON.stringify(auto.body));
     check('a colour alone is something to change', (await send('PATCH', `/api/projects/${kpid}`, {})).status === 400 && (await send('PATCH', `/api/projects/${kpid}`, { color: null })).status === 200);
     await send('PATCH', `/api/projects/${kpid}`, { name: was });
     check('a colour for a project that is not there is a 404', (await send('PATCH', '/api/projects/no_such_210', { color: 'sky' })).status === 404);
@@ -9665,6 +9666,14 @@ async function main(): Promise<void> {
     old.exec(readFileSync(new URL('350_project_color.sql', dir), 'utf8'));
     const got = old.prepare("SELECT color FROM projects WHERE id = 'p350'").get() as { color: string | null } | undefined;
     check('migration 350 applies to an existing database, and an old project is on auto', got !== undefined && got.color === null && getProject(old as unknown as Db, 'p350')?.color === undefined, JSON.stringify(got));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p350b', 'old b', '/tmp/p350b', 'y'), ('p350c', 'old c', '/tmp/p350c', 'z')`);
+    pinProjectColors(old as unknown as Db);
+    const pinned = ['p350', 'p350b', 'p350c'].map((id) => getProject(old as unknown as Db, id)?.color);
+    check('at start every project without one is pinned, in creation order, each its own', pinned.join() === PROJECT_COLORS.slice(0, 3).join(), pinned.join());
+    old.exec(`DELETE FROM projects WHERE id = 'p350b'`);
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p350d', 'old d', '/tmp/p350d', 'zz')`);
+    pinProjectColors(old as unknown as Db);
+    check('removing one moves no other project\'s colour, and the next takes the free one', getProject(old as unknown as Db, 'p350c')?.color === PROJECT_COLORS[2] && getProject(old as unknown as Db, 'p350')?.color === PROJECT_COLORS[0] && getProject(old as unknown as Db, 'p350d')?.color === PROJECT_COLORS[1], [getProject(old as unknown as Db, 'p350c')?.color, getProject(old as unknown as Db, 'p350d')?.color].join());
     old.close();
   }
 

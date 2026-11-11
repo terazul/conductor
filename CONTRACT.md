@@ -215,9 +215,12 @@ the menu with the project pages."*
 - **PATCH `/api/projects/:id`** also takes `color`: a key keeps it, `null` goes back to auto, anything else is a 400
   *"not a project colour"* naming the keys, and nothing else in the body changes. Every tab hears it as the project
   event.
-- **Auto** (`projectColors`, pure, web): in creation order each project without a key takes the key fewest of the
-  ones before it have, the palette's order breaking a tie; a kept key wins and counts. A new project never changes
-  an older one's, the first eight differ, and a key the palette doesn't have is auto.
+- **Auto** (`assignProjectColors`, pure, `shared/colors.ts`): in creation order each project without a key takes the
+  key fewest of the ones before it have, the palette's order breaking a tie; a kept key wins and counts; the first
+  eight differ, and a key the palette doesn't have is auto. **The daemon pins it** (`pinProjectColors`): at start
+  for every project without one, when a project is made, and when you choose auto. Worked out on each page alone,
+  removing a project shifted every later project's colour (found in review); pinned, a colour never moves unless you
+  change it. The web keeps the same rule for a daemon that pins none.
 - **The bar**, 4px of `--proj` set by a `pc-<key>` class: down the navigator's whole project group; at a Fleet
   card's left edge, the status stripe moved inside it; inside the left of the Project and Agent screens' crumb (the
   orchestrator's wine kept); and down the Files column head of the open project.
@@ -226,9 +229,9 @@ the menu with the project pages."*
 - The palette keeps clear of the status colours and of each other (OKLab ≥ 0.08 in both themes) and is ≥ 3:1 on
   `--bg` and `--surf`, the floor for a graphic, as the bar has no text.
 
-**Verified:** `session/verify.ts` §39: auto by default; a key kept, sent to every tab, and each key taken; a bad key
-a 400 that names the keys, and with a name beside it neither changes; a rename keeps the colour; null back to auto;
-an empty body a 400, a missing project a 404; migration 350 on an old database. `lib/verify.ts` §56: auto's order,
+**Verified:** `session/verify.ts` §39: a new project pinned to a key; a key kept, sent to every tab, and each key taken; a bad key
+a 400 that names the keys, and with a name beside it neither changes; a rename keeps the colour; null back to auto, pinned at once;
+an empty body a 400, a missing project a 404; migration 350 on an old database; pinning at start in creation order, and removing one moving no other's. `lib/verify.ts` §56: auto's order,
 stability and spread, a kept key winning and counting, an unknown key auto, `projClass`; the tokens in both themes
 and each `pc-` class; the contrast and the distances per theme; the bar in each of the five places, the edit form's
 swatches and what it saves; tokens only.

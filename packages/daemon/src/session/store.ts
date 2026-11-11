@@ -31,6 +31,7 @@ import type {
 } from '@conductor/shared';
 import {
   BUDGET_ENGINES,
+  assignProjectColors,
   MONTH_CORRECTION_KEY,
   PROVIDER_BUDGETS_KEY,
   claudeRoute,
@@ -217,7 +218,10 @@ export function insertProject(
     `INSERT INTO projects (id, name, path, default_branch, created_at)
      VALUES (?, ?, ?, ?, ?)`,
   ).run(project.id, project.name, project.path, project.defaultBranch, project.createdAt);
-  return project;
+  // Its colour, pinned now, from the ones there are (Amendment 210).
+  pinProjectColors(db);
+  const color = row<{ color: string | null }>(db.prepare('SELECT color FROM projects WHERE id = ?').get(project.id))?.color;
+  return color ? { ...project, color: color as ProjectColor } : project;
 }
 
 /**
@@ -288,7 +292,22 @@ export function setProjectMonthlyBudget(db: Db, id: string, usd: number | null):
  */
 export function setProjectColor(db: Db, id: string, color: ProjectColor | null): Project | undefined {
   db.prepare('UPDATE projects SET color = ? WHERE id = ?').run(color, id);
+  // Auto is pinned at once, so it can't move later when another project comes or goes.
+  if (color === null) pinProjectColors(db);
   return getProject(db, id);
+}
+
+/**
+ * Give every project without a colour the one auto gives it (`assignProjectColors`), and keep it
+ * (Amendment 210). Run at start, when a project is made and when auto is chosen: a colour worked out
+ * on each page from creation order shifted every later project's when one was removed.
+ */
+export function pinProjectColors(db: Db): void {
+  const all = listProjects(db);
+  if (!all.some((p) => p.color == null)) return;
+  const keys = assignProjectColors(all);
+  const set = db.prepare('UPDATE projects SET color = ? WHERE id = ? AND color IS NULL');
+  for (const p of all) if (p.color == null) set.run(keys.get(p.id)!, p.id);
 }
 
 /**

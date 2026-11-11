@@ -25,6 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { WS_PATH, DEFAULT_PORT } from '@conductor/shared';
 import { dbPath, openDb } from './db/index.js';
+import { pinProjectColors } from './session/store.js';
 import { startBackups } from './db/backup.js';
 import { initEventLog } from './eventlog.js';
 import { initHub, hub } from './hub.js';
@@ -97,6 +98,8 @@ export async function build(): Promise<FastifyInstance> {
   });
 
   const db = openDb();
+  // Every project without a colour bar gets the one auto gives it, kept from now on (Amendment 210).
+  pinProjectColors(db);
   initEventLog(db);
   initHub();
   // The models' windows kept before a restart, for the hand-off cap (Amendment 163).
