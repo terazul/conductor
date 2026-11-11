@@ -48,7 +48,19 @@ export interface Project {
    * `monthly_budget` alert, and nothing stops.
    */
   monthlyBudgetUsd?: number | null;
+  /**
+   * The colour of its bar (Amendment 210): a key of `PROJECT_COLORS`, never a colour, set on the
+   * Fleet card's edit form. Absent, or null, for auto: the web picks one (lib/projectColor.ts).
+   */
+  color?: ProjectColor | null;
 }
+
+/**
+ * The keys a project's bar can have (Amendment 210). Each is a `--proj-<key>` token (tokens.css) in
+ * both themes. The daemon refuses any other at PATCH /api/projects/:id; the order is auto's order.
+ */
+export const PROJECT_COLORS = ['sky', 'mint', 'plum', 'yellow', 'blue', 'pink', 'indigo', 'magenta'] as const;
+export type ProjectColor = (typeof PROJECT_COLORS)[number];
 
 /** A note you keep on a project, to track where you are (Amendment 55). */
 export interface ProjectNote {

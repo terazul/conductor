@@ -121,6 +121,7 @@ import {
   localMonth,
   setDayClock,
   helpersOf,
+  pinProjectColors,
   unreportedHelpers,
 } from './store.js';
 import { AgentRunner, CUT_SHORT, HELPER_TOOLS, sdk } from './runner.js';
@@ -143,7 +144,7 @@ import {
   type Clock,
 } from './retry.js';
 import { HEARTBEAT_MS, OUTAGE_CHECKS_MS, OUTAGE_EVERY_MS, OutageBook, STAGGER_MS, onOutageResume, outages, probes, resetOutages, type ResumeAnswer } from './outage.js';
-import { BUDGET_ENGINES, MONTH_CORRECTION_KEY, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
+import { BUDGET_ENGINES, MONTH_CORRECTION_KEY, PROJECT_COLORS, PROVIDER_BUDGETS_KEY, RETRY_DELAYS_KEY, claudeRoute, closingHeadingsOf, missingHeadings } from '@conductor/shared';
 import { askGateway, catalog, forgetCatalog, forgetProviderModels, known, modelSources, probeGateway, providerModels, refusal } from './models.js';
 import { forgetWindows, initWindows, recordRunWindows, recordWindows, reportedWindow, windowsFromResult } from './windows.js';
 import {
@@ -9625,6 +9626,57 @@ async function main(): Promise<void> {
     sdk.query = realQuery;
   }
 
+  console.log('\n39 · a project\'s colour bar, a key of the palette or auto (Amendment 210)');
+  {
+    /*
+     * "Allow me to a color bar for each project." The daemon keeps the key the Fleet card's edit
+     * form picks, or null for auto, and refuses anything that is not a key: the colours themselves
+     * are the web's, one value for each theme.
+     */
+    const eyes = await connect();
+    const kpid = (await send<{ project: Project }>('POST', '/api/projects', { path: ROOT, name: 'colour210' })).body.project.id;
+    // ROOT is a project already, so this is that one, under the name it had.
+    const was = getProject(db, kpid)!.name;
+    check('a project gets its auto colour pinned when it is made, so another coming or going can\'t move it', (PROJECT_COLORS as readonly string[]).includes(getProject(db, kpid)?.color ?? ''), JSON.stringify(getProject(db, kpid)));
+    const mark = eyes.frames.length;
+    const set = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: 'mint' });
+    check('a key of the palette is kept and said back', set.status === 200 && set.body.project.color === 'mint' && getProject(db, kpid)?.color === 'mint', JSON.stringify(set.body));
+    check('and every tab hears it', await until(() => eyes.frames.slice(mark).some((f) => f.type === 'entities' && f.projects?.some((p) => p.id === kpid && p.color === 'mint') === true)));
+    check('every key of the palette is taken', (await Promise.all(PROJECT_COLORS.map((c) => send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: c })))).every((r, i) => r.status === 200 && r.body.project.color === PROJECT_COLORS[i]));
+    await send('PATCH', `/api/projects/${kpid}`, { color: 'plum' });
+    const refused = await Promise.all(['#ff0000', 'red', 'Mint', '', 3, true, ['sky']].map((c) => send<{ error?: string; detail?: string }>('PATCH', `/api/projects/${kpid}`, { color: c })));
+    check('a hex, a name it doesn\'t know, the wrong case, empty, a number, a boolean and a list are each a 400', refused.every((r) => r.status === 400), refused.map((r) => r.status).join(' '));
+    check('which says what it takes, and keeps what was there', /not a project colour/.test(refused[0]!.body.error ?? '') && /sky/.test(refused[0]!.body.detail ?? '') && getProject(db, kpid)?.color === 'plum', JSON.stringify(refused[0]!.body));
+    const both = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: '#00ff00', name: 'renamed210' });
+    check('a bad colour beside a name changes neither', both.status === 400 && getProject(db, kpid)?.name === was && getProject(db, kpid)?.color === 'plum');
+    const named = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { name: 'renamed210' });
+    check('a rename keeps the colour', named.status === 200 && named.body.project.color === 'plum' && named.body.project.name === 'renamed210', JSON.stringify(named.body));
+    const auto = await send<{ project: Project }>('PATCH', `/api/projects/${kpid}`, { color: null });
+    check('null is auto again, pinned at once to the key auto gives it', auto.status === 200 && (PROJECT_COLORS as readonly string[]).includes(auto.body.project.color ?? '') && getProject(db, kpid)?.color === auto.body.project.color, JSON.stringify(auto.body));
+    check('a colour alone is something to change', (await send('PATCH', `/api/projects/${kpid}`, {})).status === 400 && (await send('PATCH', `/api/projects/${kpid}`, { color: null })).status === 200);
+    await send('PATCH', `/api/projects/${kpid}`, { name: was });
+    check('a colour for a project that is not there is a 404', (await send('PATCH', '/api/projects/no_such_210', { color: 'sky' })).status === 404);
+    eyes.close();
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '350').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p350', 'old', '/tmp/p350', 'x')`);
+    old.exec(readFileSync(new URL('350_project_color.sql', dir), 'utf8'));
+    const got = old.prepare("SELECT color FROM projects WHERE id = 'p350'").get() as { color: string | null } | undefined;
+    check('migration 350 applies to an existing database, and an old project is on auto', got !== undefined && got.color === null && getProject(old as unknown as Db, 'p350')?.color === undefined, JSON.stringify(got));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p350b', 'old b', '/tmp/p350b', 'y'), ('p350c', 'old c', '/tmp/p350c', 'z')`);
+    pinProjectColors(old as unknown as Db);
+    const pinned = ['p350', 'p350b', 'p350c'].map((id) => getProject(old as unknown as Db, id)?.color);
+    check('at start every project without one is pinned, in creation order, each its own', pinned.join() === PROJECT_COLORS.slice(0, 3).join(), pinned.join());
+    old.exec(`DELETE FROM projects WHERE id = 'p350b'`);
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p350d', 'old d', '/tmp/p350d', 'zz')`);
+    pinProjectColors(old as unknown as Db);
+    check('removing one moves no other project\'s colour, and the next takes the free one', getProject(old as unknown as Db, 'p350c')?.color === PROJECT_COLORS[2] && getProject(old as unknown as Db, 'p350')?.color === PROJECT_COLORS[0] && getProject(old as unknown as Db, 'p350d')?.color === PROJECT_COLORS[1], [getProject(old as unknown as Db, 'p350c')?.color, getProject(old as unknown as Db, 'p350d')?.color].join());
+    old.close();
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
@@ -9632,7 +9684,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

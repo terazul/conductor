@@ -40,7 +40,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FileNode } from '@conductor/shared';
+import type { FileNode, ProjectColor } from '@conductor/shared';
 import { renameAgent, renameJob } from '../agent/endpoints.js';
 import { editProject } from '../fleet/endpoints.js';
 import { errorText } from '../lib/errors.js';
@@ -84,6 +84,8 @@ import {
 import { NavTags, navTagWords } from './navtags.js';
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
+import { SourceMark } from './SourceMark.js';
+import { projClass, projectColors } from '../lib/projectColor.js';
 import { Chevron, Dot, OrchestratorMark, STATUS_WORD, tildePath } from './ui.js';
 import type { Budget } from './autonomy.js';
 import '../fleet/fleet.css';
@@ -286,6 +288,8 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
         title={`${a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}${a.orchestrator ? ' · orchestrator: starts the others' : ''}`}
       >
         <Dot status={a.status} />
+        {/* Who made its model (Amendment 208), the mark every place an agent is named uses. */}
+        <SourceMark agent={a.source} />
         <span className="sh-nav-label">{a.label}</span>
         {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
         {a.orchestrator && <OrchestratorMark short />}
@@ -749,6 +753,7 @@ function ProjectNode({
   agentId,
   drag,
   last,
+  color,
 }: {
   project: NavProject;
   open: ReadonlySet<string>;
@@ -758,6 +763,8 @@ function ProjectNode({
   drag: NavDrag;
   /** The bottom one, which shows the cue for a drop at the end. */
   last: boolean;
+  /** Its colour bar's key (Amendment 210), kept or auto. */
+  color: ProjectColor | undefined;
 }) {
   const id = navId(project.id);
   const shown = isOpen(open, id);
@@ -767,6 +774,7 @@ function ProjectNode({
 
   const cls = [
     'sh-nav-proj',
+    projClass(color),
     drag.dragging === project.id ? 'is-dragging' : '',
     moving && drag.over === project.id ? 'is-drop' : '',
     last && drag.dragging !== null && drag.over === null ? 'is-drop-after' : '',
@@ -918,6 +926,9 @@ export function Navigator() {
     () => navTree(ordered, agents, pending, alerts, jobs, finished, toRead),
     [ordered, agents, pending, alerts, jobs, finished, toRead],
   );
+  // Decided over every project in the order they were made, not the order shown, so sorting
+  // the panel never changes a colour (Amendment 210).
+  const colors = useMemo(() => projectColors(projects), [projects]);
 
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null | undefined>(undefined);
@@ -992,6 +1003,7 @@ export function Navigator() {
               agentId={agentId}
               drag={drag}
               last={i === tree.length - 1}
+              color={colors.get(p.id)}
             />
           ))}
         </div>

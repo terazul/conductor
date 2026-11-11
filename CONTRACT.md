@@ -200,6 +200,86 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 210 — post-merge, applied. **Each project has a colour bar, in the navigator and on its pages.**
+
+Daemon (`db/migrations/350_project_color.sql`, `session/store.ts`, `routes/session.ts`, `session/verify.ts`), shared
+(`wire.ts`, `tokens.css`), web (`lib/projectColor.ts`, `shell/ui.css`, `shell/shell.css`, `shell/Navigator.tsx`,
+`fleet/fleet.css`, `fleet/card.tsx`, `fleet/endpoints.ts`, `fleet/project.tsx`, `agent/agent.tsx`, `files/route.tsx`,
+`files/files.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"allow me to a color bar for each project.
+This would show as a left bar on the menu and in the main windows as well. That way I can correlate the project in
+the menu with the project pages."*
+
+- **Kept as a key, never a colour.** Migration 350 adds `projects.color TEXT`, a key of `PROJECT_COLORS` (`sky`,
+  `mint`, `plum`, `yellow`, `blue`, `pink`, `indigo`, `magenta`) or NULL for auto; `Project.color` carries it when
+  set. Each key is a `--proj-<key>` token with its own shade in each theme, so a theme change recolours every bar.
+- **PATCH `/api/projects/:id`** also takes `color`: a key keeps it, `null` goes back to auto, anything else is a 400
+  *"not a project colour"* naming the keys, and nothing else in the body changes. Every tab hears it as the project
+  event.
+- **Auto** (`assignProjectColors`, pure, `shared/colors.ts`): in creation order each project without a key takes the
+  key fewest of the ones before it have, the palette's order breaking a tie; a kept key wins and counts; the first
+  eight differ, and a key the palette doesn't have is auto. **The daemon pins it** (`pinProjectColors`): at start
+  for every project without one, when a project is made, and when you choose auto. Worked out on each page alone,
+  removing a project shifted every later project's colour (found in review); pinned, a colour never moves unless you
+  change it. The web keeps the same rule for a daemon that pins none.
+- **The bar**, 4px of `--proj` set by a `pc-<key>` class: down the navigator's whole project group; at a Fleet
+  card's left edge, the status stripe moved inside it; inside the left of the Project and Agent screens' crumb (the
+  orchestrator's wine kept); and down the Files column head of the open project.
+- **Picking one:** the Fleet card's ✎ edit project has a colour row: **auto**, edged in the colour auto gives now,
+  then the eight swatches, a radio group. Save sends `color` only when it changed.
+- The palette keeps clear of the status colours and of each other (OKLab ≥ 0.08 in both themes) and is ≥ 3:1 on
+  `--bg` and `--surf`, the floor for a graphic, as the bar has no text.
+
+**Verified:** `session/verify.ts` §39: a new project pinned to a key; a key kept, sent to every tab, and each key taken; a bad key
+a 400 that names the keys, and with a name beside it neither changes; a rename keeps the colour; null back to auto, pinned at once;
+an empty body a 400, a missing project a 404; migration 350 on an old database; pinning at start in creation order, and removing one moving no other's. `lib/verify.ts` §56: auto's order,
+stability and spread, a kept key winning and counting, an unknown key auto, `projClass`; the tokens in both themes
+and each `pc-` class; the contrast and the distances per theme; the bar in each of the five places, the edit form's
+swatches and what it saves; tokens only.
+
+### Amendment 209 — post-merge, applied. **A helper's message box is shut, pointing at its orchestrator, until you unlock it.**
+
+Web (`agent/HelperLock.tsx`, `agent/agent.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11
+Nov: *"by default do not let me add text to a sub agent from the orchestrator."* The orchestrator briefs its helpers
+and plans on what they report, so a message typed straight to a helper goes round it.
+
+- **Shut by default.** On the Agent screen of an agent with a `parentId` whose orchestrator is still listed
+  (`directedBy`), the reply tab shows, in the composer's place, *"**{orchestrator}** directs this helper — message
+  the orchestrator instead · **open {orchestrator}** · **unlock**"*, the orchestrator named as its tab is (its
+  name, else its role). **open** goes to the orchestrator (`openAgent`). A helper whose orchestrator is gone has
+  no one to message instead and keeps its box.
+- **unlock** opens the composer for that helper until you leave it (`lockedBy`, state on the Agent screen, reset on
+  another agent; another screen unmounts it). Never a setting, so it is never kept.
+- **Display only.** The daemon still takes a message to a helper; the transcript, the terminal tab, ⏸ and the stop
+  controls in the header are where they were. The composer's settings rows are behind the lock with the box.
+
+**Verified:** `lib/verify.ts` §55: who directs a helper, a non-helper and an orphan; shut for a helper and open for
+the others; unlock opens that helper only; the line's words and that it has no box; the screen's wiring, open
+targeting the orchestrator and unlock this helper; the state reset on another agent and never written; the stop
+controls outside it; tokens only.
+
+### Amendment 208 — post-merge, applied. **Each agent wears its model's maker, a lettered square beside its dot.**
+
+Shared (`tokens.css`), web (`lib/source.ts`, `shell/SourceMark.tsx`, `shell/ui.css`, `shell/navtree.ts`,
+`shell/Navigator.tsx`, `agent/agent.tsx`, `fleet/card.tsx`, `fleet/lane.tsx`, `lib/verify.ts`) and `docs/MANUAL.md`.
+Asked 11 Nov: *"when you display the agents, use an icon to represent the source, Claude, Copilot, OpenAI, etc. Do
+this in the menu, the pages as well."* The engine (Claude, Copilot, OpenRouter) is not the source the user means:
+Copilot runs OpenAI's and Anthropic's models and OpenRouter nearly everyone's, so the mark is the model's maker.
+
+- **The rule** (`sourceOf`, pure): the model id decides. `claude-*` and any id with `anthropic` (the Bedrock ids)
+  are Claude; `gpt-*`, `o1`, `o3`, `o4*` OpenAI; `gemini*` Google; `llama*` Meta; `mistral*` Mistral; `grok*` xAI;
+  `deepseek*` DeepSeek; `qwen*` Qwen. An OpenRouter `maker/model` id is read by its prefix alone (`anthropic`,
+  `openai`, `google`, `meta-llama`, `mistralai`, `x-ai`, `deepseek`, `qwen`). An id no rule knows gets its engine's
+  mark (Claude, Copilot, OpenRouter), and an engine the web doesn't know is `other`, named by its id. It returns
+  `{key, mark, label, engine}`; `sourceTitle` is "OpenAI gpt-5 · via Copilot", or "Claude opus-5-5" on Claude.
+- **The mark** (`SourceMark`): a 14px rounded square of one or two letters, `--bg` on `--src-<key>`, eleven tokens
+  in both themes. It sits after the status dot in the navigator's agent rows (`NavAgent.source`), the Agent
+  screen's tabs, its header beside the model, a Fleet card's agent rows and a Project lane. The engine's
+  `ProviderBadge` (Amendment 80) stays as it was. Spawn's role rows don't show a model, so they have no mark.
+
+**Verified:** `lib/verify.ts` §54: each maker from its bare and its OpenRouter id, the prefix deciding, near-misses
+(`o10`, `gptx`) and unknown ids falling to the engine, an unknown engine; the title; the rendered mark; the mark in
+each of the five places; one rule per key in tokens only; `--bg` on every `--src-*` 4.5:1 or more in both themes.
+
 ### Amendment 207 — post-merge, applied. **A message an agent drafts comes in a message block, with a ⧉ copy of just the message.**
 
 Daemon (`session/background.ts`, `session/backends/copilot.ts`, `session/verify.ts`), web (`agent/QuoteBlock.tsx`,

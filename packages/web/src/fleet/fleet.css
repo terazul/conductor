@@ -154,7 +154,8 @@
   background: linear-gradient(180deg, var(--surf), var(--bg2));
   position: relative;
   overflow: hidden;
-  padding: 13px 15px 12px 17px;
+  /* 17px past the status stripe, which sits after the project's bar (Amendment 210). */
+  padding: 13px 15px 12px 22px;
   cursor: pointer;
   transition: 0.16s;
 }
@@ -173,11 +174,24 @@
   border-color: var(--line2);
 }
 
-/* The left stripe: the project's worst agent status. */
-.fl-card::before {
+/* The project's colour bar (Amendment 210), at the very edge, as it is down the navigator's
+   project, so the two are the same at a glance. `--proj` is from its `pc-<key>` class. */
+.fl-card::after {
   content: "";
   position: absolute;
   left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--proj, transparent);
+}
+
+/* The left stripe: the project's worst agent status. Inside the colour bar, a 1px gap of the
+   card between, so the two never read as one. */
+.fl-card::before {
+  content: "";
+  position: absolute;
+  left: 5px;
   top: 0;
   bottom: 0;
   width: 3px;
@@ -492,6 +506,48 @@
 .fl-f input:focus {
   outline: none;
   border-color: var(--live);
+}
+
+/* The colour bar's swatches (Amendment 210): each a bar, as it will be drawn, and auto, edged in
+   the colour it gives now. The one picked is ringed in --ink, never a status colour. */
+.fl-swatches {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fl-swatch {
+  width: 14px;
+  height: 22px;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  background: var(--proj);
+  padding: 0;
+  cursor: pointer;
+}
+
+.fl-swatch.is-auto {
+  width: auto;
+  padding: 0 7px 0 9px;
+  background: var(--surf2);
+  box-shadow: inset 4px 0 0 var(--proj, transparent);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--ink2);
+}
+
+.fl-swatch.is-on {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.fl-swatch:focus-visible {
+  outline: 2px solid var(--ink2);
+  outline-offset: 1px;
+}
+
+.fl-swatch.is-on:focus-visible {
+  outline-color: var(--ink);
 }
 
 /* Amber: this is the one thing in the panel a person must read before saving. */

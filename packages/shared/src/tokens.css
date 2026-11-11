@@ -79,6 +79,39 @@
      stand out without reading as "needs you". 6.6:1 or more on every surface. */
   --you: #c4a8ff;
 
+  /* Who made an agent's model (Amendment 208): the fill of the small lettered square beside its
+     dot, `--bg` letters on it at 4.5:1 or more (lib/verify.ts). A maker's own colour, near enough,
+     never its logo. Copilot's and OpenRouter's are for a model no rule knows the maker of, and
+     other's for an engine the web doesn't know. They mark a source, not a state, and always
+     carry letters, so none is read as a status. */
+  --src-claude: #e8906f;
+  --src-openai: #d6d1c8;
+  --src-google: #7aa7ff;
+  --src-meta: #a3a6ff;
+  --src-mistral: #ff9a5c;
+  --src-xai: #b9c2cc;
+  --src-deepseek: #6cc8ff;
+  --src-qwen: #c0a4ff;
+  --src-copilot: #f08ad0;
+  --src-openrouter: #a9b4c8;
+  --src-other: #c8bfb4;
+
+  /* A project's colour bar (Amendment 210): the 4px bar down its left edge in the navigator, on its
+     Fleet card and at the top of its screens, so a project in the menu is the same one on the page.
+     A project keeps a key (`PROJECT_COLORS`), never one of these, so each theme has its own. Only a
+     bar, never text or a fill, so the floor is 3:1 on --bg and --surf (a graphic's, WCAG 1.4.11),
+     and each is far enough from every status colour, and from the others, not to be read as one
+     (OKLab distance 0.08 or more; lib/verify.ts). The hues the status colours hold (green, amber,
+     red, slate) are left out for that reason. */
+  --proj-sky: #3fc4f0;
+  --proj-mint: #7ff0a0;
+  --proj-plum: #d17bff;
+  --proj-yellow: #e6d34a;
+  --proj-blue: #5b8cff;
+  --proj-pink: #ff7f9e;
+  --proj-indigo: #9f8aff;
+  --proj-magenta: #f06bd0;
+
   /* Native scrollbars, form controls and the default canvas follow this. */
   color-scheme: dark;
 
@@ -164,6 +197,27 @@
   --here-agent: #fccde6;
 
   --you: #6236b0;
+
+  --src-claude: #a3492a;
+  --src-openai: #2a2826;
+  --src-google: #1a56c4;
+  --src-meta: #3b3fbf;
+  --src-mistral: #a84000;
+  --src-xai: #3c4550;
+  --src-deepseek: #00679a;
+  --src-qwen: #5a3fc9;
+  --src-copilot: #a1287f;
+  --src-openrouter: #475266;
+  --src-other: #574f46;
+
+  --proj-sky: #0086c0;
+  --proj-mint: #1f9a5a;
+  --proj-plum: #a530d0;
+  --proj-yellow: #9c8400;
+  --proj-blue: #2f5fe8;
+  --proj-pink: #e0306a;
+  --proj-indigo: #6c3cf0;
+  --proj-magenta: #cc2a9a;
 
   color-scheme: light;
 }

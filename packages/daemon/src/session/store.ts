@@ -23,6 +23,7 @@ import type {
   PendingRequest,
   PermissionSuggestion,
   Project,
+  ProjectColor,
   ProjectNote,
   ProjectSpend,
   ProviderSpend,
@@ -30,6 +31,7 @@ import type {
 } from '@conductor/shared';
 import {
   BUDGET_ENGINES,
+  assignProjectColors,
   MONTH_CORRECTION_KEY,
   PROVIDER_BUDGETS_KEY,
   claudeRoute,
@@ -71,6 +73,8 @@ interface ProjectRow {
   created_at: string;
   /** The project's monthly budget in dollars, or null for none (290_project_monthly_budget.sql). */
   monthly_budget_usd?: number | null;
+  /** The key of its bar's colour, or null for auto (350_project_color.sql). */
+  color?: string | null;
 }
 
 /** A project's directories after its first, in the order they were added (Amendment 39). */
@@ -95,6 +99,8 @@ const toProject = (db: Db, r: ProjectRow): Project => {
     ...(notes.length > 0 ? { notes } : {}),
     // The same: only when one is set, so a project without one reads as before (Amendment 182).
     ...(r.monthly_budget_usd != null ? { monthlyBudgetUsd: r.monthly_budget_usd } : {}),
+    // And again: auto is no field at all (Amendment 210). Only a key the PATCH let in is ever here.
+    ...(r.color != null ? { color: r.color as ProjectColor } : {}),
   };
 };
 
@@ -212,7 +218,10 @@ export function insertProject(
     `INSERT INTO projects (id, name, path, default_branch, created_at)
      VALUES (?, ?, ?, ?, ?)`,
   ).run(project.id, project.name, project.path, project.defaultBranch, project.createdAt);
-  return project;
+  // Its colour, pinned now, from the ones there are (Amendment 210).
+  pinProjectColors(db);
+  const color = row<{ color: string | null }>(db.prepare('SELECT color FROM projects WHERE id = ?').get(project.id))?.color;
+  return color ? { ...project, color: color as ProjectColor } : project;
 }
 
 /**
@@ -275,6 +284,30 @@ export function setDefaultBranch(db: Db, id: string, branch: string): Project | 
 export function setProjectMonthlyBudget(db: Db, id: string, usd: number | null): Project | undefined {
   db.prepare('UPDATE projects SET monthly_budget_usd = ? WHERE id = ?').run(usd, id);
   return getProject(db, id);
+}
+
+/**
+ * Set the key of a project's bar colour, or with null leave it to auto (Amendment 210). The caller
+ * has checked it is one of `PROJECT_COLORS` (PATCH /api/projects/:id).
+ */
+export function setProjectColor(db: Db, id: string, color: ProjectColor | null): Project | undefined {
+  db.prepare('UPDATE projects SET color = ? WHERE id = ?').run(color, id);
+  // Auto is pinned at once, so it can't move later when another project comes or goes.
+  if (color === null) pinProjectColors(db);
+  return getProject(db, id);
+}
+
+/**
+ * Give every project without a colour the one auto gives it (`assignProjectColors`), and keep it
+ * (Amendment 210). Run at start, when a project is made and when auto is chosen: a colour worked out
+ * on each page from creation order shifted every later project's when one was removed.
+ */
+export function pinProjectColors(db: Db): void {
+  const all = listProjects(db);
+  if (!all.some((p) => p.color == null)) return;
+  const keys = assignProjectColors(all);
+  const set = db.prepare('UPDATE projects SET color = ? WHERE id = ? AND color IS NULL');
+  for (const p of all) if (p.color == null) set.run(keys.get(p.id)!, p.id);
 }
 
 /**

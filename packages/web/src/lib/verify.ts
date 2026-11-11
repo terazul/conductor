@@ -18,7 +18,7 @@
  * is pure, so this is fast and has no jsdom dependency.
  */
 
-import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, MonthCorrection, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, MonthCorrection, Project, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
 import { MODEL_WAIT_SUFFIX, PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, rollupStatus, sparkline } from '@conductor/shared';
 import { PROVIDER_SPEND_NOTE, providerBudgetCell, providerSpendRows } from '../metrics/rules.js';
 import { alertActions, alertNotice, monthlyNote } from '../attention/alerts.js';
@@ -3001,9 +3001,262 @@ await (async () => {
   check('framed in tokens, the button clear of the text', /\.ag-message > \.ag-message-copy \{/.test(css) && /\.ag-message \{[^}]*border: 1px solid var\(--line2\);[^}]*padding: 10px 104px 10px 14px;/.test(css) && !/\.ag-message[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
 })();
 
+// Both themes' colours from tokens.css, and WCAG's contrast, for the sections after 53 (§9 keeps its own).
+const themeTokens = (): { dark: Map<string, string>; light: Map<string, string> } => {
+  const css = readFileSync(new URL('../../../shared/src/tokens.css', import.meta.url), 'utf8');
+  const block = (selector: string): Map<string, string> => {
+    const at = css.indexOf(`${selector} {`);
+    const body = at === -1 ? '' : css.slice(at, css.indexOf('}', at));
+    return new Map([...body.matchAll(/--([a-z0-9-]+):\s*(#[0-9a-f]{6})\s*;/gi)].map((m) => [m[1]!, m[2]!]));
+  };
+  const dark = block(':root');
+  return { dark, light: new Map([...dark, ...block(":root[data-theme='light'], [data-theme='light']")]) };
+};
+const contrast = (a: string, b: string): number => {
+  const lum = (hex: string): number => {
+    const [r, g, bl] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+
+console.log("\n54 · each agent wears its model's maker, a lettered square in the maker's colour, wherever it is named (Amendment 208)");
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const { SOURCE_KEYS, sourceOf, sourceTitle } = await import('./source.js');
+  const { SourceMark } = await import('../shell/SourceMark.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const key = (model: string, provider?: string): string => sourceOf({ model, ...(provider ? { provider } : {}) }).key;
+
+  // ── the maker, by id ──
+  const makers: [string, string, string?][] = [
+    ['claude-opus-5-5', 'claude'],
+    ['us.anthropic.claude-opus-5-5', 'claude'],
+    ['eu.anthropic.claude-sonnet-4-5-v1:0', 'claude'],
+    ['claude-sonnet-4-5', 'claude', 'copilot'],
+    ['gpt-5', 'openai', 'copilot'],
+    ['o3', 'openai', 'copilot'],
+    ['o4-mini', 'openai', 'copilot'],
+    ['gemini-2.5-pro', 'google', 'copilot'],
+    ['llama-3.3-70b', 'meta', 'openrouter'],
+    ['mistral-large', 'mistral', 'openrouter'],
+    ['grok-4', 'xai', 'openrouter'],
+    ['deepseek-r1', 'deepseek', 'openrouter'],
+    ['qwen3-coder', 'qwen', 'openrouter'],
+  ];
+  const wrong = makers.filter(([m, k, p]) => key(m, p) !== k).map(([m, k, p]) => `${m} (${p ?? 'claude'}) is ${key(m, p)}, not ${k}`);
+  check('each maker is read from its model id', wrong.length === 0, wrong.join('; '));
+  const routed: [string, string][] = [
+    ['anthropic/claude-sonnet-4.5', 'claude'],
+    ['openai/gpt-5', 'openai'],
+    ['google/gemini-2.5-pro', 'google'],
+    ['meta-llama/llama-3.3-70b-instruct', 'meta'],
+    ['mistralai/mistral-large', 'mistral'],
+    ['x-ai/grok-4', 'xai'],
+    ['deepseek/deepseek-r1', 'deepseek'],
+    ['qwen/qwen3-coder', 'qwen'],
+  ];
+  const badRoute = routed.filter(([m, k]) => key(m, 'openrouter') !== k).map(([m]) => `${m} is ${key(m, 'openrouter')}`);
+  check("an OpenRouter id's maker/ prefix decides", badRoute.length === 0, badRoute.join('; '));
+  check('…the prefix and not the name after it', key('openai/llama-ish', 'openrouter') === 'openai' && key('nousresearch/llama-3-hermes', 'openrouter') === 'openrouter');
+  check('a word that only starts like one is not one', key('opus-ish', 'copilot') === 'copilot' && key('o10', 'copilot') === 'copilot' && key('gptx', 'openrouter') === 'openrouter');
+  check(
+    "an id no rule knows gets its engine's mark, and a Claude agent Claude's",
+    key('some-model', 'copilot') === 'copilot' && key('some-model', 'openrouter') === 'openrouter' && key('sonnet') === 'claude' && key('opus', 'claude') === 'claude',
+  );
+  const acme = sourceOf({ model: 'x1', provider: 'acme' });
+  check('an engine the web does not know is "other", named as the daemon names it', acme.key === 'other' && acme.label === 'acme' && acme.mark === '?', JSON.stringify(acme));
+  const gpt = sourceOf({ model: 'gpt-5', provider: 'copilot' });
+  check('a source is its key, letters, maker and engine', gpt.key === 'openai' && gpt.mark === 'O' && gpt.label === 'OpenAI' && gpt.engine === 'Copilot', JSON.stringify(gpt));
+  const marks = SOURCE_KEYS.map((k) => sourceOf({ model: routed.find(([, r]) => r === k)?.[0] ?? '', provider: k === 'other' ? 'acme' : k === 'copilot' || k === 'openrouter' ? k : 'openrouter' }).mark);
+  check('every mark is one or two letters, and no two the same', marks.every((m) => m.length >= 1 && m.length <= 2) && new Set(marks).size === SOURCE_KEYS.length, marks.join(' '));
+
+  // ── its title ──
+  check('its title names the maker, the model and the engine: "OpenAI gpt-5 · via Copilot"', sourceTitle({ model: 'gpt-5', provider: 'copilot' }) === 'OpenAI gpt-5 · via Copilot', sourceTitle({ model: 'gpt-5', provider: 'copilot' }));
+  check('…"Claude opus-5-5" on the Claude engine, the id shortened as everywhere', sourceTitle({ model: 'us.anthropic.claude-opus-5-5' }) === 'Claude opus-5-5', sourceTitle({ model: 'us.anthropic.claude-opus-5-5' }));
+  check('…and Claude through another engine says which', sourceTitle({ model: 'claude-sonnet-4-5', provider: 'copilot' }) === 'Claude sonnet-4-5 · via Copilot');
+  check("…an OpenRouter id without its prefix, and an engine's own mark without a second via", sourceTitle({ model: 'x-ai/grok-4', provider: 'openrouter' }) === 'xAI grok-4 · via OpenRouter' && sourceTitle({ model: 'some-model', provider: 'copilot' }) === 'Copilot some-model', sourceTitle({ model: 'some-model', provider: 'copilot' }));
+
+  // ── the mark ──
+  const html = renderToStaticMarkup(createElement(SourceMark, { agent: { model: 'gpt-5', provider: 'copilot' } }));
+  check('the mark is a square of letters, its words in its title', html === '<span class="ui-src s-openai" title="OpenAI gpt-5 · via Copilot" aria-label="OpenAI gpt-5 · via Copilot">O</span>', html);
+  check('…and nothing for an agent the list does not have', renderToStaticMarkup(createElement(SourceMark, { agent: undefined })) === '');
+
+  // ── in each place ──
+  const nav = src('../shell/Navigator.tsx');
+  const tree = src('../shell/navtree.ts');
+  check(
+    "the navigator's agent row, beside the dot, from the agent the row is",
+    /<Dot status=\{a\.status\} \/>\s*\{\/\*[^*]*\*\/\}\s*<SourceMark agent=\{a\.source\} \/>\s*<span className="sh-nav-label">/.test(nav) && /source: \{ \.\.\.\(agent\.provider \? \{ provider: agent\.provider \} : \{\}\), model: agent\.model \}/.test(tree),
+  );
+  const agentScreen = src('../agent/agent.tsx');
+  check(
+    "the Agent screen's tabs, beside each dot",
+    /<Dot status=\{t\.status\} \/>\s*\{\/\*[^*]*\*\/\}\s*<SourceMark agent=\{agents\.find\(\(a\) => a\.id === t\.id\)\} \/>\s*\{t\.label\}/.test(agentScreen),
+  );
+  check("…and its header, beside the model", /<SourceMark agent=\{agent\} \/>\s*<span className="ag-model" title=\{agent\.model\}>/.test(agentScreen));
+  check(
+    "a Fleet card's agent rows",
+    /<Dot status=\{shown\} \/>\s*\{\/\*[^*]*\*\/\}\s*<SourceMark agent=\{agent\} \/>\s*<span className="fl-arow-nm">/.test(src('../fleet/card.tsx')),
+  );
+  check(
+    "a Project screen's lanes",
+    /<Dot status=\{shown\} \/>\s*\{\/\*[^*]*\*\/\}\s*<SourceMark agent=\{agent\} \/>\s*<span className="pj-lane-nm">/.test(src('../fleet/lane.tsx')),
+  );
+
+  // ── its colours ──
+  const ui = src('../shell/ui.css');
+  const noRule = SOURCE_KEYS.filter((k) => k !== 'other' && !new RegExp(`\\.ui-src\\.s-${k} \\{ --src: var\\(--src-${k}\\); \\}`).test(ui));
+  check("each maker's square is filled from its own token", noRule.length === 0 && /\.ui-src \{\s*--src: var\(--src-other\);[^}]*background: var\(--src\);\s*color: var\(--bg\);/.test(ui), noRule.join(', '));
+  check('…in tokens only, 14px square', !/\.ui-src[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(ui) && /\.ui-src \{[^}]*width: 14px;\s*height: 14px;/.test(ui));
+  const { dark, light } = themeTokens();
+  const low: string[] = [];
+  for (const [name, theme] of [['dark', dark], ['light', light]] as const) {
+    for (const k of SOURCE_KEYS) {
+      const fill = theme.get(`src-${k}`);
+      const r = fill ? contrast(theme.get('bg')!, fill) : 0;
+      if (r < 4.5) low.push(`${name} --bg on --src-${k} ${fill ? r.toFixed(2) : 'missing'}`);
+    }
+  }
+  check("each maker has a colour in both themes, and its --bg letters clear 4.5:1 on it", low.length === 0, low.join('; '));
+})();
+
+console.log("\n55 · a helper's message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209)");
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const { HelperLock, directedBy, lockedBy } = await import('../agent/HelperLock.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const ag = (id: string, role: string, extra: Partial<Agent> = {}) => ({ id, role, ...extra }) as unknown as Agent;
+  const orch = ag('o1', 'orchestrator', { name: 'lead' });
+  const helper = ag('h1', 'developer', { parentId: 'o1' });
+  const other = ag('h2', 'tester', { parentId: 'o1' });
+  const solo = ag('s1', 'developer');
+  const agents = [orch, helper, other, solo];
+
+  check('a helper is directed by its orchestrator', directedBy(helper, agents)?.id === 'o1');
+  check('…and an agent that is not a helper by no one', directedBy(solo, agents) === null && directedBy(orch, agents) === null && directedBy(ag('x', 'developer', { parentId: null }), agents) === null);
+  check("…nor a helper whose orchestrator is gone, which has no one to message instead", directedBy(ag('h9', 'developer', { parentId: 'gone' }), agents) === null);
+  check("a helper's box is shut, and an orchestrator's and a lone agent's open", lockedBy(helper, agents, null)?.id === 'o1' && lockedBy(orch, agents, null) === null && lockedBy(solo, agents, null) === null);
+  check('unlock opens it, for that helper only', lockedBy(helper, agents, 'h1') === null && lockedBy(other, agents, 'h1')?.id === 'o1');
+
+  const html = renderToStaticMarkup(createElement(HelperLock, { orchestrator: orch, onOpen: () => {}, onUnlock: () => {} }));
+  const words = html.replace(/<[^>]+>/g, '');
+  check('its line says who directs it, and offers open and unlock', words === 'lead directs this helper — message the orchestrator instead·open lead·unlock', words);
+  check('…the orchestrator named as its tab is, name else role', /<b>lead<\/b>/.test(html) && renderToStaticMarkup(createElement(HelperLock, { orchestrator: ag('o2', 'orchestrator'), onOpen: () => {}, onUnlock: () => {} })).includes('open orchestrator</button>'));
+  check('…in the composer\'s place, with no box to type in', html.startsWith('<div class="ag-composer ag-lock" role="note">') && !/<textarea|<input/.test(html));
+
+  const screen = src('../agent/agent.tsx');
+  check(
+    "the Agent screen shuts the box for a helper, and keeps the composer for anyone else",
+    /const lockOf = lockedBy\(agent, agents, unlocked\);/.test(screen) &&
+      /<TermPanel agent=\{agent\} \/> : lockOf \? \(\s*<HelperLock orchestrator=\{lockOf\} onOpen=\{\(\) => openAgent\(lockOf\)\} onUnlock=\{\(\) => setUnlocked\(agent\.id\)\} \/>\s*\) : \(\s*<Composer agent=\{agent\} \/>/.test(screen),
+  );
+  check('…open goes to the orchestrator, unlock to this helper', /onOpen=\{\(\) => openAgent\(lockOf\)\}/.test(screen) && /onUnlock=\{\(\) => setUnlocked\(agent\.id\)\}/.test(screen));
+  check(
+    'unlocked lasts until you leave: state, reset on another agent, never a setting',
+    /const \[unlocked, setUnlocked\] = useState<string \| null>\(null\);\s*useEffect\(\(\) => setUnlocked\(null\), \[active\]\);/.test(screen) && !/writeSetting\([^)]*unlock/i.test(screen),
+  );
+  check(
+    'the transcript, ⏸ and the stop controls are outside it, so they stay',
+    screen.indexOf('<StopControls agent={agent}') !== -1 && screen.indexOf('<StopControls agent={agent}') < screen.indexOf('className="ag-composer-wrap"'),
+  );
+  const css = src('../agent/agent.css');
+  check('…drawn in tokens only', /\.ag-lock-act \{[^}]*color: var\(--live\);/.test(css) && !/\.ag-lock[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
+})();
+
+console.log("\n56 · each project has a colour bar, in the navigator and on its pages, kept or auto (Amendment 210)");
+await (async () => {
+  const { projectColors, projClass } = await import('./projectColor.js');
+  const { PROJECT_COLORS } = await import('@conductor/shared');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const proj = (n: number, color?: string | null) => ({ id: `p${n}`, createdAt: `2026-11-${String(n).padStart(2, '0')}T00:00:00Z`, ...(color !== undefined ? { color } : {}) }) as Pick<Project, 'id' | 'createdAt' | 'color'>;
+  const keysOf = (list: Pick<Project, 'id' | 'createdAt' | 'color'>[]): string[] => list.map((p) => projectColors(list).get(p.id)!);
+
+  const eight = Array.from({ length: 8 }, (_, i) => proj(i + 1));
+  check('auto gives the first eight projects eight colours, in the palette\'s order', keysOf(eight).join(' ') === PROJECT_COLORS.join(' '), keysOf(eight).join(' '));
+  const shuffled = [eight[5]!, eight[2]!, eight[7]!, eight[0]!, eight[4]!, eight[1]!, eight[6]!, eight[3]!];
+  check('…by the order they were created, not the order they are listed', eight.every((p) => projectColors(shuffled).get(p.id) === projectColors(eight).get(p.id)));
+  const more = [...eight, proj(9), proj(10)];
+  check('…so adding a project never changes one before it', eight.every((p) => projectColors(more).get(p.id) === projectColors(eight).get(p.id)));
+  const sixteen = Array.from({ length: 16 }, (_, i) => proj(i + 1));
+  const counts = PROJECT_COLORS.map((k) => keysOf(sixteen).filter((c) => c === k).length);
+  check('…and spread: sixteen projects have each colour twice', counts.every((n) => n === 2), counts.join(' '));
+  const kept = [proj(1, 'mint'), proj(2), proj(3, 'plum'), proj(4)];
+  check('a colour you picked wins', projectColors(kept).get('p1') === 'mint' && projectColors(kept).get('p3') === 'plum');
+  check('…and counts for the ones after it, so auto goes round it', projectColors(kept).get('p2') === 'sky' && projectColors(kept).get('p4') === 'yellow', keysOf(kept).join(' '));
+  check('a key the palette doesn\'t have is auto, never a missing token', projectColors([proj(1, 'teal')]).get('p1') === 'sky' && projectColors([proj(1, null)]).get('p1') === 'sky');
+  check('the class is pc-<key>, and nothing without one', projClass('mint') === 'pc-mint' && projClass(undefined) === '');
+
+  // ── the tokens: both themes, a bar's contrast, and never a status colour ──
+  const { dark, light } = themeTokens();
+  const ui = src('../shell/ui.css');
+  const missing = PROJECT_COLORS.filter((k) => !dark.has(`proj-${k}`) || !light.has(`proj-${k}`) || light.get(`proj-${k}`) === dark.get(`proj-${k}`) || !ui.includes(`.pc-${k} { --proj: var(--proj-${k}); }`));
+  check('each key is a --proj-<key> token with its own value in each theme, and a pc-<key> class', missing.length === 0, missing.join(' '));
+  const lab = (hex: string): number[] => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * q, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * q, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * q];
+  };
+  const apart = (a: string, b: string): number => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]!));
+  const STATUS = ['live', 'need', 'fail', 'done', 'queue', 'idle', 'you'];
+  for (const [theme, t] of [['dark', dark], ['light', light]] as const) {
+    const dim = PROJECT_COLORS.flatMap((k) => ['bg', 'surf'].map((on) => [k, on, contrast(t.get(`proj-${k}`)!, t.get(on)!)] as const)).filter(([, , r]) => r < 3);
+    check(`${theme}: each bar clears 3:1 on --bg and --surf, a graphic's floor`, dim.length === 0, dim.map(([k, on, r]) => `${k} on ${on} ${r.toFixed(2)}`).join('; '));
+    const like = PROJECT_COLORS.flatMap((k) => STATUS.map((st) => [k, st, apart(t.get(`proj-${k}`)!, t.get(st)!)] as const)).filter(([, , d]) => d < 0.08);
+    check(`${theme}: no bar is near a status colour (OKLab 0.08 or more)`, like.length === 0, like.map(([k, st, d]) => `${k}~${st} ${d.toFixed(3)}`).join('; '));
+    const twins = PROJECT_COLORS.flatMap((k, i) => PROJECT_COLORS.slice(i + 1).map((o) => [k, o, apart(t.get(`proj-${k}`)!, t.get(`proj-${o}`)!)] as const)).filter(([, , d]) => d < 0.08);
+    check(`${theme}: …nor near another bar`, twins.length === 0, twins.map(([k, o, d]) => `${k}~${o} ${d.toFixed(3)}`).join('; '));
+  }
+
+  // ── the token in each place ──
+  const nav = src('../shell/Navigator.tsx');
+  const shell = src('../shell/shell.css');
+  check(
+    'the navigator: a 4px bar down the whole project group, colours decided over every project',
+    /'sh-nav-proj',\s*projClass\(color\),/.test(nav) && /const colors = useMemo\(\(\) => projectColors\(projects\), \[projects\]\);/.test(nav) && /color=\{colors\.get\(p\.id\)\}/.test(nav) &&
+      /\.sh-nav-proj \{[^}]*border-left: 4px solid var\(--proj, transparent\);/.test(shell) && /\.sh-nav-proj\.is-drop \{[^}]*box-shadow/.test(shell),
+  );
+  const card = src('../fleet/card.tsx');
+  const fleet = src('../fleet/fleet.css');
+  check(
+    'the Fleet card: the bar at its left edge, and the status stripe kept beside it',
+    /className=\{`fl-card s-\$\{stripe\} \$\{projClass\(color\)\}/.test(card) && /const color = useProjectColor\(project\.id\);/.test(card) &&
+      /\.fl-card::after \{[^}]*left: 0;[^}]*width: 4px;[^}]*background: var\(--proj, transparent\);/.test(fleet) && /\.fl-card::before \{[^}]*left: 5px;[^}]*width: 3px;/.test(fleet) && /\.fl-card\.s-live::before \{\s*background: var\(--live\);/.test(fleet),
+  );
+  check(
+    'the Project screen\'s header and the Agent screen\'s crumb, on their own backdrops still',
+    /className=\{`fl-panehead has-proj \$\{projClass\(projectColors\(projects\)\.get\(project\.id\)\)\}`\}>\s*<span className="ui-crumb is-project">/.test(src('../fleet/project.tsx')) &&
+      /className=\{`fl-panehead has-proj \$\{projClass\(projectColors\(projects\)\.get\(agent\.projectId\)\)\}`\}>\s*<button\s+type="button"\s+className="ui-crumb ag-crumb is-agent"/.test(src('../agent/agent.tsx')) &&
+      /\.fl-panehead\.has-proj > \.ui-crumb \{[^}]*box-shadow: inset 4px 0 0 var\(--proj\);/.test(ui) && /\.ui-crumb\.is-agent \{\s*--crumb: var\(--here-agent\);/.test(ui) && /\.ui-crumb\.is-project \{\s*--crumb: var\(--here-project\);/.test(ui),
+  );
+  check(
+    'the Files column head, when a project is open',
+    /className=\{`c5-colhead \$\{projClass\(project \? projectColors\(projects\)\.get\(project\.id\) : undefined\)\}`\}/.test(src('../files/route.tsx')) &&
+      /\.c5-colhead\[class\*='pc-'\] \{[^}]*box-shadow: inset 4px 0 0 var\(--proj\);/.test(src('../files/files.css')),
+  );
+  check(
+    'the edit form: auto and a swatch for each key, saved only when it changed',
+    /setColour\(null\)/.test(card) && /PROJECT_COLORS\.map\(\(k\) => \(/.test(card) && /onClick=\{\(\) => setColour\(k\)\}/.test(card) && /if \(colour !== \(project\.color \?\? null\)\) patch\.color = colour;/.test(card) &&
+      /color\?: ProjectColor \| null/.test(src('../fleet/endpoints.ts')),
+  );
+  const drawn = [ui.slice(ui.indexOf('a project\'s colour bar'), ui.indexOf('the orchestrator of an orchestrated stack')), fleet.slice(fleet.indexOf('.fl-card::after'), fleet.indexOf('.fl-card.s-live')), fleet.slice(fleet.indexOf('.fl-swatches'), fleet.indexOf('.fl-f-warn {')), shell.slice(shell.indexOf('.sh-nav-proj {'), shell.indexOf('.sh-nav-proj.is-dragging'))];
+  check('…drawn in tokens only', drawn.every((c) => c.length > 0 && !/#[0-9a-fA-F]{3,8}\b/.test(c)));
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

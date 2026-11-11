@@ -20,6 +20,23 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **A colour bar for each project.** Asked for (11 Nov): *"allow me to a color bar for each project. This would
+  show as a left bar on the menu and in the main windows as well. That way I can correlate the project in the menu
+  with the project pages."* *Done (11 Nov): Amendment 210 (a 4px bar in the project's colour down its navigator
+  group, its Fleet card, its Project and Agent crumbs and its Files column head; auto spreads the eight colours in
+  the order the projects were added, and the card's edit form keeps one you pick).*
+
+- [x] **Don't let me type to a helper by default.** Asked for (11 Nov): *"by default do not let me add text to a sub
+  agent from the orchestrator."* *Done (11 Nov): Amendment 209 (a helper's message box is shut, and the line in its
+  place says which orchestrator directs it, with open to go there and unlock to type to the helper until you leave
+  its screen; display only).*
+
+- [x] **An icon for each agent's source.** Asked for (11 Nov): *"when you display the agents, use an icon to
+  represent the source, Claude, Copilot, OpenAI, etc. Do this in the menu, the pages as well."*
+  *Done (11 Nov): Amendment 208 (a small lettered square in the maker's colour beside each agent's dot, read from
+  its model id, in the navigator, the Agent screen's tabs and header, a Fleet card's rows and a Project lane;
+  its title says the maker, model and engine, "OpenAI gpt-5 · via Copilot").*
+
 - [x] **Copy just the message an agent drafted, not its notes around it.** Asked for (11 Nov): *"it includes the text
   around the message not just the message, how do I get just the message Copy"*.
   *Done (11 Nov): Amendment 207 (agents are told to put a draft in a ```message block; the block shows as the message

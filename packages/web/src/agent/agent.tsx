@@ -28,6 +28,7 @@ import { fullStamp } from '../lib/when.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Chevron, Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
+import { SourceMark } from '../shell/SourceMark.js';
 import { useFileTree } from '../files/useWorkspace.js';
 import {
   foldAll,
@@ -45,6 +46,8 @@ import {
 import { Transcript, buildTranscript, replyKeys, replyStates, startFoldedKeys } from './transcript.js';
 import { ReadAllButton, toTick } from './readall.js';
 import { Composer } from './composer.js';
+import { HelperLock, lockedBy } from './HelperLock.js';
+import { projClass, projectColors } from '../lib/projectColor.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
 import { Reconnect } from './Reconnect.js';
@@ -572,6 +575,12 @@ export function AgentScreen() {
   const [ask, setAsk] = useState<string | null>(null);
   // What re-running the agents after it will do, while that confirm is armed (Amendment 102).
   const [rerunAsk, setRerunAsk] = useState<string | null>(null);
+  /*
+   * The helper whose shut message box you unlocked (Amendment 209), until you leave it: another
+   * agent here resets it, and another screen unmounts this one. Not a setting, so it is never kept.
+   */
+  const [unlocked, setUnlocked] = useState<string | null>(null);
+  useEffect(() => setUnlocked(null), [active]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const elapsedMs = useElapsedMs(
     agent ? startedMs(agent, events) : null,
@@ -717,6 +726,8 @@ export function AgentScreen() {
    */
   const budgetNow = budgetOf(agent);
   const overBudget = budgetNow?.state === 'over' && agent.status !== 'stopped';
+  // A helper's message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209).
+  const lockOf = lockedBy(agent, agents, unlocked);
 
   const exportTranscript = () => {
     const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
@@ -757,6 +768,8 @@ export function AgentScreen() {
                 }}
               >
                 <Dot status={t.status} />
+                {/* Who made its model (Amendment 208). */}
+                <SourceMark agent={agents.find((a) => a.id === t.id)} />
                 {t.label}
                 {/* The orchestrator of an orchestrated stack (Amendment 128). */}
                 {t.orchestrator && <OrchestratorMark short />}
@@ -792,7 +805,7 @@ export function AgentScreen() {
             ))}
           </div>
         )}
-        <div className="fl-panehead">
+        <div className={`fl-panehead has-proj ${projClass(projectColors(projects).get(agent.projectId))}`}>
           <button
             type="button"
             className="ui-crumb ag-crumb is-agent"
@@ -824,6 +837,8 @@ export function AgentScreen() {
               <span title="A warning only: nothing stops it">over today's budget</span>
             </Tag>
           )}
+          {/* Who made its model, as its tab and its navigator row show it (Amendment 208). */}
+          <SourceMark agent={agent} />
           <span className="ag-model" title={agent.model}>
             {agent.model.replace(/^claude-/, '')}
           </span>
@@ -962,7 +977,11 @@ export function AgentScreen() {
           </button>
         </div>
         <div className="ag-composer-wrap" style={{ height: `${composerH}px` }}>
-          {bottomTab === 'terminal' ? <TermPanel agent={agent} /> : <Composer agent={agent} />}
+          {bottomTab === 'terminal' ? <TermPanel agent={agent} /> : lockOf ? (
+            <HelperLock orchestrator={lockOf} onOpen={() => openAgent(lockOf)} onUnlock={() => setUnlocked(agent.id)} />
+          ) : (
+            <Composer agent={agent} />
+          )}
         </div>
       </div>
 

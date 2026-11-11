@@ -190,6 +190,66 @@
   flex: none;
 }
 
+/* ── who made an agent's model (Amendment 208) ─────────────────────────────── */
+
+/*
+ * A 14px rounded square, the maker's colour with `--bg` letters (4.5:1 or more, lib/verify.ts),
+ * so it reads on any row and in both themes. `flex: none` keeps it square in a tight row.
+ */
+.ui-src {
+  --src: var(--src-other);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--src);
+  color: var(--bg);
+  font-family: var(--disp);
+  /* Two letters in 14px: the scale's smallest, less 3px, so it still follows a change to it. */
+  font-size: calc(var(--fs-2xs) - 3px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  vertical-align: middle;
+  user-select: none;
+}
+.ui-src.s-claude { --src: var(--src-claude); }
+.ui-src.s-openai { --src: var(--src-openai); }
+.ui-src.s-google { --src: var(--src-google); }
+.ui-src.s-meta { --src: var(--src-meta); }
+.ui-src.s-mistral { --src: var(--src-mistral); }
+.ui-src.s-xai { --src: var(--src-xai); }
+.ui-src.s-deepseek { --src: var(--src-deepseek); }
+.ui-src.s-qwen { --src: var(--src-qwen); }
+.ui-src.s-copilot { --src: var(--src-copilot); }
+.ui-src.s-openrouter { --src: var(--src-openrouter); }
+
+/* ── a project's colour bar (Amendment 210) ───────────────────────────────────── */
+
+/*
+ * `pc-<key>` (lib/projectColor.ts) sets `--proj` to its key's token, and each place draws its own
+ * 4px bar from it: the navigator's project, the Fleet card, and the crumbs here. Never a fill or a
+ * text colour, only a bar, so it can't be taken for a status.
+ */
+.pc-sky { --proj: var(--proj-sky); }
+.pc-mint { --proj: var(--proj-mint); }
+.pc-plum { --proj: var(--proj-plum); }
+.pc-yellow { --proj: var(--proj-yellow); }
+.pc-blue { --proj: var(--proj-blue); }
+.pc-pink { --proj: var(--proj-pink); }
+.pc-indigo { --proj: var(--proj-indigo); }
+.pc-magenta { --proj: var(--proj-magenta); }
+
+/* The crumb at the top of the Project and Agent screens: the bar inside its left edge, on the
+   screen's own backdrop, which stays (Amendment 127). The colour is on the head around it, so the
+   crumb's own class stays the one every screen shares (Amendment 107). */
+.fl-panehead.has-proj > .ui-crumb {
+  box-shadow: inset 4px 0 0 var(--proj);
+  padding-left: 14px;
+}
+
 /* ── the orchestrator of an orchestrated stack (Amendment 128) ───────────────── */
 
 /*

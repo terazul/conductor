@@ -53,6 +53,13 @@
   gap: 7px;
 }
 
+/* The open project's colour bar (Amendment 210), down the left of the head that names it, as
+   the navigator draws it. `pc-<key>` sets `--proj`; with no project open there is no bar. */
+.c5-colhead[class*='pc-'] {
+  box-shadow: inset 4px 0 0 var(--proj);
+  padding-left: 16px;
+}
+
 .c5-lab {
   font-family: var(--disp);
   font-size: var(--fs-2xs);

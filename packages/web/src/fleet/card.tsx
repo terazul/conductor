@@ -24,8 +24,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Agent, PendingRequest, Project } from '@conductor/shared';
-import { marksOrchestrator } from '@conductor/shared';
+import type { Agent, PendingRequest, Project, ProjectColor } from '@conductor/shared';
+import { PROJECT_COLORS, marksOrchestrator } from '@conductor/shared';
 import {
   useAgentEvents,
   useAgents,
@@ -35,6 +35,7 @@ import {
   usePending,
   useProjectSpend,
   useProjectStatus,
+  useProjects,
   rollupStatuses,
   useServers,
 } from '../lib/store.js';
@@ -85,6 +86,8 @@ import {
   fmtElapsed,
   tildePath,
 } from '../shell/ui.js';
+import { SourceMark } from '../shell/SourceMark.js';
+import { projClass, projectColors, useProjectColor } from '../lib/projectColor.js';
 
 function AgentRow({
   agent,
@@ -118,6 +121,8 @@ function AgentRow({
         title={`${agent.role} — ${STATUS_WORD[shown]}${budget ? ` · ${budget.pct}% of its daily budget${budget.over ? ' — over' : ''}` : ''}`}
       >
         <Dot status={shown} />
+        {/* Who made its model (Amendment 208). */}
+        <SourceMark agent={agent} />
         <span className="fl-arow-nm">{agent.role}</span>
         {orchestrator && <OrchestratorMark short />}
         <ProviderBadge provider={agent.provider} />
@@ -166,7 +171,7 @@ type MenuState = 'closed' | 'menu' | 'edit' | 'dirs' | 'remove';
 /** Roughly how tall each state renders, for deciding which way to open. */
 const NEEDED: Record<Exclude<MenuState, 'closed'>, number> = {
   menu: 112,
-  edit: 400,
+  edit: 450,
   dirs: 300,
   remove: 290,
 };
@@ -195,6 +200,14 @@ function CardMenu({
   const budgetText = (): string => (project.monthlyBudgetUsd == null ? '' : String(project.monthlyBudgetUsd));
   const [monthly, setMonthly] = useState(budgetText);
   const monthlyNow = monthlyDraft(monthly, project.monthlyBudgetUsd);
+  // Its colour bar's key, null for auto (Amendment 210), and the key auto would give it now, so
+  // the auto swatch shows what you'd get.
+  const [colour, setColour] = useState<ProjectColor | null>(project.color ?? null);
+  const projects = useProjects();
+  const autoKey = useMemo(
+    () => projectColors(projects.map((p) => (p.id === project.id ? { ...p, color: null } : p))).get(project.id),
+    [projects, project.id],
+  );
   const cmd = useCommand();
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -260,16 +273,18 @@ function CardMenu({
     setName(project.name);
     setPath(project.path);
     setMonthly(budgetText());
+    setColour(project.color ?? null);
     setState('closed');
   };
 
   const save = (): void =>
     void cmd.run('Updating the project', async () => {
-      const patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null } = {};
+      const patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null; color?: ProjectColor | null } = {};
       if (name.trim() && name.trim() !== project.name) patch.name = name.trim();
       if (path.trim() && path.trim() !== project.path) patch.path = path.trim();
       if ('send' in monthlyNow && monthlyNow.send !== undefined) patch.monthlyBudgetUsd = monthlyNow.send;
-      if (patch.name === undefined && patch.path === undefined && patch.monthlyBudgetUsd === undefined) {
+      if (colour !== (project.color ?? null)) patch.color = colour;
+      if (patch.name === undefined && patch.path === undefined && patch.monthlyBudgetUsd === undefined && patch.color === undefined) {
         setState('closed');
         return null;
       }
@@ -382,6 +397,37 @@ function CardMenu({
                   />
                 </label>
                 {'problem' in monthlyNow && <p className="fl-f-warn">{monthlyNow.problem}</p>}
+                {/*
+                 * The colour of its bar in the navigator, here and on its screens (Amendment 210).
+                 * auto is the default and shows the colour it gives now; a swatch keeps that one.
+                 */}
+                <div className="fl-f">
+                  <span>colour</span>
+                  <div className="fl-swatches" role="radiogroup" aria-label="Colour bar">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={colour === null}
+                      className={`fl-swatch is-auto ${projClass(autoKey)}${colour === null ? ' is-on' : ''}`}
+                      title="Auto: the colour fewest projects before this one have"
+                      onClick={() => setColour(null)}
+                    >
+                      auto
+                    </button>
+                    {PROJECT_COLORS.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        role="radio"
+                        aria-checked={colour === k}
+                        aria-label={k}
+                        title={k}
+                        className={`fl-swatch ${projClass(k)}${colour === k ? ' is-on' : ''}`}
+                        onClick={() => setColour(k)}
+                      />
+                    ))}
+                  </div>
+                </div>
                 <div className="fl-menu-row">
                   <button type="button" className="fl-btn" disabled={cmd.busy || 'problem' in monthlyNow} onClick={save}>
                     {cmd.busy ? 'saving…' : 'save'}
@@ -656,6 +702,8 @@ export function ProjectCard({
    */
   const rest = restOf(status, agents.length, unseen.length > 0);
   const stripe = blocked ? 'need' : rest === 'status' ? key : 'idle';
+  // Its colour bar (Amendment 210), the navigator's: the stripe says how it is, this which it is.
+  const color = useProjectColor(project.id);
 
   /*
    * The headline tags (Amendment 194): needs you, or N working, with finished beside it when a
@@ -671,7 +719,7 @@ export function ProjectCard({
 
   return (
     <div
-      className={`fl-card s-${stripe}${selectedId === project.id ? ' is-sel' : ''}`}
+      className={`fl-card s-${stripe} ${projClass(color)}${selectedId === project.id ? ' is-sel' : ''}`}
       onClick={open}
       role="button"
       tabIndex={0}
