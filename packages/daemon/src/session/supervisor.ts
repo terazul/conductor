@@ -153,6 +153,7 @@ import {
 } from './store.js';
 import { reportedWindow } from './windows.js';
 import { finishJob, type Finish } from './finish.js';
+import { broadcastRecurring } from './recurring.js';
 import { USER_PAUSE_NOTE, broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, isUserPauseNote, listScheduled, nextForSlot, nextWhenDone, userPauseNote } from './schedule.js';
 
 const exec = promisify(execFile);
@@ -791,6 +792,8 @@ export class Supervisor implements AgentControl {
     }
 
     deleteProject(this.#db, projectId);
+    // Its schedules went with it (Amendment 211): every page is told the list without them.
+    broadcastRecurring(this.#db);
 
     /*
      * Workspaces whose job row is already gone.
@@ -829,7 +832,8 @@ export class Supervisor implements AgentControl {
 
   // ── jobs ──────────────────────────────────────────────────────────────────
 
-  async createJob(req: CreateJobRequest): Promise<CreateJobResponse> {
+  /** `recurringId`: the schedule launching it, when one is (Amendment 211). */
+  async createJob(req: CreateJobRequest, recurringId?: string): Promise<CreateJobResponse> {
     const project = getProject(this.#db, req.projectId);
     if (!project) throw new Error(`no such project ${req.projectId}`);
     if (!req.prompt?.trim() && !req.waitForInstructions) throw new Error('prompt is required');
@@ -876,6 +880,7 @@ export class Supervisor implements AgentControl {
       projectId: project.id,
       prompt: req.prompt.trim(),
       ...(req.name ? { name: req.name.trim() } : {}),
+      ...(recurringId ? { recurringId } : {}),
       isolation: req.isolation,
       worktreePath,
       branch,

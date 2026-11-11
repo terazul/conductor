@@ -364,6 +364,8 @@ interface JobRow {
   created_at: string;
   ended_at: string | null;
   name: string | null;
+  /** Amendment 211; absent on a row read before migration 360 ran. */
+  recurring_id?: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -378,6 +380,7 @@ const toJob = (r: JobRow): Job => ({
   endedAt: r.ended_at,
   budgetUsd: r.budget_usd,
   ...(r.name ? { name: r.name } : {}),
+  ...(r.recurring_id ? { recurringId: r.recurring_id } : {}),
 });
 
 export function listJobs(db: Db): Job[] {
@@ -399,8 +402,8 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
   const job: Job = { ...j, createdAt: nowIso(), endedAt: null };
   db.prepare(
     `INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch,
-                       status, budget_usd, created_at, ended_at, name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+                       status, budget_usd, created_at, ended_at, name, recurring_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
   ).run(
     job.id,
     job.projectId,
@@ -412,6 +415,7 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
     job.budgetUsd,
     job.createdAt,
     job.name ?? null,
+    job.recurringId ?? null,
   );
   return job;
 }

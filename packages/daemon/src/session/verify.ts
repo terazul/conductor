@@ -176,6 +176,9 @@ import { BUILT_IN_PERSONAS, PERSONAS_KEY, resetPersona, withPersona, withoutPers
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
+import { getRecurring, insertRecurring, listRecurring, runRequest } from './recurring.js';
+import { PAUSE_UNTIL_KEY, everyProblem, nextRun, runName, type Every, type RecurringJob } from '@conductor/shared';
+import { listJobs } from './store.js';
 import { RESUME_AT_NOTE, Scheduler, deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone, scheduler, userPauseNote } from './schedule.js';
 import { FolderGoneError, HOLD_NOTE, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
 import { STACKS_KEY, stacksLimit } from '../slots.js';
@@ -9678,13 +9681,236 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n40 · a job that repeats: launched as a new job when due, skipped while the last run goes on, once after downtime (Amendment 211)');
+  {
+    /*
+     * "Add the ability to schedule a command to run on a periodic basis, say every day, every
+     * week, etc. It will stay until I cancel it." A saved Spawn request and a rule; the
+     * scheduler's tick launches it through the daemon's own `createJob`. The clock is moved by
+     * passing `now`, as §37 does.
+     */
+    // The rule, on a clock with a change of hours: London, which goes forward on 29 March 2026
+    // and back on 25 October.
+    const tzWas = process.env['TZ'];
+    process.env['TZ'] = 'Europe/London';
+    const local = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo - 1, d, h, mi);
+    const iso = (e: Every, after: Date) => nextRun(e, after).toISOString();
+    check('every day at 09:00, before 09:00, is today', iso({ kind: 'daily', at: '09:00' }, local(2026, 11, 12, 8, 59)) === local(2026, 11, 12, 9).toISOString());
+    check('at 09:00 itself, never at it: tomorrow', iso({ kind: 'daily', at: '09:00' }, local(2026, 11, 12, 9)) === local(2026, 11, 13, 9).toISOString());
+    check('across midnight: 00:15 after 23:50 is the next day', iso({ kind: 'daily', at: '00:15' }, local(2026, 12, 31, 23, 50)) === local(2027, 1, 1, 0, 15).toISOString(), iso({ kind: 'daily', at: '00:15' }, local(2026, 12, 31, 23, 50)));
+    check('across the clocks going forward: 09:00 is 09:00, 23 hours after the last', iso({ kind: 'daily', at: '09:00' }, local(2026, 3, 28, 9)) === '2026-03-29T08:00:00.000Z' && Date.parse(iso({ kind: 'daily', at: '09:00' }, local(2026, 3, 28, 9))) - local(2026, 3, 28, 9).getTime() === 23 * 3_600_000, iso({ kind: 'daily', at: '09:00' }, local(2026, 3, 28, 9)));
+    check('and back: 25 hours after the last', iso({ kind: 'daily', at: '09:00' }, local(2026, 10, 24, 9)) === '2026-10-25T09:00:00.000Z' && Date.parse(iso({ kind: 'daily', at: '09:00' }, local(2026, 10, 24, 9))) - local(2026, 10, 24, 9).getTime() === 25 * 3_600_000);
+    check('a time the clocks skip runs when they reach it, an hour on', iso({ kind: 'daily', at: '01:30' }, local(2026, 3, 29, 0)) === '2026-03-29T01:30:00.000Z', iso({ kind: 'daily', at: '01:30' }, local(2026, 3, 29, 0)));
+    const twice = nextRun({ kind: 'daily', at: '01:30' }, local(2026, 10, 25, 0));
+    check('a time that happens twice runs once: the next after it is the next day', nextRun({ kind: 'daily', at: '01:30' }, twice).getDate() === 26, `${twice.toISOString()} → ${nextRun({ kind: 'daily', at: '01:30' }, twice).toISOString()}`);
+    // 14 Nov 2026 is a Saturday.
+    check('weekdays from a Saturday: Monday', iso({ kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' }, local(2026, 11, 14, 10)) === local(2026, 11, 16, 9).toISOString());
+    check('a week\'s end: Sunday follows Saturday', iso({ kind: 'weekly', days: [0], at: '09:00' }, local(2026, 11, 14, 10)) === local(2026, 11, 15, 9).toISOString());
+    check('one day, its time passed today: a week on', iso({ kind: 'weekly', days: [6], at: '09:00' }, local(2026, 11, 14, 10)) === local(2026, 11, 21, 9).toISOString());
+    check('across the year\'s end', iso({ kind: 'weekly', days: [5], at: '18:00' }, local(2026, 12, 30, 12)) === local(2027, 1, 1, 18).toISOString());
+    check('a week across the clocks going forward keeps the wall-clock time', iso({ kind: 'weekly', days: [0], at: '09:00' }, local(2026, 3, 22, 9)) === '2026-03-29T08:00:00.000Z');
+    check('every 6 hours is 6 hours on, across midnight', iso({ kind: 'hours', n: 6 }, local(2026, 11, 12, 22)) === local(2026, 11, 13, 4).toISOString());
+    check('every hour across the clocks going back is an hour of time, not of the clock', Date.parse(iso({ kind: 'hours', n: 1 }, new Date('2026-10-25T00:30:00Z'))) === Date.parse('2026-10-25T01:30:00Z'));
+    if (tzWas === undefined) delete process.env['TZ'];
+    else process.env['TZ'] = tzWas;
+    check(
+      'a rule that is not one is refused, saying why',
+      [
+        { kind: 'daily', at: '9:00' }, { kind: 'daily', at: '24:00' }, { kind: 'daily' }, { kind: 'weekly', days: [], at: '09:00' },
+        { kind: 'weekly', days: [7], at: '09:00' }, { kind: 'weekly', days: [1.5], at: '09:00' }, { kind: 'hours', n: 0 },
+        { kind: 'hours', n: 169 }, { kind: 'hours', n: 2.5 }, { kind: 'monthly' }, null, 'daily',
+      ].every((e) => everyProblem(e) !== null) && everyProblem({ kind: 'weekly', days: [0, 6], at: '23:59' }) === null && everyProblem({ kind: 'hours', n: 168 }) === null,
+    );
+
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    check('nothing holds the fleet as this starts', !sup.held);
+    const rpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'repeat211' })).body.project.id;
+    const tickAt = async (now: number, sched: Scheduler = scheduler()): Promise<void> => {
+      await sched.tick();
+      await sched.tick(now);
+    };
+    const request = {
+      projectId: rpid,
+      prompt: 'Run the nightly checks and say what failed.',
+      isolation: 'in_place',
+      preset: 'solo',
+      agents: [{ role: 'builder', model: OPUS, autonomy: DEFAULT_AUTONOMY }],
+      budgetUsd: 5,
+    };
+    type One = { recurring: RecurringJob; error?: string; detail?: string };
+    const eyes = await connect();
+    const made = await send<One>('POST', '/api/recurring', { name: '  Nightly checks ', every: { kind: 'hours', n: 2 }, request });
+    const rec = made.body.recurring;
+    check('saved: 201, its name trimmed, next due by its rule', made.status === 201 && rec.name === 'Nightly checks' && Math.abs(Date.parse(rec.nextAt) - Date.now() - 2 * 3_600_000) < 60_000 && !rec.paused && rec.lastResult === null && rec.lastJobId === null, JSON.stringify(made.body));
+    check('the request kept is the launch\'s, as POST /api/jobs checks it', rec.request.projectId === rpid && rec.request.prompt === request.prompt && rec.request.agents[0]?.model === OPUS && rec.request.preset === 'solo' && rec.request.budgetUsd === 5 && rec.projectId === rpid, JSON.stringify(rec.request));
+    check('every tab hears the list', await until(() => eyes.frames.some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === rec.id))));
+    const listed = await get<{ recurring: RecurringJob[] }>('/api/recurring');
+    check('and it is listed, with its next time', listed.status === 200 && listed.body.recurring.some((r) => r.id === rec.id && r.nextAt === rec.nextAt));
+    const later = await connect();
+    check('a page that opens later has it in the snapshot', await until(() => later.frames.some((f) => f.type === 'hello' && (f.snapshot.recurring ?? []).some((r) => r.id === rec.id))));
+    later.close();
+    const weekly = await send<One>('POST', '/api/recurring', { name: 'weekly', every: { kind: 'weekly', days: [5, 1, 1], at: '09:00' }, request });
+    check('a week\'s days are kept sorted, once each', weekly.status === 201 && weekly.body.recurring.every.kind === 'weekly' && weekly.body.recurring.every.days.join() === '1,5', JSON.stringify(weekly.body.recurring?.every));
+
+    const bad = await Promise.all([
+      send<One>('POST', '/api/recurring', { name: '', every: { kind: 'hours', n: 2 }, request }),
+      send<One>('POST', '/api/recurring', { name: 'x'.repeat(61), every: { kind: 'hours', n: 2 }, request }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'daily', at: '25:00' }, request }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'weekly', days: [], at: '09:00' }, request }),
+      send<One>('POST', '/api/recurring', { name: 'n', request }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, agents: [] } }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, prompt: '' } }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 } }),
+    ]);
+    check('a bad name, rule or request is a 400 that says why', bad.every((r) => r.status === 400 && typeof r.body.error === 'string'), bad.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    const nowhere = await send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, projectId: 'prj_nowhere_211' } });
+    check('a project that is not there is refused: 404', nowhere.status === 404 && nowhere.body.error === 'no such project', `${nowhere.status} ${nowhere.body.error}`);
+    const countRec = () => (db.prepare('SELECT COUNT(*) AS n FROM recurring_jobs').get() as { n: number }).n;
+    check('and none of them is kept', countRec() === 2);
+    const sandboxed = await fetch(`${BASE}/api/recurring`, { method: 'POST', headers: { origin: 'null', 'content-type': 'application/json' }, body: JSON.stringify({ name: 'n', every: { kind: 'hours', n: 2 }, request }) });
+    check('a sandboxed page (Origin: null) cannot save one: 403', sandboxed.status === 403 && countRec() === 2, String(sandboxed.status));
+
+    const renamed = await send<One>('PATCH', `/api/recurring/${rec.id}`, { name: 'Nightly' });
+    check('PATCH renames, keeping its time', renamed.status === 200 && renamed.body.recurring.name === 'Nightly' && renamed.body.recurring.nextAt === rec.nextAt);
+    const retimed = await send<One>('PATCH', `/api/recurring/${rec.id}`, { every: { kind: 'hours', n: 3 } });
+    check('a new rule is next due by it from now', retimed.status === 200 && retimed.body.recurring.every.kind === 'hours' && Math.abs(Date.parse(retimed.body.recurring.nextAt) - Date.now() - 3 * 3_600_000) < 60_000);
+    const patchBad = await Promise.all([
+      send<One>('PATCH', `/api/recurring/${rec.id}`, { every: { kind: 'hours', n: 0 } }),
+      send<One>('PATCH', `/api/recurring/${rec.id}`, { name: ' ' }),
+      send<One>('PATCH', `/api/recurring/${rec.id}`, { paused: 'yes' }),
+      send<One>('PATCH', '/api/recurring/rec_nobody', { paused: true }),
+      send<One>('DELETE', '/api/recurring/rec_nobody'),
+    ]);
+    check('PATCH refuses a bad rule, name or pause, and one that is not there is a 404', patchBad.map((r) => r.status).join() === '400,400,400,404,404', patchBad.map((r) => r.status).join());
+    check('and the refusals changed nothing', getRecurring(db, rec.id)?.name === 'Nightly' && getRecurring(db, rec.id)?.every.kind === 'hours' && getRecurring(db, rec.id)?.paused === false);
+    await send('DELETE', `/api/recurring/${weekly.body.recurring.id}`);
+
+    // Due: one job, the saved request, named for the schedule and the time.
+    const jobsOf = (id: string) => listJobs(db).filter((j) => j.recurringId === id);
+    const due1 = Date.parse(getRecurring(db, rec.id)!.nextAt) + 1_000;
+    await tickAt(due1 - 2_000);
+    check('a second before its time nothing launches', jobsOf(rec.id).length === 0);
+    const mark = eyes.frames.length;
+    await tickAt(due1);
+    const first = jobsOf(rec.id);
+    const r1 = getRecurring(db, rec.id)!;
+    check('at its time it launches exactly one job', first.length === 1, String(first.length));
+    check('named for the schedule and the time', first[0]?.name === runName('Nightly', new Date(due1)) && /^Nightly · \d{1,2} [A-Z][a-z]{2} \d\d:\d\d$/.test(first[0]?.name ?? ''), first[0]?.name);
+    check('from the saved request: its prompt, isolation, budget and agent', first[0]?.prompt === request.prompt && first[0]?.isolation === 'in_place' && first[0]?.budgetUsd === 5 && listAgents(db).filter((a) => a.jobId === first[0]?.id).map((a) => a.model).join() === OPUS);
+    check('recorded: started, its job, when, and next due by the rule from then', r1.lastResult === 'started' && r1.lastJobId === first[0]?.id && r1.lastAt === new Date(due1).toISOString() && r1.nextAt === new Date(due1 + 3 * 3_600_000).toISOString(), JSON.stringify(r1));
+    check('the job says it came from it, on the wire too', getJob(db, first[0]!.id)?.recurringId === rec.id && (await until(() => eyes.frames.slice(mark).some((f) => f.type === 'entities' && (f.jobs ?? []).some((j) => j.id === first[0]!.id && j.recurringId === rec.id)))));
+    check('and every tab hears the schedule\'s new state', await until(() => eyes.frames.slice(mark).some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === rec.id && r.lastResult === 'started'))));
+    await tickAt(due1 + 1_000);
+    check('the next look launches nothing more', jobsOf(rec.id).length === 1);
+
+    // Due again while that run goes on: skipped, never a second copy.
+    await until(() => runs.some((r) => !r.finished));
+    const due2 = Date.parse(r1.nextAt) + 1_000;
+    await tickAt(due2);
+    const r2 = getRecurring(db, rec.id)!;
+    check('due while the last run is still going: skipped, no second copy', jobsOf(rec.id).length === 1 && r2.lastResult === 'skipped' && r2.lastAt === new Date(due2).toISOString() && r2.lastJobId === first[0]?.id, JSON.stringify(r2));
+    check('and next due by its rule all the same', r2.nextAt === new Date(due2 + 3 * 3_600_000).toISOString());
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    check('its job ends', await until(() => getJob(db, first[0]!.id)?.status === 'done'), String(getJob(db, first[0]!.id)?.status));
+    const due3 = Date.parse(r2.nextAt) + 1_000;
+    await tickAt(due3);
+    check('once it has ended the next time launches again', jobsOf(rec.id).length === 2 && getRecurring(db, rec.id)?.lastResult === 'started');
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    await until(() => jobsOf(rec.id).every((j) => j.status === 'done'));
+
+    // Paused: never due. Resumed: due by its rule from then, not for what it missed.
+    const paused = await send<One>('PATCH', `/api/recurring/${rec.id}`, { paused: true });
+    check('paused, and said back', paused.status === 200 && paused.body.recurring.paused === true);
+    const due4 = Date.parse(getRecurring(db, rec.id)!.nextAt) + 1_000;
+    await tickAt(due4);
+    await tickAt(due4 + 10 * 3_600_000);
+    check('a paused one does not launch, however long it is due', jobsOf(rec.id).length === 2 && getRecurring(db, rec.id)?.lastAt === new Date(due3).toISOString());
+    const resumed = await send<One>('PATCH', `/api/recurring/${rec.id}`, { paused: false });
+    check('resumed, it is next due by its rule from now', resumed.status === 200 && !resumed.body.recurring.paused && Math.abs(Date.parse(resumed.body.recurring.nextAt) - Date.now() - 3 * 3_600_000) < 60_000, resumed.body.recurring?.nextAt);
+
+    // Pause all: it stays due, and launches once when the pause ends.
+    const due5 = Date.parse(getRecurring(db, rec.id)!.nextAt) + 1_000;
+    const pauseEnds = new Date(due5 + 3_600_000).toISOString();
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: pauseEnds } });
+    await tickAt(due5);
+    check('while everything is paused it does not launch, and stays due', sup.held && jobsOf(rec.id).length === 2 && Date.parse(getRecurring(db, rec.id)!.nextAt) < due5, `${sup.held} ${jobsOf(rec.id).length}`);
+    await tickAt(due5 + 1_800_000);
+    check('still not, half an hour in', jobsOf(rec.id).length === 2);
+    await tickAt(Date.parse(pauseEnds) + 1_000);
+    check('when the pause ends it launches, once', !sup.held && jobsOf(rec.id).length === 3 && getRecurring(db, rec.id)?.lastResult === 'started', `${sup.held} ${jobsOf(rec.id).length}`);
+    await tickAt(Date.parse(pauseEnds) + 2_000);
+    check('and only once', jobsOf(rec.id).length === 3);
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: null } });
+    await scheduler().tick();
+    check('the pause put away, nothing holds the fleet', !sup.held);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    await until(() => jobsOf(rec.id).every((j) => j.status === 'done'));
+
+    // Down for three days over a daily one: the first look launches it once.
+    const daily = (await send<One>('POST', '/api/recurring', { name: 'Daily', every: { kind: 'daily', at: '09:00' }, request })).body.recurring;
+    db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ?').run(new Date(Date.now() - 3 * 86_400_000).toISOString(), daily.id);
+    const reopened = new DatabaseSync(process.env['CONDUCTOR_DB']!);
+    check('a daemon that opens the file afresh has it', getRecurring(reopened as unknown as Db, daily.id)?.name === 'Daily');
+    reopened.close();
+    const fresh = new Scheduler(db, sup);
+    await fresh.tick();
+    fresh.stop();
+    const afterDown = getRecurring(db, daily.id)!;
+    check('a restart after several missed times launches once', jobsOf(daily.id).length === 1 && afterDown.lastResult === 'started', `${jobsOf(daily.id).length} ${afterDown.lastResult}`);
+    check('and is next due at its time, ahead', Date.parse(afterDown.nextAt) > Date.now() && new Date(afterDown.nextAt).getHours() === 9 && new Date(afterDown.nextAt).getMinutes() === 0, afterDown.nextAt);
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+
+    // A refusal is recorded, and it goes on being due.
+    const gone = mkdtempSync(join(tmpdir(), 'conductor-211-'));
+    const gpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: gone, name: 'gone211' })).body.project.id;
+    const branchy = (await send<One>('POST', '/api/recurring', { name: 'Gone', every: { kind: 'hours', n: 1 }, request: { ...request, projectId: gpid, isolation: 'worktree' } })).body.recurring;
+    check('a worktree setup can be saved on a folder that is not a git repo', branchy !== undefined);
+    const dueG = Date.parse(branchy.nextAt) + 1_000;
+    await tickAt(dueG);
+    const failed = getRecurring(db, branchy.id)!;
+    check('a launch refused (no git repo for its worktree) is recorded as failed, with why, and stays', failed.lastResult?.startsWith('failed: ') === true && failed.lastJobId === null && Date.parse(failed.nextAt) > dueG && jobsOf(branchy.id).length === 0, failed.lastResult ?? undefined);
+    check('a branch the setup names is that name and the time, so each run has its own', runRequest({ name: 'n', request: { ...rec.request, isolation: 'worktree', branch: 'nightly' } }, local(2026, 11, 12, 9)).branch === 'nightly-20261112-0900');
+
+    // Removing the project takes its schedules; cancelling one keeps its jobs.
+    const removal = await send('DELETE', `/api/projects/${gpid}`);
+    check('a project removed takes its schedules', removal.status === 200 && getRecurring(db, branchy.id) === null, String(removal.status));
+    rmSync(gone, { recursive: true, force: true });
+    const cancel = await send<{ removed: boolean }>('DELETE', `/api/recurring/${rec.id}`);
+    check('cancelled: gone from the list, its jobs kept, and still saying where they came from', cancel.status === 200 && cancel.body.removed && getRecurring(db, rec.id) === null && jobsOf(rec.id).length === 3);
+    check('every tab hears the cancel', await until(() => eyes.frames.some((f) => f.type === 'recurring' && !f.recurring.some((r) => r.id === rec.id))));
+    await send('DELETE', `/api/recurring/${daily.id}`);
+    eyes.close();
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '360').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p360', 'old', '/tmp/p360', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j360', 'p360', 'old prompt', 'in_place', '/tmp/p360', 'main', 'done', 'x')`);
+    old.exec(readFileSync(new URL('360_recurring_jobs.sql', dir), 'utf8'));
+    const oldJob = listJobs(old as unknown as Db).find((j) => j.id === 'j360');
+    check('migration 360 applies to an existing database, and an old job came from no schedule', oldJob !== undefined && oldJob.recurringId === undefined && listRecurring(old as unknown as Db).length === 0, JSON.stringify(oldJob));
+    const oldRec = insertRecurring(old as unknown as Db, { name: 'old', every: { kind: 'daily', at: '09:00' }, request: { ...rec.request, projectId: 'p360' } });
+    old.exec(`DELETE FROM projects WHERE id = 'p360'`);
+    check('and its schedules go with their project', getRecurring(old as unknown as Db, oldRec.id) === null);
+    old.close();
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
