@@ -9763,7 +9763,10 @@ async function main(): Promise<void> {
       send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, agents: [] } }),
       send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, prompt: '' } }),
       send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 } }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, waitForInstructions: true } }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, prompt: '   ' } }),
     ]);
+    check('the daemon itself refuses a repeating launch that waits for instructions, or has no prompt, as repeat… does', /cannot wait for instructions/.test(bad.at(-2)?.body.error ?? '') && bad.at(-1)?.status === 400, bad.slice(-2).map((r) => `${r.status} ${r.body.error}`).join(' | '));
     check('a bad name, rule or request is a 400 that says why', bad.every((r) => r.status === 400 && typeof r.body.error === 'string'), bad.map((r) => `${r.status} ${r.body.error}`).join(' | '));
     const nowhere = await send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 2 }, request: { ...request, projectId: 'prj_nowhere_211' } });
     check('a project that is not there is refused: 404', nowhere.status === 404 && nowhere.body.error === 'no such project', `${nowhere.status} ${nowhere.body.error}`);
@@ -9875,6 +9878,14 @@ async function main(): Promise<void> {
     await tickAt(dueG);
     const failed = getRecurring(db, branchy.id)!;
     check('a launch refused (no git repo for its worktree) is recorded as failed, with why, and stays', failed.lastResult?.startsWith('failed: ') === true && failed.lastJobId === null && Date.parse(failed.nextAt) > dueG && jobsOf(branchy.id).length === 0, failed.lastResult ?? undefined);
+    // A saved setup that no longer passes the launch's own checks is refused at its time, not started.
+    const stale = (await send<One>('POST', '/api/recurring', { name: 'Stale', every: { kind: 'hours', n: 1 }, request })).body.recurring;
+    db.prepare('UPDATE recurring_jobs SET request = ? WHERE id = ?').run(JSON.stringify({ ...stale.request, agents: [] }), stale.id);
+    const dueS = Date.parse(stale.nextAt) + 1_000;
+    await tickAt(dueS);
+    const staleNow = getRecurring(db, stale.id)!;
+    check('a saved setup checked again at its time: one that no longer passes is failed, with why, never launched, and its time moves on', staleNow.lastResult?.startsWith('failed: invalid agents') === true && jobsOf(stale.id).length === 0 && Date.parse(staleNow.nextAt) > dueS, JSON.stringify(staleNow.lastResult));
+    await send('DELETE', `/api/recurring/${stale.id}`);
     check('a branch the setup names is that name and the time, so each run has its own', runRequest({ name: 'n', request: { ...rec.request, isolation: 'worktree', branch: 'nightly' } }, local(2026, 11, 12, 9)).branch === 'nightly-20261112-0900');
 
     // Removing the project takes its schedules; cancelling one keeps its jobs.

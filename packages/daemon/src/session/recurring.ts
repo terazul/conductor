@@ -173,7 +173,14 @@ export async function runDueRecurring(db: Db, sup: Pick<Supervisor, 'createJob'>
       result = RESULT_SKIPPED;
     } else {
       try {
-        const { job } = await sup.createJob(runRequest(r, at), r.id);
+        // Checked again as POST /api/jobs checks a launch: a schedule outlives what it was saved
+        // with, and a model the engine no longer serves, or a persona gone, is refused here with
+        // the reason, not started to fail at its first call. Imported late: routes/session.ts
+        // imports the supervisor this file is driven by.
+        const { parseCreateJob } = await import('../routes/session.js');
+        const parsed = await parseCreateJob(r.request);
+        if (!parsed.ok) throw new Error(parsed.detail ? `${parsed.error}: ${parsed.detail}` : parsed.error);
+        const { job } = await sup.createJob(runRequest({ ...r, request: parsed.request }, at), r.id);
         result = RESULT_STARTED;
         jobId = job.id;
       } catch (err) {

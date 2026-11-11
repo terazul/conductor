@@ -48,6 +48,12 @@ export default async function recurringRoutes(app: FastifyInstance): Promise<voi
     const parsed = await parseCreateJob(body.request);
     if (!parsed.ok) return fail(reply, parsed.status, parsed.error, parsed.detail);
     if (!getProject(db, parsed.request.projectId)) return fail(reply, 404, 'no such project');
+    // What Spawn's repeat… refuses, refused here too: a run that waits for instructions, or has no
+    // prompt, would start a job that sits waiting every time it comes due.
+    if (parsed.request.waitForInstructions === true) {
+      return fail(reply, 400, 'a repeating launch cannot wait for instructions', 'give it a prompt to run each time');
+    }
+    if (parsed.request.prompt.trim() === '') return fail(reply, 400, 'a repeating launch needs a prompt');
     const recurring = insertRecurring(db, {
       name: (body.name as string).trim(),
       every: normalEvery(body.every as Every),

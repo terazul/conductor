@@ -200,6 +200,15 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 212 — post-merge, applied. **The message box is edged in its project's colour.**
+
+Web only (`agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"on the text
+input box, make the border color (same thickness as the vertical color bar on project) match the project color
+bar."* The Agent screen's message box (`.ag-cbox`) takes its agent's project colour (`useProjectColor`, Amendment
+210's rule, kept or auto) as a 4px border of `--proj`, the bar's own thickness, its padding taken in by the 3px more
+so the text stays where it was. Focus keeps the colour and rings it in `--live`, outside. With no colour known the box
+is as it was. **Verified:** `lib/verify.ts` §58. Not looked at in a browser.
+
 ### Amendment 211 — post-merge, applied. **A launch saved to repeat on a rule, until you cancel it.**
 
 Daemon (`db/migrations/360_recurring_jobs.sql`, `session/recurring.ts`, `routes/recurring.ts`, `session/schedule.ts`,
@@ -211,7 +220,8 @@ Daemon (`db/migrations/360_recurring_jobs.sql`, `session/recurring.ts`, `routes/
 on a periodic basis, say every day, every week, etc. It will stay until I cancel it."*
 
 - **What is saved is a Spawn setup.** Migration 360 adds `recurring_jobs`: a name, `request` (the exact
-  `CreateJobRequest` Spawn's `launchBody` makes, checked by `parseCreateJob` as `POST /api/jobs` checks one), the
+  `CreateJobRequest` Spawn's `launchBody` makes, checked by `parseCreateJob` as `POST /api/jobs` checks one, and
+  refused if it waits for instructions or has no prompt, by the daemon as by repeat…), the
   rule `every`, `next_at`, the last run's time, job and result, and `paused`; removing the project removes its
   schedules. `jobs.recurring_id` (no foreign key) is the schedule a job came from, `Job.recurringId` on the wire.
 - **The rule** (`Every`, `shared/recurring.ts`): `daily` at HH:MM, `weekly` on some days (0 Sunday … 6 Saturday) at
@@ -246,6 +256,10 @@ on a periodic basis, say every day, every week, etc. It will stay until I cancel
   **✕ cancel**, which asks first and keeps the jobs it started. A Fleet card says *"⟳ N repeating"*; a run's job reads
   *"⟳ from {name}"* (a cancelled schedule's, *"⟳ from a cancelled schedule"*) on its card and Project group, and the
   navigator's job group wears a ⟳ named in its title.
+
+- **Checked again at its time.** Before each run the saved request goes through `parseCreateJob` again (found in
+  review): a model the engine no longer serves, or a persona gone, is `failed: <why>` and its time moves on, rather
+  than a job started to fail at its first model call.
 
 **Verified:** `session/verify.ts` §40: `nextRun` across both changes of clocks in Europe/London, weekdays, hours and
 never at now; the rule and name checks; the routes, their 400s and 404s; a due schedule launching exactly one job,
