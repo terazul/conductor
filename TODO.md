@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Don't let me type to a helper by default.** Asked for (11 Nov): *"by default do not let me add text to a sub
+  agent from the orchestrator."* *Done (11 Nov): Amendment 209 (a helper's message box is shut, and the line in its
+  place says which orchestrator directs it, with open to go there and unlock to type to the helper until you leave
+  its screen; display only).*
+
 - [x] **An icon for each agent's source.** Asked for (11 Nov): *"when you display the agents, use an icon to
   represent the source, Claude, Copilot, OpenAI, etc. Do this in the menu, the pages as well."*
   *Done (11 Nov): Amendment 208 (a small lettered square in the maker's colour beside each agent's dot, read from

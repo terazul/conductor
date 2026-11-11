@@ -3126,9 +3126,53 @@ await (async () => {
   check("each maker has a colour in both themes, and its --bg letters clear 4.5:1 on it", low.length === 0, low.join('; '));
 })();
 
+console.log("\n55 · a helper's message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209)");
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const { HelperLock, directedBy, lockedBy } = await import('../agent/HelperLock.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const ag = (id: string, role: string, extra: Partial<Agent> = {}) => ({ id, role, ...extra }) as unknown as Agent;
+  const orch = ag('o1', 'orchestrator', { name: 'lead' });
+  const helper = ag('h1', 'developer', { parentId: 'o1' });
+  const other = ag('h2', 'tester', { parentId: 'o1' });
+  const solo = ag('s1', 'developer');
+  const agents = [orch, helper, other, solo];
+
+  check('a helper is directed by its orchestrator', directedBy(helper, agents)?.id === 'o1');
+  check('…and an agent that is not a helper by no one', directedBy(solo, agents) === null && directedBy(orch, agents) === null && directedBy(ag('x', 'developer', { parentId: null }), agents) === null);
+  check("…nor a helper whose orchestrator is gone, which has no one to message instead", directedBy(ag('h9', 'developer', { parentId: 'gone' }), agents) === null);
+  check("a helper's box is shut, and an orchestrator's and a lone agent's open", lockedBy(helper, agents, null)?.id === 'o1' && lockedBy(orch, agents, null) === null && lockedBy(solo, agents, null) === null);
+  check('unlock opens it, for that helper only', lockedBy(helper, agents, 'h1') === null && lockedBy(other, agents, 'h1')?.id === 'o1');
+
+  const html = renderToStaticMarkup(createElement(HelperLock, { orchestrator: orch, onOpen: () => {}, onUnlock: () => {} }));
+  const words = html.replace(/<[^>]+>/g, '');
+  check('its line says who directs it, and offers open and unlock', words === 'lead directs this helper — message the orchestrator instead·open lead·unlock', words);
+  check('…the orchestrator named as its tab is, name else role', /<b>lead<\/b>/.test(html) && renderToStaticMarkup(createElement(HelperLock, { orchestrator: ag('o2', 'orchestrator'), onOpen: () => {}, onUnlock: () => {} })).includes('open orchestrator</button>'));
+  check('…in the composer\'s place, with no box to type in', html.startsWith('<div class="ag-composer ag-lock" role="note">') && !/<textarea|<input/.test(html));
+
+  const screen = src('../agent/agent.tsx');
+  check(
+    "the Agent screen shuts the box for a helper, and keeps the composer for anyone else",
+    /const lockOf = lockedBy\(agent, agents, unlocked\);/.test(screen) &&
+      /<TermPanel agent=\{agent\} \/> : lockOf \? \(\s*<HelperLock orchestrator=\{lockOf\} onOpen=\{\(\) => openAgent\(lockOf\)\} onUnlock=\{\(\) => setUnlocked\(agent\.id\)\} \/>\s*\) : \(\s*<Composer agent=\{agent\} \/>/.test(screen),
+  );
+  check('…open goes to the orchestrator, unlock to this helper', /onOpen=\{\(\) => openAgent\(lockOf\)\}/.test(screen) && /onUnlock=\{\(\) => setUnlocked\(agent\.id\)\}/.test(screen));
+  check(
+    'unlocked lasts until you leave: state, reset on another agent, never a setting',
+    /const \[unlocked, setUnlocked\] = useState<string \| null>\(null\);\s*useEffect\(\(\) => setUnlocked\(null\), \[active\]\);/.test(screen) && !/writeSetting\([^)]*unlock/i.test(screen),
+  );
+  check(
+    'the transcript, ⏸ and the stop controls are outside it, so they stay',
+    screen.indexOf('<StopControls agent={agent}') !== -1 && screen.indexOf('<StopControls agent={agent}') < screen.indexOf('className="ag-composer-wrap"'),
+  );
+  const css = src('../agent/agent.css');
+  check('…drawn in tokens only', /\.ag-lock-act \{[^}]*color: var\(--live\);/.test(css) && !/\.ag-lock[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

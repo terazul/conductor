@@ -46,6 +46,7 @@ import {
 import { Transcript, buildTranscript, replyKeys, replyStates, startFoldedKeys } from './transcript.js';
 import { ReadAllButton, toTick } from './readall.js';
 import { Composer } from './composer.js';
+import { HelperLock, lockedBy } from './HelperLock.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
 import { Reconnect } from './Reconnect.js';
@@ -573,6 +574,12 @@ export function AgentScreen() {
   const [ask, setAsk] = useState<string | null>(null);
   // What re-running the agents after it will do, while that confirm is armed (Amendment 102).
   const [rerunAsk, setRerunAsk] = useState<string | null>(null);
+  /*
+   * The helper whose shut message box you unlocked (Amendment 209), until you leave it: another
+   * agent here resets it, and another screen unmounts this one. Not a setting, so it is never kept.
+   */
+  const [unlocked, setUnlocked] = useState<string | null>(null);
+  useEffect(() => setUnlocked(null), [active]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const elapsedMs = useElapsedMs(
     agent ? startedMs(agent, events) : null,
@@ -718,6 +725,8 @@ export function AgentScreen() {
    */
   const budgetNow = budgetOf(agent);
   const overBudget = budgetNow?.state === 'over' && agent.status !== 'stopped';
+  // A helper's message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209).
+  const lockOf = lockedBy(agent, agents, unlocked);
 
   const exportTranscript = () => {
     const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
@@ -967,7 +976,11 @@ export function AgentScreen() {
           </button>
         </div>
         <div className="ag-composer-wrap" style={{ height: `${composerH}px` }}>
-          {bottomTab === 'terminal' ? <TermPanel agent={agent} /> : <Composer agent={agent} />}
+          {bottomTab === 'terminal' ? <TermPanel agent={agent} /> : lockOf ? (
+            <HelperLock orchestrator={lockOf} onOpen={() => openAgent(lockOf)} onUnlock={() => setUnlocked(agent.id)} />
+          ) : (
+            <Composer agent={agent} />
+          )}
         </div>
       </div>
 

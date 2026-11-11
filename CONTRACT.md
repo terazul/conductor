@@ -200,6 +200,27 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 209 — post-merge, applied. **A helper's message box is shut, pointing at its orchestrator, until you unlock it.**
+
+Web (`agent/HelperLock.tsx`, `agent/agent.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11
+Nov: *"by default do not let me add text to a sub agent from the orchestrator."* The orchestrator briefs its helpers
+and plans on what they report, so a message typed straight to a helper goes round it.
+
+- **Shut by default.** On the Agent screen of an agent with a `parentId` whose orchestrator is still listed
+  (`directedBy`), the reply tab shows, in the composer's place, *"**{orchestrator}** directs this helper — message
+  the orchestrator instead · **open {orchestrator}** · **unlock**"*, the orchestrator named as its tab is (its
+  name, else its role). **open** goes to the orchestrator (`openAgent`). A helper whose orchestrator is gone has
+  no one to message instead and keeps its box.
+- **unlock** opens the composer for that helper until you leave it (`lockedBy`, state on the Agent screen, reset on
+  another agent; another screen unmounts it). Never a setting, so it is never kept.
+- **Display only.** The daemon still takes a message to a helper; the transcript, the terminal tab, ⏸ and the stop
+  controls in the header are where they were. The composer's settings rows are behind the lock with the box.
+
+**Verified:** `lib/verify.ts` §55: who directs a helper, a non-helper and an orphan; shut for a helper and open for
+the others; unlock opens that helper only; the line's words and that it has no box; the screen's wiring, open
+targeting the orchestrator and unlock this helper; the state reset on another agent and never written; the stop
+controls outside it; tokens only.
+
 ### Amendment 208 — post-merge, applied. **Each agent wears its model's maker, a lettered square beside its dot.**
 
 Shared (`tokens.css`), web (`lib/source.ts`, `shell/SourceMark.tsx`, `shell/ui.css`, `shell/navtree.ts`,
