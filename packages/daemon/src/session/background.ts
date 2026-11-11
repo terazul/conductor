@@ -64,8 +64,24 @@ export function declinedHere(tool: string): string | null {
   );
 }
 
-/** The system prompt to append: the persona's own, if any, then the line. */
+/**
+ * How an agent hands you a message to send (Amendment 207): in a ```message block, which the
+ * transcript shows as the message with a ⧉ copy of its own that copies only it. Agents had set a
+ * draft apart with --- lines, which Conductor can't tell from the text around it, so the reply's
+ * copy took the notes with it.
+ */
+export const MESSAGE_LINE =
+  'When the user asks you to draft something for them to send (an email, a chat or Teams message, a reply, ' +
+  'an announcement), put only the message itself in a fenced block marked message: a line with ```message, ' +
+  'the message in markdown, and a line with ```. Keep your notes about it outside the block, before or after. ' +
+  'Conductor shows the block as the message, with a copy button that copies only what is inside. One block per ' +
+  'message; if the message itself holds a code block, open and close the message block with four backticks.';
+
+/** Every agent's lines from Conductor: the turn-end line, then how to hand over a message. */
+export const CONDUCTOR_LINES = `${TURN_END_LINE}\n\n${MESSAGE_LINE}`;
+
+/** The system prompt to append: the persona's own, if any, then Conductor's lines. */
 export function withTurnEndLine(systemPrompt: string | null | undefined): string {
   const own = systemPrompt?.trim();
-  return own ? `${own}\n\n${TURN_END_LINE}` : TURN_END_LINE;
+  return own ? `${own}\n\n${CONDUCTOR_LINES}` : CONDUCTOR_LINES;
 }

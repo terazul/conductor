@@ -21,7 +21,7 @@ import { modelSources } from './models.js';
 import { sdk } from './runner.js';
 import { DEFAULT_AUTONOMY, getAgent, insertAgent, insertJob } from './store.js';
 import { supervisor } from './supervisor.js';
-import { FOREGROUND_NOTE, TURN_END_LINE, declinedHere, foregroundInput, withTurnEndLine } from './background.js';
+import { CONDUCTOR_LINES, FOREGROUND_NOTE, MESSAGE_LINE, TURN_END_LINE, declinedHere, foregroundInput, withTurnEndLine } from './background.js';
 
 modelSources.gateway = () => Promise.reject(new Error('verify asked the real model API'));
 modelSources.claudeCode = () => Promise.reject(new Error('verify started a real Claude Code'));
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   check('a workflow is declined, saying what to do instead', /Agent calls in the foreground/.test(declinedHere('Workflow') ?? ''));
   check('nothing else is declined', declinedHere('Agent') === null && declinedHere('Bash') === null && declinedHere('Edit') === null);
   check('and not to end its turn to wait on something outside', /never end it to wait/.test(TURN_END_LINE) && /gh run watch/.test(TURN_END_LINE) && /foreground first/.test(TURN_END_LINE));
-  check('every agent is told, after its persona', withTurnEndLine('Be terse.') === `Be terse.\n\n${TURN_END_LINE}` && withTurnEndLine(null) === TURN_END_LINE && withTurnEndLine('  ') === TURN_END_LINE);
+  check('every agent is told, after its persona: the turn-end line, then how to hand over a message (Amendment 207)', CONDUCTOR_LINES === `${TURN_END_LINE}\n\n${MESSAGE_LINE}` && withTurnEndLine('Be terse.') === `Be terse.\n\n${CONDUCTOR_LINES}` && withTurnEndLine(null) === CONDUCTOR_LINES && withTurnEndLine('  ') === CONDUCTOR_LINES);
   check('the line says what dies and what to do', /process ends/.test(TURN_END_LINE) && /background subagents, workflows, background shell commands/.test(TURN_END_LINE) && /foreground/.test(TURN_END_LINE));
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   check('the agent launches', await until(() => runs.length === 1), String(runs.length));
   const run = runs[0]!;
   const sp = run.options.systemPrompt as { type?: string; append?: string } | undefined;
-  check('its system prompt carries the turn-end line, appended to Claude Code\'s own', sp?.type === 'preset' && sp.append === TURN_END_LINE, JSON.stringify(sp));
+  check('its system prompt carries the turn-end line and the message line, appended to Claude Code\'s own', sp?.type === 'preset' && sp.append === CONDUCTOR_LINES, JSON.stringify(sp));
 
   const a = out(await preToolUse(run, 'Agent', { description: 'd', prompt: 'build lane C', subagent_type: 'general-purpose', run_in_background: true }, 'tu_1'));
   const ai = a['updatedInput'] as Record<string, unknown> | undefined;

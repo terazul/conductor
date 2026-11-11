@@ -236,6 +236,26 @@
   padding-right: 96px;
 }
 
+/*
+ * A ```message block (Amendment 207): the message an agent drafted for you, drawn as it will read,
+ * in a framed box with the quote's ⧉ copy in its corner.
+ */
+.ag-message {
+  position: relative;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 10px 104px 10px 14px;
+}
+
+.ag-message-body > * + * {
+  margin-top: 8px;
+}
+
+.ag-message > .ag-message-copy {
+  top: 8px;
+  right: 8px;
+}
+
 .ag-quote-copy {
   position: absolute;
   top: 0;

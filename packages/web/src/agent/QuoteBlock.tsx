@@ -90,3 +90,46 @@ export function QuoteBlock({ source, children }: { source: string; children: Rea
     </div>
   );
 }
+
+/**
+ * A message an agent drafted for you to send (Amendment 207): a ```message block, shown as the
+ * message itself, its markdown drawn, with a ⧉ copy that copies only it, as the agent wrote it and
+ * drawn with no colour, so it pastes into a mail or a chat as it reads here. Agents are told to put
+ * a draft in one (the daemon's MESSAGE_LINE); before that they set it apart with --- lines, and the
+ * reply's copy took the notes around it too.
+ */
+export function MessageBlock({ source, children }: { source: string; children: ReactNode }) {
+  const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const say = (next: { ok: boolean; why?: string }): void => {
+    setSaid(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
+  };
+  const copy = (): void => {
+    const html = import('./replycopy.js').then((m) => m.replyClipboard([{ kind: 'prose', text: source }]).html);
+    void copyRich(source, html).then(
+      () => say({ ok: true }),
+      (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
+    );
+  };
+
+  return (
+    <div className="ag-message">
+      {/* ag-quote-copy, so the reply's copy and Cmd-C leave it out as they do a quote's (cleanHtml's CHROME). */}
+      <button
+        type="button"
+        className={`ag-quote-copy ag-message-copy${said && !said.ok ? ' is-failed' : ''}`}
+        aria-label="Copy this message"
+        title={said && !said.ok ? `Couldn't copy: ${said.why}` : 'Copy just this message, without the notes around it or its colours'}
+        onClick={copy}
+      >
+        {said ? (said.ok ? '✓ copied' : "couldn't copy") : '⧉ copy'}
+      </button>
+      <div className="ag-message-body">{children}</div>
+    </div>
+  );
+}

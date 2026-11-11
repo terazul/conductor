@@ -35,6 +35,7 @@
  * up as they arrive. The stored spend is never changed and never estimated.
  */
 
+import { MESSAGE_LINE } from '../background.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -416,7 +417,8 @@ export class CopilotBackend implements AgentBackend {
       ...(provider ? { provider } : {}),
       // Appended to the runtime's own, like Claude's preset `append`. Never `replace`,
       // which drops the runtime's guardrails.
-      ...(systemPrompt?.trim() ? { systemMessage: { mode: 'append' as const, content: systemPrompt } } : {}),
+      // With how to hand over a message (Amendment 207), so a draft is a ```message block here too.
+      systemMessage: { mode: 'append' as const, content: systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${MESSAGE_LINE}` : MESSAGE_LINE },
       ...(excluded.length > 0 ? { excludedTools: excluded } : {}),
       ...(tools.length > 0 ? { tools } : {}),
       onPermissionRequest: (req) => this.#onPermission(req),
