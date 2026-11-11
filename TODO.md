@@ -20,6 +20,10 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **The message box in its project's colour.** Asked for (11 Nov): *"on the text input box, make the border color
+  (same thickness as the vertical color bar on project) match the project color bar."*
+  *Done (11 Nov): Amendment 212 (a 4px border of the project's colour; focus rings it in the live colour).*
+
 - [x] **Run a job again on a schedule, until I cancel it.** Asked for (11 Nov): *"add the ability to schedule a
   command to run on a periodic basis, say every day, every week, etc. It will stay until I cancel it."*
   *Done (11 Nov): Amendment 211 (Spawn's repeat… saves the launch as it stands to run again every day at a time, on

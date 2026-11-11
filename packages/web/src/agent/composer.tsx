@@ -18,6 +18,7 @@
  * blocked agents.
  */
 
+import { projClass, useProjectColor } from '../lib/projectColor.js';
 import { useDraft } from '../lib/drafts.js';
 import { useEffect, useState } from 'react';
 import { spentOn, type Agent, type Autonomy, type EffortLevel, type SendMessageResponse } from '@conductor/shared';
@@ -504,6 +505,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const open = settingsShown(useSetting(SETTINGS_KEY));
   // What ⏎ does in the box (Amendment 203): sends unless you ticked ⏎ new line.
   const enterSendsNow = enterSends(useSetting(ENTER_KEY));
+  // The project's colour (Amendment 210), for the box's edge (Amendment 212).
+  const boxColor = useProjectColor(agent.projectId);
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
   // Past the budget it says so (Amendment 124), and nothing stops it (Amendment 180).
@@ -534,7 +537,8 @@ export function Composer({ agent }: { agent: Agent }) {
   return (
     <div className="ag-composer">
       <ScheduledList agentId={agent.id} />
-      <div className="ag-cbox">
+      {/* Edged in its project's colour, as thick as the project's bar, so the box says which project it writes to (Amendment 212). */}
+      <div className={`ag-cbox${boxColor ? ` has-proj ${projClass(boxColor)}` : ''}`}>
         <textarea
           className="ag-input"
           value={text}

@@ -1313,6 +1313,22 @@ a.ag-tool-subj:focus-visible {
   border-color: var(--live);
 }
 
+/*
+ * The box edged in its project's colour (Amendment 212), as thick as the project's bar (4px,
+ * Amendment 210), the padding taken in by the 3px more of edge so the text doesn't move. Focus
+ * keeps the colour and rings it in the live colour, outside, as focus is shown elsewhere.
+ */
+.ag-cbox.has-proj {
+  border: 4px solid var(--proj);
+  padding: 6px 9px;
+}
+
+.ag-cbox.has-proj:focus-within {
+  border-color: var(--proj);
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+
 .ag-input {
   font: inherit;
   font-family: var(--mono);
