@@ -4016,6 +4016,7 @@ async function main(): Promise<void> {
       msg.body.delivery === 'resumed' && s1b?.resumed === true && fakeCopilot.resumes.slice(resumes0).join() === 'agt_cp1',
       JSON.stringify(fakeCopilot.resumes),
     );
+    check('and the resume is told the message line too, as the first run was (Amendment 207)', JSON.stringify(s1b?.config.systemMessage) === JSON.stringify({ mode: 'append', content: MESSAGE_LINE }), JSON.stringify(s1b?.config.systemMessage));
     check(
       'and the resume is given its callbacks and folder again',
       typeof s1b?.config.onPermissionRequest === 'function' && s1b?.config.workingDirectory === ROOT && (s1b?.config as { continuePendingWork?: boolean }).continuePendingWork === false,
@@ -4134,12 +4135,13 @@ async function main(): Promise<void> {
 
     // hand_off, in-process, for an agent others wait for (Amendment 104).
     job('job_cp_hand', null);
-    fixture('agt_cp_lead', 'job_cp_hand', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
+    fixture('agt_cp_lead', 'job_cp_hand', { status: 'queued', autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot', systemPrompt: '  Lead the hand-off.  ' } as Partial<Agent>);
     fixture('agt_cp_next', 'job_cp_hand', { status: 'queued', dependsOn: ['agt_cp_lead'], autonomy: DEFAULT_AUTONOMY, model: 'gpt-5-mini', provider: 'copilot' } as Partial<Agent>);
     sup.pump();
     const sLead = await sessionOf('agt_cp_lead');
     type InProcessTool = { name: string; skipPermission?: boolean; handler?: (a: unknown, i: unknown) => unknown };
     const leadTools = (sLead?.config.tools ?? []) as InProcessTool[];
+    check('a Copilot agent with a persona is told its persona, then the message line (Amendment 207)', JSON.stringify(sLead?.config.systemMessage) === JSON.stringify({ mode: 'append', content: `Lead the hand-off.\n\n${MESSAGE_LINE}` }), JSON.stringify(sLead?.config.systemMessage));
     check('a Copilot agent others wait for is given hand_off, needing no permission (Amendment 104)', leadTools.map((t) => t.name).join() === 'hand_off' && leadTools.every((t) => t.skipPermission === true), JSON.stringify(leadTools.map((t) => t.name)));
     const refusedBlank = (await leadTools[0]?.handler?.({ summary: '  ' }, {})) as { resultType?: string; error?: string } | undefined;
     check('a blank summary is a failure the model reads, not a hand-off', refusedBlank?.resultType === 'failure' && /needs a summary/.test(refusedBlank.error ?? '') && getHandoff(db, 'agt_cp_lead').summary === null, JSON.stringify(refusedBlank));
