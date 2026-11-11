@@ -71,6 +71,7 @@ import {
   useTouches,
   useWholeDiff,
 } from './useWorkspace.js';
+import { projClass, projectColors } from '../lib/projectColor.js';
 import './files.css';
 
 /** First changed file, else the first markdown file, else the first file at all. */
@@ -408,7 +409,7 @@ function Files() {
   return (
     <div className="c5-root">
       <div className="c5-col" style={{ width: `${shownW}px` }}>
-        <div className="c5-colhead">
+        <div className={`c5-colhead ${projClass(project ? projectColors(projects).get(project.id) : undefined)}`}>
           <div className="c5-jobrow">
             <span className="c5-lab">Project</span>
           </div>

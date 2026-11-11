@@ -47,6 +47,7 @@ import { Transcript, buildTranscript, replyKeys, replyStates, startFoldedKeys } 
 import { ReadAllButton, toTick } from './readall.js';
 import { Composer } from './composer.js';
 import { HelperLock, lockedBy } from './HelperLock.js';
+import { projClass, projectColors } from '../lib/projectColor.js';
 import { Inspector } from './inspector.js';
 import { NeedsPanel } from '../attention/NeedsPanel.js';
 import { Reconnect } from './Reconnect.js';
@@ -804,7 +805,7 @@ export function AgentScreen() {
             ))}
           </div>
         )}
-        <div className="fl-panehead">
+        <div className={`fl-panehead has-proj ${projClass(projectColors(projects).get(agent.projectId))}`}>
           <button
             type="button"
             className="ui-crumb ag-crumb is-agent"

@@ -473,6 +473,17 @@
   cursor: grab;
 }
 
+/*
+ * A project's colour bar (Amendment 210): 4px down the left of the whole group, its row and what
+ * is open under it, the same bar its Fleet card and its screens have. A border, not a shadow, so
+ * the drop cue's inset shadow is left to say where a drag lands. `--proj` is from `pc-<key>`.
+ */
+.sh-nav-proj {
+  border-left: 4px solid var(--proj, transparent);
+  border-radius: 2px;
+  padding-left: 2px;
+}
+
 .sh-nav-proj.is-dragging {
   opacity: 0.45;
 }

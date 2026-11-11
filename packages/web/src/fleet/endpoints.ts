@@ -7,7 +7,7 @@
  * lib/feed.ts so bearer auth stays in one place.
  */
 
-import type { Project, ProjectNote } from '@conductor/shared';
+import type { Project, ProjectColor, ProjectNote } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /*
@@ -19,8 +19,8 @@ import { api } from '../lib/feed.js';
 export { removeProject, type ProjectRemoval } from '../spawn/endpoints.js';
 
 /**
- * Edit a project's name and/or path, and its monthly budget in dollars, null for none
- * (Amendment 182).
+ * Edit a project's name and/or path, its monthly budget in dollars, null for none
+ * (Amendment 182), and its colour bar's key, null for auto (Amendment 210).
  *
  * Send only what changed — the daemon treats the body as a partial, so omitting
  * `path` leaves it alone rather than clearing it. Also not in `wire.ts`, for
@@ -28,7 +28,7 @@ export { removeProject, type ProjectRemoval } from '../spawn/endpoints.js';
  */
 export function editProject(
   projectId: string,
-  patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null },
+  patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null; color?: ProjectColor | null },
 ): Promise<{ project: Project }> {
   return api(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: patch });
 }

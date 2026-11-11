@@ -56,6 +56,7 @@ import { NotesPanel } from './Notes.js';
 import { Dock } from './dock.js';
 import { PROJECT_COLUMN, usePanel } from '../shell/panels.js';
 import { Splitter } from '../shell/Splitter.js';
+import { projClass, projectColors } from '../lib/projectColor.js';
 import './fleet.css';
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -436,7 +437,7 @@ export function ProjectScreen() {
 
       {/* ── lanes + dock ── */}
       <div className="fl-pane">
-        <div className="fl-panehead">
+        <div className={`fl-panehead has-proj ${projClass(projectColors(projects).get(project.id))}`}>
           <span className="ui-crumb is-project">
             <b>{project.name}</b>
             {job && (

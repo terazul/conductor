@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **A colour bar for each project.** Asked for (11 Nov): *"allow me to a color bar for each project. This would
+  show as a left bar on the menu and in the main windows as well. That way I can correlate the project in the menu
+  with the project pages."* *Done (11 Nov): Amendment 210 (a 4px bar in the project's colour down its navigator
+  group, its Fleet card, its Project and Agent crumbs and its Files column head; auto spreads the eight colours in
+  the order the projects were added, and the card's edit form keeps one you pick).*
+
 - [x] **Don't let me type to a helper by default.** Asked for (11 Nov): *"by default do not let me add text to a sub
   agent from the orchestrator."* *Done (11 Nov): Amendment 209 (a helper's message box is shut, and the line in its
   place says which orchestrator directs it, with open to go there and unlock to type to the helper until you leave

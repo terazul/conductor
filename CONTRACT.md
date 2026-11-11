@@ -200,6 +200,39 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 210 — post-merge, applied. **Each project has a colour bar, in the navigator and on its pages.**
+
+Daemon (`db/migrations/350_project_color.sql`, `session/store.ts`, `routes/session.ts`, `session/verify.ts`), shared
+(`wire.ts`, `tokens.css`), web (`lib/projectColor.ts`, `shell/ui.css`, `shell/shell.css`, `shell/Navigator.tsx`,
+`fleet/fleet.css`, `fleet/card.tsx`, `fleet/endpoints.ts`, `fleet/project.tsx`, `agent/agent.tsx`, `files/route.tsx`,
+`files/files.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"allow me to a color bar for each project.
+This would show as a left bar on the menu and in the main windows as well. That way I can correlate the project in
+the menu with the project pages."*
+
+- **Kept as a key, never a colour.** Migration 350 adds `projects.color TEXT`, a key of `PROJECT_COLORS` (`sky`,
+  `mint`, `plum`, `yellow`, `blue`, `pink`, `indigo`, `magenta`) or NULL for auto; `Project.color` carries it when
+  set. Each key is a `--proj-<key>` token with its own shade in each theme, so a theme change recolours every bar.
+- **PATCH `/api/projects/:id`** also takes `color`: a key keeps it, `null` goes back to auto, anything else is a 400
+  *"not a project colour"* naming the keys, and nothing else in the body changes. Every tab hears it as the project
+  event.
+- **Auto** (`projectColors`, pure, web): in creation order each project without a key takes the key fewest of the
+  ones before it have, the palette's order breaking a tie; a kept key wins and counts. A new project never changes
+  an older one's, the first eight differ, and a key the palette doesn't have is auto.
+- **The bar**, 4px of `--proj` set by a `pc-<key>` class: down the navigator's whole project group; at a Fleet
+  card's left edge, the status stripe moved inside it; inside the left of the Project and Agent screens' crumb (the
+  orchestrator's wine kept); and down the Files column head of the open project.
+- **Picking one:** the Fleet card's ✎ edit project has a colour row: **auto**, edged in the colour auto gives now,
+  then the eight swatches, a radio group. Save sends `color` only when it changed.
+- The palette keeps clear of the status colours and of each other (OKLab ≥ 0.08 in both themes) and is ≥ 3:1 on
+  `--bg` and `--surf`, the floor for a graphic, as the bar has no text.
+
+**Verified:** `session/verify.ts` §39: auto by default; a key kept, sent to every tab, and each key taken; a bad key
+a 400 that names the keys, and with a name beside it neither changes; a rename keeps the colour; null back to auto;
+an empty body a 400, a missing project a 404; migration 350 on an old database. `lib/verify.ts` §56: auto's order,
+stability and spread, a kept key winning and counting, an unknown key auto, `projClass`; the tokens in both themes
+and each `pc-` class; the contrast and the distances per theme; the bar in each of the five places, the edit form's
+swatches and what it saves; tokens only.
+
 ### Amendment 209 — post-merge, applied. **A helper's message box is shut, pointing at its orchestrator, until you unlock it.**
 
 Web (`agent/HelperLock.tsx`, `agent/agent.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11

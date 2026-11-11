@@ -43,7 +43,7 @@ import type {
   StopRetryingResponse,
   StopWaitingResponse,
 } from '@conductor/shared';
-import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProviderInfo } from '@conductor/shared';
+import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PROJECT_COLORS, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProjectColor, type ProviderInfo } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
@@ -64,7 +64,7 @@ import {
   listJobs,
   listProjects,
 } from '../session/store.js';
-import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, setProjectMonthlyBudget, updateNote } from '../session/store.js';
+import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, setProjectColor, setProjectMonthlyBudget, updateNote } from '../session/store.js';
 import { monthlyBudgetProblem } from '../daily.js';
 import { describeRule } from '../session/rules.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
@@ -508,7 +508,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   });
 
   /**
-   * Edit a project's name and/or path, and its monthly budget (Amendment 182). Bookkeeping
+   * Edit a project's name and/or path, its monthly budget (Amendment 182) and its colour (210). Bookkeeping
    * only — nothing on disk moves.
    *
    * PATCH rather than PUT: the body is a partial, and a PUT that silently reset
@@ -520,7 +520,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    * patch shape would mean a W0 edit for every field the form grows.
    */
   app.patch<{ Params: { projectId: string } }>('/api/projects/:projectId', async (req, reply) => {
-    const body = (req.body ?? {}) as { name?: unknown; path?: unknown; monthlyBudgetUsd?: unknown };
+    const body = (req.body ?? {}) as { name?: unknown; path?: unknown; monthlyBudgetUsd?: unknown; color?: unknown };
     const patch: { name?: string; path?: string } = {};
     if (typeof body.name === 'string') patch.name = body.name;
     if (typeof body.path === 'string') patch.path = body.path;
@@ -531,8 +531,14 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       const problem = monthlyBudgetProblem(monthly);
       if (problem) return fail(reply, 400, 'not a monthly budget', problem);
     }
-    if (patch.name === undefined && patch.path === undefined && monthly === undefined) {
-      return fail(reply, 400, 'nothing to change', 'send a name, a path, a monthly budget, or any of them');
+    // A key of the palette, or null for auto (Amendment 210). Never a colour: the web has the
+    // values, one for each theme, so a hex or a name it doesn't know is refused here.
+    const color = body.color;
+    if (color !== undefined && color !== null && !(PROJECT_COLORS as readonly unknown[]).includes(color)) {
+      return fail(reply, 400, 'not a project colour', `one of ${PROJECT_COLORS.join(', ')}, or null for auto`);
+    }
+    if (patch.name === undefined && patch.path === undefined && monthly === undefined && color === undefined) {
+      return fail(reply, 400, 'nothing to change', 'send a name, a path, a monthly budget, a colour, or any of them');
     }
     if (!getProject(db, req.params.projectId)) return fail(reply, 404, 'no such project');
     try {
@@ -540,6 +546,10 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       if (monthly !== undefined) {
         setProjectMonthlyBudget(db, req.params.projectId, monthly as number | null);
         // Tells every page, and the budget may add or clear its alert.
+        project = sendProject(req.params.projectId);
+      }
+      if (color !== undefined) {
+        setProjectColor(db, req.params.projectId, color as ProjectColor | null);
         project = sendProject(req.params.projectId);
       }
       if (!project) return fail(reply, 404, 'no such project');
