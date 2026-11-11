@@ -200,6 +200,31 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 207 — post-merge, applied. **A message an agent drafts comes in a message block, with a ⧉ copy of just the message.**
+
+Daemon (`session/background.ts`, `session/backends/copilot.ts`, `session/verify.ts`), web (`agent/QuoteBlock.tsx`,
+`agent/markdown.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"I asked an agent to
+draft a message, it gives me a Copy button, it includes the text around the message not just the message, how do I
+get just the message Copy"*. Agents set a draft apart with `---` lines (seen in the Investrack architect's and the
+ai-assistant analyst's replies that day), which nothing in the markdown marks as the message, so the reply's ⧉ copy
+(Amendment 201) took the notes around it too. Decided with the user: agents use a message block.
+
+- **Agents are told.** `MESSAGE_LINE` (`background.ts`): put only the message in a fenced block marked `message`,
+  notes outside it, one block per message, four backticks if the message holds code. Claude agents get it after the
+  turn-end line (`CONDUCTOR_LINES`, appended to every agent's system prompt with its persona's); Copilot and
+  OpenRouter agents get it as their appended `systemMessage`, which they had only with a persona before. It applies
+  from an agent's next run.
+- **The block** (`MessageBlock`): a ` ```message ` fence is drawn as its markdown, in a framed box, not as code;
+  its ⧉ copy (the quote's chip, Amendment 204) copies the block's source as `text/plain` and that rendered with no
+  colour (`replyClipboard`, `cleanHtml`) as `text/html`. The button carries `ag-quote-copy`, so the reply's own copy
+  and ⌘C leave it out. Any other fence is still code on white.
+
+**Verified:** `session/verify.ts`: the line is in every agent's appended prompt (the nine prompt checks now compare
+with `CONDUCTOR_LINES`), and a Copilot session is made with it; `session/verify-background.ts`'s two prompt checks
+(Amendment 133) likewise. `lib/verify.ts` §53: the block drawn as the message
+with the notes outside; its copy is the message only, with no colour; the reply's copy is unchanged; other fences are
+code; a four-backtick message keeps code inside; tokens only. Not looked at in a browser, nor pasted into mail.
+
 ### Amendment 206 — post-merge, applied. **The fleet's month can be set to the AI gateway's figure, and Conductor counts on top of it.**
 
 Daemon (`routes/spend.ts` new, `session/store.ts`, `daily.ts`, `hub.ts`, `session/alerts.ts`,

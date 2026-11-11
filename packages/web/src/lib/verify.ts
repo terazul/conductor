@@ -2975,6 +2975,32 @@ await (async () => {
   );
 })();
 
+console.log('\n53 · a ```message block is the message an agent drafted, drawn as it reads, with a ⧉ copy of just it (Amendment 207)');
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement, Fragment } = await import('react');
+  const { renderMarkdown } = await import('../agent/markdown.js');
+  const { replyClipboard } = await import('../agent/replycopy.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const body = '**Subject: VLT-329**\n\nHi Olena,\n\n- one\n- two\n\nThanks,\nDurval';
+  const reply = `I couldn't open the ticket.\n\n\`\`\`message\n${body}\n\`\`\`\n\nTell me if you want it shorter.`;
+  const shown = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown(reply)));
+  check('the block is drawn as the message, its markdown rendered, not as code', /<div class="ag-message"><button type="button" class="ag-quote-copy ag-message-copy"[^>]*>⧉ copy<\/button><div class="ag-message-body"><p><strong>Subject: VLT-329<\/strong><\/p><p>Hi Olena,<\/p><ul><li>one<\/li>/.test(shown) && !shown.includes('ag-code'), shown);
+  check('…and the notes around it stay outside it', shown.indexOf('open the ticket') < shown.indexOf('ag-message') && shown.lastIndexOf('Tell me if') > shown.lastIndexOf('Durval'));
+  const qb = src('../agent/QuoteBlock.tsx');
+  check('its copy is the block\'s own source, as the agent wrote it, drawn as a reply is', /export function MessageBlock[\s\S]*replyClipboard\(\[\{ kind: 'prose', text: source \}\]\)\.html[\s\S]*copyRich\(source, html\)/.test(qb));
+  const clip = replyClipboard([{ kind: 'prose', text: body }]);
+  check('what it copies is just the message, with no colour and no notes', clip.text === body && !clip.html.includes('open the ticket') && clip.html.includes('<strong>Subject: VLT-329</strong>') && !/style="(?!font-family: monospace)|class=/.test(clip.html), clip.html);
+  const whole = replyClipboard([{ kind: 'prose', text: reply }]);
+  check('the reply\'s own copy still takes all of it, and leaves the block\'s button out', whole.html.includes('open the ticket.') && whole.html.includes('Hi Olena,') && !whole.html.includes('⧉ copy'), whole.html);
+  const code = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown('```ts\nconst a = 1;\n```')));
+  check('any other fenced block is still code on white', code.includes('class="ag-code"') && !code.includes('ag-message'));
+  const four = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown('````message\nRun:\n\n```sh\nmake test\n```\n````')));
+  check('a message with code in it, fenced with four backticks, keeps its code inside', four.includes('class="ag-message"') && four.includes('make test') && (four.match(/ag-message"/g) ?? []).length === 1, four);
+  const css = src('../agent/agent.css');
+  check('framed in tokens, the button clear of the text', /\.ag-message > \.ag-message-copy \{/.test(css) && /\.ag-message \{[^}]*border: 1px solid var\(--line2\);[^}]*padding: 10px 104px 10px 14px;/.test(css) && !/\.ag-message[^{]*\{[^}]*#[0-9a-fA-F]{3,8}\b/.test(css));
+})();
+
 console.log(
   failures === 0
     ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206).\n'

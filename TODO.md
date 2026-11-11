@@ -20,6 +20,11 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Copy just the message an agent drafted, not its notes around it.** Asked for (11 Nov): *"it includes the text
+  around the message not just the message, how do I get just the message Copy"*.
+  *Done (11 Nov): Amendment 207 (agents are told to put a draft in a ```message block; the block shows as the message
+  with a ⧉ copy of just it).*
+
 - [x] **Set the month's spend to the AI gateway's.** Asked for (9 Nov): *"sometimes there is a gap on spend to
   month and the actual calculated by the ai gateway, allow me to update the spend to month to align with the ai
   gateway."* *Done (9 Nov): Amendment 206 (Settings, under the monthly budget: match the AI gateway sets the

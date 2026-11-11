@@ -47,7 +47,7 @@ import type { ReactNode } from 'react';
 import { isMermaid } from '../lib/mermaid.js';
 import { MermaidBlock } from './Mermaid.js';
 import { CodeBlock } from './CodeBlock.js';
-import { QuoteBlock } from './QuoteBlock.js';
+import { MessageBlock, QuoteBlock } from './QuoteBlock.js';
 
 export function lineCount(text: string): number {
   return text.split('\n').length;
@@ -371,9 +371,15 @@ export function renderMarkdown(text: string, linkFile?: LinkFile, keyBase = ''):
         const k = key('c');
         // A diagram is drawn, in its own component (Amendment 60); anything else is on white,
         // with a copy for all of it (Amendment 185).
+        // A ```message block is a draft for you to send (Amendment 207): drawn as the message, with
+        // a copy of just it.
         out.push(
           isMermaid(lang) ? (
             <MermaidBlock key={k} source={body} />
+          ) : lang.toLowerCase() === 'message' ? (
+            <MessageBlock key={k} source={body}>
+              {renderMarkdown(body, linkFile, `${k}m`)}
+            </MessageBlock>
           ) : (
             <CodeBlock key={k} body={body} lang={lang} />
           ),
