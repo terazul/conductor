@@ -15,7 +15,7 @@
  * gives names the agent.
  */
 
-import type { AddAgentRequest, AddAgentResponse } from '@conductor/shared';
+import type { AddAgentRequest, AddAgentResponse, CreateJobRequest, CreateRecurringRequest, Every, RecurringJob } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /**
@@ -45,4 +45,13 @@ export function removeProject(projectId: string): Promise<{ removed: ProjectRemo
  */
 export function addAgent(jobId: string, body: AddAgentRequest): Promise<AddAgentResponse> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}/agents`, { method: 'POST', body });
+}
+
+/**
+ * Save a launch to run again on a rule (Amendment 211): `request` is the launch's own body,
+ * which the daemon checks as `POST /api/jobs` does and launches as a new job each time.
+ */
+export function saveRecurring(name: string, every: Every, request: CreateJobRequest): Promise<{ recurring: RecurringJob }> {
+  const body: CreateRecurringRequest = { name, every, request };
+  return api('/api/recurring', { method: 'POST', body });
 }

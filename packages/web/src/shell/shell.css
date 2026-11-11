@@ -588,6 +588,13 @@ summary:has(> .sh-nav-chev)::-webkit-details-marker {
   flex: none;
 }
 
+/* A job a schedule started (Amendment 211): the schedule's name is its title. */
+.sh-nav-from {
+  font-size: var(--fs-xs);
+  color: var(--ink3);
+  flex: none;
+}
+
 /* Something in this project waits on you: the heading says so, and how many, on the same
    --need-wash backdrop as the rail, so it is seen in light as well as dark. */
 .sh-nav-head.is-need,

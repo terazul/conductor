@@ -41,12 +41,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FileNode, ProjectColor } from '@conductor/shared';
+import { fromMark } from '@conductor/shared';
 import { renameAgent, renameJob } from '../agent/endpoints.js';
 import { editProject } from '../fleet/endpoints.js';
 import { errorText } from '../lib/errors.js';
 import { currentRoute, navigate, onNavigate, type NavParams } from '../lib/nav.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
-import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects } from '../lib/store.js';
+import { useAgents, useAlerts, useJobs, usePending, useProjectSpend, useProjects, useRecurring } from '../lib/store.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { useToRead } from '../lib/replies.js';
 import { ORDER_KEY, SORT_KEY } from '../fleet/order.js';
@@ -365,6 +366,8 @@ function JobGroup({
   const id = navJobId(project.id, job.id);
   const shown = jobShown(open, id);
   const count = `${job.agents.length} ${job.agents.length === 1 ? 'agent' : 'agents'}`;
+  // A schedule started it (Amendment 211): a mark, and the schedule's name on hover.
+  const from = fromMark(job.recurringId, useRecurring());
   return (
     <div className="sh-nav-job">
       {renaming ? (
@@ -394,6 +397,11 @@ function JobGroup({
             <Chevron open={shown} />
             <Dot status={job.status} />
             <span className="sh-nav-label">{job.label}</span>
+            {from && (
+              <span className="sh-nav-from" title={from}>
+                ⟳
+              </span>
+            )}
             <span className="sh-nav-n">{job.agents.length}</span>
             {/* The stack's headline, the Fleet card's rule (Amendment 194). */}
             <NavTags tags={job.tags} needs={job.needs} />

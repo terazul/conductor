@@ -118,6 +118,7 @@ export function buildSnapshot(): Snapshot {
     if (slice.monthCorrection !== undefined) snap.monthCorrection = slice.monthCorrection;
     if (slice.settings !== undefined) snap.settings = slice.settings;
     if (slice.scheduled !== undefined) snap.scheduled = slice.scheduled;
+    if (slice.recurring !== undefined) snap.recurring = slice.recurring;
   }
 
   // Always authoritative — never a contributor's to set.

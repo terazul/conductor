@@ -370,7 +370,7 @@ type ParsedJob = { ok: true; request: CreateJobRequest } | { ok: false; status: 
  * exactly as one launch is checked: the prompt, the agents and their models, and a branch's
  * shape. Git's word on the branch comes later, in `createJob`.
  */
-async function parseCreateJob(raw: unknown): Promise<ParsedJob> {
+export async function parseCreateJob(raw: unknown): Promise<ParsedJob> {
   const body = asRecord(raw);
   const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
   const prompt = typeof body['prompt'] === 'string' ? body['prompt'] : '';

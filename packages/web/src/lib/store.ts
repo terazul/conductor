@@ -31,6 +31,7 @@ import {
   type Project,
   type ProjectSpend,
   type ProviderSpend,
+  type RecurringJob,
   type ScheduledMessage,
   type ServerFrame,
   type Snapshot,
@@ -72,6 +73,8 @@ interface State {
   providerSpend: ProviderSpend[] | null;
   /** Messages waiting for their time (Amendment 111), soonest first. */
   scheduled: ScheduledMessage[];
+  /** Jobs that repeat (Amendment 211), soonest due first. */
+  recurring: RecurringJob[];
   eventsByAgent: Map<string, Event[]>;
   eventsByJob: Map<string, Event[]>;
 }
@@ -95,6 +98,7 @@ function initialState(): State {
     projectSpend: null,
     providerSpend: null,
     scheduled: [],
+    recurring: [],
     eventsByAgent: new Map(),
     eventsByJob: new Map(),
   };
@@ -216,6 +220,11 @@ class Store {
         s.scheduled = frame.scheduled;
         break;
 
+      case 'recurring':
+        // The whole list each time (Amendment 211): one was saved, ran, changed or cancelled.
+        s.recurring = frame.recurring;
+        break;
+
       case 'branches':
         // The Branches screen re-reads its own (Amendment 109); nothing here to project.
         receiveBranches(frame.projectId);
@@ -257,6 +266,8 @@ class Store {
     s.providerSpend = snap.providerSpend ?? null;
     // A daemon from before Amendment 111 sends none.
     s.scheduled = snap.scheduled ?? [];
+    // And one from before Amendment 211 none that repeat.
+    s.recurring = snap.recurring ?? [];
     s.seq = snap.seq;
     s.generation += 1;
   }
@@ -489,6 +500,11 @@ export function usePending(): PendingRequest[] {
 /** Every scheduled message (Amendment 111), soonest first. Filter by agent where you show them. */
 export function useScheduled(): ScheduledMessage[] {
   return useSelect('scheduled', (s) => s.scheduled);
+}
+
+/** Every job that repeats (Amendment 211), soonest due first. Filter by project where you show them. */
+export function useRecurring(): RecurringJob[] {
+  return useSelect('recurring', (s) => s.recurring);
 }
 
 export function useAlerts(): Alert[] {

@@ -20,6 +20,17 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **The message box in its project's colour.** Asked for (11 Nov): *"on the text input box, make the border color
+  (same thickness as the vertical color bar on project) match the project color bar."*
+  *Done (11 Nov): Amendment 212 (a 4px border of the project's colour; focus rings it in the live colour).*
+
+- [x] **Run a job again on a schedule, until I cancel it.** Asked for (11 Nov): *"add the ability to schedule a
+  command to run on a periodic basis, say every day, every week, etc. It will stay until I cancel it."*
+  *Done (11 Nov): Amendment 211 (Spawn's repeat… saves the launch as it stands to run again every day at a time, on
+  the weekdays you pick, or every N hours; each run is a new job named for the schedule and the time, skipped while
+  the last run is still going, and run once after Conductor was off; the Project screen's Repeating list has its next
+  time and last result, pause, edit time and cancel, and a run's job reads "⟳ from {name}").*
+
 - [x] **A colour bar for each project.** Asked for (11 Nov): *"allow me to a color bar for each project. This would
   show as a left bar on the menu and in the main windows as well. That way I can correlate the project in the menu
   with the project pages."* *Done (11 Nov): Amendment 210 (a 4px bar in the project's colour down its navigator

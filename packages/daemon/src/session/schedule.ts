@@ -25,6 +25,9 @@
  *     agent's `resume_at`; at that time it is resumed as ▶ resume would, and the time cleared.
  *     While everything is paused it waits for the pause to end. It survives a restart: the
  *     first look resumes one whose time passed while the daemon was down.
+ *   - **Launch a job that repeats** (Amendment 211, recurring.ts). Each one due launches as a
+ *     new job, or is skipped while its last run's job is still going. Not while everything is
+ *     paused: it stays due and launches once when the pause ends.
  *
  * TIME. Instants are ISO, compared as numbers. The browser turns the local date and time
  * you picked into one; nothing here reads or sets a time zone.
@@ -42,6 +45,7 @@ import { rows, type Db } from '../db/index.js';
 import { hub, registerSnapshotContributor } from '../hub.js';
 import { onSettingsChanged, patchSettings, readSettings, settingRule } from '../settings.js';
 import { dueResumes, lastStatusNote, newId, setAgentResumeAt } from './store.js';
+import { broadcastRecurring, listRecurring, runDueRecurring } from './recurring.js';
 import type { Supervisor } from './supervisor.js';
 
 /** How often the clock is looked at. */
@@ -213,7 +217,7 @@ export function broadcastScheduled(db: Db): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** What the clock acts through: `Supervisor`'s, or a stand-in in verify. */
-type Sup = Pick<Supervisor, 'sendMessage' | 'hold' | 'release' | 'held' | 'resumeAgent'>;
+type Sup = Pick<Supervisor, 'sendMessage' | 'hold' | 'release' | 'held' | 'resumeAgent' | 'createJob'>;
 
 export class Scheduler {
   readonly #db: Db;
@@ -238,7 +242,7 @@ export class Scheduler {
       onSettingsChanged((changed) => {
         if (changed.includes(PAUSE_UNTIL_KEY)) void this.tick();
       }),
-      registerSnapshotContributor(() => ({ scheduled: listScheduled(this.#db) })),
+      registerSnapshotContributor(() => ({ scheduled: listScheduled(this.#db), recurring: listRecurring(this.#db) })),
     );
     if (pausedUntil()) {
       this.#holding = true;
@@ -309,6 +313,9 @@ export class Scheduler {
       }
     }
     if (changed) this.broadcast();
+
+    // Jobs that repeat (Amendment 211). Not while held by anyone: they stay due until it ends.
+    if (!this.#sup.held && (await runDueRecurring(this.#db, this.#sup, now))) broadcastRecurring(this.#db);
   }
 
   /**

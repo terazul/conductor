@@ -18,7 +18,7 @@
  * is pure, so this is fast and has no jsdom dependency.
  */
 
-import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, MonthCorrection, Project, ProviderSpend, ServerFrame, Snapshot } from '@conductor/shared';
+import type { Agent, AgentStatus, Alert, Event, EventPayload, Job, MonthCorrection, Project, ProviderSpend, RecurringJob, ServerFrame, Snapshot } from '@conductor/shared';
 import { MODEL_WAIT_SUFFIX, PROVIDER_BUDGETS_KEY, budgetState, diffstat, localDayOf, providerBudgetLabel, resolveFileEdits, rollupStatus, sparkline } from '@conductor/shared';
 import { PROVIDER_SPEND_NOTE, providerBudgetCell, providerSpendRows } from '../metrics/rules.js';
 import { alertActions, alertNotice, monthlyNote } from '../attention/alerts.js';
@@ -3254,9 +3254,135 @@ await (async () => {
   check('…drawn in tokens only', drawn.every((c) => c.length > 0 && !/#[0-9a-fA-F]{3,8}\b/.test(c)));
 })();
 
+console.log("\n57 · a launch saved to repeat on a rule, listed on its project with its next time and last result, its runs marked (Amendment 211)");
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const { DEFAULT_RULE, RuleFields, draftOf, ruleOf, toggleDay } = await import('../shell/RuleFields.js');
+  const { RepeatForm, defaultName, repeatRefusal, ruleLine } = await import('../spawn/repeat.js');
+  const { RepeatingRow, fromMark, repeatingCount, resultLine } = await import('../fleet/repeating.js');
+  const { launchBody, launchRequest } = await import('../spawn/launch.js');
+  const { saveRecurring } = await import('../spawn/endpoints.js');
+  const { cancelRecurring, patchRecurring } = await import('../fleet/endpoints.js');
+  const { everyWords } = await import('@conductor/shared');
+  const { groupByJob } = await import('../shell/navtree.js');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const text = (html: string): string => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
+
+  // ── the rule, as you set it and in words ──
+  check('a new rule starts every day at 09:00', everyWords(ruleOf(DEFAULT_RULE)) === 'every day at 09:00', everyWords(ruleOf(DEFAULT_RULE)));
+  check('…weekdays, when you pick them, read as weekdays', everyWords(ruleOf({ ...DEFAULT_RULE, kind: 'weekly' })) === 'every weekday at 09:00', everyWords(ruleOf({ ...DEFAULT_RULE, kind: 'weekly' })));
+  check('…and every N hours', everyWords(ruleOf({ ...DEFAULT_RULE, kind: 'hours', n: 6 })) === 'every 6 hours' && everyWords(ruleOf({ ...DEFAULT_RULE, kind: 'hours', n: 1 })) === 'every hour');
+  check('a kept rule comes back as the draft it was', ['daily', 'weekly', 'hours'].every((k) => {
+    const e = ruleOf({ ...DEFAULT_RULE, kind: k as 'daily', days: [2, 4], at: '07:30', n: 3 });
+    return JSON.stringify(ruleOf(draftOf(e))) === JSON.stringify(e);
+  }));
+  check('a day toggles in and out, in the week\'s order', toggleDay([1, 5], 3).join() === '1,3,5' && toggleDay([1, 3, 5], 3).join() === '1,5');
+  const at = new Date(2026, 10, 11, 8, 0);
+  check('the form says the rule and when it next runs', ruleLine(DEFAULT_RULE, at) === 'every day at 09:00 · next 09:00', ruleLine(DEFAULT_RULE, at));
+  check('…or what is wrong with it', ruleLine({ ...DEFAULT_RULE, kind: 'weekly', days: [] }, at) !== '' && !ruleLine({ ...DEFAULT_RULE, kind: 'weekly', days: [] }, at).includes('next'), ruleLine({ ...DEFAULT_RULE, kind: 'weekly', days: [] }, at));
+  const fields = renderToStaticMarkup(createElement(RuleFields, { rule: { ...DEFAULT_RULE, kind: 'weekly' }, onChange: () => {} }));
+  check('the control offers the three rules, the seven days Monday first, and a time', /every day at<\/option><option value="weekly"[^>]*>these weekdays at<\/option><option value="hours">every N hours/.test(fields) &&
+    text(fields).includes('MonTueWedThuFriSatSun') && (fields.match(/aria-pressed="true"/g) ?? []).length === 5 && /type="time"/.test(fields), fields);
+
+  // ── repeat…: what it saves is the launch's own request ──
+  const input = { projectId: 'p1', title: '', prompt: '\n  Run the nightly tests\nand report', waitForInstructions: false, method: 'named' as const, branch: 'nightly', preset: 'Solo', agents: [], budgetUsd: 4 };
+  check('its name starts as the prompt\'s first line', defaultName(input.title, input.prompt) === 'Run the nightly tests');
+  check('…or the title, when you gave one, cut to 60', defaultName('Nightly', input.prompt) === 'Nightly' && defaultName('x'.repeat(80), '').length === 60);
+  check('several stacks are refused, saying how to save it', repeatRefusal(input, 3, null) === 'A schedule repeats one stack. Set stacks to 1 to save it.');
+  check('…as is no project, a job that waits for instructions, and an empty prompt',
+    repeatRefusal(null, 1, null) === 'Pick a project first.' && /waits for instructions/.test(repeatRefusal({ ...input, waitForInstructions: true }, 1, null) ?? '') && repeatRefusal({ ...input, prompt: '  ' }, 1, null) === 'Write what needs doing first.');
+  check('…and whatever stops launch itself; a ready launch can be saved', repeatRefusal(input, 1, 'Wait for the models, or pick one.') === 'Wait for the models, or pick one.' && repeatRefusal(input, 1, null) === null);
+
+  const realFetch = globalThis.fetch;
+  const sent: { url: string; method: string; body: unknown }[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    sent.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({ recurring: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  await saveRecurring('Nightly', { kind: 'daily', at: '09:00' }, launchBody(input));
+  await patchRecurring('rec_1', { paused: true });
+  await cancelRecurring('rec_1');
+  globalThis.fetch = realFetch;
+  const post = sent[0];
+  check('save schedule posts the name, the rule and launchBody\'s request to /api/recurring', post?.url === '/api/recurring' && post.method === 'POST' &&
+    JSON.stringify(post.body) === JSON.stringify({ name: 'Nightly', every: { kind: 'daily', at: '09:00' }, request: launchBody(input) }), JSON.stringify(post));
+  check('…which is the request launch itself posts for one stack', JSON.stringify(launchRequest(input, 1).body) === JSON.stringify(launchBody(input)));
+  check('pause is a PATCH and cancel a DELETE, on the schedule', sent[1]?.url === '/api/recurring/rec_1' && sent[1].method === 'PATCH' && JSON.stringify(sent[1].body) === '{"paused":true}' && sent[2]?.url === '/api/recurring/rec_1' && sent[2].method === 'DELETE');
+
+  const repeat = src('../spawn/repeat.tsx');
+  const route = src('../spawn/route.tsx');
+  check('the form saves launchBody of the input it is given', /saveRecurring\(name\.trim\(\), every, launchBody\(input\)\)/.test(repeat));
+  check('…and Spawn gives it the same input launch posts', /const request = launchRequest\(launchInput, stacks\);/.test(route) && /<RepeatForm input=\{launchInput\} stacks=\{stacks\}/.test(route));
+  check('repeat… sits beside launch, and opens the form', /<span className="sp-kbd">⌘⏎<\/span>\s*<\/button>\s*\{\/\*[^*]*\*\/\}\s*<button\s+type="button"\s+className="sp-ghost"\s+aria-expanded=\{repeating\}/.test(route) && />\s*repeat…\s*</.test(route));
+  const form = renderToStaticMarkup(createElement(RepeatForm, { input, stacks: 1, blocked: null, onClose: () => {} }));
+  check('the form: the name, the rule, save schedule and close, and how each run goes', /class="sp-input sp-repeat-name"[^>]*value="Run the nightly tests"/.test(form) && /<button type="button" class="sp-ghost">save schedule<\/button>/.test(form) &&
+    text(form).includes('Each run is a new job from this setup. If the last run is still going when the next is due, that one is skipped.'), form);
+  const refused = renderToStaticMarkup(createElement(RepeatForm, { input, stacks: 2, blocked: null, onClose: () => {} }));
+  check('…with save shut and the reason under it, for several stacks', /<button type="button" class="sp-ghost" disabled="">save schedule/.test(refused) && text(refused).includes('A schedule repeats one stack.'));
+
+  // ── the Project screen's Repeating list ──
+  const now = new Date(2026, 10, 11, 12, 0);
+  const iso = (h: number, m = 0, day = 11): string => new Date(2026, 10, day, h, m).toISOString();
+  const rec = (extra: Partial<RecurringJob>): RecurringJob => ({
+    id: 'rec_1', projectId: 'p1', name: 'Nightly tests', request: launchBody(input), every: { kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' },
+    nextAt: iso(9, 0, 12), lastAt: null, lastJobId: null, lastResult: null, createdAt: iso(8), paused: false, ...extra,
+  });
+  check('a last result in words: not run yet, started, skipped, failed',
+    resultLine(rec({}), now) === 'not run yet' && resultLine(rec({ lastAt: iso(9), lastResult: 'started' }), now) === 'started 09:00' &&
+      resultLine(rec({ lastAt: iso(9), lastResult: 'skipped' }), now) === 'skipped 09:00: the last run was still going' &&
+      resultLine(rec({ lastAt: iso(9), lastResult: 'failed: no such model' }), now) === 'failed 09:00: no such model');
+  const run = { id: 'ag_run', jobId: 'job_run', projectId: 'p1' } as unknown as Agent;
+  const row = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_run' }), agents: [run] }));
+  check('a row: its name, the rule in words, the next time, and its last result with a link to its job',
+    text(row).startsWith('Nightly testsevery weekday at 09:00 · next 12 Nov 09:00started') && /<button type="button" class="pj-rep-link"[^>]*>its job<\/button>/.test(row), text(row));
+  check('…and pause, edit time and cancel', /❚❚ pause<\/button>/.test(row) && />edit time<\/button>/.test(row) && />✕ cancel<\/button>/.test(row));
+  const gone = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_removed' }), agents: [run] }));
+  check('…no link when its job has been removed', !gone.includes('its job'));
+  const paused = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ paused: true, lastAt: iso(9), lastResult: 'skipped' }), agents: [] }));
+  check('a paused row says paused, not a next time, and offers resume', /class="pj-rep is-paused"/.test(paused) && text(paused).includes('every weekday at 09:00 · paused') && /▶ resume<\/button>/.test(paused) && /pj-rep-last is-skip/.test(paused));
+  const rep = src('../fleet/repeating.tsx');
+  check('cancel asks first, and says the jobs it started stay', /Cancel this schedule\? The jobs it started stay\./.test(rep) && /\) : armed \? \(/.test(rep) && /onClick=\{\(\) => setArmed\(true\)\}>\s*✕ cancel/.test(rep));
+  check('edit time is the same rule control, saved as a new rule', /<RuleFields rule=\{editing\} onChange=\{setEditing\} \/>/.test(rep) && /patchRecurring\(r\.id, \{ every: ruleOf\(editing\) \}\)/.test(rep) && /setEditing\(draftOf\(r\.every\)\)/.test(rep));
+  const project = src('../fleet/project.tsx');
+  check('the list sits under the project\'s notes, its own projects\' rows only', /<NotesPanel project=\{project\} \/>\s*<\/div>\s*\{\/\*[^*]*\*\/\}\s*<RepeatingList projectId=\{project\.id\} \/>/.test(project) &&
+    /useRecurring\(\)\.filter\(\(r\) => r\.projectId === projectId\)/.test(rep) && /<span className="ui-lab">Repeating · \{recurring\.length\}<\/span>/.test(rep));
+  send({ type: 'recurring', recurring: [rec({})] });
+  check('the recurring frame replaces the list', store.select('v57:rec', (s) => s.recurring).map((r) => r.id).join() === 'rec_1');
+
+  // ── the marks: the Fleet card's count, and "from" on a run's job ──
+  check('the count reads ⟳ N repeating, and nothing for none', repeatingCount(2) === '⟳ 2 repeating' && repeatingCount(0) === null);
+  check('a run\'s job is marked from its schedule, by name', fromMark('rec_1', [rec({})]) === '⟳ from Nightly tests');
+  check('…a cancelled schedule\'s jobs say so, and a job you launched has none', fromMark('rec_gone', [rec({})]) === '⟳ from a cancelled schedule' && fromMark(undefined, [rec({})]) === null);
+  const card = src('../fleet/card.tsx');
+  check('the Fleet card: the count of its project\'s, and the mark on its job', /repeatingCount\(recurring\.filter\(\(r\) => r\.projectId === project\.id\)\.length\)/.test(card) && /fromMark\(job\.recurringId, recurring\)/.test(card) && /\{from && <span className="fl-from"> · \{from\}<\/span>\}/.test(card));
+  check('the Project screen\'s job group header', /const from = fromMark\(job\.recurringId, useRecurring\(\)\);/.test(project) && /<span className="fl-from"[^>]*>\s*\{from\}/.test(project));
+  const nav = src('../shell/Navigator.tsx');
+  const grouped = groupByJob([{ id: 'a', jobId: 'job_run', label: 'a', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }], [{ id: 'job_run', prompt: 'p', recurringId: 'rec_1' }]);
+  check('the navigator\'s job group: its schedule carried, a ⟳ whose title names it', grouped[0]?.recurringId === 'rec_1' && /const from = fromMark\(job\.recurringId, useRecurring\(\)\);/.test(nav) && /<span className="sh-nav-from" title=\{from\}>\s*⟳\s*<\/span>/.test(nav));
+
+  const css = [src('../spawn/spawn.css'), src('../fleet/fleet.css'), src('../shell/ui.css'), src('../shell/shell.css')];
+  const blocks = [css[0]!.slice(css[0]!.indexOf('.sp-repeat {')), css[1]!.slice(css[1]!.indexOf('.pj-rep {')), css[2]!.slice(css[2]!.indexOf('.ui-rule')), css[3]!.slice(css[3]!.indexOf('.sh-nav-from'), css[3]!.indexOf('.sh-nav-from') + 120)];
+  check('…drawn in tokens only', blocks.every((b) => b.length > 20 && !/#[0-9a-fA-F]{3,8}\b/.test(b)) && css[1]!.includes('.fl-from {'));
+})();
+
+console.log('\n58 · the message box is edged in its project\'s colour, as thick as the project\'s bar (Amendment 212)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const comp = src('../agent/composer.tsx');
+  const css = src('../agent/agent.css');
+  const ui = src('../shell/ui.css');
+  check('the box takes its project\'s colour, kept or auto, by the same rule as every bar', /const boxColor = useProjectColor\(agent\.projectId\);/.test(comp) && /className=\{`ag-cbox\$\{boxColor \? ` has-proj \$\{projClass\(boxColor\)\}` : ''\}`\}/.test(comp));
+  const edge = /\.ag-cbox\.has-proj \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const bar = /\.fl-panehead\.has-proj > \.ui-crumb \{([^}]*)\}/.exec(ui)?.[1] ?? '';
+  check('its edge is the project bar\'s colour and thickness, 4px of --proj', /border: 4px solid var\(--proj\);/.test(edge) && /inset 4px 0 0 var\(--proj\)/.test(bar), edge);
+  check('focus keeps the colour and rings it in the live colour', /\.ag-cbox\.has-proj:focus-within \{[^}]*border-color: var\(--proj\);[^}]*outline: 2px solid var\(--live\);/.test(css));
+  check('with no project colour known, the box is as it was', /\.ag-cbox \{\s*border: 1px solid var\(--line2\);/.test(css));
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

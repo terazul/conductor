@@ -1202,3 +1202,45 @@
   gap: 4px;
   margin: 6px 0 2px 15px;
 }
+
+/* repeat…: this launch saved to run again on a rule (Amendment 211). */
+.sp-repeat {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--line2);
+  border-radius: 7px;
+  padding: 12px 14px;
+}
+
+.sp-repeat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sp-input.sp-repeat-name {
+  flex: 1;
+  min-width: 220px;
+}
+
+.sp-repeat-words {
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
+.sp-repeat-how {
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  line-height: 1.45;
+  max-width: 70ch;
+}
+
+.sp-repeat-saved {
+  border-left: 2px solid var(--ink3);
+  padding: 4px 9px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}

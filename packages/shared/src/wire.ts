@@ -107,6 +107,11 @@ export interface Job {
    * one; clearing it restores the prompt. Only a label: the instruction is untouched.
    */
   name?: string;
+  /**
+   * The schedule that started it (Amendment 211), present only when one did. It stays when the
+   * schedule is cancelled, so the job can still say it came from one.
+   */
+  recurringId?: string;
 }
 
 export interface Agent {
@@ -945,6 +950,8 @@ export interface Snapshot {
   settings?: Record<string, string>;
   /** Amendment 111: messages waiting for their time. Optional for the same reason. */
   scheduled?: ScheduledMessage[];
+  /** Amendment 211: jobs that repeat. Optional for the same reason. */
+  recurring?: RecurringJob[];
 }
 
 /**
@@ -1039,6 +1046,55 @@ export interface ScheduledMessage {
   createdAt: string;
   /** Why it could not be sent, once it was due; null while it waits. It is not tried again. */
   error: string | null;
+}
+
+/**
+ * When a repeating job runs again (Amendment 211): every day at a time, on some weekdays at a
+ * time, or every N hours. Times are `HH:MM` on the daemon's local clock; days are 0 (Sunday)
+ * to 6. The rule, its check and its words are in recurring.ts.
+ */
+export type Every =
+  | { kind: 'daily'; at: string }
+  | { kind: 'weekly'; days: number[]; at: string }
+  | { kind: 'hours'; n: number };
+
+/**
+ * A job that repeats until you cancel it (Amendment 211): a saved Spawn setup, launched as a
+ * new job each time it is due. If the last run's job has not ended by then, that run is
+ * skipped; times missed while the daemon was down launch once, on its first tick back.
+ */
+export interface RecurringJob {
+  id: string;
+  projectId: string;
+  name: string;
+  /** What each run launches: the exact request Spawn would send. */
+  request: CreateJobRequest;
+  every: Every;
+  /** When it is next due, ISO. */
+  nextAt: string;
+  /** When it last came due, ISO; null before the first time. */
+  lastAt: string | null;
+  /** The job its last run started; null until one has. */
+  lastJobId: string | null;
+  /** `started`, `skipped` (the last run was still going) or `failed: <why>`; null before the first time. */
+  lastResult: string | null;
+  createdAt: string;
+  /** Paused, it does not run; resumed, it is next due by its rule from then. */
+  paused: boolean;
+}
+
+/** POST /api/recurring (Amendment 211). The project is the request's. */
+export interface CreateRecurringRequest {
+  name: string;
+  every: Every;
+  request: CreateJobRequest;
+}
+
+/** PATCH /api/recurring/:id (Amendment 211). */
+export interface PatchRecurringRequest {
+  name?: string;
+  every?: Every;
+  paused?: boolean;
 }
 
 /** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 157). */
@@ -1302,6 +1358,8 @@ export type ServerFrame =
   | { type: 'branches'; projectId: string }
   /** Amendment 111: every scheduled message, whenever one is added, sent, fails or is cancelled. */
   | { type: 'scheduled'; scheduled: ScheduledMessage[] }
+  /** Amendment 211: every repeating job, whenever one is added, changed, run, skipped or cancelled. */
+  | { type: 'recurring'; recurring: RecurringJob[] }
   /**
    * Amendment 141: one scope's terminals, whole, whenever one is opened, exits or is closed,
    * so a terminal opened in one browser tab is listed in the others. Never carries output.

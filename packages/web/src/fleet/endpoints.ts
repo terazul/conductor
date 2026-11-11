@@ -7,7 +7,7 @@
  * lib/feed.ts so bearer auth stays in one place.
  */
 
-import type { Project, ProjectColor, ProjectNote } from '@conductor/shared';
+import type { PatchRecurringRequest, Project, ProjectColor, ProjectNote, RecurringJob } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /*
@@ -87,4 +87,14 @@ export function editNote(
 
 export function removeNote(projectId: string, noteId: string): Promise<{ project: Project }> {
   return api(`${notesOf(projectId)}/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+}
+
+/** A job that repeats (Amendment 211): its name, its rule, or paused. A new rule or a resume is next due by it from now. */
+export function patchRecurring(id: string, patch: PatchRecurringRequest): Promise<{ recurring: RecurringJob }> {
+  return api(`/api/recurring/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
+}
+
+/** Cancel a job that repeats. The jobs it started stay. */
+export function cancelRecurring(id: string): Promise<{ removed: boolean }> {
+  return api(`/api/recurring/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

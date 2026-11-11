@@ -1640,3 +1640,87 @@
   font-size: var(--fs-sm);
   color: var(--ink3);
 }
+
+/* ── Repeating (Amendment 211): a project's jobs that repeat ───────────────── */
+
+.pj-rep {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pj-rep:last-child {
+  border-bottom: none;
+}
+
+.pj-rep.is-paused .pj-rep-name,
+.pj-rep.is-paused .pj-rep-rule {
+  color: var(--ink3);
+}
+
+.pj-rep-name {
+  font-size: var(--fs-base);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pj-rep-rule,
+.pj-rep-last {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
+.pj-rep-last.is-skip {
+  color: var(--need);
+}
+
+.pj-rep-last.is-fail {
+  color: var(--fail);
+}
+
+.pj-rep-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--live);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pj-rep-link:hover {
+  text-decoration: underline;
+}
+
+.pj-rep-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.pj-rep-why {
+  font-size: var(--fs-sm);
+  color: var(--need);
+}
+
+.pj-rep-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* A job a schedule started, by its name: "⟳ from Nightly tests". */
+.fl-from {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+  white-space: nowrap;
+}

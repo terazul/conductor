@@ -200,6 +200,76 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 212 — post-merge, applied. **The message box is edged in its project's colour.**
+
+Web only (`agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"on the text
+input box, make the border color (same thickness as the vertical color bar on project) match the project color
+bar."* The Agent screen's message box (`.ag-cbox`) takes its agent's project colour (`useProjectColor`, Amendment
+210's rule, kept or auto) as a 4px border of `--proj`, the bar's own thickness, its padding taken in by the 3px more
+so the text stays where it was. Focus keeps the colour and rings it in `--live`, outside. With no colour known the box
+is as it was. **Verified:** `lib/verify.ts` §58. Not looked at in a browser.
+
+### Amendment 211 — post-merge, applied. **A launch saved to repeat on a rule, until you cancel it.**
+
+Daemon (`db/migrations/360_recurring_jobs.sql`, `session/recurring.ts`, `routes/recurring.ts`, `session/schedule.ts`,
+`session/supervisor.ts`, `session/store.ts`, `routes/session.ts`, `hub.ts`, `session/verify.ts`), shared
+(`recurring.ts`, `wire.ts`), web (`spawn/repeat.tsx`, `spawn/route.tsx`, `spawn/endpoints.ts`, `spawn/spawn.css`,
+`shell/RuleFields.tsx`, `shell/ui.css`, `fleet/repeating.tsx`, `fleet/project.tsx`, `fleet/card.tsx`,
+`fleet/endpoints.ts`, `fleet/fleet.css`, `shell/navtree.ts`, `shell/Navigator.tsx`, `shell/shell.css`,
+`lib/store.ts`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"add the ability to schedule a command to run
+on a periodic basis, say every day, every week, etc. It will stay until I cancel it."*
+
+- **What is saved is a Spawn setup.** Migration 360 adds `recurring_jobs`: a name, `request` (the exact
+  `CreateJobRequest` Spawn's `launchBody` makes, checked by `parseCreateJob` as `POST /api/jobs` checks one, and
+  refused if it waits for instructions or has no prompt, by the daemon as by repeat…), the
+  rule `every`, `next_at`, the last run's time, job and result, and `paused`; removing the project removes its
+  schedules. `jobs.recurring_id` (no foreign key) is the schedule a job came from, `Job.recurringId` on the wire.
+- **The rule** (`Every`, `shared/recurring.ts`): `daily` at HH:MM, `weekly` on some days (0 Sunday … 6 Saturday) at
+  HH:MM, or every `n` hours, 1 to 168. Times are local wall-clock times, built from the date, so a change of clocks
+  moves nothing; a skipped time runs when the clock reaches it, a doubled one once. `everyProblem` checks it, `nextRun`
+  says when it is next due, never at `now`, and `everyWords` says it: *"every weekday at 09:00"*, *"every 6 hours"*.
+  One copy, so the daemon and the page can't disagree.
+- **Routes:** `GET /api/recurring`, `POST` `{ name, every, request }` → 201, `PATCH /api/recurring/:id` `{ name?,
+  every?, paused? }`, `DELETE` → `{ removed }`. A bad name (required, ≤ 60), rule or request is a 400, an unknown
+  project or schedule a 404. Every change, and each run, is sent to every tab as a `recurring` frame; the snapshot
+  carries the list.
+- **Each run** is on the clock in `Scheduler`'s tick (`runDueRecurring`), as a new job through
+  `Supervisor.createJob`, so it starts fresh, named *"{name} · 12 Nov 09:00"*. A setup that names a branch runs on
+  that name and the time (`nightly-20261112-0900`), as a branch is one job's. The row is claimed (its `next_at`
+  moved on, compare-and-set) before it launches, so two clocks never launch it twice.
+  - **Skipped while the last run is going.** If the job the last run started has not ended (done, failed or
+    stopped), this run is skipped, never run beside it: the row reads *"skipped 09:00: the last run was still
+    going"*.
+  - **Once after downtime.** Each time it runs, it is next due by its rule from now, so times missed while the daemon
+    was down launch once, on the first look, not once for each.
+  - Paused, it is never due; resumed, or given a new rule, it is next due from now, so a week paused is not a week
+    of runs. While Pause all holds, nothing launches: it stays due and launches once when the hold ends.
+  - A launch refused (no worktree to be had, a model gone) is kept as *"failed: {why}"* and the next time comes as
+    usual.
+- **Spawn, repeat…** beside launch opens a form: a name, from the title or the prompt's first line; the rule
+  (`RuleFields`: every day at / these weekdays at / every N hours); **save schedule**, which posts `launchBody` of the
+  launch as it stands. One stack only: with several it says *"A schedule repeats one stack. Set stacks to 1 to save
+  it."* A job that waits for instructions, an empty prompt, or a launch not ready (models, agents, branch) can't be
+  saved either.
+- **The Project screen's Repeating list**, under Notes, one row each: the name, the rule in words, the next time (or
+  paused), the last result with a link to its job, and **pause / resume**, **edit time** (the same rule control) and
+  **✕ cancel**, which asks first and keeps the jobs it started. A Fleet card says *"⟳ N repeating"*; a run's job reads
+  *"⟳ from {name}"* (a cancelled schedule's, *"⟳ from a cancelled schedule"*) on its card and Project group, and the
+  navigator's job group wears a ⟳ named in its title.
+
+- **Checked again at its time.** Before each run the saved request goes through `parseCreateJob` again (found in
+  review): a model the engine no longer serves, or a persona gone, is `failed: <why>` and its time moves on, rather
+  than a job started to fail at its first model call.
+
+**Verified:** `session/verify.ts` §40: `nextRun` across both changes of clocks in Europe/London, weekdays, hours and
+never at now; the rule and name checks; the routes, their 400s and 404s; a due schedule launching exactly one job,
+named and with its request and `recurringId`; skipped while the last run goes on; paused and resumed; held by Pause
+all, then launched once; a restart launching once; a refused launch kept as failed; a named branch per run; a
+project's removal taking its schedules; a cancel keeping the jobs; migration 360 on an old database. `lib/verify.ts`
+§57: the rule control and its words; the form's name, refusals and what it posts (`launchBody`, the request launch
+posts for one stack); the routes it calls; the list's rows, results, link, actions and confirm; the frame; the count
+and the marks in the card, the Project group and the navigator; tokens only.
+
 ### Amendment 210 — post-merge, applied. **Each project has a colour bar, in the navigator and on its pages.**
 
 Daemon (`db/migrations/350_project_color.sql`, `session/store.ts`, `routes/session.ts`, `session/verify.ts`), shared
