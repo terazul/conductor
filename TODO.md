@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **An icon for each agent's source.** Asked for (11 Nov): *"when you display the agents, use an icon to
+  represent the source, Claude, Copilot, OpenAI, etc. Do this in the menu, the pages as well."*
+  *Done (11 Nov): Amendment 208 (a small lettered square in the maker's colour beside each agent's dot, read from
+  its model id, in the navigator, the Agent screen's tabs and header, a Fleet card's rows and a Project lane;
+  its title says the maker, model and engine, "OpenAI gpt-5 · via Copilot").*
+
 - [x] **Copy just the message an agent drafted, not its notes around it.** Asked for (11 Nov): *"it includes the text
   around the message not just the message, how do I get just the message Copy"*.
   *Done (11 Nov): Amendment 207 (agents are told to put a draft in a ```message block; the block shows as the message

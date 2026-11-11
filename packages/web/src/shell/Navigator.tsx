@@ -84,6 +84,7 @@ import {
 import { NavTags, navTagWords } from './navtags.js';
 import { NAV_PANEL, usePanel } from './panels.js';
 import { Splitter } from './Splitter.js';
+import { SourceMark } from './SourceMark.js';
 import { Chevron, Dot, OrchestratorMark, STATUS_WORD, tildePath } from './ui.js';
 import type { Budget } from './autonomy.js';
 import '../fleet/fleet.css';
@@ -286,6 +287,8 @@ function AgentRow({ agent: a, projectId, selected }: { agent: NavAgent; projectI
         title={`${a.needs > 0 ? `${a.label} — waiting on you` : `${a.label} — ${STATUS_WORD[a.status]}`}${a.orchestrator ? ' · orchestrator: starts the others' : ''}`}
       >
         <Dot status={a.status} />
+        {/* Who made its model (Amendment 208), the mark every place an agent is named uses. */}
+        <SourceMark agent={a.source} />
         <span className="sh-nav-label">{a.label}</span>
         {/* The orchestrator of an orchestrated stack, as its Agent tab marks it (agent/agent.tsx:636, Amendment 142). */}
         {a.orchestrator && <OrchestratorMark short />}

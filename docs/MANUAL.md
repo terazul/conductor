@@ -650,7 +650,8 @@ doesn't list is refused at launch.
 These agents work like Claude ones: the same transcript, the same Needs you and the same
 deny rules. Conductor itself refuses a tool on an agent's deny list, on every engine, even
 under **bypass permissions**. Their badge on Fleet cards, Project lanes and the Agent
-screen names the engine. Some things are different:
+screen names the engine, and the lettered square beside each agent's dot names who made its
+model, such as **O** for OpenAI's `gpt-5` on Copilot (§4). Some things are different:
 
 - **Budgets are in tokens, not dollars.** Neither engine reports what a run cost, and
   Conductor won't estimate it. The budget pill reads **budget per agent per day 5M tokens**
@@ -1058,6 +1059,17 @@ an agent's earlier steps, a Files folder, a Fleet card's agents, a job on the Pr
 **How these are counted**) has one chevron on the left of its label, pointing right when it is closed and
 down when it is open. Click the label or the chevron; it is the same button.
 
+**Who made an agent's model** is a small lettered square beside its status dot, wherever the agent
+is named: its row in the navigator, its tab and the header of the Agent screen, its row on a Fleet
+card and its lane on the Project screen. The letters and colour are the maker's: **C** Claude,
+**O** OpenAI, **G** Google, **M** Meta, **Mi** Mistral, **x** xAI, **D** DeepSeek and **Q** Qwen.
+It is read from the model's id (`gpt-5`, `o3`, `us.anthropic.claude-opus-5-5`), and for an
+OpenRouter id such as `openai/gpt-5`, from the part before the slash. Pointing at it says the
+maker, the model and, if it isn't Claude's own, the engine it runs on: **OpenAI gpt-5 · via
+Copilot**, or **Claude opus-5-5**. A model Conductor doesn't know the maker of shows its engine's
+square instead, **Cp** Copilot or **OR** OpenRouter, so the square is never a guess. It marks who
+made the model, not how the agent is doing, and the engine's own badge stays where it was.
+
 **The navigator**, the panel down the left of every screen, lists your projects. Beside each
 project's name is its status, the same as on its Fleet card: **N working**, **finished** when a
 job in it has finished and you haven't seen it, both when both are true, or the quiet **done** or
@@ -1071,7 +1083,7 @@ project's name opens its Project screen, and its chevron opens it to three subme
   **N working**, **finished** if it finished and you haven't seen it (never in amber), or
   **done**, **failed**, **paused** and the like. Where the amber count shows, it says that
   something needs you, and how many, so the words **needs you** are left out beside it. Under it is one row per agent, each with its status dot,
-  the ◆ when it is an orchestrator (as on its Agent tab), plus a count when one needs you. A
+  the square of who made its model (above), the ◆ when it is an orchestrator (as on its Agent tab), plus a count when one needs you. A
   click opens the agent, and the navigator stays
   where it is. Groups start open; click a group's heading to close it. A project with
   one job still shows its group. Helpers are listed in their job like any agent. Once an

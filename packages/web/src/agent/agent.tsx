@@ -28,6 +28,7 @@ import { fullStamp } from '../lib/when.js';
 import { budgetOf, budgetWords } from '../shell/autonomy.js';
 import { Chevron, Dot, OrchestratorMark, ProviderBadge, STATUS_KEY, STATUS_WORD, Tag, fmtElapsed } from '../shell/ui.js';
 import { Splitter } from '../shell/Splitter.js';
+import { SourceMark } from '../shell/SourceMark.js';
 import { useFileTree } from '../files/useWorkspace.js';
 import {
   foldAll,
@@ -757,6 +758,8 @@ export function AgentScreen() {
                 }}
               >
                 <Dot status={t.status} />
+                {/* Who made its model (Amendment 208). */}
+                <SourceMark agent={agents.find((a) => a.id === t.id)} />
                 {t.label}
                 {/* The orchestrator of an orchestrated stack (Amendment 128). */}
                 {t.orchestrator && <OrchestratorMark short />}
@@ -824,6 +827,8 @@ export function AgentScreen() {
               <span title="A warning only: nothing stops it">over today's budget</span>
             </Tag>
           )}
+          {/* Who made its model, as its tab and its navigator row show it (Amendment 208). */}
+          <SourceMark agent={agent} />
           <span className="ag-model" title={agent.model}>
             {agent.model.replace(/^claude-/, '')}
           </span>

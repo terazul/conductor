@@ -88,6 +88,8 @@ export interface NavAgent {
   budget: Budget | null;
   /** `⏸ paused` or `⏸ until 14:05`, the Agent tab's own chip (agent/tabs.ts, Amendment 205); null when it isn't one you paused. */
   paused: string | null;
+  /** Its engine and model, for the maker's mark beside the dot (Amendment 208); absent for an agent the list doesn't have. */
+  source?: Pick<Agent, 'provider' | 'model'>;
 }
 
 /**
@@ -239,6 +241,7 @@ export function navTree(
         orchestrator: t.orchestrator,
         budget: agent ? budgetOf(agent, today) : null,
         paused: t.paused,
+        ...(agent ? { source: { ...(agent.provider ? { provider: agent.provider } : {}), model: agent.model } } : {}),
       };
     });
 

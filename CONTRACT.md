@@ -200,6 +200,29 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 208 — post-merge, applied. **Each agent wears its model's maker, a lettered square beside its dot.**
+
+Shared (`tokens.css`), web (`lib/source.ts`, `shell/SourceMark.tsx`, `shell/ui.css`, `shell/navtree.ts`,
+`shell/Navigator.tsx`, `agent/agent.tsx`, `fleet/card.tsx`, `fleet/lane.tsx`, `lib/verify.ts`) and `docs/MANUAL.md`.
+Asked 11 Nov: *"when you display the agents, use an icon to represent the source, Claude, Copilot, OpenAI, etc. Do
+this in the menu, the pages as well."* The engine (Claude, Copilot, OpenRouter) is not the source the user means:
+Copilot runs OpenAI's and Anthropic's models and OpenRouter nearly everyone's, so the mark is the model's maker.
+
+- **The rule** (`sourceOf`, pure): the model id decides. `claude-*` and any id with `anthropic` (the Bedrock ids)
+  are Claude; `gpt-*`, `o1`, `o3`, `o4*` OpenAI; `gemini*` Google; `llama*` Meta; `mistral*` Mistral; `grok*` xAI;
+  `deepseek*` DeepSeek; `qwen*` Qwen. An OpenRouter `maker/model` id is read by its prefix alone (`anthropic`,
+  `openai`, `google`, `meta-llama`, `mistralai`, `x-ai`, `deepseek`, `qwen`). An id no rule knows gets its engine's
+  mark (Claude, Copilot, OpenRouter), and an engine the web doesn't know is `other`, named by its id. It returns
+  `{key, mark, label, engine}`; `sourceTitle` is "OpenAI gpt-5 · via Copilot", or "Claude opus-5-5" on Claude.
+- **The mark** (`SourceMark`): a 14px rounded square of one or two letters, `--bg` on `--src-<key>`, eleven tokens
+  in both themes. It sits after the status dot in the navigator's agent rows (`NavAgent.source`), the Agent
+  screen's tabs, its header beside the model, a Fleet card's agent rows and a Project lane. The engine's
+  `ProviderBadge` (Amendment 80) stays as it was. Spawn's role rows don't show a model, so they have no mark.
+
+**Verified:** `lib/verify.ts` §54: each maker from its bare and its OpenRouter id, the prefix deciding, near-misses
+(`o10`, `gptx`) and unknown ids falling to the engine, an unknown engine; the title; the rendered mark; the mark in
+each of the five places; one rule per key in tokens only; `--bg` on every `--src-*` 4.5:1 or more in both themes.
+
 ### Amendment 207 — post-merge, applied. **A message an agent drafts comes in a message block, with a ⧉ copy of just the message.**
 
 Daemon (`session/background.ts`, `session/backends/copilot.ts`, `session/verify.ts`), web (`agent/QuoteBlock.tsx`,

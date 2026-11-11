@@ -32,6 +32,7 @@ import {
   fmtMoney,
   fmtTokens,
 } from '../shell/ui.js';
+import { SourceMark } from '../shell/SourceMark.js';
 import { agentPairWords } from '../shell/spend.js';
 
 export function Lane({
@@ -86,6 +87,8 @@ export function Lane({
     >
       <div className="pj-lanehead">
         <Dot status={shown} />
+        {/* Who made its model (Amendment 208). */}
+        <SourceMark agent={agent} />
         <span className="pj-lane-nm">{agent.role}</span>
         {orchestrator && <OrchestratorMark short />}
         <Tag tone={key}>{STATUS_WORD[shown]}</Tag>
