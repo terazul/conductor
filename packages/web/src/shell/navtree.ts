@@ -126,6 +126,8 @@ export interface NavJob {
   needs: number;
   /** It finished and you haven't seen it (Amendment 87). */
   finished: boolean;
+  /** The schedule that started it, when one did (Amendment 211). */
+  recurringId?: string;
   /** Its agents' budgets summed (`sumBudgets`); null when none of them has one (Amendment 140). */
   budget: Budget | null;
   /**
@@ -279,7 +281,7 @@ export function navTree(
  */
 export function groupByJob(
   rows: readonly NavAgent[],
-  jobs: readonly Pick<Job, 'id' | 'prompt' | 'name'>[],
+  jobs: readonly Pick<Job, 'id' | 'prompt' | 'name' | 'recurringId'>[],
   finished: ReadonlySet<string> = new Set(),
 ): NavJob[] {
   const out = new Map<string, NavJob>();
@@ -296,6 +298,7 @@ export function groupByJob(
         status: a.status,
         needs: 0,
         finished: finished.has(a.jobId),
+        ...(job?.recurringId ? { recurringId: job.recurringId } : {}),
         budget: null,
         tags: [],
       };

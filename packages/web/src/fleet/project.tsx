@@ -25,6 +25,7 @@ import {
   useProjectSpend,
   useProjectStatus,
   useProjects,
+  useRecurring,
   useServers,
 } from '../lib/store.js';
 import { projectPairWords, projectSpendOf } from '../shell/spend.js';
@@ -53,6 +54,7 @@ import { Lane } from './lane.js';
 import { restOf, restWord } from './rest.js';
 import { nestHelpers } from './nest.js';
 import { NotesPanel } from './Notes.js';
+import { RepeatingList, fromMark } from './repeating.js';
 import { Dock } from './dock.js';
 import { PROJECT_COLUMN, usePanel } from '../shell/panels.js';
 import { Splitter } from '../shell/Splitter.js';
@@ -98,6 +100,7 @@ function JobGroup({
   const [adding, setAdding] = useState(false);
   const cmd = useCommand();
   const alerts = useAlerts();
+  const from = fromMark(job.recurringId, useRecurring());
 
   const blocked = agents.filter((a) => pending.some((p) => p.agentId === a.id)).length;
   const working = agents.filter((a) => a.status === 'working').length;
@@ -124,6 +127,11 @@ function JobGroup({
         <span className="pj-group-meta">
           ⑂ {job.branch} · {plural(agents.length, 'agent')}
         </span>
+        {from && (
+          <span className="fl-from" title="A schedule started this job (Amendment 211): it is on the Repeating list">
+            {from}
+          </span>
+        )}
 
         {blocked > 0 ? (
           <Tag tone="need">{blocked} blocked on you</Tag>
@@ -430,6 +438,9 @@ export function ProjectScreen() {
             <span className="ui-lab">Notes · {project.notes?.length ?? 0}</span>
             <NotesPanel project={project} />
           </div>
+
+          {/* The jobs that repeat here, saved from Spawn's repeat… (Amendment 211). */}
+          <RepeatingList projectId={project.id} />
         </div>
       </div>
 

@@ -37,12 +37,14 @@ import {
   useProjectStatus,
   useProjects,
   rollupStatuses,
+  useRecurring,
   useServers,
 } from '../lib/store.js';
 import { monthlyDraft, projectPairWords, projectSpendOf } from '../shell/spend.js';
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { headlineTags, restOf } from './rest.js';
+import { fromMark, repeatingCount } from './repeating.js';
 import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents, toggleAgents } from './agentlist.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -649,6 +651,10 @@ export function ProjectCard({
   const key = STATUS_KEY[status];
   const jobs = useJobs(project.id);
   const job = primaryJob(jobs);
+  // Its jobs that repeat, and the schedule its job came from (Amendment 211).
+  const recurring = useRecurring();
+  const repeating = repeatingCount(recurring.filter((r) => r.projectId === project.id).length);
+  const from = job ? fromMark(job.recurringId, recurring) : null;
   const allAgents = useAgents();
   const allPending = usePending();
   const allAlerts = useAlerts();
@@ -741,6 +747,13 @@ export function ProjectCard({
           <>
             <b>⑂ {job.branch}</b> · {job.isolation.replace('_', ' ')}
           </>
+        )}
+        {from && <span className="fl-from"> · {from}</span>}
+        {repeating && (
+          <span className="fl-from" title="Jobs that repeat here: on the Project screen's Repeating list">
+            {' · '}
+            {repeating}
+          </span>
         )}
       </div>
 

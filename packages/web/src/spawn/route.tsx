@@ -115,8 +115,10 @@ import {
   stacksNotes,
   stacksPreview,
   stacksRefusal,
+  type LaunchInput,
   type Method,
 } from './launch.js';
+import { RepeatForm } from './repeat.js';
 import { getBranches } from '../branches/endpoints.js';
 import { useReorder } from './reorder.js';
 import { RoleRow, WaitsFor } from './RoleRow.js';
@@ -641,27 +643,42 @@ function Spawn() {
   /** This launch's rows are not the preset's own, so its label says so (Amendment 115). */
   const changed = !isCustom && !sameStack(preset.roles, base.roles);
 
+  /** The launch as it stands: what launch posts, and what repeat… saves (Amendment 211). */
+  const launchInput: LaunchInput | null = useMemo(
+    () =>
+      projectId === null
+        ? null
+        : {
+            projectId,
+            title,
+            prompt,
+            waitForInstructions,
+            method,
+            branch: branchName,
+            preset: presetLabel(preset.label, changed),
+            agents: specs,
+            budgetUsd: jobBudget,
+          },
+    [projectId, title, prompt, waitForInstructions, method, branchName, preset.label, changed, specs, jobBudget],
+  );
+  /** Why launch can't go, for repeat…: the stacks and an empty prompt it says itself. */
+  const repeatBlocked = !modelsReady
+    ? 'Wait for the models, or pick one.'
+    : customBad || singleBad
+      ? 'Finish setting up the agents first.'
+      : !methodOk
+        ? 'Finish choosing where it runs first.'
+        : null;
+  const [repeating, setRepeating] = useState(false);
+
   const launch = useCallback(async () => {
-    if (!canLaunch || projectId === null) return;
+    if (!canLaunch || launchInput === null) return;
     setBusy(true);
     setError(null);
     setLaunched(null);
     setLaunchedStacks(null);
     try {
-      const request = launchRequest(
-        {
-          projectId,
-          title,
-          prompt,
-          waitForInstructions,
-          method,
-          branch: branchName,
-          preset: presetLabel(preset.label, changed),
-          agents: specs,
-          budgetUsd: jobBudget,
-        },
-        stacks,
-      );
+      const request = launchRequest(launchInput, stacks);
       // One stack posts what a launch always posted; more go as one batch, 201 or 207 (Amendment 181).
       if (request.path === '/api/jobs') {
         setLaunched(await api<CreateJobResponse>(request.path, { method: 'POST', body: request.body }));
@@ -679,7 +696,7 @@ function Spawn() {
     } finally {
       setBusy(false);
     }
-  }, [canLaunch, projectId, title, prompt, waitForInstructions, method, branchName, preset.label, changed, specs, jobBudget, stacks]);
+  }, [canLaunch, launchInput, method, stacks]);
 
   // ⌘⏎ / ctrl+⏎ launches from anywhere on the screen, per the mockup.
   useEffect(() => {
@@ -1491,12 +1508,26 @@ function Spawn() {
                   : `launch ${specs.length} agent${specs.length === 1 ? '' : 's'}`}
           <span className="sp-kbd">⌘⏎</span>
         </button>
+        {/* This launch, again on a rule, until you cancel it (Amendment 211). */}
+        <button
+          type="button"
+          className="sp-ghost"
+          aria-expanded={repeating}
+          onClick={() => setRepeating((r) => !r)}
+          title="Save this setup to launch again every day, on weekdays or every few hours, until you cancel it"
+        >
+          repeat…
+        </button>
         {/* "plan first" was a button here; it is one of the modes now (Amendment 65). */}
         <span className="sp-slots">
           {free} of {slots.total} slot{free === 1 ? '' : 's'} free
           {willQueue > 0 && ` · ${willQueue} will stay queued`}
         </span>
       </div>
+
+      {repeating && (
+        <RepeatForm input={launchInput} stacks={stacks} blocked={repeatBlocked} onClose={() => setRepeating(false)} />
+      )}
 
       {error && (
         <div className="sp-error">

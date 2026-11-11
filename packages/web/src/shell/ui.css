@@ -431,3 +431,44 @@
   color: var(--ink);
   border-color: var(--line2);
 }
+
+/* A rule for a job that repeats (Amendment 211): Spawn's repeat… form and the Project screen's edit time. */
+.ui-rule {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-rule-days {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ui-rule-day {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: var(--surf);
+  color: var(--ink3);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.ui-rule-day[aria-pressed='true'] {
+  color: var(--ink);
+  border-color: var(--ink3);
+  background: var(--surf3);
+}
+
+.ui-rule-n {
+  width: 5em;
+}
+
+.ui-rule-unit {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink3);
+}
