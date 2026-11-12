@@ -20,6 +20,10 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **A ⧉ copy loses its bullets and indents.** Reported (12 Nov): *"When I click on a copy button, it is losing
+  formatting, it is not including indentations and bullets. If I select and copy directly, it seems to keep the
+  formatting."* *Done (12 Nov): Amendment 213 (the reply's, a quote's and a message's copy put the HTML on the
+  clipboard as ⌘C does, on a copy event; `clipboard.write` only before the renderer has loaded).*
 - [x] **The message box in its project's colour.** Asked for (11 Nov): *"on the text input box, make the border color
   (same thickness as the vertical color bar on project) match the project color bar."*
   *Done (11 Nov): Amendment 212 (a 4px border of the project's colour; focus rings it in the live colour).*

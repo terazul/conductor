@@ -200,6 +200,24 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 213 — post-merge, applied. **A ⧉ copy keeps its lists and indents where you paste it.**
+
+Web only (`lib/clipboard.ts`, new `agent/copyreply.ts`, `agent/transcript.tsx`, `agent/QuoteBlock.tsx`,
+`lib/verify.ts`) and `docs/MANUAL.md`. Reported 12 Nov: *"When I click on a copy button, it is losing formatting, it
+is not including indentations and bullets. If I select and copy directly, it seems to keep the formatting."* The
+HTML was right (Amendment 201's `replyClipboard` draws nested and numbered lists); the way it reached the clipboard
+differed. ⌘C sets `text/html` on a copy event (`copySelection`); the buttons used `clipboard.write` with a
+`ClipboardItem` whose HTML was a promise, and what that puts on the pasteboard pasted flat in places where the same
+HTML by ⌘C did not. Now the reply's, a quote's and a message's ⧉ copy go through `copyProse`: the renderer is loaded
+when the button first shows (`usePreloadReplyCopy`), so in the click the HTML is made at once and put on the
+clipboard as ⌘C does (`copyByEvent`: a one-off `copy` listener on the window, capturing, which sets both flavours
+and stops the event, so the transcript's ⌘C handler never swaps a selection in, then `execCommand('copy')`, with the text selected in a span off screen for that moment, since Safari fires no copy event with nothing selected, and your own selection put back after).
+Clicked before the renderer has loaded, or where the browser won't fire the event, it is `copyRich` as before. What
+is copied is unchanged: the markdown as `text/plain`, the reply drawn without colour as `text/html`. Also: §57's
+row check read the real clock and failed on the day of its next run; it takes either form now. **Verified:**
+`lib/verify.ts` §59, and §50 and §53's checks of the quote and message copies, updated. Not tried in a browser or
+pasted into another app; the cause is inferred from ⌘C working on the same HTML.
+
 ### Amendment 212 — post-merge, applied. **The message box is edged in its project's colour.**
 
 Web only (`agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`. Asked 11 Nov: *"on the text

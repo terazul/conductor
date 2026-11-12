@@ -37,6 +37,61 @@ export async function copyRich(text: string, html: Promise<string>): Promise<voi
   await copyText(text);
 }
 
+/**
+ * Text and HTML the way Cmd-C puts them (Amendment 213): a copy event, its data set by hand.
+ * A copy button goes this way when its HTML is ready inside the click, because what
+ * `clipboard.write` puts on the pasteboard is not always what a paste reads as a document: lists
+ * and their indents came out flat where the same HTML, by Cmd-C, kept them. The listener is on
+ * the window, first, and stops the event there, so the transcript's own Cmd-C (copySelection)
+ * never swaps a selection in. False where the browser wouldn't fire it; the caller then uses
+ * `copyRich`.
+ */
+export function copyByEvent(text: string, html: string): boolean {
+  const win = globalThis as { addEventListener?: Window['addEventListener']; removeEventListener?: Window['removeEventListener']; document?: Document };
+  if (!win.document?.execCommand || !win.addEventListener || !win.removeEventListener) return false;
+  let wrote = false;
+  const put = (e: Event): void => {
+    const data = (e as ClipboardEvent).clipboardData;
+    if (!data) return;
+    data.setData('text/html', html);
+    data.setData('text/plain', text);
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    wrote = true;
+  };
+  // Safari fires no copy event with nothing selected, so a span off screen is selected for the
+  // moment of the copy, as copy-to-clipboard does, and what you had selected is put back after.
+  const doc = win.document;
+  const sel = doc.getSelection?.() ?? null;
+  const kept = sel ? Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i)) : [];
+  let span: HTMLSpanElement | null = null;
+  win.addEventListener('copy', put, true);
+  try {
+    if (sel && doc.body && doc.createRange) {
+      span = doc.createElement('span');
+      span.textContent = text || ' ';
+      span.setAttribute('aria-hidden', 'true');
+      span.style.cssText = 'position:fixed;top:0;left:-9999px;white-space:pre;user-select:text;-webkit-user-select:text';
+      doc.body.appendChild(span);
+      const range = doc.createRange();
+      range.selectNodeContents(span);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    doc.execCommand('copy');
+  } catch {
+    // Not allowed here: the caller falls back.
+  } finally {
+    win.removeEventListener('copy', put, true);
+    if (span) {
+      span.remove();
+      sel?.removeAllRanges();
+      for (const r of kept) sel?.addRange(r);
+    }
+  }
+  return wrote;
+}
+
 // ── copied HTML, without the app's colours (Amendment 201) ────────────────────
 
 /** What survives as itself: a document's structure, and nothing that carries a look. */
