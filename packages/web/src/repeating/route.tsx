@@ -9,7 +9,8 @@
  * its agent, the rule in words and its next time, its last result with a link, and ▶ run now, pause,
  * edit and cancel.
  *
- * + new offers the two kinds. A message to an agent: its project, its agent, the text and the rule.
+ * + new offers the two kinds. A message to an agent: its project, its agent (never a helper, which its
+ * orchestrator directs), the text and the rule.
  * A job like one you ran: its project, one of its jobs Conductor kept the setup of, newest first,
  * with its prompt to keep or change, and the rule (`RepeatJobForm`, the job's own ⟳ repeat…). A new
  * launch is set up in Spawn, which has its own repeat…; the link goes there.
@@ -25,7 +26,7 @@ import { openProject, openSpawn } from '../shell/nav.js';
 import { DEFAULT_RULE, RuleFields, ruleOf, type RuleDraft } from '../shell/RuleFields.js';
 import { useCommand } from '../agent/endpoints.js';
 import { defaultName, ruleLine } from '../spawn/repeat.js';
-import { jobWords } from '../fleet/notewords.js';
+import { agentLabels, jobWords } from '../fleet/notewords.js';
 import { RepeatJobForm, RepeatingRow, repeatableJobs, repeatingGroups, repeatingSummary } from '../fleet/repeating.js';
 import { saveRecurringMessage } from '../fleet/endpoints.js';
 import './repeating.css';
@@ -37,11 +38,18 @@ const KINDS: { id: Kind; label: string; title: string }[] = [
   { id: 'job', label: 'a job like one you ran', title: 'Start a new job with the setup of one you ran, on a rule' },
 ];
 
-/** An agent in the picker: its role, and its job when it has one. */
-const agentWords = (a: Agent, jobs: readonly Job[]): string => {
-  const job = jobs.find((j) => j.id === a.jobId);
-  return job ? `${a.role} · ${jobWords(job)}` : a.role;
-};
+/**
+ * The picker's agents, named: each its role and its job when it has one, and two in one job by the
+ * end of their ids (`agentLabels`, as the Notes screen names them).
+ */
+const agentWords = (agents: readonly Agent[], jobs: readonly Job[]): string[] =>
+  agentLabels(
+    agents.map((a) => {
+      const job = jobs.find((j) => j.id === a.jobId);
+      return { agentId: a.id, role: a.role, ...(job ? { job: jobWords(job) } : {}) };
+    }),
+    true,
+  );
 
 function ProjectPick({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   const projects = useProjects();
@@ -67,7 +75,9 @@ function NewMessage() {
   const [text, setText] = useState('');
   const [named, setNamed] = useState<string | null>(null);
   const [rule, setRule] = useState<RuleDraft>(DEFAULT_RULE);
-  const agents = allAgents.filter((a) => a.projectId === projectId);
+  // A helper is its orchestrator's to direct: the daemon refuses one, so it is not offered.
+  const agents = allAgents.filter((a) => a.projectId === projectId && !a.parentId);
+  const labels = agentWords(agents, jobs);
   const agent = agents.find((a) => a.id === agentId) ?? null;
   const name = named ?? defaultName('', text);
   const every = ruleOf(rule);
@@ -101,9 +111,9 @@ function NewMessage() {
         />
         <select className="rp-pick" aria-label="agent" value={agentId} disabled={agents.length === 0} onChange={(e) => setAgentId(e.target.value)}>
           <option value="">{projectId && agents.length === 0 ? 'No agents in this project' : 'Pick an agent'}</option>
-          {agents.map((a) => (
+          {agents.map((a, i) => (
             <option key={a.id} value={a.id}>
-              {agentWords(a, jobs)}
+              {labels[i]}
             </option>
           ))}
         </select>

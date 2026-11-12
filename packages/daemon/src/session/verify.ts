@@ -176,8 +176,8 @@ import { BUILT_IN_PERSONAS, PERSONAS_KEY, resetPersona, withPersona, withoutPers
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
-import { getRecurring, insertRecurring, listRecurring, runRequest } from './recurring.js';
-import { NOT_REPEATABLE, PAUSE_UNTIL_KEY, everyProblem, nextRun, runName, type Every, type RecurringJob } from '@conductor/shared';
+import { getRecurring, insertRecurring, listRecurring, runDueRecurring, runRecurringNow, runRequest } from './recurring.js';
+import { BEING_RUN, HELPER_NOT_SCHEDULED, NOT_REPEATABLE, PAUSE_UNTIL_KEY, RESULT_SENT_QUEUED, RESULT_STARTED, RESULT_STARTED_HELD, everyProblem, nextRun, runName, type Every, type RecurringJob } from '@conductor/shared';
 import { jobRequest, listJobs } from './store.js';
 import { RESUME_AT_NOTE, SCHEDULED_TEXT_MAX, Scheduler, deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone, scheduler, userPauseNote } from './schedule.js';
 import { FolderGoneError, HOLD_NOTE, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
@@ -10068,14 +10068,22 @@ async function main(): Promise<void> {
     await scheduler().tick();
     await settle();
 
-    // Not started yet: tried again at the next look, and nothing said until it goes.
+    // Not started yet: tried again at each look, its time kept, and why it waits said once.
     const newbie = (await send<One>('POST', '/api/recurring', { name: 'Nudge', every: { kind: 'hours', n: 2 }, agentId: 'agt_rep216_new', text: 'Start on the review.' })).body.recurring;
     const wasDue = new Date(Date.now() - 60_000).toISOString();
     db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ?').run(wasDue, newbie.id);
     mark = runs.length;
+    frameMark = eyes.frames.length;
     await scheduler().tick();
     const n1 = getRecurring(db, newbie.id)!;
-    check('an agent that cannot take a message yet: still due, at the same time, nothing recorded', n1.nextAt === wasDue && n1.lastResult === null && n1.lastAt === null && runs.length === mark, JSON.stringify(n1));
+    check('an agent that cannot take a message yet: still due, at the same time, and its last result says why it waits', n1.nextAt === wasDue && n1.lastResult === 'waiting: reviewer has not started yet' && n1.lastAt !== null && n1.lastJobId === null && runs.length === mark, JSON.stringify(n1));
+    const heardWaiting = (): number => eyes.frames.slice(frameMark).filter((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === newbie.id && r.lastResult === n1.lastResult)).length;
+    check('…and every tab hears it', await until(() => heardWaiting() > 0));
+    const heard1 = heardWaiting();
+    await scheduler().tick();
+    await scheduler().tick();
+    await new Promise((r) => setTimeout(r, 200));
+    check('…once: the looks after it try again and say nothing more, its time still kept', heardWaiting() === heard1 && getRecurring(db, newbie.id)?.lastAt === n1.lastAt && getRecurring(db, newbie.id)?.nextAt === wasDue && runs.length === mark, `${heardWaiting()} ${heard1}`);
     const nowRun = await send<One>('POST', `/api/recurring/${newbie.id}/run`);
     check('▶ run now on it says why it could not be sent, and keeps its time', nowRun.status === 200 && nowRun.body.recurring.lastResult === 'failed: agent agt_rep216_new cannot receive messages yet' && nowRun.body.recurring.nextAt === wasDue, JSON.stringify(nowRun.body));
     db.prepare('UPDATE agents SET sdk_session_id = ? WHERE id = ?').run('sess_rep216_new', 'agt_rep216_new');
@@ -10182,6 +10190,95 @@ async function main(): Promise<void> {
     ]);
     check('an empty or wrong prompt, or text: 400, saying why', jobBad.every((r) => r.status === 400) && jobBad[2]!.body.error === 'only a repeating message has text', jobBad.map((r) => `${r.status} ${r.body.error}`).join(' | '));
     check('and they changed nothing', getRecurring(db, fj.id)?.request?.prompt === 'Tidy the changelog, the README and the manual.' && getRecurring(db, fj.id)?.text === undefined);
+
+    // One at a time (review of 216): a schedule being run, by the clock or run now, is not run beside itself.
+    type Stand = Parameters<typeof runRecurringNow>[1];
+    const gated = (): { sup: Stand; open: () => void; made: () => number } => {
+      let open = (): void => {};
+      const gate = new Promise<void>((r) => (open = r));
+      let n = 0;
+      const stand = {
+        held: false,
+        sendMessage: () => 'sent' as const,
+        createJob: async () => {
+          n += 1;
+          const id = `job_gated216_${n}`;
+          await gate;
+          return { job: { id } as Job, agents: [] };
+        },
+      } as unknown as Stand;
+      return { sup: stand, open: () => open(), made: () => n };
+    };
+    const one = insertRecurring(db, { name: 'Gated', every: { kind: 'hours', n: 6 }, request: kept1! });
+    let g = gated();
+    const first = runRecurringNow(db, g.sup, one.id);
+    const second = runRecurringNow(db, g.sup, one.id);
+    const r2 = await second;
+    check('▶ run now twice at once: the second runs nothing, and says it is being run now', r2?.skipped === BEING_RUN && BEING_RUN === 'it is being run now' && r2.recurring.lastResult === null, JSON.stringify(r2));
+    await until(() => g.made() > 0);
+    g.open();
+    const ranFirst = await first;
+    check('…and the first makes exactly one job, and records it', g.made() === 1 && ranFirst?.skipped === undefined && ranFirst?.recurring.lastResult === RESULT_STARTED && ranFirst.recurring.lastJobId === 'job_gated216_1', `${g.made()} ${JSON.stringify(ranFirst)}`);
+    const viaRoute = await send<One & { skipped?: string }>('POST', `/api/recurring/${one.id}/run`);
+    check('the route answers { recurring }, with no skipped, when it ran', viaRoute.status === 200 && viaRoute.body.skipped === undefined && 'recurring' in viaRoute.body, JSON.stringify(viaRoute.body));
+    await settle();
+
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    db.prepare('UPDATE recurring_jobs SET next_at = ?, last_job_id = NULL WHERE id = ?').run(dueAt, one.id);
+    g = gated();
+    const clock = runDueRecurring(db, g.sup, Date.now());
+    const during = await runRecurringNow(db, g.sup, one.id);
+    check('the clock running it, then ▶ run now: run now runs nothing, and says why', during?.skipped === BEING_RUN, JSON.stringify(during));
+    await until(() => g.made() > 0);
+    g.open();
+    await clock;
+    check('…and the clock\'s run is the one job', g.made() === 1 && getRecurring(db, one.id)?.lastJobId === 'job_gated216_1' && getRecurring(db, one.id)?.lastResult === RESULT_STARTED && Date.parse(getRecurring(db, one.id)!.nextAt) > Date.now(), `${g.made()} ${JSON.stringify(getRecurring(db, one.id))}`);
+
+    db.prepare('UPDATE recurring_jobs SET next_at = ?, last_job_id = NULL WHERE id = ?').run(dueAt, one.id);
+    g = gated();
+    const byHand = runRecurringNow(db, g.sup, one.id);
+    const looked = await runDueRecurring(db, g.sup, Date.now());
+    check('▶ run now running it, then the clock: the clock leaves it as it is, still due, for its next look', looked === false && getRecurring(db, one.id)?.nextAt === dueAt, JSON.stringify(getRecurring(db, one.id)));
+    await until(() => g.made() > 0);
+    g.open();
+    await byHand;
+    check('…and run now\'s is the one job', g.made() === 1 && getRecurring(db, one.id)?.lastJobId === 'job_gated216_1', String(g.made()));
+
+    const refusing = { held: false, sendMessage: () => 'sent' as const, createJob: async () => { throw new Error('the folder is gone'); } } as unknown as Stand;
+    const failedNow = await runRecurringNow(db, refusing, one.id);
+    check('a run that made no job keeps the job the last run started', failedNow?.recurring.lastResult === 'failed: the folder is gone' && failedNow.recurring.lastJobId === 'job_gated216_1', JSON.stringify(failedNow));
+    await send('DELETE', `/api/recurring/${one.id}`);
+
+    // Run now while everything is paused: it starts, and says it waits.
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: new Date(Date.now() + 3_600_000).toISOString() } });
+    const heldRun = await send<One>('POST', `/api/recurring/${fj.id}/run`);
+    const hj = heldRun.body.recurring.lastJobId;
+    check('▶ run now while everything is paused: started, saying it waits for Pause all to end, its job queued', sup.held && heldRun.status === 200 && heldRun.body.recurring.lastResult === RESULT_STARTED_HELD && RESULT_STARTED_HELD === 'started (waits for Pause all to end)' && hj !== null && hj !== sj && getJob(db, hj)?.status === 'queued', `${getJob(db, hj ?? '')?.status} ${JSON.stringify(heldRun.body)}`);
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: null } });
+    await scheduler().tick();
+    await settle();
+
+    // Sent while every slot was taken: it says it waits for one.
+    const slotless = { held: false, sendMessage: () => 'queued' as const, createJob: async () => { throw new Error('not a job'); } } as unknown as Stand;
+    const queuedNow = await runRecurringNow(db, slotless, newbie.id);
+    check('a message that waits for a slot says so', queuedNow?.recurring.lastResult === RESULT_SENT_QUEUED && RESULT_SENT_QUEUED === 'sent (waiting for a slot)', JSON.stringify(queuedNow));
+
+    // A helper is its orchestrator's to direct.
+    insertAgent(db, { id: 'agt_rep216_help', jobId: 'job_agt_rep216_new', projectId: mpid, role: 'helper', model: 'opus', sdkSessionId: 'sess_rep216_help', status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY, parentId: 'agt_rep216_new' });
+    const recsBefore = countRec();
+    const toHelper = await send<One>('POST', '/api/recurring', { name: 'Poke', every: weekdays, agentId: 'agt_rep216_help', text: 'Hurry up.' });
+    check('a message to a helper is refused: 400, saying to schedule it to the orchestrator, nothing kept', toHelper.status === 400 && toHelper.body.error === HELPER_NOT_SCHEDULED && /schedule a message to the orchestrator instead/.test(HELPER_NOT_SCHEDULED) && countRec() === recsBefore, `${toHelper.status} ${toHelper.body.error}`);
+
+    // A batch launch: each job keeps its own stack's setup, {track} already filled in by Spawn.
+    const stack216 = (n: number) => ({ projectId: mpid, prompt: `Run track ${n} of the plan.`, isolation: 'worktree', branch: `r216/t${n}`, preset: 'solo', agents: [{ role: 'builder', model: OPUS, autonomy: DEFAULT_AUTONOMY }], budgetUsd: 3 });
+    const two = await send<{ jobs?: Array<{ job: Job }> }>('POST', '/api/jobs/batch', { jobs: [stack216(1), stack216(2)] });
+    const twoKept = (two.body.jobs ?? []).map((m) => jobRequest(db, m.job.id));
+    check(
+      'a batch of two stacks keeps each job\'s own one-stack setup, its track filled in',
+      two.status === 201 && twoKept.length === 2 && twoKept.every((k, i) => k !== null && k.prompt === `Run track ${i + 1} of the plan.` && k.branch === `r216/t${i + 1}` && !k.prompt.includes('{track}') && k.agents.length === 1 && !('jobs' in k)) && (two.body.jobs ?? []).every((m) => getJob(db, m.job.id)?.repeatable === true),
+      `${two.status} ${JSON.stringify(twoKept)}`,
+    );
+    await settle();
     for (const id of [fj.id, asIs.body.recurring.id, given.body.recurring.id, newbie.id, lost.id]) await send('DELETE', `/api/recurring/${id}`);
     eyes.close();
 
@@ -10214,7 +10311,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project; and a note keeps the agent whose screen it was typed on, one of its own project\'s, with its role, which removing the agent does not take; and a message to an agent repeats on its rule as if typed then, sent or failed, tried again while the agent cannot take one, held while everything is paused, sent once after downtime and gone with its agent; any schedule runs now, keeping its next time; and a job you ran repeats from the setup it kept, its prompt changed if you like, while one from before setups were kept is refused, and every new job keeps its setup.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project; and a note keeps the agent whose screen it was typed on, one of its own project\'s, with its role, which removing the agent does not take; and a message to an agent repeats on its rule as if typed then, sent, waiting for a slot or failed, tried again while the agent cannot take one and saying once why it waits, held while everything is paused, sent once after downtime and gone with its agent; any schedule runs now, keeping its next time, saying it waits while everything is paused, and never beside a run of itself, by the clock or run now, while a run that made no job keeps the last one\'s; a helper takes no schedule, its orchestrator does; and a job you ran repeats from the setup it kept, its prompt changed if you like, while one from before setups were kept is refused, and every new job keeps its setup, each stack of a batch its own.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

@@ -22,27 +22,39 @@
  *
  * A MESSAGE (Amendment 216): a row with `agent_id` and `text` instead of a request. Each time it
  * comes due the text goes to the agent through `Supervisor.sendMessage`, exactly as if you had
- * pressed send then: into its live run, or resuming a finished one. `sent`, or `failed: <why>`.
- * There is no skip rule. An agent not yet started ("cannot receive messages yet") is tried
- * again at the next look, as ⏲ later's messages are. Pause all and missed times are as above.
+ * pressed send then: into its live run, or resuming a finished one. `sent`, `sent (waiting for a
+ * slot)` when every slot was taken, or `failed: <why>`. There is no skip rule. An agent not yet
+ * started ("cannot receive messages yet") is tried again at each look, as ⏲ later's messages
+ * are, its next time not moved: `waiting: developer has not started yet`, recorded (and sent to
+ * every tab) once, when it starts to wait. Pause all and missed times are as above.
  *
  * RUN NOW runs either kind once, at once (`runRecurringNow`): the last result is set, the next
- * time is not moved. A job still skips while its last run goes.
+ * time is not moved. A job still skips while its last run goes. Made while everything is paused,
+ * it is `started (waits for Pause all to end)`: it waits queued until then.
+ *
+ * ONE AT A TIME: a schedule being run, by the clock or run now, is held in this process until
+ * that run ends. The clock leaves it for its next look; run now runs nothing and says it is being
+ * run now. Only a run that made a job writes `last_job_id`, so a skip or a failure never loses
+ * the job the last run started.
  */
 
 import type { CreateJobRequest, Every, Job, RecurringJob } from '@conductor/shared';
 import {
+  BEING_RUN,
   RESULT_SENT,
+  RESULT_SENT_QUEUED,
   RESULT_SKIPPED,
   RESULT_STARTED,
+  RESULT_STARTED_HELD,
   nextRun,
   resultFailed,
+  resultWaiting,
   runBranch,
   runName,
 } from '@conductor/shared';
 import { rows, type Db } from '../db/index.js';
 import { hub } from '../hub.js';
-import { getJob, newId } from './store.js';
+import { getAgent, getJob, newId } from './store.js';
 import type { Supervisor } from './supervisor.js';
 
 interface Row {
@@ -176,50 +188,80 @@ export function runRequest(r: { name: string; request: CreateJobRequest }, at: D
 }
 
 /** What the clock and run now need of the supervisor. */
-type Runs = Pick<Supervisor, 'createJob' | 'sendMessage'>;
+type Runs = Pick<Supervisor, 'createJob' | 'sendMessage' | 'held'>;
 
 /** Not started yet, so it has no session to take a message: tried again at the next look. */
 const NOT_YET = /cannot receive messages yet/;
 
 /**
- * One run of a schedule at `at`, by its kind: the last result and the last job to record, and
- * `retry` for a message to an agent that cannot take one yet.
+ * The schedules being run in this process, by id: by the clock or by run now. Taken before any
+ * await and given back in `finally`, so two runs of one schedule never go side by side: the
+ * second finds it taken and runs nothing. A `next_at` claim alone cannot do this, since run now
+ * leaves `next_at` where it is.
  */
-async function runOnce(db: Db, sup: Runs, r: RecurringJob, at: Date): Promise<{ result: string; jobId: string | null; retry?: true }> {
-  if (r.kind === 'message') {
-    try {
-      sup.sendMessage(r.agentId!, r.text!);
-      return { result: RESULT_SENT, jobId: null };
-    } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
-      return { result: resultFailed(why), jobId: null, ...(NOT_YET.test(why) ? { retry: true as const } : {}) };
-    }
-  }
-  if (r.lastJobId !== null && stillGoing(getJob(db, r.lastJobId))) return { result: RESULT_SKIPPED, jobId: r.lastJobId };
+const running = new Set<string>();
+
+/** What one run did. `jobId` only when it made a job; `retry` for a message that cannot go yet. */
+type Ran = { result: string; jobId?: string; retry?: true };
+
+/**
+ * One run of a schedule at `at`, by its kind, read fresh once it is claimed: a run that was going
+ * when the caller read it may have recorded since. `busy` when it is already being run, `gone`
+ * when it was cancelled.
+ */
+async function runOnce(db: Db, sup: Runs, id: string, at: Date): Promise<Ran | 'busy' | 'gone'> {
+  if (running.has(id)) return 'busy';
+  running.add(id);
   try {
-    // Checked again as POST /api/jobs checks a launch: a schedule outlives what it was saved
-    // with, and a model the engine no longer serves, or a persona gone, is refused here with
-    // the reason, not started to fail at its first call. Imported late: routes/session.ts
-    // imports the supervisor this file is driven by.
-    const { parseCreateJob } = await import('../routes/session.js');
-    const parsed = await parseCreateJob(r.request);
-    if (!parsed.ok) throw new Error(parsed.detail ? `${parsed.error}: ${parsed.detail}` : parsed.error);
-    // The job keeps the schedule's setup, not the run's name and branch (Amendment 216).
-    const { job } = await sup.createJob(runRequest({ name: r.name, request: parsed.request }, at), r.id, parsed.request);
-    return { result: RESULT_STARTED, jobId: job.id };
-  } catch (err) {
-    return { result: resultFailed(err instanceof Error ? err.message : String(err)), jobId: r.lastJobId };
+    const r = getRecurring(db, id);
+    if (!r) return 'gone';
+    if (r.kind === 'message') {
+      try {
+        const how = sup.sendMessage(r.agentId!, r.text!);
+        return { result: how === 'queued' ? RESULT_SENT_QUEUED : RESULT_SENT };
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        return { result: resultFailed(why), ...(NOT_YET.test(why) ? { retry: true as const } : {}) };
+      }
+    }
+    if (r.lastJobId !== null && stillGoing(getJob(db, r.lastJobId))) return { result: RESULT_SKIPPED };
+    try {
+      // Checked again as POST /api/jobs checks a launch: a schedule outlives what it was saved
+      // with, and a model the engine no longer serves, or a persona gone, is refused here with
+      // the reason, not started to fail at its first call. Imported late: routes/session.ts
+      // imports the supervisor this file is driven by.
+      const { parseCreateJob } = await import('../routes/session.js');
+      const parsed = await parseCreateJob(r.request);
+      if (!parsed.ok) throw new Error(parsed.detail ? `${parsed.error}: ${parsed.detail}` : parsed.error);
+      // The job keeps the schedule's setup, not the run's name and branch (Amendment 216).
+      const { job } = await sup.createJob(runRequest({ name: r.name, request: parsed.request }, at), r.id, parsed.request);
+      // Made while everything is paused (run now), it waits queued for the pause to end.
+      return { result: sup.held ? RESULT_STARTED_HELD : RESULT_STARTED, jobId: job.id };
+    } catch (err) {
+      return { result: resultFailed(err instanceof Error ? err.message : String(err)) };
+    }
+  } finally {
+    running.delete(id);
   }
 }
 
-/** Cancelled while its launch ran, the update finds no row: the job it started stays. */
-function record(db: Db, id: string, iso: string, ran: { result: string; jobId: string | null }): void {
-  db.prepare('UPDATE recurring_jobs SET last_at = ?, last_job_id = ?, last_result = ? WHERE id = ?').run(
+/**
+ * Its last result, and the job only when this run made one: a skip or a failure keeps the job
+ * the last run started. Cancelled while its launch ran, the update finds no row: the job it
+ * started stays.
+ */
+function record(db: Db, id: string, iso: string, ran: Ran): void {
+  db.prepare('UPDATE recurring_jobs SET last_at = ?, last_job_id = COALESCE(?, last_job_id), last_result = ? WHERE id = ?').run(
     iso,
-    ran.jobId,
+    ran.jobId ?? null,
     ran.result,
     id,
   );
+}
+
+/** Why a message cannot go yet, in words: its agent, by role, has not started. */
+function waitingWhy(db: Db, r: RecurringJob): string {
+  return resultWaiting(`${getAgent(db, r.agentId!)?.role ?? 'its agent'} has not started yet`);
 }
 
 /**
@@ -234,15 +276,28 @@ export async function runDueRecurring(db: Db, sup: Runs, now: number): Promise<b
   ).map(toRecurring);
   let changed = false;
   for (const r of due) {
+    // Being run now: left as it is, for the next look.
+    if (running.has(r.id)) continue;
     // Claimed first, next due by its rule from now: a second clock that read the same row (a
     // restart's first look beside the old one's) finds it taken and launches nothing.
     const next = nextRun(r.every, at).toISOString();
     const claim = db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ? AND next_at = ?').run(next, r.id, r.nextAt);
     if (Number(claim.changes) === 0) continue;
-    const ran = await runOnce(db, sup, r, at);
-    if (ran.retry) {
-      // Given back, still due: the next look tries again, and nothing is said until it goes.
+    const ran = await runOnce(db, sup, r.id, at);
+    if (ran === 'gone') continue;
+    if (ran === 'busy') {
+      // Not reached (nothing awaits between the check above and the claim), but given back if it is.
       db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ? AND next_at = ?').run(r.nextAt, r.id, next);
+      continue;
+    }
+    if (ran.retry) {
+      // Given back, still due: the next look tries again. Why it waits is said once, when it starts to.
+      db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ? AND next_at = ?').run(r.nextAt, r.id, next);
+      const waiting = waitingWhy(db, r);
+      if (getRecurring(db, r.id)?.lastResult !== waiting) {
+        record(db, r.id, iso, { result: waiting });
+        changed = true;
+      }
       continue;
     }
     record(db, r.id, iso, ran);
@@ -254,13 +309,21 @@ export async function runDueRecurring(db: Db, sup: Runs, now: number): Promise<b
 /**
  * Run now (Amendment 216): one run of either kind, at once, paused or not, its next time left
  * where it is. A job still skips while its last run goes, and its last result says so; a
- * message to an agent that cannot take one yet says that. Null for no such schedule.
+ * message to an agent that cannot take one yet says that. One already being run (by the clock,
+ * or another run now) runs nothing, and `skipped` says so: its last result is that run's. Null
+ * for no such schedule.
  */
-export async function runRecurringNow(db: Db, sup: Runs, id: string, now = Date.now()): Promise<RecurringJob | null> {
-  const r = getRecurring(db, id);
-  if (!r) return null;
+export async function runRecurringNow(
+  db: Db,
+  sup: Runs,
+  id: string,
+  now = Date.now(),
+): Promise<{ recurring: RecurringJob; skipped?: string } | null> {
+  if (!getRecurring(db, id)) return null;
   const at = new Date(now);
-  const ran = await runOnce(db, sup, r, at);
-  record(db, id, at.toISOString(), ran);
-  return getRecurring(db, id);
+  const ran = await runOnce(db, sup, id, at);
+  if (ran === 'busy') return { recurring: getRecurring(db, id)!, skipped: BEING_RUN };
+  if (ran !== 'gone') record(db, id, at.toISOString(), ran);
+  const recurring = getRecurring(db, id);
+  return recurring ? { recurring } : null;
 }

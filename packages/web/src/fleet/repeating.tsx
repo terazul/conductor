@@ -15,7 +15,7 @@
  */
 
 import { useState } from 'react';
-import type { Agent, Job, PatchRecurringRequest, Project, RecurringJob } from '@conductor/shared';
+import type { Agent, Job, PatchRecurringRequest, Project, RecurringJob, RunRecurringResponse } from '@conductor/shared';
 import { NOT_REPEATABLE, RECURRING_NAME_MAX, everyProblem, everyWords, readResult, recurringNameProblem } from '@conductor/shared';
 import { useAgents, useRecurring } from '../lib/store.js';
 import { fmtStamp } from '../lib/when.js';
@@ -35,14 +35,21 @@ export function resultLine(r: Pick<RecurringJob, 'lastAt' | 'lastResult'>, now: 
   const at = fmtStamp(r.lastAt, now);
   switch (result.kind) {
     case 'started':
-      return `started ${at}`;
+      return result.held ? `started ${at}: waits for Pause all to end` : `started ${at}`;
     case 'sent':
-      return `sent ${at}`;
+      return result.queued ? `sent ${at}: waiting for a slot` : `sent ${at}`;
     case 'skipped':
       return `skipped ${at}: the last run was still going`;
+    case 'waiting':
+      return `waiting since ${at}: ${result.reason}`;
     case 'failed':
       return `failed ${at}: ${result.reason}`;
   }
+}
+
+/** What ▶ run now says when it is back: skipped when it was already being run, by the clock or another tab. */
+export function runNowText(res: RunRecurringResponse): string {
+  return res.skipped ? `Skipped: ${res.skipped}.` : 'Done: its last result says how it went.';
 }
 
 /** The Fleet card's count: "⟳ 2 repeating", or null for none. */
@@ -127,7 +134,7 @@ export function RepeatingRow({ r, agents }: { r: RecurringJob; agents: readonly 
   const runAgent = message ? null : firstAgentOf(agents, r.lastJobId);
   const toAgent = message ? (agents.find((a) => a.id === r.agentId) ?? null) : null;
   const result = readResult(r.lastResult);
-  const tone = result?.kind === 'failed' ? ' is-fail' : result?.kind === 'skipped' ? ' is-skip' : '';
+  const tone = result?.kind === 'failed' ? ' is-fail' : result?.kind === 'skipped' || result?.kind === 'waiting' ? ' is-skip' : '';
   const editWhy = editing ? editProblem(r, editing) : null;
 
   return (
@@ -228,7 +235,7 @@ export function RepeatingRow({ r, agents }: { r: RecurringJob; agents: readonly 
               type="button"
               className="fl-btn is-ghost"
               disabled={cmd.busy}
-              onClick={() => void cmd.run('Running it now', () => runRecurring(r.id), () => 'Done: its last result says how it went.')}
+              onClick={() => void cmd.run('Running it now', () => runRecurring(r.id), runNowText)}
               title={
                 message
                   ? 'Send it once now; its next time stays'
@@ -268,7 +275,8 @@ export function RepeatingRow({ r, agents }: { r: RecurringJob; agents: readonly 
 /**
  * ⟳ repeat… on a job you ran (Amendment 216): a name, its prompt to change or keep, and a rule. The
  * daemon copies the setup it kept for the job with this prompt; a job launched before it kept one
- * gets no button (`repeatJobTitle`), and the daemon refuses it in the same words.
+ * gets no button (`repeatJobTitle`), and the daemon refuses it in the same words. Saved, the form
+ * gives way to the line that says so (`RepeatJobSaved`): there is no save left to press twice.
  */
 export function RepeatJobForm({ job, onClose }: { job: Pick<Job, 'id' | 'name' | 'prompt'>; onClose: () => void }) {
   const cmd = useCommand();
@@ -276,7 +284,9 @@ export function RepeatJobForm({ job, onClose }: { job: Pick<Job, 'id' | 'name' |
   const [prompt, setPrompt] = useState(job.prompt);
   const [rule, setRule] = useState<RuleDraft>(DEFAULT_RULE);
   const every = ruleOf(rule);
+  const [saved, setSaved] = useState<string | null>(null);
   const why = recurringNameProblem(name) ?? everyProblem(every) ?? (prompt.trim() ? null : 'Write what needs doing first.');
+  if (saved !== null) return <RepeatJobSaved text={saved} onClose={onClose} />;
 
   return (
     // Its clicks and keys are its own, inside a Fleet card that opens on both.
@@ -305,8 +315,10 @@ export function RepeatJobForm({ job, onClose }: { job: Pick<Job, 'id' | 'name' |
           className="fl-btn is-primary"
           disabled={cmd.busy || why !== null}
           onClick={() =>
-            void cmd
-              .run('Saving the schedule', () => saveRecurringFromJob(name.trim(), every, job.id, prompt.trim()), (res: { recurring: RecurringJob }) => `Saved: next ${fmtStamp(res.recurring.nextAt)}.`)
+            void cmd.run('Saving the schedule', async () => {
+              const res = await saveRecurringFromJob(name.trim(), every, job.id, prompt.trim());
+              setSaved(savedText(res.recurring));
+            })
           }
         >
           {cmd.busy ? 'saving…' : 'save schedule'}
@@ -322,6 +334,27 @@ export function RepeatJobForm({ job, onClose }: { job: Pick<Job, 'id' | 'name' |
           {cmd.notice.text}
         </div>
       )}
+    </div>
+  );
+}
+
+/** What a saved schedule's line says: when it next runs. */
+export function savedText(r: Pick<RecurringJob, 'nextAt'>, now: Date = new Date()): string {
+  return `Saved: next ${fmtStamp(r.nextAt, now)}. It is on the Repeating screen.`;
+}
+
+/** The form once saved: the line that says so, and close. */
+export function RepeatJobSaved({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div className="pj-rep-form" role="group" aria-label="repeat this job" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="pj-notice t-ok" role="status">
+        {text}
+      </div>
+      <div className="pj-rep-actions">
+        <button type="button" className="fl-btn is-ghost" onClick={onClose}>
+          close
+        </button>
+      </div>
     </div>
   );
 }

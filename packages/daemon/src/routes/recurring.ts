@@ -6,14 +6,16 @@
  *                                  | { name, every, fromJobId, prompt? }
  *                                  | { name, every, agentId, text } → 201 { recurring }
  *   PATCH  /api/recurring/:id      ← { name?, every?, paused?, text?, prompt? } → { recurring }
- *   POST   /api/recurring/:id/run  → { recurring }: run once now, the next time left where it is
+ *   POST   /api/recurring/:id/run  → { recurring, skipped? }: run once now, the next time left where
+ *                                    it is; `skipped: 'it is being run now'` when the clock or
+ *                                    another run now already is, and nothing more ran
  *   DELETE /api/recurring/:id      → { removed }
  *
  * `request` is checked exactly as `POST /api/jobs` checks a launch (`parseCreateJob`), and
  * kept as it comes back from that check; `every` by `everyProblem`. `fromJobId` is that job's
  * kept setup (Amendment 216), its prompt replaced when one is given, then checked as `request`
  * is; a job from before setups were kept is refused. A message needs an agent that is there and
- * text as ⏲ later's does. PATCH re-checks a new `prompt` the same way. Each run launches a new
+ * not a helper, which its orchestrator directs, and text as ⏲ later's does. PATCH re-checks a new `prompt` the same way. Each run launches a new
  * job, or sends the text, on the clock in session/schedule.ts; the rules are in
  * session/recurring.ts. Deleting one is cancelling it: the jobs it started stay.
  *
@@ -23,7 +25,7 @@
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { CreateJobRequest, Every, PatchRecurringRequest } from '@conductor/shared';
-import { NOT_REPEATABLE, everyProblem, normalEvery, recurringNameProblem as nameProblem } from '@conductor/shared';
+import { HELPER_NOT_SCHEDULED, NOT_REPEATABLE, everyProblem, normalEvery, recurringNameProblem as nameProblem } from '@conductor/shared';
 import { openDb } from '../db/index.js';
 import { getAgent, getJob, getProject, jobRequest } from '../session/store.js';
 import { SCHEDULED_TEXT_MAX } from '../session/schedule.js';
@@ -95,6 +97,8 @@ export default async function recurringRoutes(app: FastifyInstance): Promise<voi
     if (body['agentId'] !== undefined) {
       const agent = typeof body['agentId'] === 'string' ? getAgent(db, body['agentId']) : undefined;
       if (!agent) return fail(reply, 404, 'no such agent');
+      // Its orchestrator directs it, and clears it (and so its schedules) once it has finished.
+      if (agent.parentId) return fail(reply, 400, HELPER_NOT_SCHEDULED);
       const text = textOf(body['text']);
       if (refused(text)) return fail(reply, text.status, text.error);
       const recurring = insertRecurring(db, { name, every, agentId: agent.id, projectId: agent.projectId, text });
@@ -159,10 +163,10 @@ export default async function recurringRoutes(app: FastifyInstance): Promise<voi
   });
 
   app.post<{ Params: { id: string } }>('/api/recurring/:id/run', async (req, reply) => {
-    const recurring = await runRecurringNow(db, supervisor(), req.params.id);
-    if (!recurring) return fail(reply, 404, 'no such schedule');
-    broadcastRecurring(db);
-    return { recurring };
+    const ran = await runRecurringNow(db, supervisor(), req.params.id);
+    if (!ran) return fail(reply, 404, 'no such schedule');
+    if (!ran.skipped) broadcastRecurring(db);
+    return ran;
   });
 
   app.delete<{ Params: { id: string } }>('/api/recurring/:id', async (req, reply) => {

@@ -24,7 +24,7 @@ import { useJobs, useProjects } from '../lib/store.js';
 import { openProject } from '../shell/nav.js';
 import { replyBarLine, replyBarWords } from './replybar.js';
 import { useEffect, useState } from 'react';
-import { everyWords, spentOn, type Agent, type Autonomy, type EffortLevel, type Every, type RecurringJob, type SendMessageResponse } from '@conductor/shared';
+import { HELPER_NOT_SCHEDULED, everyWords, spentOn, type Agent, type Autonomy, type EffortLevel, type Every, type RecurringJob, type SendMessageResponse } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, ProviderModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -327,6 +327,8 @@ export function Composer({ agent }: { agent: Agent }) {
 
   // Send it on a rule (Amendment 216): the same text, to this agent, until you cancel it.
   const [repeat, setRepeat] = useState(false);
+  // Not on a helper: its orchestrator directs it, and the daemon refuses one (HELPER_NOT_SCHEDULED).
+  const helper = Boolean(agent.parentId);
   const saveRepeat = async (name: string, every: Every) => {
     const body = text.trim();
     if (body.length === 0) return;
@@ -676,8 +678,9 @@ export function Composer({ agent }: { agent: Agent }) {
               type="button"
               className={`ag-later-btn${repeat ? ' is-on' : ''}`}
               aria-expanded={repeat}
+              disabled={helper}
               onClick={() => setRepeat((v) => !v)}
-              title="Send this message on a rule, every day or every few hours, until you cancel it"
+              title={helper ? HELPER_NOT_SCHEDULED : 'Send this message on a rule, every day or every few hours, until you cancel it'}
             >
               ⟳ repeat…
             </button>
@@ -715,7 +718,7 @@ export function Composer({ agent }: { agent: Agent }) {
           />
         )}
 
-        {repeat && (
+        {repeat && !helper && (
           <RepeatRow busy={send.busy} text={text} onSave={(name, every) => void saveRepeat(name, every)} onClose={() => setRepeat(false)} />
         )}
 

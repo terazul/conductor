@@ -3584,11 +3584,12 @@ await (async () => {
   const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
   const text = (html: string): string => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
   const {
-    RepeatJobButton, RepeatJobForm, RepeatingRow, editOf, editPatch, editProblem, kindWords, repeatJobTitle, repeatableJobs, repeatingGroups, repeatingSummary, resultLine,
+    RepeatJobButton, RepeatJobForm, RepeatJobSaved, RepeatingRow, editOf, editPatch, editProblem, kindWords, repeatJobTitle, repeatableJobs, repeatingGroups, repeatingSummary, resultLine, runNowText, savedText,
   } = await import('../fleet/repeating.js');
+  const { agentLabels, noteAgents } = await import('../fleet/notewords.js');
   const { RepeatRow, repeatLine } = await import('../agent/scheduled.js');
   const { runRecurring, saveRecurringFromJob, saveRecurringMessage } = await import('../fleet/endpoints.js');
-  const { NOT_REPEATABLE } = await import('@conductor/shared');
+  const { BEING_RUN, HELPER_NOT_SCHEDULED, NOT_REPEATABLE } = await import('@conductor/shared');
   const { draftOf } = await import('../shell/RuleFields.js');
 
   const iso = (h: number, m = 0, day = 11): string => new Date(2026, 10, day, h, m).toISOString();
@@ -3681,7 +3682,7 @@ await (async () => {
   const comp = src('../agent/composer.tsx');
   check('the message box: ⟳ repeat… right after ⏲ later, saving what is typed to this agent, then emptied',
     /⏲ later\s*<\/button>\s*<button[^>]*className=\{`ag-later-btn\$\{repeat \? ' is-on' : ''\}`\}[\s\S]{0,300}?>\s*⟳ repeat…\s*<\/button>/.test(comp) && /saveRecurringMessage\(name, every, agent\.id, body\)/.test(comp) && /if \(ok\) \{\s*setText\(''\);\s*setRepeat\(false\);/.test(comp) &&
-      /\{repeat && \(\s*<RepeatRow busy=\{send\.busy\} text=\{text\}/.test(comp));
+      /\{repeat && !helper && \(\s*<RepeatRow busy=\{send\.busy\} text=\{text\}/.test(comp));
   const sched = src('../agent/scheduled.tsx');
   check('…and the agent\'s repeating messages are listed with its waiting ones, pause and cancel each', /useRecurring\(\)/.test(sched) && /r\.kind === 'message' && r\.agentId === agentId/.test(sched) && /\{repeating\.map\(\(r\) =>/.test(sched) && /patchRecurring\(r\.id, \{ paused: !r\.paused \}\)/.test(sched) && /cancelRecurring\(r\.id\)/.test(sched));
   const route = src('../repeating/route.tsx');
@@ -3695,13 +3696,66 @@ await (async () => {
   check('+ new: a message to an agent or a job like one you ran, and a link to set up a new launch in Spawn',
     /label: 'a message to an agent'/.test(route) && /label: 'a job like one you ran'/.test(route) && /\{adding === 'message' \? <NewMessage \/> : <NewJob \/>\}/.test(route) && /onClick=\{\(\) => openSpawn\(\)\}[^>]*>\s*set up a new launch in Spawn/.test(route));
   check('…the message: its project\'s agents only, the save refused until each is picked and written',
-    /allAgents\.filter\(\(a\) => a\.projectId === projectId\)/.test(route) && /'Pick a project first\.'/.test(route) && /'Pick the agent it goes to\.'/.test(route) && /saveRecurringMessage\(name\.trim\(\), every, agent\.id, text\.trim\(\)\)/.test(route));
+    /allAgents\.filter\(\(a\) => a\.projectId === projectId && !a\.parentId\)/.test(route) && /'Pick a project first\.'/.test(route) && /'Pick the agent it goes to\.'/.test(route) && /saveRecurringMessage\(name\.trim\(\), every, agent\.id, text\.trim\(\)\)/.test(route));
   check('…the job: its project\'s repeatable jobs, then the job\'s own form', /const choices = repeatableJobs\(jobs, projectId\);/.test(route) && /<RepeatJobForm key=\{job\.id\} job=\{job\}/.test(route));
   const card = src('../fleet/card.tsx');
   const project = src('../fleet/project.tsx');
   check('the job\'s ⟳ repeat… on its Fleet card and its Project screen, each opening the same form',
     /<RepeatJobButton job=\{job\} open=\{repeatOpen\}/.test(card) && /<RepeatJobForm key=\{job\.id\} job=\{job\} onClose=\{\(\) => setRepeatOpen\(false\)\} \/>/.test(card) &&
       /<RepeatJobButton job=\{job\} open=\{repeating\}/.test(project) && /<RepeatJobForm job=\{job\} onClose=\{\(\) => setRepeating\(false\)\} \/>/.test(project));
+
+  // ── the review of 216 ──
+  // 1. ▶ run now on one already being run says so, and runs nothing.
+  check('▶ run now on one already being run says it was skipped and why; one that ran says to read its last result',
+    runNowText({ recurring: msg(), skipped: BEING_RUN }) === 'Skipped: it is being run now.' && runNowText({ recurring: msg() }) === 'Done: its last result says how it went.' &&
+      /cmd\.run\('Running it now', \(\) => runRecurring\(r\.id\), runNowText\)/.test(src('../fleet/repeating.tsx')));
+  // 2. A message to an agent not started yet says it waits, in the last result's place.
+  check('a message whose agent has not started says it waits, since when',
+    resultLine(msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), now) === 'waiting since 09:00: reviewer has not started yet', resultLine(msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), now));
+  const wrow = renderToStaticMarkup(createElement(RepeatingRow, { r: msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), agents: [dev] }));
+  check('…on its row, where the last result goes, in the skip colour, not the failure one', /class="pj-rep-last is-skip">waiting since (\d+ \w+ )?09:00: reviewer has not started yet/.test(wrow), wrow);
+  // 3. Saved, ⟳ repeat… on a job has no save left to press twice.
+  const saved = renderToStaticMarkup(createElement(RepeatJobSaved, { text: savedText({ nextAt: iso(18) }, now), onClose: () => {} }));
+  check('a job saved to repeat: the form gives way to the line that says so, and close, with no save left',
+    savedText({ nextAt: iso(18) }, now) === 'Saved: next 18:00. It is on the Repeating screen.' && text(saved).startsWith('Saved: next 18:00.') && />close<\/button>/.test(saved) && !saved.includes('save schedule') && !saved.includes('<textarea'), saved);
+  const repSrc = src('../fleet/repeating.tsx');
+  check('…the form turns into it once the save is back, and save is shut while one is going',
+    /if \(saved !== null\) return <RepeatJobSaved text=\{saved\} onClose=\{onClose\} \/>;/.test(repSrc) && /await saveRecurringFromJob\(name\.trim\(\), every, job\.id, prompt\.trim\(\)\);\s*setSaved\(savedText\(res\.recurring\)\);/.test(repSrc) &&
+      /disabled=\{cmd\.busy \|\| why !== null\}/.test(repSrc));
+  check('…and the message forms cannot save twice either: the box\'s ⟳ repeat… shuts and empties, + new\'s message empties, so its save is shut',
+    /if \(ok\) \{\s*setText\(''\);\s*setRepeat\(false\);/.test(comp) && /\.then\(\(ok\) => \{\s*if \(!ok\) return;\s*setText\(''\);/.test(route) && /\(text\.trim\(\) \? null : 'Write the message first\.'\)/.test(route));
+  // 5. A helper takes no schedule: its orchestrator directs it.
+  check('a helper: left out of + new\'s agents, and ⟳ repeat… shut in its message box, its title saying why, in the daemon\'s words',
+    /!a\.parentId/.test(route) && /const helper = Boolean\(agent\.parentId\);/.test(comp) && /disabled=\{helper\}/.test(comp) && /title=\{helper \? HELPER_NOT_SCHEDULED :/.test(comp) &&
+      HELPER_NOT_SCHEDULED === "a helper is its orchestrator's to direct; schedule a message to the orchestrator instead");
+  // 6. Two of one role in one job are told apart by the end of their ids, on both pickers.
+  const twins = agentLabels([
+    { agentId: 'ag_x1a3f2', role: 'developer', job: 'Nightly tests' },
+    { agentId: 'ag_x2b7c1', role: 'developer', job: 'Nightly tests' },
+    { agentId: 'ag_x3', role: 'developer', job: 'Fix the login page' },
+    { agentId: 'ag_x4', role: 'reviewer', job: 'Nightly tests' },
+  ]);
+  check('twins in one job: role, job and the last four of the id; a role alone when it does not repeat',
+    twins.join() === 'developer · Nightly tests · a3f2,developer · Nightly tests · b7c1,developer · Fix the login page,reviewer', twins.join());
+  check('…with every agent\'s job when asked (the Repeating picker), and the role alone with no job',
+    agentLabels([{ agentId: 'ag_1', role: 'developer', job: 'Nightly tests' }, { agentId: 'ag_2', role: 'reviewer' }], true).join() === 'developer · Nightly tests,reviewer');
+  const twinNotes = noteAgents(
+    [{ id: 'p1', name: 'conductor', notes: [
+      { id: 'n1', projectId: 'p1', text: 'a', createdAt: iso(9), agentId: 'ag_n1a3f2', agentLabel: 'developer' },
+      { id: 'n2', projectId: 'p1', text: 'b', createdAt: iso(9), agentId: 'ag_n2b7c1', agentLabel: 'developer' },
+    ] }],
+    null,
+    () => 'Nightly tests',
+  );
+  check('…on the Notes screen\'s picker as on the Repeating screen\'s, by one rule',
+    twinNotes.map((a) => a.label).join() === 'developer · Nightly tests · a3f2,developer · Nightly tests · b7c1' && /agentLabels\(/.test(route) && /agentLabels\(items\)/.test(src('../fleet/notewords.ts')), twinNotes.map((a) => a.label).join());
+  // 7 and 8. What run now during Pause all, and a send that waits for a slot, say.
+  check('run now while everything is paused: started, and that it waits for Pause all to end',
+    resultLine(jobRec({ lastAt: iso(9), lastResult: 'started (waits for Pause all to end)' }), now) === 'started 09:00: waits for Pause all to end');
+  check('a message sent while every slot was taken: sent, waiting for a slot',
+    resultLine(msg({ lastAt: iso(9), lastResult: 'sent (waiting for a slot)' }), now) === 'sent 09:00: waiting for a slot');
+  check('a repeating message\'s ✕ above the box asks first: ✕ cancel, then confirm or keep',
+    /arming === r\.id \?[\s\S]*?cancelRecurring\(r\.id\)[\s\S]*?>\s*confirm\s*<\/button>[\s\S]*?>\s*keep\s*<\/button>[\s\S]*?setArming\(r\.id\);\s*\}\}\s*>\s*✕ cancel\s*<\/button>/.test(sched));
 
   // ── its colours ──
   const fleet = src('../fleet/fleet.css');
@@ -3724,7 +3778,7 @@ await (async () => {
 
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup (Amendment 216).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

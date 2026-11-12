@@ -2369,6 +2369,11 @@ a.ag-files-p:focus-visible {
   color: var(--ink);
 }
 
+/* A repeating message's cancel, asked (Amendment 216). */
+.ag-sched-x.is-confirm {
+  color: var(--fail);
+}
+
 /* A scheduled message opens to its whole text when clicked (Amendment 118). */
 .ag-sched-open {
   flex: 1 1 auto;

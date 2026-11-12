@@ -1101,7 +1101,9 @@ export interface RecurringJob {
   lastJobId: string | null;
   /**
    * `started`, `skipped` (the last run was still going), `sent` (a message) or `failed: <why>`;
-   * null before the first time.
+   * null before the first time. Amendment 216's review added `started (waits for Pause all to
+   * end)` (run now while everything is paused), `sent (waiting for a slot)`, and `waiting: <why>`
+   * (a message to an agent that has not started yet, tried again at each look).
    */
   lastResult: string | null;
   createdAt: string;
@@ -1126,6 +1128,15 @@ export interface PatchRecurringRequest {
   paused?: boolean;
   text?: string;
   prompt?: string;
+}
+
+/**
+ * POST /api/recurring/:id/run (Amendment 216). `skipped` says why nothing ran, when the schedule
+ * was already being run (by the clock, or another run now): its last result is that run's.
+ */
+export interface RunRecurringResponse {
+  recurring: RecurringJob;
+  skipped?: string;
 }
 
 /** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 157). */

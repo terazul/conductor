@@ -128,7 +128,8 @@ export function noteGroups<P extends { id: string; notes?: readonly NoteLike[] }
  * The agents the agent picker offers: those with notes, in the filter's project if it has one, each
  * once, by the label its notes keep, and named with their project when there are several projects.
  * Two of one project's agents with the same role are told apart by their job (`jobOf`: its name, or
- * its prompt's first words), `developer · Nightly tests`, or *removed* once the agent is gone.
+ * its prompt's first words), `developer · Nightly tests`, or *removed* once the agent is gone; two
+ * in one job by the end of their ids too (`agentLabels`).
  */
 export function noteAgents(
   projects: readonly { id: string; name: string; notes?: readonly NoteLike[] }[],
@@ -141,13 +142,23 @@ export function noteAgents(
     if (projectId !== null && p.id !== projectId) continue;
     const roles = new Map<string, string>();
     for (const n of p.notes ?? []) if (n.agentId && !roles.has(n.agentId)) roles.set(n.agentId, n.agentLabel ?? 'agent');
-    const repeats = (role: string): boolean => [...roles.values()].filter((r) => r === role).length > 1;
-    for (const [agentId, role] of roles) {
-      const label = repeats(role) ? `${role} · ${jobOf(agentId) ?? 'removed'}` : role;
-      out.push({ agentId, label: many ? `${p.name} / ${label}` : label });
-    }
+    const items = [...roles].map(([agentId, role]) => ({ agentId, role, job: jobOf(agentId) ?? 'removed' }));
+    agentLabels(items).forEach((label, i) => out.push({ agentId: items[i]!.agentId, label: many ? `${p.name} / ${label}` : label }));
   }
   return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * One list's agents, each told apart from the rest (Amendments 214, 216): its role; with its job when
+ * another has the same role (or `always`), `developer · Nightly tests`; and, when another has the same
+ * role in the same job, with the last four of its id, `developer · Nightly tests · a3f2`. In the
+ * order given. The Notes and Repeating screens' agent pickers both name agents this way.
+ */
+export function agentLabels(items: readonly { agentId: string; role: string; job?: string }[], always = false): string[] {
+  const times = (x: string, of: readonly string[]): number => of.filter((y) => y === x).length;
+  const roles = items.map((i) => i.role);
+  const named = items.map((i) => ((always || times(i.role, roles) > 1) && i.job !== undefined ? `${i.role} · ${i.job}` : i.role));
+  return named.map((l, i) => (times(l, named) > 1 ? `${l} · ${items[i]!.agentId.slice(-4)}` : l));
 }
 
 /** A job as the agent picker names it: its name, else its prompt's first five words. */

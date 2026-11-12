@@ -17,7 +17,7 @@
  * daemon made it, it goes when a slot frees, and cancelling it puts the agent back.
  *
  * A message that repeats (Amendment 216) is one line here too, after them: **⟳ every weekday at
- * 09:00**, its name, and pause or resume and cancel. ⟳ repeat… beside ⏲ later saves one from the
+ * 09:00**, its name, and pause or resume and cancel, which asks first (✕ cancel → confirm). ⟳ repeat… beside ⏲ later saves one from the
  * box (`RepeatRow`); the Repeating screen lists them all, with edit and ▶ run now.
  */
 
@@ -127,6 +127,8 @@ export function ScheduledList({ agentId }: { agentId: string }) {
   const firstSlot = items.find((m) => m.trigger === 'slot' && !m.error)?.id;
   const now = new Date(useNow(30_000));
   const [why, setWhy] = useState<string | null>(null);
+  // A repeating message's ✕ asks first (✕ cancel → confirm): it would go on being sent for weeks.
+  const [arming, setArming] = useState<string | null>(null);
   // Which rows are open to their full text (Amendment 118). A row shows one line until clicked.
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string): void =>
@@ -214,18 +216,39 @@ export function ScheduledList({ agentId }: { agentId: string }) {
             >
               {r.paused ? '▶' : '❚❚'}
             </button>
-            <button
-              type="button"
-              className="ag-sched-x"
-              aria-label="cancel it"
-              title="Cancel: it will not be sent again. What it sent stays."
-              onClick={() => {
-                setWhy(null);
-                cancelRecurring(r.id).catch((err: unknown) => setWhy(errorText(err)));
-              }}
-            >
-              ✕
-            </button>
+            {arming === r.id ? (
+              <>
+                <button
+                  type="button"
+                  className="ag-sched-x is-confirm"
+                  aria-label="confirm: cancel it"
+                  title="Cancel: it will not be sent again. What it sent stays."
+                  onClick={() => {
+                    setWhy(null);
+                    setArming(null);
+                    cancelRecurring(r.id).catch((err: unknown) => setWhy(errorText(err)));
+                  }}
+                >
+                  confirm
+                </button>
+                <button type="button" className="ag-sched-x" aria-label="keep it" title="Keep it" onClick={() => setArming(null)}>
+                  keep
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ag-sched-x"
+                aria-label="cancel it"
+                title="Cancel it: asks first"
+                onClick={() => {
+                  setWhy(null);
+                  setArming(r.id);
+                }}
+              >
+                ✕ cancel
+              </button>
+            )}
           </div>
         </div>
       ))}

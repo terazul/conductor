@@ -214,25 +214,38 @@ answer is one idea, **Repeating**, with two kinds of schedule in the one table, 
 result are shared by both.
 
 - **380:** `recurring_jobs` gains `agent_id` (references `agents`, `ON DELETE CASCADE`) and `text`. A message row has
-  both, `request = ''`, its agent's `project_id`, `last_job_id` always NULL, and `last_result` `sent` or
-  `failed: <why>`. `jobs` gains `request`, the single-stack `CreateJobRequest` the job was made from as
+  both, `request = ''`, its agent's `project_id`, `last_job_id` always NULL, and `last_result` `sent`,
+  `sent (waiting for a slot)`, `waiting: <why>` or `failed: <why>`. `jobs` gains `request`, the single-stack `CreateJobRequest` the job was made from as
   `parseCreateJob` normalised it. It is written at creation from now on (`createJob(req, recurringId?, stored = req)`):
   each stack of a batch keeps its own, and a recurring run keeps the schedule's request, not the run's name or branch.
   Old jobs have NULL. `RecurringJob` has `kind`, with `request` only for a job and `agentId` and `text` only for a
   message. `Job.repeatable` is `true` when the job kept its request.
 - **Sending:** a due message goes through `Supervisor.sendMessage`, as if you had pressed send then: into a live run,
-  or resuming a finished one. There is no skip rule. *"Cannot receive messages yet"* (an agent with no session) puts
-  the claim back and leaves nothing recorded, so the next tick tries again, as ⏲ later's do. Pause all and missed
-  times are as for jobs: it stays due while held, and after downtime it is sent once.
+  or resuming a finished one. There is no skip rule. When every slot is taken (`sendMessage` gives `'queued'`) the
+  last result is *sent (waiting for a slot)*. *"Cannot receive messages yet"* (an agent with no session) puts the
+  claim back, so the next tick tries again, as ⏲ later's do, with `next_at` not moved. It records *waiting: developer
+  has not started yet* (`resultWaiting`) and sends the frame once, when it starts to wait; later ticks that find the
+  same result write nothing. Pause all and missed times are as for jobs: it stays due while held, and after downtime
+  it is sent once.
 - **Run now:** `POST /api/recurring/:id/run` runs either kind once, paused or held or not. It sets the last result
   and leaves `next_at` alone, and a job still skips while its last run goes. For a message that cannot receive yet,
-  run now records it as failed, since you asked and should see why. 404 *"no such schedule"*.
+  run now records it as failed, since you asked and should see why. A job made while Pause all holds records
+  *started (waits for Pause all to end)* and waits queued. It answers `RunRecurringResponse`, `{recurring, skipped?}`.
+  404 *"no such schedule"*.
+- **One at a time:** `session/recurring.ts` holds a `Set` of the schedule ids being run, shared by the clock and run
+  now. `runOnce` checks and takes the id before its first await and gives it back in `finally`, then reads the row
+  fresh. The clock leaves a taken row for its next look, with its claim untouched. Run now on a taken row runs
+  nothing, writes nothing, sends no frame, and answers `skipped: 'it is being run now'` (`BEING_RUN`). The web says
+  *Skipped: it is being run now.* (`runNowText`). `last_job_id` is written as `COALESCE(?, last_job_id)`, so only a
+  run that made a job changes it: a skip or a failure keeps the job the last run started.
 - **`POST /api/recurring`:** it takes `{request}` as before, `{fromJobId, prompt?}` or `{agentId, text}`.
   - `fromJobId` copies that job's kept request, with its prompt replaced if one is given. Giving a prompt also drops
     `waitForInstructions`, since the prompt is now what needs doing. The copy is re-checked as Spawn's is.
   - Refusals: 404 *"no such job"*; 400 `NOT_REPEATABLE`, *"this job was launched before Conductor kept its setup;
     set it up in Spawn and use repeat…"*, for a job with none; 404 for a missing agent; 400 for empty or overlong
-    text (`SCHEDULED_TEXT_MAX`); the waits-for-instructions and empty-prompt refusals as before.
+    text (`SCHEDULED_TEXT_MAX`); 400 `HELPER_NOT_SCHEDULED`, *"a helper is its orchestrator's to direct; schedule a
+    message to the orchestrator instead"*, for an agent with a `parentId`; the waits-for-instructions and
+    empty-prompt refusals as before.
 - **`PATCH`:** it adds `name`, `every`, `text` (a message only) and `prompt` (a job only, re-checked through
   `parseCreateJob`). Sending either to the wrong kind gives 400 *"only a repeating message has text"* /
   *"only a repeating job has a prompt"*. Removing an agent removes its schedules, and a resync sends the recurring
@@ -248,18 +261,33 @@ result are shared by both.
   - **edit** was **edit time**. It now opens the name, the rule (`RuleFields`) and the prompt or the text in place,
     and saves only what changed (`editPatch`).
 - **+ new** offers two forms:
-  - **A message to an agent** is project → agent → text → rule. The agent picker lists every agent of the project as
-    `role · job`, and the name starts as the text's first line.
+  - **A message to an agent** is project → agent → text → rule. The agent picker lists every agent of the project
+    but its helpers as `role · job`, and two of one role in one job also get the last four characters of their id,
+    `developer · Nightly tests · a3f2`. The name starts as the text's first line. `agentLabels` in
+    `fleet/notewords.ts` names them; the Notes screen's picker (`noteAgents`) uses it too.
   - **A job like one you ran** is project → one of its repeatable jobs, newest first (`repeatableJobs`) → the job's own
     form.
   - It also links **set up a new launch in Spawn**.
 - **⟳ repeat… in the message box**, right after ⏲ later: a row with the name (starting as the text's first line) and
   the rule. Saving it makes a message schedule for this agent and empties the box, as ⏲ later does. `ScheduledList`
   shows this agent's repeating messages after its waiting ones. Each is one line, **⟳ every weekday at 09:00** and its
-  name, not opened, with pause and cancel.
+  name, not opened, with pause and cancel. Cancel asks first: **✕ cancel**, then **confirm** or **keep**. On a
+  helper the button is shut, with `HELPER_NOT_SCHEDULED` as its title.
 - **⟳ repeat… on a job** sits on its group header on the Project screen and in the Fleet card's action row, and opens
   `RepeatJobForm` (name, prompt prefilled, rule). It is shut on a job that kept no setup, with `NOT_REPEATABLE` as its
-  title.
+  title. Once saved, the form gives way to *Saved: next 13 Nov 09:00. It is on the Repeating screen.* (`savedText`,
+  `RepeatJobSaved`) and **close**, so there is no save left to press twice. Save is shut while it is in flight.
+
+**Found in review** of `fcfd59e` and `936064a`, and fixed in the same terms as above:
+- ▶ run now had no claim, so it and the clock, or two run nows, could start two jobs at once. Hence *one at a time*.
+- A message waiting for its agent recorded nothing, so the row said nothing. Hence *waiting*.
+- `RepeatJobForm` stayed open after a save, so a second press made a second schedule. The box's ⟳ repeat… (it
+  empties and closes) and + new's message form (it empties its text, so save shuts) were already safe; checks now
+  say so.
+- A helper could be scheduled, and it is cleared when its orchestrator finishes.
+- Two agents of one role in one job had the same label.
+- Run now during Pause all and a message sent into a full house said only *started* / *sent*.
+- The box's ✕ on a repeating message cancelled at once.
 
 **Departures:**
 - §57's three row checks were updated for **edit time** becoming **edit** and for the kind line between the name and
@@ -272,7 +300,13 @@ result are shared by both.
   - a message sent on its rule, resuming its session;
   - missed times sent once;
   - held, then sent once;
-  - not yet: retried, then sent;
+  - not yet: retried, then sent; waiting recorded and heard once, `next_at` kept, and two more ticks changing nothing;
+  - two concurrent run nows against a gated `createJob`: one job, the other `skipped`, and the route's answer;
+  - the clock and run now in either order: one job, run now skipped or the clock's row left due;
+  - a failed run keeping the last `last_job_id`;
+  - run now under Pause all, and a message into a full house, with their results;
+  - a helper refused;
+  - a batch of two stacks, each job keeping its own single-stack request with `{track}` resolved;
   - a missing folder recorded as failed;
   - run now for both kinds, keeping the next time;
   - PATCH of text, prompt, name and every, with their refusals;
@@ -289,7 +323,10 @@ result are shared by both.
   - the three requests' bodies;
   - the wiring;
   - `r` unique;
-  - tokens only, and the text colours at 4.5:1 or better in both themes.
+  - tokens only, and the text colours at 4.5:1 or better in both themes;
+  - from review: `runNowText` both ways; the waiting, held and queued rows; the saved form rendered and save shut
+    while in flight, and the box's and + new's forms emptying; helpers left out of the picker and shut in the box;
+    `agentLabels` with twins in one job, through `noteAgents` too; the two-step ✕ and its colour.
 - §15's and `metrics/verify.ts`' hotkey lists include `repeating`.
 
 Not looked at in a browser.
