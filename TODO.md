@@ -20,6 +20,12 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Make repeating easier, and see every schedule without opening each project.** Asked for (12 Nov): *"make it
+  easier to schedule recurring tasks, and also provide a way to view the recurring tasks without having to go into
+  each project."* *Done (12 Nov): Amendment 216 (a Repeating screen, `r`, every schedule by project with ▶ run now
+  and edit in place; a message to an agent on a rule, from the message box's ⟳ repeat… or + new; a job you ran
+  repeated from the setup Conductor now keeps for every job (380), from its ⟳ repeat… or + new; a job from before
+  that is refused, saying why).*
 - [x] **Say which project and agent the reply box writes to.** Asked for (12 Nov): *"above the text window for my
   reply, add the 'project/agent' at the top in the menu bar."* *Done (12 Nov): Amendment 215 (a bar across the top
   of the box, **project / role · job name**, 18% of the project's colour; the name opens the project).*

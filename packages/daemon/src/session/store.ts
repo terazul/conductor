@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   Autonomy,
   BlockMode,
+  CreateJobRequest,
   DaySpend,
   DecisionSummary,
   HelperRole,
@@ -381,6 +382,8 @@ interface JobRow {
   name: string | null;
   /** Amendment 211; absent on a row read before migration 360 ran. */
   recurring_id?: string | null;
+  /** Amendment 216: the setup it was launched from, JSON; absent before migration 380 ran. */
+  request?: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -396,6 +399,7 @@ const toJob = (r: JobRow): Job => ({
   budgetUsd: r.budget_usd,
   ...(r.name ? { name: r.name } : {}),
   ...(r.recurring_id ? { recurringId: r.recurring_id } : {}),
+  ...(r.request ? { repeatable: true as const } : {}),
 });
 
 export function listJobs(db: Db): Job[] {
@@ -413,12 +417,16 @@ export function getJob(db: Db, id: string): Job | undefined {
   return r ? toJob(r) : undefined;
 }
 
-export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
-  const job: Job = { ...j, createdAt: nowIso(), endedAt: null };
+/**
+ * A new job. `request` is the setup it was launched from (Amendment 216), kept so it can be
+ * repeated; a job made without one is not repeatable.
+ */
+export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt' | 'repeatable'>, request?: CreateJobRequest): Job {
+  const job: Job = { ...j, createdAt: nowIso(), endedAt: null, ...(request ? { repeatable: true as const } : {}) };
   db.prepare(
     `INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch,
-                       status, budget_usd, created_at, ended_at, name, recurring_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+                       status, budget_usd, created_at, ended_at, name, recurring_id, request)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
   ).run(
     job.id,
     job.projectId,
@@ -431,8 +439,15 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
     job.createdAt,
     job.name ?? null,
     job.recurringId ?? null,
+    request ? JSON.stringify(request) : null,
   );
   return job;
+}
+
+/** The setup a job was launched from (Amendment 216), or null for one from before it was kept. */
+export function jobRequest(db: Db, id: string): CreateJobRequest | null {
+  const r = row<{ request: string | null }>(db.prepare('SELECT request FROM jobs WHERE id = ?').get(id));
+  return r?.request ? (JSON.parse(r.request) as CreateJobRequest) : null;
 }
 
 /** The name a launched stack is shown by, or with null its original prompt again. */

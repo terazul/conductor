@@ -144,10 +144,17 @@ export function fromMark(
 export type RecurringResult =
   | { kind: 'started' }
   | { kind: 'skipped' }
+  | { kind: 'sent' }
   | { kind: 'failed'; reason: string };
 
 export const RESULT_STARTED = 'started';
 export const RESULT_SKIPPED = 'skipped';
+/** A repeating message went to its agent (Amendment 216). */
+export const RESULT_SENT = 'sent';
+
+/** Why a job without its kept setup cannot be repeated (Amendment 216): the daemon's refusal, and the button's title. */
+export const NOT_REPEATABLE =
+  'this job was launched before Conductor kept its setup; set it up in Spawn and use repeat…';
 
 /** `failed: <why>`, as kept. */
 export function resultFailed(reason: string): string {
@@ -159,5 +166,6 @@ export function readResult(raw: string | null): RecurringResult | null {
   if (raw === null) return null;
   if (raw === RESULT_STARTED) return { kind: 'started' };
   if (raw === RESULT_SKIPPED) return { kind: 'skipped' };
+  if (raw === RESULT_SENT) return { kind: 'sent' };
   return { kind: 'failed', reason: raw.replace(/^failed:\s*/, '') };
 }

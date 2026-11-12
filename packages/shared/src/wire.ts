@@ -120,6 +120,11 @@ export interface Job {
    * schedule is cancelled, so the job can still say it came from one.
    */
   recurringId?: string;
+  /**
+   * Present when the job keeps the setup it was launched from (Amendment 216): every Spawn launch
+   * and recurring run from then on. Such a job can be repeated with `fromJobId`.
+   */
+  repeatable?: true;
 }
 
 export interface Agent {
@@ -1067,42 +1072,60 @@ export type Every =
   | { kind: 'hours'; n: number };
 
 /**
- * A job that repeats until you cancel it (Amendment 211): a saved Spawn setup, launched as a
+ * Something that repeats until you cancel it (Amendment 211): a saved Spawn setup, launched as a
  * new job each time it is due. If the last run's job has not ended by then, that run is
  * skipped; times missed while the daemon was down launch once, on its first tick back.
+ *
+ * Or (Amendment 216) a message to an agent, sent on the rule exactly as if you had pressed send
+ * then: into its live run, or resuming a finished one. It is never skipped.
  */
 export interface RecurringJob {
   id: string;
+  /** The project of the setup, or of the agent a message goes to. */
   projectId: string;
   name: string;
-  /** What each run launches: the exact request Spawn would send. */
-  request: CreateJobRequest;
+  /** A new job each time (`request`), or a message to an agent (`agentId` and `text`). */
+  kind: 'job' | 'message';
+  /** A job: what each run launches, the exact request Spawn would send. */
+  request?: CreateJobRequest;
+  /** A message: the agent it is sent to. Removing the agent removes the schedule. */
+  agentId?: string;
+  /** A message: what is sent. */
+  text?: string;
   every: Every;
   /** When it is next due, ISO. */
   nextAt: string;
-  /** When it last came due, ISO; null before the first time. */
+  /** When it last came due, or was run now, ISO; null before the first time. */
   lastAt: string | null;
-  /** The job its last run started; null until one has. */
+  /** A job: the job its last run started; null until one has, and always for a message. */
   lastJobId: string | null;
-  /** `started`, `skipped` (the last run was still going) or `failed: <why>`; null before the first time. */
+  /**
+   * `started`, `skipped` (the last run was still going), `sent` (a message) or `failed: <why>`;
+   * null before the first time.
+   */
   lastResult: string | null;
   createdAt: string;
   /** Paused, it does not run; resumed, it is next due by its rule from then. */
   paused: boolean;
 }
 
-/** POST /api/recurring (Amendment 211). The project is the request's. */
-export interface CreateRecurringRequest {
-  name: string;
-  every: Every;
-  request: CreateJobRequest;
-}
+/**
+ * POST /api/recurring (Amendments 211, 216). One of: a Spawn setup; a job you ran, whose kept
+ * setup is copied with its prompt replaced if you give one; or a message to an agent. The
+ * project is the request's, the job's or the agent's.
+ */
+export type CreateRecurringRequest =
+  | { name: string; every: Every; request: CreateJobRequest }
+  | { name: string; every: Every; fromJobId: string; prompt?: string }
+  | { name: string; every: Every; agentId: string; text: string };
 
-/** PATCH /api/recurring/:id (Amendment 211). */
+/** PATCH /api/recurring/:id (Amendments 211, 216). `text` is a message's; `prompt` a job's. */
 export interface PatchRecurringRequest {
   name?: string;
   every?: Every;
   paused?: boolean;
+  text?: string;
+  prompt?: string;
 }
 
 /** POST /api/agents/:agentId/scheduled. `at` is required unless `trigger` is `done` (Amendment 157). */

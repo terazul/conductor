@@ -24,7 +24,7 @@ import { useJobs, useProjects } from '../lib/store.js';
 import { openProject } from '../shell/nav.js';
 import { replyBarLine, replyBarWords } from './replybar.js';
 import { useEffect, useState } from 'react';
-import { spentOn, type Agent, type Autonomy, type EffortLevel, type SendMessageResponse } from '@conductor/shared';
+import { everyWords, spentOn, type Agent, type Autonomy, type EffortLevel, type Every, type RecurringJob, type SendMessageResponse } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, ProviderModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -52,7 +52,8 @@ import {
   nearestEffort,
 } from '../spawn/autonomy.js';
 import { queueWhenDone, restoreFolder, scheduleMessage, sendMessage, sentText, setAutonomy, setModel, useCommand, type Notice } from './endpoints.js';
-import { LaterRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
+import { LaterRow, RepeatRow, ScheduledList, whenDoneLabel, whenDoneRefusal } from './scheduled.js';
+import { saveRecurringMessage } from '../fleet/endpoints.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
 import { ENTER_KEY, SETTINGS_KEY, WORKING_SAYS, enterAction, enterSends, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
@@ -321,6 +322,22 @@ export function Composer({ agent }: { agent: Agent }) {
     if (ok) {
       setText('');
       setLater(false);
+    }
+  };
+
+  // Send it on a rule (Amendment 216): the same text, to this agent, until you cancel it.
+  const [repeat, setRepeat] = useState(false);
+  const saveRepeat = async (name: string, every: Every) => {
+    const body = text.trim();
+    if (body.length === 0) return;
+    const ok = await send.run(
+      'Saving the schedule',
+      () => saveRecurringMessage(name, every, agent.id, body),
+      (r: { recurring: RecurringJob }) => `Repeats ${everyWords(r.recurring.every)}, next ${fmtWhen(r.recurring.nextAt)}.`,
+    );
+    if (ok) {
+      setText('');
+      setRepeat(false);
     }
   };
 
@@ -657,6 +674,15 @@ export function Composer({ agent }: { agent: Agent }) {
             </button>
             <button
               type="button"
+              className={`ag-later-btn${repeat ? ' is-on' : ''}`}
+              aria-expanded={repeat}
+              onClick={() => setRepeat((v) => !v)}
+              title="Send this message on a rule, every day or every few hours, until you cancel it"
+            >
+              ⟳ repeat…
+            </button>
+            <button
+              type="button"
               className={`ag-later-btn${busyNow ? ' is-hot' : ''}`}
               onClick={() => void whenDone()}
               disabled={send.busy || text.trim().length === 0 || doneRefused !== null}
@@ -687,6 +713,10 @@ export function Composer({ agent }: { agent: Agent }) {
             onSchedule={(at) => void schedule(at)}
             onClose={() => setLater(false)}
           />
+        )}
+
+        {repeat && (
+          <RepeatRow busy={send.busy} text={text} onSave={(name, every) => void saveRepeat(name, every)} onClose={() => setRepeat(false)} />
         )}
 
         {open && (

@@ -200,6 +200,100 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 216 — post-merge, applied. **Repeating: a message to an agent, a job like one you ran, every schedule on one screen.**
+
+Daemon (new migration `380_recurring_more.sql`, `session/recurring.ts`, `routes/recurring.ts`, `session/store.ts`,
+`session/supervisor.ts`, `session/schedule.ts`, `session/verify.ts`), shared (`wire.ts`, `recurring.ts`), web (new
+`repeating/route.tsx` and `repeating/repeating.css`, `fleet/repeating.tsx`, `fleet/endpoints.ts`, `fleet/card.tsx`,
+`fleet/project.tsx`, `fleet/fleet.css`, `agent/composer.tsx`, `agent/scheduled.tsx`, `agent/agent.css`,
+`lib/screens.ts`, `shell/shell.tsx`, `lib/verify.ts`, `metrics/verify.ts`) and `docs/MANUAL.md`. Asked 12 Nov: *"make
+it easier to schedule recurring tasks, and also provide a way to view the recurring tasks without having to go into
+each project"*. Answered: repeat a job you ran, a quick form, ▶ run now and edit on each schedule, and *"for an
+existing agent, like the SCHEDULE button, but REPEATING, and that text gets repeated to that agent as requested"*. The
+answer is one idea, **Repeating**, with two kinds of schedule in the one table, so pause, run now, edit and the last
+result are shared by both.
+
+- **380:** `recurring_jobs` gains `agent_id` (references `agents`, `ON DELETE CASCADE`) and `text`. A message row has
+  both, `request = ''`, its agent's `project_id`, `last_job_id` always NULL, and `last_result` `sent` or
+  `failed: <why>`. `jobs` gains `request`, the single-stack `CreateJobRequest` the job was made from as
+  `parseCreateJob` normalised it. It is written at creation from now on (`createJob(req, recurringId?, stored = req)`):
+  each stack of a batch keeps its own, and a recurring run keeps the schedule's request, not the run's name or branch.
+  Old jobs have NULL. `RecurringJob` has `kind`, with `request` only for a job and `agentId` and `text` only for a
+  message. `Job.repeatable` is `true` when the job kept its request.
+- **Sending:** a due message goes through `Supervisor.sendMessage`, as if you had pressed send then: into a live run,
+  or resuming a finished one. There is no skip rule. *"Cannot receive messages yet"* (an agent with no session) puts
+  the claim back and leaves nothing recorded, so the next tick tries again, as ⏲ later's do. Pause all and missed
+  times are as for jobs: it stays due while held, and after downtime it is sent once.
+- **Run now:** `POST /api/recurring/:id/run` runs either kind once, paused or held or not. It sets the last result
+  and leaves `next_at` alone, and a job still skips while its last run goes. For a message that cannot receive yet,
+  run now records it as failed, since you asked and should see why. 404 *"no such schedule"*.
+- **`POST /api/recurring`:** it takes `{request}` as before, `{fromJobId, prompt?}` or `{agentId, text}`.
+  - `fromJobId` copies that job's kept request, with its prompt replaced if one is given. Giving a prompt also drops
+    `waitForInstructions`, since the prompt is now what needs doing. The copy is re-checked as Spawn's is.
+  - Refusals: 404 *"no such job"*; 400 `NOT_REPEATABLE`, *"this job was launched before Conductor kept its setup;
+    set it up in Spawn and use repeat…"*, for a job with none; 404 for a missing agent; 400 for empty or overlong
+    text (`SCHEDULED_TEXT_MAX`); the waits-for-instructions and empty-prompt refusals as before.
+- **`PATCH`:** it adds `name`, `every`, `text` (a message only) and `prompt` (a job only, re-checked through
+  `parseCreateJob`). Sending either to the wrong kind gives 400 *"only a repeating message has text"* /
+  *"only a repeating job has a prompt"*. Removing an agent removes its schedules, and a resync sends the recurring
+  frame.
+- **The Repeating screen:** order 84, key `r`. `r` was free: the route keys were 1–9, 0 and `n`, no page handler
+  reads `r`, and the only other `'r'` is a React key in `agent/markdown.tsx`. The status bar says it.
+  - The screen holds every schedule, grouped by project in the projects' order (`repeatingGroups`), each group under
+    its name and colour bar, which opens the project. The count reads *3 schedules in 2 projects*.
+  - Its rows are the Project screen's `RepeatingRow`, extended, so both screens get the same row. A row shows its
+    name, then **⟳ job** or **⟳ message to developer** (`kindWords`), then the rule and next time, then the last
+    result. A message's last result links **its agent**, and a job's **its job**. Then come **▶ run now**,
+    **❚❚ pause / ▶ resume**, **edit** and **✕ cancel**.
+  - **edit** was **edit time**. It now opens the name, the rule (`RuleFields`) and the prompt or the text in place,
+    and saves only what changed (`editPatch`).
+- **+ new** offers two forms:
+  - **A message to an agent** is project → agent → text → rule. The agent picker lists every agent of the project as
+    `role · job`, and the name starts as the text's first line.
+  - **A job like one you ran** is project → one of its repeatable jobs, newest first (`repeatableJobs`) → the job's own
+    form.
+  - It also links **set up a new launch in Spawn**.
+- **⟳ repeat… in the message box**, right after ⏲ later: a row with the name (starting as the text's first line) and
+  the rule. Saving it makes a message schedule for this agent and empties the box, as ⏲ later does. `ScheduledList`
+  shows this agent's repeating messages after its waiting ones. Each is one line, **⟳ every weekday at 09:00** and its
+  name, not opened, with pause and cancel.
+- **⟳ repeat… on a job** sits on its group header on the Project screen and in the Fleet card's action row, and opens
+  `RepeatJobForm` (name, prompt prefilled, rule). It is shut on a job that kept no setup, with `NOT_REPEATABLE` as its
+  title.
+
+**Departures:**
+- §57's three row checks were updated for **edit time** becoming **edit** and for the kind line between the name and
+  the rule. They check the same things.
+- §40's old-database check now writes its row as 360 did, with a raw `INSERT`, because `insertRecurring` writes 380's
+  columns. The check still asserts that the row goes with its project.
+
+**Verified:**
+- daemon `session/verify.ts` §42:
+  - a message sent on its rule, resuming its session;
+  - missed times sent once;
+  - held, then sent once;
+  - not yet: retried, then sent;
+  - a missing folder recorded as failed;
+  - run now for both kinds, keeping the next time;
+  - PATCH of text, prompt, name and every, with their refusals;
+  - removal with the agent, and the frame;
+  - a new job keeps its request and an old one none;
+  - `fromJobId` with and without a prompt, and its refusals;
+  - 380 on a database of everything before it.
+- `lib/verify.ts` §62:
+  - grouping and count;
+  - row words for both kinds, their links and buttons;
+  - edit's start, patch and refusals;
+  - repeatable jobs and the button's enabled and disabled states;
+  - the job form and the box's row rendered;
+  - the three requests' bodies;
+  - the wiring;
+  - `r` unique;
+  - tokens only, and the text colours at 4.5:1 or better in both themes.
+- §15's and `metrics/verify.ts`' hotkey lists include `repeating`.
+
+Not looked at in a browser.
+
 ### Amendment 215 — post-merge, applied. **The message box says which project and agent it writes to.**
 
 Web only (new `agent/replybar.ts`, `agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`.

@@ -263,6 +263,9 @@ function StatusBar() {
       <span>
         <kbd>n</kbd> notes
       </span>
+      <span>
+        <kbd>r</kbd> repeating
+      </span>
       <DockButton />
       <span className="sh-right">
         <PauseAll />

@@ -7,7 +7,7 @@
  * lib/feed.ts so bearer auth stays in one place.
  */
 
-import type { PatchRecurringRequest, Project, ProjectColor, ProjectNote, RecurringJob } from '@conductor/shared';
+import type { CreateRecurringRequest, Every, PatchRecurringRequest, Project, ProjectColor, ProjectNote, RecurringJob } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /*
@@ -103,4 +103,21 @@ export function patchRecurring(id: string, patch: PatchRecurringRequest): Promis
 /** Cancel a job that repeats. The jobs it started stay. */
 export function cancelRecurring(id: string): Promise<{ removed: boolean }> {
   return api(`/api/recurring/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Run a schedule now (Amendment 216), either kind, keeping its next time. A job still skips while its last run is going. */
+export function runRecurring(id: string): Promise<{ recurring: RecurringJob }> {
+  return api(`/api/recurring/${encodeURIComponent(id)}/run`, { method: 'POST' });
+}
+
+/** A message to an agent, sent on a rule until you cancel it (Amendment 216). */
+export function saveRecurringMessage(name: string, every: Every, agentId: string, text: string): Promise<{ recurring: RecurringJob }> {
+  const body: CreateRecurringRequest = { name, every, agentId, text };
+  return api('/api/recurring', { method: 'POST', body });
+}
+
+/** A job like one you ran, on a rule: the daemon copies its stored setup with this prompt (Amendment 216). */
+export function saveRecurringFromJob(name: string, every: Every, fromJobId: string, prompt: string): Promise<{ recurring: RecurringJob }> {
+  const body: CreateRecurringRequest = { name, every, fromJobId, prompt };
+  return api('/api/recurring', { method: 'POST', body });
 }

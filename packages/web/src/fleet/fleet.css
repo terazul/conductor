@@ -1740,6 +1740,56 @@
   margin-top: 4px;
 }
 
+/* Amendment 216: what it repeats, the edit's fields, and ⟳ repeat…'s form on a job. */
+.pj-rep-kind {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
+.pj-rep-input,
+.pj-rep-body {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--well);
+  color: var(--ink);
+}
+
+.pj-rep-input {
+  min-width: 16em;
+}
+
+.pj-rep-body {
+  width: 100%;
+  resize: vertical;
+}
+
+.pj-rep-input:focus,
+.pj-rep-body:focus {
+  outline: none;
+  border-color: var(--live);
+}
+
+.pj-rep-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg2);
+  cursor: default;
+}
+
+.pj-rep-how {
+  font-size: var(--fs-sm);
+  color: var(--ink2);
+}
+
 /* A job a schedule started, by its name: "⟳ from Nightly tests". */
 .fl-from {
   font-family: var(--mono);

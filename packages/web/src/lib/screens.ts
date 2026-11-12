@@ -34,6 +34,7 @@
  *   70   —   Spawn          Track A   no tab (Amendment 42)
  *   80  '8'  Metrics        wave 10   (Amendment 122)
  *   82  'n'  Notes          wave 14   (Amendment 214)
+ *   84  'r'  Repeating      wave 14   (Amendment 216)
  *   90  '9'  Settings       W0        (Amendment 47)
  *   99  '0'  Diagnostics    W0
  *

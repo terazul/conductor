@@ -2416,6 +2416,27 @@ a.ag-files-p:focus-visible {
   overflow-y: auto;
 }
 
+/* A message that repeats (Amendment 216): one line, not opened, pause and cancel at its end. */
+.ag-sched-row.is-repeat .ag-sched-open {
+  cursor: default;
+}
+
+.ag-sched-row.is-paused .ag-sched-when {
+  color: var(--ink3);
+}
+
+.ag-repeat-name {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 14em;
+}
+
 /* ── ⏸ pause until a time (Amendment 205) ─────────────────────────────────── */
 
 /* A paused agent's tab, as `.sh-nav-tag.is-pause` is its navigator row: `--bg` on `--idle`. */

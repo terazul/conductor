@@ -832,8 +832,12 @@ export class Supervisor implements AgentControl {
 
   // ── jobs ──────────────────────────────────────────────────────────────────
 
-  /** `recurringId`: the schedule launching it, when one is (Amendment 211). */
-  async createJob(req: CreateJobRequest, recurringId?: string): Promise<CreateJobResponse> {
+  /**
+   * `recurringId`: the schedule launching it, when one is (Amendment 211). `stored`: the setup the
+   * job keeps, so it can be repeated (Amendment 216), the request itself unless a recurring run
+   * gives its schedule's, before the run's name and branch, so repeating a run repeats the setup.
+   */
+  async createJob(req: CreateJobRequest, recurringId?: string, stored: CreateJobRequest = req): Promise<CreateJobResponse> {
     const project = getProject(this.#db, req.projectId);
     if (!project) throw new Error(`no such project ${req.projectId}`);
     if (!req.prompt?.trim() && !req.waitForInstructions) throw new Error('prompt is required');
@@ -886,7 +890,7 @@ export class Supervisor implements AgentControl {
       branch,
       status: 'queued',
       budgetUsd: req.budgetUsd ?? null,
-    });
+    }, stored);
 
     // Roles resolve to ids in one pass so dependsOnRoles can point at siblings.
     const idByRole = new Map<string, string>();
