@@ -20,6 +20,9 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Say which project and agent the reply box writes to.** Asked for (12 Nov): *"above the text window for my
+  reply, add the 'project/agent' at the top in the menu bar."* *Done (12 Nov): Amendment 215 (a bar across the top
+  of the box, **project / role · job name**, 18% of the project's colour; the name opens the project).*
 - [x] **See every note, and which agent it was typed on.** Asked for (12 Nov): *"provide a way to view all the notes
   that were typed on various agents."* *Done (12 Nov): Amendment 214 (a Notes screen, `n`, filtered by project,
   agent, open or done and words; a note added on an agent's screen is tagged with it, and its row opens it).*

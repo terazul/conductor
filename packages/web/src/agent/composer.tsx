@@ -20,6 +20,9 @@
 
 import { projClass, useProjectColor } from '../lib/projectColor.js';
 import { useDraft } from '../lib/drafts.js';
+import { useJobs, useProjects } from '../lib/store.js';
+import { openProject } from '../shell/nav.js';
+import { replyBarLine, replyBarWords } from './replybar.js';
 import { useEffect, useState } from 'react';
 import { spentOn, type Agent, type Autonomy, type EffortLevel, type SendMessageResponse } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
@@ -507,6 +510,12 @@ export function Composer({ agent }: { agent: Agent }) {
   const enterSendsNow = enterSends(useSetting(ENTER_KEY));
   // The project's colour (Amendment 210), for the box's edge (Amendment 212).
   const boxColor = useProjectColor(agent.projectId);
+  // Which project and agent the box writes to, across its top, tinted in that colour (Amendment 215).
+  const bar = replyBarWords(
+    useProjects().find((p) => p.id === agent.projectId)?.name,
+    agent.role,
+    useJobs(agent.projectId).find((j) => j.id === agent.jobId)?.name,
+  );
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
   // Past the budget it says so (Amendment 124), and nothing stops it (Amendment 180).
@@ -539,6 +548,18 @@ export function Composer({ agent }: { agent: Agent }) {
       <ScheduledList agentId={agent.id} />
       {/* Edged in its project's colour, as thick as the project's bar, so the box says which project it writes to (Amendment 212). */}
       <div className={`ag-cbox${boxColor ? ` has-proj ${projClass(boxColor)}` : ''}`}>
+        <div className="ag-cbar" title={replyBarLine(bar)}>
+          {bar.project !== null && (
+            <>
+              <button type="button" className="ag-cbar-proj" title={`Open ${bar.project}`} onClick={() => openProject(agent.projectId)}>
+                {bar.project}
+              </button>
+              <span className="ag-cbar-quiet"> / </span>
+            </>
+          )}
+          <span className="ag-cbar-agent">{bar.agent}</span>
+          {bar.job !== null && <span className="ag-cbar-quiet"> · {bar.job}</span>}
+        </div>
         <textarea
           className="ag-input"
           value={text}

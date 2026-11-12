@@ -200,6 +200,22 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 215 — post-merge, applied. **The message box says which project and agent it writes to.**
+
+Web only (new `agent/replybar.ts`, `agent/composer.tsx`, `agent/agent.css`, `lib/verify.ts`) and `docs/MANUAL.md`.
+Asked 12 Nov: *"above the text window for my reply, add the 'project/agent' at the top in the menu bar."* Answered: a
+bar across the top inside the box, tinted in the project's colour, reading **conductor / developer**, the textarea
+under it, then the row as before. The bar (`.ag-cbar`) is the box's first child and runs edge to edge over its
+padding, so it is part of the box and never scrolls away. It reads the project's name, a button that opens the
+project, then ` / ` and the agent's role (Amendment 184) as plain text, and ` · ` and the job's name, in `--ink2`,
+when the job has one (`replyBarWords`, pure); until the project is known, the role alone. With a project colour
+(Amendment 210, kept or auto) it is `color-mix(in srgb, var(--proj) 18%, var(--surf))`, `--surf` being the box's
+own background, under the 4px edge of Amendment 212; with none, a plain strip in `--surf` with a `--line` rule under
+it. 18% was picked by computing every `--proj-*` in both themes: the worst is `--ink2` on mint in the dark theme,
+5.40:1 (`--ink`'s worst is 8.90:1, the same place); 25% would leave that at 4.38:1. **Verified:** `lib/verify.ts`
+§61 (the words, the bar's place and wiring, the mix computed for all eight colours in both themes against `--ink`
+and `--ink2`, the no-colour case, tokens only). Not looked at in a browser.
+
 ### Amendment 214 — post-merge, applied. **Every note in one place, and the agent each was typed on.**
 
 Daemon (new migration `370_note_agent.sql`, `session/store.ts`, `routes/session.ts`, `session/verify.ts`), shared

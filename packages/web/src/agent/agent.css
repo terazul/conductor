@@ -1329,6 +1329,54 @@ a.ag-tool-subj:focus-visible {
   outline-offset: 2px;
 }
 
+/*
+ * The bar across the top of the box (Amendment 215): "project / agent", and the job's name in the
+ * quieter ink. It runs edge to edge inside the box, over its padding, and doesn't scroll. Plain in
+ * the box's own colours with no project colour; with one, 18% of it over --surf, which keeps --ink
+ * and --ink2 past 4.5:1 for all eight colours in both themes (lib/verify.ts §61).
+ */
+.ag-cbar {
+  margin: -9px -12px 0;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 7px 7px 0 0;
+  background: var(--surf);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: none;
+}
+
+.ag-cbox.has-proj > .ag-cbar {
+  margin: -6px -9px 0;
+  padding: 5px 9px;
+  border-radius: 4px 4px 0 0;
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--proj) 18%, var(--surf));
+}
+
+.ag-cbar-proj {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ag-cbar-proj:hover,
+.ag-cbar-proj:focus-visible {
+  text-decoration: underline;
+}
+
+.ag-cbar-quiet {
+  color: var(--ink2);
+}
+
 .ag-input {
   font: inherit;
   font-family: var(--mono);
