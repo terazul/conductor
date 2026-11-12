@@ -72,8 +72,14 @@ export function createProject(body: {
 
 const notesOf = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/notes`;
 
-export function addNote(projectId: string, text: string, due: string | null = null): Promise<{ note: ProjectNote; project: Project }> {
-  return api(notesOf(projectId), { method: 'POST', body: { text, ...(due ? { due } : {}) } });
+/** `agentId`: the agent whose screen it was typed on, one of this project's (Amendment 214). */
+export function addNote(
+  projectId: string,
+  text: string,
+  due: string | null = null,
+  agentId?: string,
+): Promise<{ note: ProjectNote; project: Project }> {
+  return api(notesOf(projectId), { method: 'POST', body: { text, ...(due ? { due } : {}), ...(agentId ? { agentId } : {}) } });
 }
 
 /** Change what's given: text, due (null clears it), done (Amendment 63). */

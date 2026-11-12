@@ -135,7 +135,7 @@ export function Inspector({
             <span className="ui-lab">
               {project.name} notes · {project.notes?.length ?? 0}
             </span>
-            <NotesPanel project={project} />
+            <NotesPanel project={project} agentId={agent.id} />
           </div>
         )}
 

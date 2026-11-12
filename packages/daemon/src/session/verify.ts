@@ -9915,13 +9915,68 @@ async function main(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n41 · a note says which agent\'s screen it was typed on, and still says so once the agent is gone (Amendment 214)');
+  {
+    /*
+     * "Provide a way to view all the notes that were typed on various agents." A note is still the
+     * project's; POST takes the agent it was typed beside, one of that project's, and keeps its
+     * role as it read then. Inserted, as section 2's are: nothing here needs a run.
+     */
+    type NoteReply = { note?: ProjectNote; project?: Project; error?: string; detail?: string };
+    const { insertProject } = await import('./store.js');
+    const npid = (await send<{ project: Project }>('POST', '/api/projects', { path: ROOT, name: 'notes214' })).body.project.id;
+    const elsewhere = insertProject(db, { path: join(ROOT, 'notes-other-214'), name: 'notes other 214', defaultBranch: 'main' });
+    const agentOf = (id: string, projectId: string, role: string): void => {
+      insertJob(db, { id: `job_${id}`, projectId, prompt: 'notes 214', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+      insertAgent(db, { id, jobId: `job_${id}`, projectId, role, model: 'opus', sdkSessionId: null, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY });
+    };
+    agentOf('agt_note214', npid, 'developer');
+    agentOf('agt_note214_other', elsewhere.id, 'reviewer');
+    const notesUrl = (pid: string) => `/api/projects/${pid}/notes`;
+    const projectNotesCount = (pid: string): number => getProject(db, pid)?.notes?.length ?? 0;
+
+    const tagged = await send<NoteReply>('POST', notesUrl(npid), { text: 'typed beside the developer', agentId: 'agt_note214' });
+    check('a note typed on an agent\'s screen keeps that agent and its role', tagged.status === 201 && tagged.body.note?.agentId === 'agt_note214' && tagged.body.note?.agentLabel === 'developer', JSON.stringify(tagged.body.note));
+    check('and the project sent back has it so', tagged.body.project?.notes?.some((n) => n.id === tagged.body.note?.id && n.agentLabel === 'developer') === true);
+    const plain = await send<NoteReply>('POST', notesUrl(npid), { text: 'typed on the Fleet card' });
+    check('a note from a card or the Project screen has no agent, and no field for one', plain.status === 201 && plain.body.note !== undefined && !('agentId' in plain.body.note) && !('agentLabel' in plain.body.note), JSON.stringify(plain.body.note));
+    const before = projectNotesCount(npid);
+    const refused = await Promise.all([
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 'agt_note214_other' }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 'agt_nobody_214' }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 7 }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: '' }),
+    ]);
+    check('an agent of another project, one that is not there, a number or empty is a 400 that says why', refused.every((r) => r.status === 400 && /not on this project/.test(r.body.error ?? '')), refused.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    check('and none of them is kept', projectNotesCount(npid) === before);
+    const edited = await send<NoteReply>('PATCH', `${notesUrl(npid)}/${tagged.body.note!.id}`, { text: 'changed', agentId: 'agt_note214_other', agentLabel: 'someone' });
+    check('PATCH changes the text and never the agent', edited.status === 200 && edited.body.note?.text === 'changed' && edited.body.note?.agentId === 'agt_note214' && edited.body.note?.agentLabel === 'developer', JSON.stringify(edited.body.note));
+    const removed = await send('DELETE', '/api/agents/agt_note214');
+    const after = getProject(db, npid)?.notes?.find((n) => n.id === tagged.body.note!.id);
+    check('removing the agent keeps the note, its id and its role', removed.status === 200 && getAgent(db, 'agt_note214') === undefined && after?.agentId === 'agt_note214' && after?.agentLabel === 'developer', `${removed.status} ${JSON.stringify(after)}`);
+    for (const n of getProject(db, npid)?.notes ?? []) await send('DELETE', `${notesUrl(npid)}/${n.id}`);
+    db.prepare('DELETE FROM projects WHERE id = ?').run(elsewhere.id);
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '370').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p370', 'old', '/tmp/p370', 'x')`);
+    old.exec(`INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due) VALUES ('n370', 'p370', 'an old note', 'x', 'x', '2026-11-12')`);
+    old.exec(readFileSync(new URL('370_note_agent.sql', dir), 'utf8'));
+    const oldNote = getProject(old as unknown as Db, 'p370')?.notes?.[0];
+    check('migration 370 applies to an existing database, and an old note has no agent', oldNote?.id === 'n370' && oldNote.text === 'an old note' && oldNote.due === '2026-11-12' && oldNote.agentId === undefined && oldNote.agentLabel === undefined, JSON.stringify(oldNote));
+    old.close();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   await new Promise<void>((r) => devServer.close(() => r()));
   await app.close();
   rmSync(ROOT, { recursive: true, force: true });
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project; and a note keeps the agent whose screen it was typed on, one of its own project\'s, with its role, which removing the agent does not take.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

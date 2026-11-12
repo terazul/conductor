@@ -11,6 +11,10 @@
  *
  * Each note can be copied, as its text alone (Amendment 83): from its row wherever the
  * panel shows, and from the note the Fleet card shows.
+ *
+ * A note added in the Agent inspector is tagged with that agent (Amendment 214), and its row says
+ * so: the role, which opens the agent, or "removed" once it is gone. The row is the Notes screen's
+ * too (notes/route.tsx), so every note reads and acts the same wherever it is.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -18,9 +22,11 @@ import type { Project, ProjectNote } from '@conductor/shared';
 import { NOTE_MAX } from '@conductor/shared';
 import { useCommand } from '../agent/endpoints.js';
 import { copyText } from '../lib/clipboard.js';
+import { useAgent } from '../lib/store.js';
 import { useNow } from '../shell/clock.js';
+import { openAgent } from '../shell/nav.js';
 import { addNote, editNote, removeNote } from './endpoints.js';
-import { cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from './notewords.js';
+import { agentTag, cardNote, dueLabel, dueState, localDate, noteAge, noteCount, wasEdited } from './notewords.js';
 import './fleet.css';
 
 const stop = {
@@ -144,7 +150,27 @@ export function NotesButton({ project, open, onToggle }: { project: Project; ope
   );
 }
 
-function NoteRow({ project, note }: { project: Project; note: ProjectNote }) {
+/** The agent a note was typed beside (Amendment 214): its role, which opens it, or "removed". */
+function AgentTag({ note }: { note: ProjectNote }) {
+  const agent = useAgent(note.agentId ?? null);
+  const tag = agentTag(note, agent !== undefined);
+  if (!tag) return null;
+  if (tag.removed || !agent) {
+    return (
+      <span className="fl-note-agent is-removed" title="Typed on this agent's screen. The agent has since been removed.">
+        {tag.label} · removed
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="fl-note-agent" title="Typed on this agent's screen. Open it." onClick={() => openAgent(agent)}>
+      {tag.label}
+    </button>
+  );
+}
+
+/** One note: tick it done, copy, edit, delete. The Notes screen's rows are these too. */
+export function NoteRow({ project, note }: { project: Pick<Project, 'id'>; note: ProjectNote }) {
   const { today, now } = useToday();
   const cmd = useCommand();
   const [draft, setDraft] = useState<{ text: string; due: string | null } | null>(null);
@@ -202,6 +228,8 @@ function NoteRow({ project, note }: { project: Project; note: ProjectNote }) {
       </div>
       <div className="fl-note-meta">
         <span>
+          <AgentTag note={note} />
+          {note.agentId ? ' · ' : ''}
           <DueBadge note={note} today={today} />
           {note.due ? ' · ' : ''}
           {noteAge(note.createdAt, now)}
@@ -238,8 +266,11 @@ function NoteRow({ project, note }: { project: Project; note: ProjectNote }) {
   );
 }
 
-/** Every note, newest first, and a box for the next one. */
-export function NotesPanel({ project }: { project: Project }) {
+/**
+ * Every note, newest first, and a box for the next one. `agentId` is the agent whose screen this
+ * is, in the inspector: a note added here is tagged with it (Amendment 214).
+ */
+export function NotesPanel({ project, agentId }: { project: Project; agentId?: string }) {
   const { today } = useToday();
   const [text, setText] = useState('');
   const [due, setDue] = useState<string | null>(null);
@@ -247,7 +278,7 @@ export function NotesPanel({ project }: { project: Project }) {
   const add = (): void => {
     if (!text.trim()) return;
     void cmd.run('Adding the note', async () => {
-      await addNote(project.id, text, due);
+      await addNote(project.id, text, due, agentId);
       setText('');
       setDue(null);
     });

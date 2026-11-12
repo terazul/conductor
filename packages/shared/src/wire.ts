@@ -73,6 +73,14 @@ export interface ProjectNote {
   due?: string;
   /** When it was ticked done. Absent: not done. */
   doneAt?: string;
+  /**
+   * Amendment 214. The agent whose screen it was typed on, and that agent's role as it read then
+   * (`developer`), which still reads once the agent is removed. Both absent for a note typed on a
+   * Fleet card or the Project screen, and for every note from before this. Set only when the note
+   * is made; a change never moves them.
+   */
+  agentId?: string;
+  agentLabel?: string;
 }
 
 /** The longest note the daemon takes. */

@@ -200,6 +200,29 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 214 — post-merge, applied. **Every note in one place, and the agent each was typed on.**
+
+Daemon (new migration `370_note_agent.sql`, `session/store.ts`, `routes/session.ts`, `session/verify.ts`), shared
+(`wire.ts`), web (new `notes/route.tsx` and `notes/notes.css`, `fleet/Notes.tsx`, `fleet/notewords.ts`,
+`fleet/endpoints.ts`, `fleet/fleet.css`, `agent/inspector.tsx`, `lib/screens.ts`, `shell/shell.tsx`, `lib/verify.ts`,
+`metrics/verify.ts`) and `docs/MANUAL.md`. Asked 12 Nov: *"provide a way to view all the notes that were typed on
+various agents."* Answered: tag new notes with the agent whose screen they were typed on, filter by project or agent,
+on a new top-bar screen. `project_notes` gains `agent_id` and `agent_label` (370, both nullable, no foreign key, so a
+note outlives its agent): `POST /api/projects/:id/notes` takes `agentId`, which must name one of that project's agents
+(else 400, `that agent is not on this project`), and keeps its role as `agentLabel`; `PATCH` never changes either, and
+a note added anywhere but the Agent inspector has none. `ProjectNote` carries both. The inspector's notes panel sends
+its agent; each note's row, wherever it shows, leads its meta line with that role, which opens the agent, or
+**role · removed** once it is gone. **Notes** (order 82, key `n`, which no screen or handler used; the status bar
+says so) lists every project's notes, read from the projects the page already has, grouped by project under its name
+and colour bar, which opens it; late first (the longest late first), then due today, then newest, and the groups by
+their first note (`noteGroups`, pure). Filters: a project, an agent (those with notes; named with their project when
+several projects have some), open (the default), done or all, and words the text holds. Its rows are `NoteRow`,
+exported from `fleet/Notes.tsx`, so tick, copy, edit, delete and due work as on every list. Notes from before 370 have
+no agent. **Verified:** daemon `session/verify.ts` §41 (the tag, its refusals, PATCH leaving it, removal keeping the
+label, 370 on an old database); `lib/verify.ts` §60 (filters, order, groups, the picker, the tag, the summary, the
+wiring, `n` unique) and §15's and `metrics/verify.ts`' hotkey lists now include `notes`; §24's inspector check now
+expects the `agentId`. Not looked at in a browser.
+
 ### Amendment 213 — post-merge, applied. **A ⧉ copy keeps its lists and indents where you paste it.**
 
 Web only (`lib/clipboard.ts`, new `agent/copyreply.ts`, `agent/transcript.tsx`, `agent/QuoteBlock.tsx`,

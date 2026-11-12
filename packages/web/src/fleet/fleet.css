@@ -1599,6 +1599,29 @@
   flex-wrap: wrap;
 }
 
+/* The agent a note was typed beside (Amendment 214): a quiet link in the meta line, its role. */
+.fl-note-agent {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink2);
+  text-decoration: underline;
+  text-decoration-color: var(--line2);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.fl-note-agent:hover {
+  color: var(--ink);
+}
+
+.fl-note-agent.is-removed {
+  color: var(--ink3);
+  text-decoration: none;
+  cursor: default;
+}
+
 /* ── + agent: one more agent in a job (Amendment 89) ─────────────────────── */
 
 .pj-add {

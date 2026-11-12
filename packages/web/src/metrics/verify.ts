@@ -336,7 +336,7 @@ console.log('\n7 · the screen is registered, reachable on 8, and in both themes
 
   // No other screen has 8, and none of the tabs shares a key.
   const keys: string[] = [];
-  for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'settings', 'diagnostics']) {
+  for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'settings', 'diagnostics']) {
     for (const f of ['route.tsx']) {
       try {
         const code = src(`../${dir}/${f}`);

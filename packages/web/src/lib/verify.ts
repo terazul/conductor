@@ -957,7 +957,7 @@ console.log('\n15 · a screen can be reached without having a tab (Amendment 42)
   {
     // The made-up key really is one nothing has: no screen registers it.
     const real: string[] = [];
-    for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'settings', 'diagnostics', 'spawn']) {
+    for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'settings', 'diagnostics', 'spawn']) {
       const code = readFileSync(new URL(`../${dir}/route.tsx`, import.meta.url), 'utf8');
       for (const m of code.matchAll(/hotkey:\s*'(.)'/g)) real.push(m[1]!);
     }
@@ -1144,7 +1144,7 @@ console.log('\n24 · notes on a project, on its card (Amendment 55)');
   const projectScreen = readFileSync(new URL('../fleet/project.tsx', import.meta.url), 'utf8');
   const inspector = readFileSync(new URL('../agent/inspector.tsx', import.meta.url), 'utf8');
   check('the Project screen edits the same notes (Amendment 56)', /<NotesPanel project=\{project\} \/>/.test(projectScreen));
-  check("and the Agent screen, its agent's project's", /<NotesPanel project=\{project\} \/>/.test(inspector) && /p\.id === agent\.projectId/.test(inspector));
+  check("and the Agent screen, its agent's project's", /<NotesPanel project=\{project\} agentId=\{agent\.id\} \/>/.test(inspector) && /p\.id === agent\.projectId/.test(inspector));
   check('typing in it never opens the project', /onKeyDown: \(e: React\.KeyboardEvent\) => e\.stopPropagation\(\)/.test(notes));
 
   // Copy, and a delete that says so (Amendment 83).
@@ -3470,9 +3470,64 @@ await (async () => {
   check('the reply\'s, the quote\'s and the message\'s copy all use copyProse, and preload', /function ReplyCopy[\s\S]{0,80}usePreloadReplyCopy\(\);/.test(tr) && /copyProse\(proseOf\(reply\), reply\)/.test(tr) && (qb.match(/usePreloadReplyCopy\(\);/g) ?? []).length === 2 && !/copyRich|import\('\.\/replycopy/.test(tr + qb));
 })();
 
+console.log('\n60 · every note in one place, by project and by the agent whose screen it was typed on (Amendment 214)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { NO_NOTE_FILTER, noteMatches, noteGroups, noteAgents, agentTag, notesSummary } = await import('../fleet/notewords.js');
+  const today = '2026-11-12';
+  const note = (id: string, projectId: string, over: { createdAt?: string; due?: string; doneAt?: string; agentId?: string; agentLabel?: string; text?: string } = {}) => ({ id, projectId, text: `note ${id}`, createdAt: `2026-11-0${id.length}T10:00:00Z`, ...over });
+  const a = [
+    note('a1', 'pa', { createdAt: '2026-11-01T10:00:00Z' }),
+    note('a2', 'pa', { createdAt: '2026-11-05T10:00:00Z', agentId: 'ag_dev', agentLabel: 'developer' }),
+    note('a3', 'pa', { createdAt: '2026-11-06T10:00:00Z', doneAt: '2026-11-07T10:00:00Z', agentId: 'ag_dev', agentLabel: 'developer' }),
+  ];
+  const b = [
+    note('b1', 'pb', { createdAt: '2026-11-02T10:00:00Z', due: '2026-11-10' }),
+    note('b2', 'pb', { createdAt: '2026-11-03T10:00:00Z', due: '2026-11-08', agentId: 'ag_rev', agentLabel: 'reviewer' }),
+    note('b3', 'pb', { createdAt: '2026-11-04T10:00:00Z', due: today, text: 'Ship the Release' }),
+  ];
+  const projects = [
+    { id: 'pa', name: 'alpha', notes: a },
+    { id: 'pb', name: 'beta', notes: b },
+    { id: 'pc', name: 'gamma', notes: [] },
+  ];
+  const ids = (g: { project: { id: string }; notes: { id: string }[] }[]): string => g.map((x) => `${x.project.id}:${x.notes.map((n) => n.id).join(',')}`).join(' ');
+
+  // ── which notes, in what order ──
+  const open = noteGroups(projects, NO_NOTE_FILTER, today);
+  check('open notes to begin with, grouped by project, a project with none left out', ids(open) === 'pb:b2,b1,b3 pa:a2,a1', ids(open));
+  check('…late first, the longest late first, then due today, then the newest; the group with the most urgent note at the top', open[0]?.project.id === 'pb' && open[0].notes.map((n) => n.id).join() === 'b2,b1,b3');
+  check('done shows the ticked ones only, all shows every one', ids(noteGroups(projects, { ...NO_NOTE_FILTER, show: 'done' }, today)) === 'pa:a3' && noteGroups(projects, { ...NO_NOTE_FILTER, show: 'all' }, today).reduce((s, g) => s + g.notes.length, 0) === 6);
+  check('one project\'s', ids(noteGroups(projects, { ...NO_NOTE_FILTER, projectId: 'pa' }, today)) === 'pa:a2,a1');
+  check('one agent\'s, done and open, and a note with no agent is not one of them', ids(noteGroups(projects, { ...NO_NOTE_FILTER, agentId: 'ag_dev', show: 'all' }, today)) === 'pa:a3,a2');
+  check('words the text holds, any case, around spaces', ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: '  release ' }, today)) === 'pb:b3' && !noteMatches(a[0]!, { ...NO_NOTE_FILTER, q: 'release' }));
+  check('ties keep the projects\' own order', ids(noteGroups([{ id: 'x', notes: [note('x1', 'x', { createdAt: '2026-11-01T10:00:00Z' })] }, { id: 'y', notes: [note('y1', 'y', { createdAt: '2026-11-01T10:00:00Z' })] }], NO_NOTE_FILTER, today)).startsWith('x:'));
+
+  // ── the agent picker, and a note's tag ──
+  const picks = noteAgents(projects, null);
+  check('the agent picker offers those with notes, each once, named with their project when there are several', JSON.stringify(picks) === JSON.stringify([{ agentId: 'ag_dev', label: 'alpha / developer' }, { agentId: 'ag_rev', label: 'beta / reviewer' }]), JSON.stringify(picks));
+  check('…and by its role alone within one project', JSON.stringify(noteAgents(projects, 'pa')) === JSON.stringify([{ agentId: 'ag_dev', label: 'developer' }]) && noteAgents(projects, 'pc').length === 0);
+  check('a note\'s tag is its role, to open; once the agent is gone, removed; none typed nowhere', JSON.stringify(agentTag(a[1]!, true)) === '{"label":"developer","removed":false}' && agentTag(a[1]!, false)?.removed === true && agentTag(a[0]!, true) === null);
+  check('the summary counts notes and projects, and says when there are none', notesSummary(open, 'open') === '5 open notes in 2 projects' && notesSummary([{ notes: [1] }], 'all') === '1 note in 1 project' && notesSummary([], 'done') === 'no done notes');
+
+  // ── where it is drawn ──
+  const route = src('../notes/route.tsx');
+  const notes = src('../fleet/Notes.tsx');
+  check('the inspector tags what is typed there with its agent, and addNote sends it', /<NotesPanel project=\{project\} agentId=\{agent\.id\} \/>/.test(src('../agent/inspector.tsx')) && /addNote\(project\.id, text, due, agentId\)/.test(notes) && /\.\.\.\(agentId \? \{ agentId \} : \{\}\)/.test(src('../fleet/endpoints.ts')));
+  check('the Notes screen\'s rows are every project list\'s row, not a copy of it', /export function NoteRow\(/.test(notes) && /import \{ NoteRow \} from '\.\.\/fleet\/Notes\.js';/.test(route) && /<NoteRow key=\{n\.id\} project=\{project\} note=\{n\} \/>/.test(route) && !/fl-note-text/.test(route));
+  check('…whose meta line leads with the agent, which opens it', /<AgentTag note=\{note\} \/>/.test(notes) && /onClick=\{\(\) => openAgent\(agent\)\}/.test(notes) && /\{tag\.label\} · removed/.test(notes));
+  check('a top-bar screen, Notes, order 82, hotkey n, in the reserved table and the status bar', /id: 'notes',\s*label: 'Notes',\s*hotkey: 'n',\s*order: 82,/.test(route) && /82\s+'n'\s+Notes/.test(src('./screens.ts')) && /<kbd>n<\/kbd> notes/.test(src('../shell/shell.tsx')));
+  const keyed: string[] = [];
+  for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'settings', 'diagnostics', 'spawn']) for (const m of src(`../${dir}/route.tsx`).matchAll(/hotkey:\s*'(.)'/g)) keyed.push(m[1]!);
+  check('…and n is no other screen\'s', keyed.filter((k) => k === 'n').length === 1, keyed.join());
+  check('each group opens its project, under its colour bar', /className=\{`nt-group \$\{projClass\(colors\.get\(project\.id\)\)\}`\}/.test(route) && /onClick=\{\(\) => openProject\(project\.id\)\}/.test(route));
+  const css = src('../notes/notes.css') + src('../fleet/fleet.css').slice(src('../fleet/fleet.css').indexOf('.fl-note-agent'));
+  check('…drawn in tokens only, the bar a bar and never a fill', !/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')) && /\.nt-ghead \{[^}]*box-shadow: inset 4px 0 0 var\(--proj, var\(--line2\)\);/.test(css) && !/background:[^;]*--proj/.test(css));
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

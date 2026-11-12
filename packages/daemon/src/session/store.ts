@@ -114,6 +114,8 @@ interface NoteRow {
   updated_at: string;
   due?: string | null;
   done_at?: string | null;
+  agent_id?: string | null;
+  agent_label?: string | null;
 }
 
 const toNote = (r: NoteRow): ProjectNote => ({
@@ -125,6 +127,9 @@ const toNote = (r: NoteRow): ProjectNote => ({
   // Only when set, so a plain note's shape is what it was (Amendment 63).
   ...(r.due ? { due: r.due } : {}),
   ...(r.done_at ? { doneAt: r.done_at } : {}),
+  // The agent whose screen it was typed on (Amendment 214), only when there was one.
+  ...(r.agent_id ? { agentId: r.agent_id } : {}),
+  ...(r.agent_label ? { agentLabel: r.agent_label } : {}),
 });
 
 /** Every open note due today or before, for Needs You. */
@@ -146,12 +151,22 @@ export function getNote(db: Db, id: string): ProjectNote | undefined {
   return r ? toNote(r) : undefined;
 }
 
-export function insertNote(db: Db, projectId: string, text: string, due: string | null = null): ProjectNote {
+/**
+ * A new note. `agent` is the agent whose screen it was typed on (Amendment 214): its id, and its
+ * role as it reads now, kept so the tag still reads once the agent is gone.
+ */
+export function insertNote(
+  db: Db,
+  projectId: string,
+  text: string,
+  due: string | null = null,
+  agent: { id: string; label: string } | null = null,
+): ProjectNote {
   const at = nowIso();
   const id = newId('note');
   db.prepare(
-    'INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(id, projectId, text, at, at, due);
+    'INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due, agent_id, agent_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(id, projectId, text, at, at, due, agent?.id ?? null, agent?.label ?? null);
   return getNote(db, id)!;
 }
 
