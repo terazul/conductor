@@ -20,6 +20,19 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Make repeating easier, and see every schedule without opening each project.** Asked for (12 Nov): *"make it
+  easier to schedule recurring tasks, and also provide a way to view the recurring tasks without having to go into
+  each project."* *Done (12 Nov): Amendment 216 (a Repeating screen, `r`, every schedule by project with ▶ run now
+  and edit in place; a message to an agent on a rule, from the message box's ⟳ repeat… or + new; a job you ran
+  repeated from the setup Conductor now keeps for every job (380), from its ⟳ repeat… or + new; a job from before
+  that is refused, saying why).*
+- [x] **Say which project and agent the reply box writes to.** Asked for (12 Nov): *"above the text window for my
+  reply, add the 'project/agent' at the top in the menu bar."* *Done (12 Nov): Amendment 215 (a bar across the top
+  of the box, **project / role · job name**, 18% of the project's colour; the name opens the project).*
+- [x] **See every note, and which agent it was typed on.** Asked for (12 Nov): *"provide a way to view all the notes
+  that were typed on various agents."* *Done (12 Nov): Amendment 214 (a Notes screen, `n`, filtered by project,
+  agent, open or done and every word of a search; the filters last until reload; two agents with one role are told
+  apart by their job; a note added on an agent's screen is tagged with it, and its row opens it).*
 - [x] **A ⧉ copy loses its bullets and indents.** Reported (12 Nov): *"When I click on a copy button, it is losing
   formatting, it is not including indentations and bullets. If I select and copy directly, it seems to keep the
   formatting."* *Done (12 Nov): Amendment 213 (the reply's, a quote's and a message's copy put the HTML on the

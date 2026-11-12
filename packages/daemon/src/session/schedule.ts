@@ -314,7 +314,7 @@ export class Scheduler {
     }
     if (changed) this.broadcast();
 
-    // Jobs that repeat (Amendment 211). Not while held by anyone: they stay due until it ends.
+    // Jobs and messages that repeat (Amendments 211, 216). Not while held by anyone: they stay due until it ends.
     if (!this.#sup.held && (await runDueRecurring(this.#db, this.#sup, now))) broadcastRecurring(this.#db);
   }
 

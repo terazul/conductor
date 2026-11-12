@@ -176,10 +176,10 @@ import { BUILT_IN_PERSONAS, PERSONAS_KEY, resetPersona, withPersona, withoutPers
 import { HELPERS_MAX, PIPELINE_HELPERS_MAX, READ_ONLY_BASH, READ_ONLY_BASH_DENIED, SEND_BACKS_MAX, WRITE_TOOLS, helperModel, helperReads, helperSlug, marksOrchestrator, pipelineHelperCap, readOnlyRefusal, roleRefusal, sendBackRefusal, showsOrchestrator, type HelperRole } from '@conductor/shared';
 import { getHelperRole, getHelperRoles, startedInLane } from './store.js';
 import { lastStatusNote } from './store.js';
-import { getRecurring, insertRecurring, listRecurring, runRequest } from './recurring.js';
-import { PAUSE_UNTIL_KEY, everyProblem, nextRun, runName, type Every, type RecurringJob } from '@conductor/shared';
-import { listJobs } from './store.js';
-import { RESUME_AT_NOTE, Scheduler, deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone, scheduler, userPauseNote } from './schedule.js';
+import { getRecurring, insertRecurring, listRecurring, runDueRecurring, runRecurringNow, runRequest } from './recurring.js';
+import { BEING_RUN, HELPER_NOT_SCHEDULED, NOT_REPEATABLE, PAUSE_UNTIL_KEY, RESULT_SENT_QUEUED, RESULT_STARTED, RESULT_STARTED_HELD, everyProblem, nextRun, runName, type Every, type RecurringJob } from '@conductor/shared';
+import { jobRequest, listJobs } from './store.js';
+import { RESUME_AT_NOTE, SCHEDULED_TEXT_MAX, Scheduler, deleteScheduled, insertScheduled, listScheduled, nextForSlot, nextWhenDone, scheduler, userPauseNote } from './schedule.js';
 import { FolderGoneError, HOLD_NOTE, SLOT_RESUME_NOTE, SLOT_WAIT_NOTE } from './supervisor.js';
 import { STACKS_KEY, stacksLimit } from '../slots.js';
 import { terminals } from '../terminal/service.js';
@@ -9744,7 +9744,7 @@ async function main(): Promise<void> {
     const made = await send<One>('POST', '/api/recurring', { name: '  Nightly checks ', every: { kind: 'hours', n: 2 }, request });
     const rec = made.body.recurring;
     check('saved: 201, its name trimmed, next due by its rule', made.status === 201 && rec.name === 'Nightly checks' && Math.abs(Date.parse(rec.nextAt) - Date.now() - 2 * 3_600_000) < 60_000 && !rec.paused && rec.lastResult === null && rec.lastJobId === null, JSON.stringify(made.body));
-    check('the request kept is the launch\'s, as POST /api/jobs checks it', rec.request.projectId === rpid && rec.request.prompt === request.prompt && rec.request.agents[0]?.model === OPUS && rec.request.preset === 'solo' && rec.request.budgetUsd === 5 && rec.projectId === rpid, JSON.stringify(rec.request));
+    check('the request kept is the launch\'s, as POST /api/jobs checks it', rec.request!.projectId === rpid && rec.request!.prompt === request.prompt && rec.request!.agents[0]?.model === OPUS && rec.request!.preset === 'solo' && rec.request!.budgetUsd === 5 && rec.projectId === rpid, JSON.stringify(rec.request));
     check('every tab hears the list', await until(() => eyes.frames.some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === rec.id))));
     const listed = await get<{ recurring: RecurringJob[] }>('/api/recurring');
     check('and it is listed, with its next time', listed.status === 200 && listed.body.recurring.some((r) => r.id === rec.id && r.nextAt === rec.nextAt));
@@ -9886,7 +9886,7 @@ async function main(): Promise<void> {
     const staleNow = getRecurring(db, stale.id)!;
     check('a saved setup checked again at its time: one that no longer passes is failed, with why, never launched, and its time moves on', staleNow.lastResult?.startsWith('failed: invalid agents') === true && jobsOf(stale.id).length === 0 && Date.parse(staleNow.nextAt) > dueS, JSON.stringify(staleNow.lastResult));
     await send('DELETE', `/api/recurring/${stale.id}`);
-    check('a branch the setup names is that name and the time, so each run has its own', runRequest({ name: 'n', request: { ...rec.request, isolation: 'worktree', branch: 'nightly' } }, local(2026, 11, 12, 9)).branch === 'nightly-20261112-0900');
+    check('a branch the setup names is that name and the time, so each run has its own', runRequest({ name: 'n', request: { ...rec.request!, isolation: 'worktree', branch: 'nightly' } }, local(2026, 11, 12, 9)).branch === 'nightly-20261112-0900');
 
     // Removing the project takes its schedules; cancelling one keeps its jobs.
     const removal = await send('DELETE', `/api/projects/${gpid}`);
@@ -9907,9 +9907,399 @@ async function main(): Promise<void> {
     old.exec(readFileSync(new URL('360_recurring_jobs.sql', dir), 'utf8'));
     const oldJob = listJobs(old as unknown as Db).find((j) => j.id === 'j360');
     check('migration 360 applies to an existing database, and an old job came from no schedule', oldJob !== undefined && oldJob.recurringId === undefined && listRecurring(old as unknown as Db).length === 0, JSON.stringify(oldJob));
-    const oldRec = insertRecurring(old as unknown as Db, { name: 'old', every: { kind: 'daily', at: '09:00' }, request: { ...rec.request, projectId: 'p360' } });
+    // As 360 wrote a row: today's insertRecurring writes 380's columns too (Amendment 216).
+    old.prepare(`INSERT INTO recurring_jobs (id, project_id, name, request, every, next_at, created_at) VALUES ('r360', 'p360', 'old', ?, '{"kind":"daily","at":"09:00"}', 'x', 'x')`).run(JSON.stringify({ ...rec.request!, projectId: 'p360' }));
     old.exec(`DELETE FROM projects WHERE id = 'p360'`);
-    check('and its schedules go with their project', getRecurring(old as unknown as Db, oldRec.id) === null);
+    check('and its schedules go with their project', (old.prepare(`SELECT COUNT(*) AS n FROM recurring_jobs WHERE id = 'r360'`).get() as { n: number }).n === 0);
+    old.close();
+    sdk.query = realQuery;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n41 · a note says which agent\'s screen it was typed on, and still says so once the agent is gone (Amendment 214)');
+  {
+    /*
+     * "Provide a way to view all the notes that were typed on various agents." A note is still the
+     * project's; POST takes the agent it was typed beside, one of that project's, and keeps its
+     * role as it read then. Inserted, as section 2's are: nothing here needs a run.
+     */
+    type NoteReply = { note?: ProjectNote; project?: Project; error?: string; detail?: string };
+    const { insertProject } = await import('./store.js');
+    const npid = (await send<{ project: Project }>('POST', '/api/projects', { path: ROOT, name: 'notes214' })).body.project.id;
+    const elsewhere = insertProject(db, { path: join(ROOT, 'notes-other-214'), name: 'notes other 214', defaultBranch: 'main' });
+    const agentOf = (id: string, projectId: string, role: string): void => {
+      insertJob(db, { id: `job_${id}`, projectId, prompt: 'notes 214', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+      insertAgent(db, { id, jobId: `job_${id}`, projectId, role, model: 'opus', sdkSessionId: null, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY });
+    };
+    agentOf('agt_note214', npid, 'developer');
+    agentOf('agt_note214_other', elsewhere.id, 'reviewer');
+    const notesUrl = (pid: string) => `/api/projects/${pid}/notes`;
+    const projectNotesCount = (pid: string): number => getProject(db, pid)?.notes?.length ?? 0;
+
+    const tagged = await send<NoteReply>('POST', notesUrl(npid), { text: 'typed beside the developer', agentId: 'agt_note214' });
+    check('a note typed on an agent\'s screen keeps that agent and its role', tagged.status === 201 && tagged.body.note?.agentId === 'agt_note214' && tagged.body.note?.agentLabel === 'developer', JSON.stringify(tagged.body.note));
+    check('and the project sent back has it so', tagged.body.project?.notes?.some((n) => n.id === tagged.body.note?.id && n.agentLabel === 'developer') === true);
+    const plain = await send<NoteReply>('POST', notesUrl(npid), { text: 'typed on the Fleet card' });
+    check('a note from a card or the Project screen has no agent, and no field for one', plain.status === 201 && plain.body.note !== undefined && !('agentId' in plain.body.note) && !('agentLabel' in plain.body.note), JSON.stringify(plain.body.note));
+    const before = projectNotesCount(npid);
+    const refused = await Promise.all([
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 'agt_note214_other' }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 'agt_nobody_214' }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 7 }),
+      send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: '' }),
+    ]);
+    check('an agent of another project, one that is not there, a number or empty is a 400 that says why', refused.every((r) => r.status === 400) && refused[0]!.body.error === 'that agent is not on this project' && refused.slice(1).every((r) => r.body.error === 'no such agent'), refused.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    check('and none of them is kept', projectNotesCount(npid) === before);
+    const edited = await send<NoteReply>('PATCH', `${notesUrl(npid)}/${tagged.body.note!.id}`, { text: 'changed', agentId: 'agt_note214_other', agentLabel: 'someone' });
+    check('PATCH changes the text and never the agent', edited.status === 200 && edited.body.note?.text === 'changed' && edited.body.note?.agentId === 'agt_note214' && edited.body.note?.agentLabel === 'developer', JSON.stringify(edited.body.note));
+    const removed = await send('DELETE', '/api/agents/agt_note214');
+    const after = getProject(db, npid)?.notes?.find((n) => n.id === tagged.body.note!.id);
+    check('removing the agent keeps the note, its id and its role', removed.status === 200 && getAgent(db, 'agt_note214') === undefined && after?.agentId === 'agt_note214' && after?.agentLabel === 'developer', `${removed.status} ${JSON.stringify(after)}`);
+    for (const n of getProject(db, npid)?.notes ?? []) await send('DELETE', `${notesUrl(npid)}/${n.id}`);
+    db.prepare('DELETE FROM projects WHERE id = ?').run(elsewhere.id);
+
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '370').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p370', 'old', '/tmp/p370', 'x')`);
+    old.exec(`INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due) VALUES ('n370', 'p370', 'an old note', 'x', 'x', '2026-11-12')`);
+    old.exec(readFileSync(new URL('370_note_agent.sql', dir), 'utf8'));
+    const oldNote = getProject(old as unknown as Db, 'p370')?.notes?.[0];
+    check('migration 370 applies to an existing database, and an old note has no agent', oldNote?.id === 'n370' && oldNote.text === 'an old note' && oldNote.due === '2026-11-12' && oldNote.agentId === undefined && oldNote.agentLabel === undefined, JSON.stringify(oldNote));
+    old.close();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n42 · a message to an agent repeats on its rule; any schedule runs now; a job you ran repeats from the setup it kept (Amendment 216)');
+  {
+    /*
+     * "Make it easier to schedule recurring tasks", and "for an existing agent, like the SCHEDULE
+     * button, but REPEATING, and that text gets repeated to that agent as requested". A message
+     * schedule goes through `sendMessage` as ⏲ later's do; the clock is moved by passing `now`,
+     * as §40 does. The agents are inserted, as §41's are, with sessions to resume.
+     */
+    sdk.query = fakeQuery as typeof sdk.query;
+    for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+    await until(() => sup.slots.used === 0);
+    check('nothing holds the fleet as this starts', !sup.held);
+    type One = { recurring: RecurringJob; error?: string; detail?: string };
+    const mpid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'repeat216' })).body.project.id;
+    const tickAt = async (now: number, sched: Scheduler = scheduler()): Promise<void> => {
+      await sched.tick();
+      await sched.tick(now);
+    };
+    const settle = async (): Promise<void> => {
+      for (const r of runs) if (!r.finished) r.finish({ cost: 0, reason: 'completed' });
+      await until(() => sup.slots.used === 0);
+    };
+    const agentOf = (id: string, role: string, session: string | null, path = ROOT): void => {
+      insertJob(db, { id: `job_${id}`, projectId: mpid, prompt: 'repeat 216', isolation: 'in_place', worktreePath: path, branch: 'main', status: 'done', budgetUsd: null });
+      insertAgent(db, { id, jobId: `job_${id}`, projectId: mpid, role, model: 'opus', sdkSessionId: session, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY });
+    };
+    agentOf('agt_rep216', 'developer', 'sess_rep216');
+    agentOf('agt_rep216_new', 'reviewer', null);
+    agentOf('agt_rep216_gone', 'tester', 'sess_rep216_gone', join(ROOT, 'no-such-folder-216'));
+    const eyes = await connect();
+    const weekdays: Every = { kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' };
+    const said = (text: string, from: number): boolean => runs.slice(from).some((r) => r.prompts.some((p) => p.includes(text)));
+
+    // Saved: a message, to its agent, on the agent's project.
+    const made = await send<One>('POST', '/api/recurring', { name: 'Standup', every: weekdays, agentId: 'agt_rep216', text: '  Say what you did yesterday.  ' });
+    const msg = made.body.recurring;
+    check('a message schedule is saved: 201, a message to its agent, on its project, its text trimmed', made.status === 201 && msg.kind === 'message' && msg.agentId === 'agt_rep216' && msg.projectId === mpid && msg.text === 'Say what you did yesterday.' && msg.request === undefined && msg.lastResult === null && msg.lastJobId === null, JSON.stringify(made.body));
+    const kept = db.prepare('SELECT request, agent_id, text, project_id FROM recurring_jobs WHERE id = ?').get(msg.id) as { request: string; agent_id: string; text: string; project_id: string };
+    check('kept in the one table: no request, the agent and its text', kept.request === '' && kept.agent_id === 'agt_rep216' && kept.text === msg.text && kept.project_id === mpid, JSON.stringify(kept));
+    check('every tab hears it', await until(() => eyes.frames.some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === msg.id && r.kind === 'message'))));
+    const countRec = () => (db.prepare('SELECT COUNT(*) AS n FROM recurring_jobs').get() as { n: number }).n;
+    const before = countRec();
+    const badMsg = await Promise.all([
+      send<One>('POST', '/api/recurring', { name: 'n', every: weekdays, agentId: 'agt_nobody_216', text: 'x' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: weekdays, agentId: 7, text: 'x' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: weekdays, agentId: 'agt_rep216', text: '   ' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: weekdays, agentId: 'agt_rep216' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: weekdays, agentId: 'agt_rep216', text: 'x'.repeat(SCHEDULED_TEXT_MAX + 1) }),
+      send<One>('POST', '/api/recurring', { name: '', every: weekdays, agentId: 'agt_rep216', text: 'x' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 0 }, agentId: 'agt_rep216', text: 'x' }),
+    ]);
+    check(
+      'an agent that is not there is a 404; no text, too much, a bad name or rule a 400 that says why',
+      badMsg.map((r) => r.status).join() === '404,404,400,400,400,400,400' && badMsg[0]!.body.error === 'no such agent' && badMsg[2]!.body.error === 'text is required' && /longer than/.test(badMsg[4]!.body.error ?? ''),
+      badMsg.map((r) => `${r.status} ${r.body.error}`).join(' | '),
+    );
+    check('and none of them is kept', countRec() === before);
+
+    // Due: the text goes to the agent, as if you had pressed send then.
+    const due1 = Date.parse(msg.nextAt) + 1_000;
+    await tickAt(due1 - 2_000);
+    let mark = runs.length;
+    check('a second before its time nothing is sent', runs.length === mark && getRecurring(db, msg.id)?.lastResult === null);
+    let frameMark = eyes.frames.length;
+    await tickAt(due1);
+    check('at its time the text goes to the agent, resuming its session', await until(() => said(msg.text!, mark)) && runs.slice(mark).some((r) => r.options.resume === 'sess_rep216'), JSON.stringify(runs.slice(mark).map((r) => r.prompts)));
+    const r1 = getRecurring(db, msg.id)!;
+    check('recorded: sent, when, no job, and next due by the rule from then', r1.lastResult === 'sent' && r1.lastAt === new Date(due1).toISOString() && r1.lastJobId === null && r1.nextAt === nextRun(weekdays, new Date(due1)).toISOString(), JSON.stringify(r1));
+    check('and every tab hears it was sent', await until(() => eyes.frames.slice(frameMark).some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === msg.id && r.lastResult === 'sent'))));
+    await settle();
+    mark = runs.length;
+    await tickAt(due1 + 1_000);
+    check('the next look sends nothing more: no skip rule, and no second copy', runs.length === mark);
+
+    // Missed while the daemon was down: sent once.
+    db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ?').run(new Date(Date.now() - 3 * 86_400_000).toISOString(), msg.id);
+    mark = runs.length;
+    const fresh = new Scheduler(db, sup);
+    await fresh.tick();
+    fresh.stop();
+    await until(() => said(msg.text!, mark));
+    check('a restart after several missed times sends it once', runs.length - mark === 1 && getRecurring(db, msg.id)?.lastResult === 'sent' && Date.parse(getRecurring(db, msg.id)!.nextAt) > Date.now(), String(runs.length - mark));
+    await settle();
+
+    // Pause all: it stays due, and is sent once when the pause ends.
+    const due2 = Date.parse(getRecurring(db, msg.id)!.nextAt) + 1_000;
+    const pauseEnds = new Date(due2 + 3_600_000).toISOString();
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: pauseEnds } });
+    mark = runs.length;
+    await tickAt(due2);
+    check('while everything is paused it is not sent, and stays due', sup.held && runs.length === mark && Date.parse(getRecurring(db, msg.id)!.nextAt) < due2, `${sup.held} ${runs.length - mark}`);
+    await tickAt(Date.parse(pauseEnds) + 1_000);
+    check('when the pause ends it is sent, once', !sup.held && (await until(() => said(msg.text!, mark))) && runs.length - mark === 1 && getRecurring(db, msg.id)?.lastAt === new Date(Date.parse(pauseEnds) + 1_000).toISOString(), `${sup.held} ${runs.length - mark}`);
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: null } });
+    await scheduler().tick();
+    await settle();
+
+    // Not started yet: tried again at each look, its time kept, and why it waits said once.
+    const newbie = (await send<One>('POST', '/api/recurring', { name: 'Nudge', every: { kind: 'hours', n: 2 }, agentId: 'agt_rep216_new', text: 'Start on the review.' })).body.recurring;
+    const wasDue = new Date(Date.now() - 60_000).toISOString();
+    db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ?').run(wasDue, newbie.id);
+    mark = runs.length;
+    frameMark = eyes.frames.length;
+    await scheduler().tick();
+    const n1 = getRecurring(db, newbie.id)!;
+    check('an agent that cannot take a message yet: still due, at the same time, and its last result says why it waits', n1.nextAt === wasDue && n1.lastResult === 'waiting: reviewer has not started yet' && n1.lastAt !== null && n1.lastJobId === null && runs.length === mark, JSON.stringify(n1));
+    const heardWaiting = (): number => eyes.frames.slice(frameMark).filter((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === newbie.id && r.lastResult === n1.lastResult)).length;
+    check('…and every tab hears it', await until(() => heardWaiting() > 0));
+    const heard1 = heardWaiting();
+    await scheduler().tick();
+    await scheduler().tick();
+    await new Promise((r) => setTimeout(r, 200));
+    check('…once: the looks after it try again and say nothing more, its time still kept', heardWaiting() === heard1 && getRecurring(db, newbie.id)?.lastAt === n1.lastAt && getRecurring(db, newbie.id)?.nextAt === wasDue && runs.length === mark, `${heardWaiting()} ${heard1}`);
+    const nowRun = await send<One>('POST', `/api/recurring/${newbie.id}/run`);
+    check('▶ run now on it says why it could not be sent, and keeps its time', nowRun.status === 200 && nowRun.body.recurring.lastResult === 'failed: agent agt_rep216_new cannot receive messages yet' && nowRun.body.recurring.nextAt === wasDue, JSON.stringify(nowRun.body));
+    db.prepare('UPDATE agents SET sdk_session_id = ? WHERE id = ?').run('sess_rep216_new', 'agt_rep216_new');
+    await scheduler().tick();
+    check('once it can, the next look sends it', (await until(() => said('Start on the review.', mark))) && getRecurring(db, newbie.id)?.lastResult === 'sent' && Date.parse(getRecurring(db, newbie.id)!.nextAt) > Date.now());
+    await settle();
+
+    // Refused: recorded as failed, with why, and it goes on being due.
+    const lost = (await send<One>('POST', '/api/recurring', { name: 'Lost', every: { kind: 'hours', n: 1 }, agentId: 'agt_rep216_gone', text: 'Run the tests.' })).body.recurring;
+    db.prepare('UPDATE recurring_jobs SET next_at = ? WHERE id = ?').run(new Date(Date.now() - 60_000).toISOString(), lost.id);
+    mark = runs.length;
+    await scheduler().tick();
+    const l1 = getRecurring(db, lost.id)!;
+    check('a message refused (its agent\'s folder gone) is recorded as failed, with why, and stays due by its rule', l1.lastResult?.startsWith('failed: tester: ') === true && l1.lastJobId === null && Date.parse(l1.nextAt) > Date.now() && runs.length === mark, l1.lastResult ?? undefined);
+
+    // Run now: once, paused or not, its next time left where it is.
+    await send<One>('PATCH', `/api/recurring/${msg.id}`, { paused: true });
+    const pausedAt = getRecurring(db, msg.id)!.nextAt;
+    mark = runs.length;
+    frameMark = eyes.frames.length;
+    const ranNow = await send<One>('POST', `/api/recurring/${msg.id}/run`);
+    check('▶ run now sends a message at once, even paused, its next time kept', ranNow.status === 200 && ranNow.body.recurring.lastResult === 'sent' && ranNow.body.recurring.nextAt === pausedAt && ranNow.body.recurring.paused && Math.abs(Date.parse(ranNow.body.recurring.lastAt!) - Date.now()) < 60_000 && (await until(() => said(msg.text!, mark))), JSON.stringify(ranNow.body));
+    check('and every tab hears it', await until(() => eyes.frames.slice(frameMark).some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === msg.id && r.lastAt === ranNow.body.recurring.lastAt))));
+    await settle();
+    const nobody = await send<One>('POST', '/api/recurring/rec_nobody_216/run');
+    check('run now on one that is not there: 404', nobody.status === 404 && nobody.body.error === 'no such schedule', `${nobody.status} ${nobody.body.error}`);
+    await send<One>('PATCH', `/api/recurring/${msg.id}`, { paused: false });
+
+    // PATCH: its text, name and rule, each checked; a prompt is a job's.
+    const atWas = getRecurring(db, msg.id)!.nextAt;
+    frameMark = eyes.frames.length;
+    const retexted = await send<One>('PATCH', `/api/recurring/${msg.id}`, { text: '  Say what you will do today.  ' });
+    check('PATCH changes a message\'s text, trimmed, keeping its time', retexted.status === 200 && retexted.body.recurring.text === 'Say what you will do today.' && retexted.body.recurring.nextAt === atWas && retexted.body.recurring.kind === 'message', JSON.stringify(retexted.body));
+    check('and every tab hears the new text', await until(() => eyes.frames.slice(frameMark).some((f) => f.type === 'recurring' && f.recurring.some((r) => r.id === msg.id && r.text === 'Say what you will do today.'))));
+    const renamed = await send<One>('PATCH', `/api/recurring/${msg.id}`, { name: ' Morning ', every: { kind: 'hours', n: 4 } });
+    check('its name and rule, the rule next due by it from now, still a message to its agent', renamed.status === 200 && renamed.body.recurring.name === 'Morning' && renamed.body.recurring.every.kind === 'hours' && Math.abs(Date.parse(renamed.body.recurring.nextAt) - Date.now() - 4 * 3_600_000) < 60_000 && renamed.body.recurring.agentId === 'agt_rep216', JSON.stringify(renamed.body));
+    const msgBad = await Promise.all([
+      send<One>('PATCH', `/api/recurring/${msg.id}`, { text: '  ' }),
+      send<One>('PATCH', `/api/recurring/${msg.id}`, { text: 'x'.repeat(SCHEDULED_TEXT_MAX + 1) }),
+      send<One>('PATCH', `/api/recurring/${msg.id}`, { prompt: 'do a job' }),
+      send<One>('PATCH', `/api/recurring/${msg.id}`, { name: '' }),
+      send<One>('PATCH', `/api/recurring/${msg.id}`, { every: { kind: 'daily', at: '9am' } }),
+    ]);
+    check('no text, too much, a prompt, a bad name or rule: 400, saying why', msgBad.every((r) => r.status === 400) && msgBad[0]!.body.error === 'text is required' && msgBad[2]!.body.error === 'only a repeating job has a prompt', msgBad.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    const m2 = getRecurring(db, msg.id)!;
+    check('and the refusals changed nothing', m2.text === 'Say what you will do today.' && m2.name === 'Morning' && m2.every.kind === 'hours' && m2.request === undefined);
+
+    // Removed with its agent; every tab is told to read the fleet again.
+    frameMark = eyes.frames.length;
+    const removed = await send('DELETE', '/api/agents/agt_rep216');
+    check('removing the agent removes its repeating messages', removed.status === 200 && getAgent(db, 'agt_rep216') === undefined && getRecurring(db, msg.id) === null && getRecurring(db, newbie.id) !== null, String(removed.status));
+    check('and every tab hears it', await until(() => eyes.frames.slice(frameMark).some((f) => f.type === 'resync' || (f.type === 'recurring' && !f.recurring.some((r) => r.id === msg.id)))));
+
+    // A job you ran: Spawn's launch keeps its setup, and repeat… copies it.
+    const launch = { projectId: mpid, prompt: 'Tidy the changelog.', isolation: 'in_place', preset: 'solo', agents: [{ role: 'builder', model: OPUS, autonomy: DEFAULT_AUTONOMY }], budgetUsd: 4 };
+    frameMark = eyes.frames.length;
+    const launched = await send<{ job: Job }>('POST', '/api/jobs', launch);
+    const lj = launched.body.job;
+    const kept1 = jobRequest(db, lj.id);
+    check('a new job keeps the setup it was launched from, and says it can repeat', launched.status === 201 && lj.repeatable === true && kept1?.prompt === launch.prompt && kept1.budgetUsd === 4 && kept1.isolation === 'in_place' && kept1.agents[0]?.model === OPUS && kept1.projectId === mpid, JSON.stringify(kept1));
+    check('on the wire too', getJob(db, lj.id)?.repeatable === true && (await until(() => eyes.frames.slice(frameMark).some((f) => f.type === 'entities' && (f.jobs ?? []).some((j) => j.id === lj.id && j.repeatable === true)))));
+    await settle();
+    insertJob(db, { id: 'job_old216', projectId: mpid, prompt: 'from before', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'done', budgetUsd: null });
+    check('a job from before setups were kept keeps none, and cannot repeat', jobRequest(db, 'job_old216') === null && getJob(db, 'job_old216')?.repeatable === undefined);
+
+    const copied = await send<One>('POST', '/api/recurring', { name: 'Changelog', every: { kind: 'hours', n: 6 }, fromJobId: lj.id, prompt: 'Tidy the changelog and the README.' });
+    const fj = copied.body.recurring;
+    check('repeat… on it saves a job schedule from its setup, the prompt replaced', copied.status === 201 && fj.kind === 'job' && fj.request?.prompt === 'Tidy the changelog and the README.' && fj.request.budgetUsd === 4 && fj.request.agents[0]?.model === OPUS && fj.request.isolation === 'in_place' && fj.projectId === mpid && fj.agentId === undefined, JSON.stringify(copied.body));
+    const asIs = await send<One>('POST', '/api/recurring', { name: 'Changelog as it was', every: { kind: 'hours', n: 6 }, fromJobId: lj.id });
+    check('with no prompt given it keeps the job\'s own', asIs.status === 201 && asIs.body.recurring.request?.prompt === launch.prompt);
+    const waits = (await send<{ job: Job }>('POST', '/api/jobs', { ...launch, prompt: '', waitForInstructions: true })).body.job;
+    await settle();
+    const fromBad = await Promise.all([
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 6 }, fromJobId: 'job_old216' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 6 }, fromJobId: 'job_old216', prompt: 'something' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 6 }, fromJobId: 'job_nobody_216' }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 6 }, fromJobId: waits.id }),
+      send<One>('POST', '/api/recurring', { name: 'n', every: { kind: 'hours', n: 6 }, fromJobId: lj.id, prompt: '  ' }),
+    ]);
+    check('an old job is refused, in exactly the words the button\'s title gives', fromBad[0]!.status === 400 && fromBad[0]!.body.error === NOT_REPEATABLE && fromBad[1]!.body.error === NOT_REPEATABLE && NOT_REPEATABLE === 'this job was launched before Conductor kept its setup; set it up in Spawn and use repeat…', `${fromBad[0]!.status} ${fromBad[0]!.body.error}`);
+    check('a job that is not there is a 404; one that waits for instructions, or an empty prompt, a 400', fromBad[2]!.status === 404 && fromBad[2]!.body.error === 'no such job' && fromBad[3]!.status === 400 && /cannot wait for instructions/.test(fromBad[3]!.body.error ?? '') && fromBad[4]!.status === 400, fromBad.slice(2).map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    const given = await send<One>('POST', '/api/recurring', { name: 'Waited', every: { kind: 'hours', n: 6 }, fromJobId: waits.id, prompt: 'Now do the thing.' });
+    check('given a prompt, one that waited for instructions repeats with it, waiting no more', given.status === 201 && given.body.recurring.request?.prompt === 'Now do the thing.' && given.body.recurring.request.waitForInstructions === undefined, JSON.stringify(given.body));
+
+    // Run now, a job: started, the next time kept; while that run goes, skipped.
+    const fjAt = getRecurring(db, fj.id)!.nextAt;
+    const started = await send<One>('POST', `/api/recurring/${fj.id}/run`);
+    const sj = started.body.recurring.lastJobId;
+    const sjKept = sj === null ? null : jobRequest(db, sj);
+    check('▶ run now starts a job at once, its next time kept', started.status === 200 && started.body.recurring.lastResult === 'started' && sj !== null && started.body.recurring.nextAt === fjAt, JSON.stringify(started.body));
+    check('the job it starts came from it, and keeps the schedule\'s setup, not the run\'s name', sj !== null && getJob(db, sj)?.recurringId === fj.id && getJob(db, sj)?.name?.startsWith('Changelog · ') === true && getJob(db, sj)?.repeatable === true && sjKept?.prompt === fj.request?.prompt && sjKept?.name === undefined, JSON.stringify(sjKept));
+    await until(() => runs.some((r) => !r.finished));
+    const skipped = await send<One>('POST', `/api/recurring/${fj.id}/run`);
+    check('run now again while that run goes: skipped, saying so, never a second copy', skipped.status === 200 && skipped.body.recurring.lastResult === 'skipped' && skipped.body.recurring.lastJobId === sj && listJobs(db).filter((j) => j.recurringId === fj.id).length === 1 && skipped.body.recurring.nextAt === fjAt, JSON.stringify(skipped.body));
+    await settle();
+
+    // PATCH a job's prompt: the whole setup checked again.
+    const reprompted = await send<One>('PATCH', `/api/recurring/${fj.id}`, { prompt: 'Tidy the changelog, the README and the manual.' });
+    check('PATCH changes a job\'s prompt, the rest of its setup kept, its time too', reprompted.status === 200 && reprompted.body.recurring.request?.prompt === 'Tidy the changelog, the README and the manual.' && reprompted.body.recurring.request.budgetUsd === 4 && reprompted.body.recurring.nextAt === fjAt, JSON.stringify(reprompted.body));
+    const jobBad = await Promise.all([
+      send<One>('PATCH', `/api/recurring/${fj.id}`, { prompt: '' }),
+      send<One>('PATCH', `/api/recurring/${fj.id}`, { prompt: 7 }),
+      send<One>('PATCH', `/api/recurring/${fj.id}`, { text: 'a message' }),
+    ]);
+    check('an empty or wrong prompt, or text: 400, saying why', jobBad.every((r) => r.status === 400) && jobBad[2]!.body.error === 'only a repeating message has text', jobBad.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    check('and they changed nothing', getRecurring(db, fj.id)?.request?.prompt === 'Tidy the changelog, the README and the manual.' && getRecurring(db, fj.id)?.text === undefined);
+
+    // One at a time (review of 216): a schedule being run, by the clock or run now, is not run beside itself.
+    type Stand = Parameters<typeof runRecurringNow>[1];
+    const gated = (): { sup: Stand; open: () => void; made: () => number } => {
+      let open = (): void => {};
+      const gate = new Promise<void>((r) => (open = r));
+      let n = 0;
+      const stand = {
+        held: false,
+        sendMessage: () => 'sent' as const,
+        createJob: async () => {
+          n += 1;
+          const id = `job_gated216_${n}`;
+          await gate;
+          return { job: { id } as Job, agents: [] };
+        },
+      } as unknown as Stand;
+      return { sup: stand, open: () => open(), made: () => n };
+    };
+    const one = insertRecurring(db, { name: 'Gated', every: { kind: 'hours', n: 6 }, request: kept1! });
+    let g = gated();
+    const first = runRecurringNow(db, g.sup, one.id);
+    const second = runRecurringNow(db, g.sup, one.id);
+    const r2 = await second;
+    check('▶ run now twice at once: the second runs nothing, and says it is being run now', r2?.skipped === BEING_RUN && BEING_RUN === 'it is being run now' && r2.recurring.lastResult === null, JSON.stringify(r2));
+    await until(() => g.made() > 0);
+    g.open();
+    const ranFirst = await first;
+    check('…and the first makes exactly one job, and records it', g.made() === 1 && ranFirst?.skipped === undefined && ranFirst?.recurring.lastResult === RESULT_STARTED && ranFirst.recurring.lastJobId === 'job_gated216_1', `${g.made()} ${JSON.stringify(ranFirst)}`);
+    const viaRoute = await send<One & { skipped?: string }>('POST', `/api/recurring/${one.id}/run`);
+    check('the route answers { recurring }, with no skipped, when it ran', viaRoute.status === 200 && viaRoute.body.skipped === undefined && 'recurring' in viaRoute.body, JSON.stringify(viaRoute.body));
+    await settle();
+
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    db.prepare('UPDATE recurring_jobs SET next_at = ?, last_job_id = NULL WHERE id = ?').run(dueAt, one.id);
+    g = gated();
+    const clock = runDueRecurring(db, g.sup, Date.now());
+    const during = await runRecurringNow(db, g.sup, one.id);
+    check('the clock running it, then ▶ run now: run now runs nothing, and says why', during?.skipped === BEING_RUN, JSON.stringify(during));
+    await until(() => g.made() > 0);
+    g.open();
+    await clock;
+    check('…and the clock\'s run is the one job', g.made() === 1 && getRecurring(db, one.id)?.lastJobId === 'job_gated216_1' && getRecurring(db, one.id)?.lastResult === RESULT_STARTED && Date.parse(getRecurring(db, one.id)!.nextAt) > Date.now(), `${g.made()} ${JSON.stringify(getRecurring(db, one.id))}`);
+
+    db.prepare('UPDATE recurring_jobs SET next_at = ?, last_job_id = NULL WHERE id = ?').run(dueAt, one.id);
+    g = gated();
+    const byHand = runRecurringNow(db, g.sup, one.id);
+    const looked = await runDueRecurring(db, g.sup, Date.now());
+    check('▶ run now running it, then the clock: the clock leaves it as it is, still due, for its next look', looked === false && getRecurring(db, one.id)?.nextAt === dueAt, JSON.stringify(getRecurring(db, one.id)));
+    await until(() => g.made() > 0);
+    g.open();
+    await byHand;
+    check('…and run now\'s is the one job', g.made() === 1 && getRecurring(db, one.id)?.lastJobId === 'job_gated216_1', String(g.made()));
+
+    const refusing = { held: false, sendMessage: () => 'sent' as const, createJob: async () => { throw new Error('the folder is gone'); } } as unknown as Stand;
+    const failedNow = await runRecurringNow(db, refusing, one.id);
+    check('a run that made no job keeps the job the last run started', failedNow?.recurring.lastResult === 'failed: the folder is gone' && failedNow.recurring.lastJobId === 'job_gated216_1', JSON.stringify(failedNow));
+    await send('DELETE', `/api/recurring/${one.id}`);
+
+    // Run now while everything is paused: it starts, and says it waits.
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: new Date(Date.now() + 3_600_000).toISOString() } });
+    const heldRun = await send<One>('POST', `/api/recurring/${fj.id}/run`);
+    const hj = heldRun.body.recurring.lastJobId;
+    check('▶ run now while everything is paused: started, saying it waits for Pause all to end, its job queued', sup.held && heldRun.status === 200 && heldRun.body.recurring.lastResult === RESULT_STARTED_HELD && RESULT_STARTED_HELD === 'started (waits for Pause all to end)' && hj !== null && hj !== sj && getJob(db, hj)?.status === 'queued', `${getJob(db, hj ?? '')?.status} ${JSON.stringify(heldRun.body)}`);
+    await send('PATCH', '/api/settings', { settings: { [PAUSE_UNTIL_KEY]: null } });
+    await scheduler().tick();
+    await settle();
+
+    // Sent while every slot was taken: it says it waits for one.
+    const slotless = { held: false, sendMessage: () => 'queued' as const, createJob: async () => { throw new Error('not a job'); } } as unknown as Stand;
+    const queuedNow = await runRecurringNow(db, slotless, newbie.id);
+    check('a message that waits for a slot says so', queuedNow?.recurring.lastResult === RESULT_SENT_QUEUED && RESULT_SENT_QUEUED === 'sent (waiting for a slot)', JSON.stringify(queuedNow));
+
+    // A helper is its orchestrator's to direct.
+    insertAgent(db, { id: 'agt_rep216_help', jobId: 'job_agt_rep216_new', projectId: mpid, role: 'helper', model: 'opus', sdkSessionId: 'sess_rep216_help', status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY, parentId: 'agt_rep216_new' });
+    const recsBefore = countRec();
+    const toHelper = await send<One>('POST', '/api/recurring', { name: 'Poke', every: weekdays, agentId: 'agt_rep216_help', text: 'Hurry up.' });
+    check('a message to a helper is refused: 400, saying to schedule it to the orchestrator, nothing kept', toHelper.status === 400 && toHelper.body.error === HELPER_NOT_SCHEDULED && /schedule a message to the orchestrator instead/.test(HELPER_NOT_SCHEDULED) && countRec() === recsBefore, `${toHelper.status} ${toHelper.body.error}`);
+
+    // A batch launch: each job keeps its own stack's setup, {track} already filled in by Spawn.
+    const stack216 = (n: number) => ({ projectId: mpid, prompt: `Run track ${n} of the plan.`, isolation: 'worktree', branch: `r216/t${n}`, preset: 'solo', agents: [{ role: 'builder', model: OPUS, autonomy: DEFAULT_AUTONOMY }], budgetUsd: 3 });
+    const two = await send<{ jobs?: Array<{ job: Job }> }>('POST', '/api/jobs/batch', { jobs: [stack216(1), stack216(2)] });
+    const twoKept = (two.body.jobs ?? []).map((m) => jobRequest(db, m.job.id));
+    check(
+      'a batch of two stacks keeps each job\'s own one-stack setup, its track filled in',
+      two.status === 201 && twoKept.length === 2 && twoKept.every((k, i) => k !== null && k.prompt === `Run track ${i + 1} of the plan.` && k.branch === `r216/t${i + 1}` && !k.prompt.includes('{track}') && k.agents.length === 1 && !('jobs' in k)) && (two.body.jobs ?? []).every((m) => getJob(db, m.job.id)?.repeatable === true),
+      `${two.status} ${JSON.stringify(twoKept)}`,
+    );
+    await settle();
+    for (const id of [fj.id, asIs.body.recurring.id, given.body.recurring.id, newbie.id, lost.id]) await send('DELETE', `/api/recurring/${id}`);
+    eyes.close();
+
+    // Migration 380 on a database from before it.
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON');
+    const dir = new URL('../db/migrations/', import.meta.url);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '380').sort()) old.exec(readFileSync(new URL(f, dir), 'utf8'));
+    old.exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p380', 'old', '/tmp/p380', 'x')`);
+    old.exec(`INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch, status, created_at) VALUES ('j380', 'p380', 'old prompt', 'in_place', '/tmp/p380', 'main', 'done', 'x')`);
+    old.prepare(`INSERT INTO recurring_jobs (id, project_id, name, request, every, next_at, created_at) VALUES ('r380', 'p380', 'old one', ?, '{"kind":"hours","n":2}', '2026-11-12T09:00:00.000Z', 'x')`).run(JSON.stringify({ ...kept1, projectId: 'p380' }));
+    old.exec(readFileSync(new URL('380_recurring_more.sql', dir), 'utf8'));
+    const oldDb = old as unknown as Db;
+    const oldJob = listJobs(oldDb).find((j) => j.id === 'j380');
+    check('migration 380 applies to an existing database: an old job kept no setup, and cannot repeat', oldJob !== undefined && oldJob.repeatable === undefined && jobRequest(oldDb, 'j380') === null, JSON.stringify(oldJob));
+    const oldRec = getRecurring(oldDb, 'r380');
+    check('and an old schedule is a job, its setup as it was', oldRec?.kind === 'job' && oldRec.request?.prompt === launch.prompt && oldRec.agentId === undefined && oldRec.text === undefined, JSON.stringify(oldRec));
+    insertAgent(oldDb, { id: 'a380', jobId: 'j380', projectId: 'p380', role: 'developer', model: 'opus', sdkSessionId: null, status: 'done', blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy: DEFAULT_AUTONOMY });
+    const oldMsg = insertRecurring(oldDb, { name: 'hello', every: { kind: 'hours', n: 2 }, agentId: 'a380', projectId: 'p380', text: 'hello' });
+    old.exec(`DELETE FROM agents WHERE id = 'a380'`);
+    check('a message saved on it goes with its agent, and the job schedule stays', oldMsg.kind === 'message' && getRecurring(oldDb, oldMsg.id) === null && getRecurring(oldDb, 'r380') !== null);
     old.close();
     sdk.query = realQuery;
   }
@@ -9921,7 +10311,7 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project.\n'
+      ? '\nTrack A session: PASS — project removal forgets bookkeeping and touches no files; budgets are per day and only warn, so nothing is stopped, held or given the SDK as a limit, and midnight continues nothing; models switch; failures and outages reach Needs You; a resume that cannot make its call is moved past it; an agent put to sleep keeps its question and wakes into a free slot; cleanup clears only what removal left behind; an agent that waited hears what the ones before it said; the other directories of a project are reachable, readable, and forgotten without touching them; an agent whose model cannot be reached waits and tries again five times, then waits for the model to come back, checked on a schedule, and resumes when it answers, one first and the rest after it; each agent, project and the fleet keep an all-time total beside the figure for today, which removing an agent does not lower; and every agent launched before runs shell unattended, except a reading one; and a changed setting takes effect on the next run — a persona\'s prompt and skills as Settings has them, the launch copy when it\'s gone, for helpers too — while a live run takes the mode and effort; and one launch starts several stacks, all checked before any is made; and this month reads beside today, for the fleet and each project, against a monthly budget that only warns, put away for the month and clean on the 1st; and each engine and Claude route keeps its month too, in dollars or tokens as it reports them, against a budget of its own that only warns; and an agent\'s latest reply is kept by its seq when its run ends on prose, for every browser and across a restart; and an agent paused until a time is resumed once at it, after a restart too, though not while everything is paused, and never one the hold or a model paused; and the fleet\'s month can be set to the AI gateway\'s figure, kept as a correction for that month alone that spend adds on top of and the fleet\'s monthly budget reads, while each engine\'s, route\'s and project\'s month stays as counted; and a project keeps the key of its colour bar, or null for auto, and refuses anything else; and a saved Spawn setup repeats on its rule as a new job each time, skipped while its last run goes on, held while everything is paused, launched once after downtime, and gone with its project; and a note keeps the agent whose screen it was typed on, one of its own project\'s, with its role, which removing the agent does not take; and a message to an agent repeats on its rule as if typed then, sent, waiting for a slot or failed, tried again while the agent cannot take one and saying once why it waits, held while everything is paused, sent once after downtime and gone with its agent; any schedule runs now, keeping its next time, saying it waits while everything is paused, and never beside a run of itself, by the clock or run now, while a run that made no job keeps the last one\'s; a helper takes no schedule, its orchestrator does; and a job you ran repeats from the setup it kept, its prompt changed if you like, while one from before setups were kept is refused, and every new job keeps its setup, each stack of a batch its own.\n'
       : `\nTrack A session: FAIL — ${failures} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);

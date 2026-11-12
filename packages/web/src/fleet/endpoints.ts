@@ -7,7 +7,7 @@
  * lib/feed.ts so bearer auth stays in one place.
  */
 
-import type { PatchRecurringRequest, Project, ProjectColor, ProjectNote, RecurringJob } from '@conductor/shared';
+import type { CreateRecurringRequest, Every, PatchRecurringRequest, Project, ProjectColor, ProjectNote, RecurringJob, RunRecurringResponse } from '@conductor/shared';
 import { api } from '../lib/feed.js';
 
 /*
@@ -72,8 +72,14 @@ export function createProject(body: {
 
 const notesOf = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/notes`;
 
-export function addNote(projectId: string, text: string, due: string | null = null): Promise<{ note: ProjectNote; project: Project }> {
-  return api(notesOf(projectId), { method: 'POST', body: { text, ...(due ? { due } : {}) } });
+/** `agentId`: the agent whose screen it was typed on, one of this project's (Amendment 214). */
+export function addNote(
+  projectId: string,
+  text: string,
+  due: string | null = null,
+  agentId?: string,
+): Promise<{ note: ProjectNote; project: Project }> {
+  return api(notesOf(projectId), { method: 'POST', body: { text, ...(due ? { due } : {}), ...(agentId ? { agentId } : {}) } });
 }
 
 /** Change what's given: text, due (null clears it), done (Amendment 63). */
@@ -97,4 +103,24 @@ export function patchRecurring(id: string, patch: PatchRecurringRequest): Promis
 /** Cancel a job that repeats. The jobs it started stay. */
 export function cancelRecurring(id: string): Promise<{ removed: boolean }> {
   return api(`/api/recurring/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Run a schedule now (Amendment 216), either kind, keeping its next time. A job still skips while its last run is going;
+ * `skipped` says why nothing ran when it was already being run.
+ */
+export function runRecurring(id: string): Promise<RunRecurringResponse> {
+  return api(`/api/recurring/${encodeURIComponent(id)}/run`, { method: 'POST' });
+}
+
+/** A message to an agent, sent on a rule until you cancel it (Amendment 216). */
+export function saveRecurringMessage(name: string, every: Every, agentId: string, text: string): Promise<{ recurring: RecurringJob }> {
+  const body: CreateRecurringRequest = { name, every, agentId, text };
+  return api('/api/recurring', { method: 'POST', body });
+}
+
+/** A job like one you ran, on a rule: the daemon copies its stored setup with this prompt (Amendment 216). */
+export function saveRecurringFromJob(name: string, every: Every, fromJobId: string, prompt: string): Promise<{ recurring: RecurringJob }> {
+  const body: CreateRecurringRequest = { name, every, fromJobId, prompt };
+  return api('/api/recurring', { method: 'POST', body });
 }

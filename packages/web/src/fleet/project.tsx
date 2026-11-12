@@ -54,7 +54,7 @@ import { Lane } from './lane.js';
 import { restOf, restWord } from './rest.js';
 import { nestHelpers } from './nest.js';
 import { NotesPanel } from './Notes.js';
-import { RepeatingList, fromMark } from './repeating.js';
+import { RepeatJobButton, RepeatJobForm, RepeatingList, fromMark } from './repeating.js';
 import { Dock } from './dock.js';
 import { PROJECT_COLUMN, usePanel } from '../shell/panels.js';
 import { Splitter } from '../shell/Splitter.js';
@@ -98,6 +98,8 @@ function JobGroup({
   const [armed, setArmed] = useState(false);
   // One more agent in this job (Amendment 89): the editor opens under the header.
   const [adding, setAdding] = useState(false);
+  // ⟳ repeat… (Amendment 216): this job's setup, saved to run again on a rule.
+  const [repeating, setRepeating] = useState(false);
   const cmd = useCommand();
   const alerts = useAlerts();
   const from = fromMark(job.recurringId, useRecurring());
@@ -156,6 +158,7 @@ function JobGroup({
         >
           + agent
         </button>
+        <RepeatJobButton job={job} open={repeating} onToggle={() => setRepeating((r) => !r)} />
 
         {/*
          * Two stages, one at a time, because the job is the unit you launched and so it is
@@ -222,6 +225,7 @@ function JobGroup({
       )}
 
       {adding && <AddAgent job={job} agents={agents} onClose={() => setAdding(false)} />}
+      {repeating && <RepeatJobForm job={job} onClose={() => setRepeating(false)} />}
 
       {open &&
         (agents.length === 0 ? (

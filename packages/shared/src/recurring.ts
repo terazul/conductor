@@ -142,12 +142,35 @@ export function fromMark(
 
 /** What a last result says, for a schedule's row. */
 export type RecurringResult =
-  | { kind: 'started' }
+  | { kind: 'started'; held?: true }
   | { kind: 'skipped' }
+  | { kind: 'sent'; queued?: true }
+  | { kind: 'waiting'; reason: string }
   | { kind: 'failed'; reason: string };
 
 export const RESULT_STARTED = 'started';
+/** Run now while everything is paused: the job is made, and waits queued until the pause ends. */
+export const RESULT_STARTED_HELD = 'started (waits for Pause all to end)';
 export const RESULT_SKIPPED = 'skipped';
+/** A repeating message went to its agent (Amendment 216). */
+export const RESULT_SENT = 'sent';
+/** It went, to wait for a slot: every one was taken (Amendment 168). */
+export const RESULT_SENT_QUEUED = 'sent (waiting for a slot)';
+
+/** Why run now ran nothing: the clock, or another run now, was already running it. */
+export const BEING_RUN = 'it is being run now';
+
+/** Why a helper gets no repeating message: its orchestrator directs it, and its finished helpers are cleared. */
+export const HELPER_NOT_SCHEDULED = "a helper is its orchestrator's to direct; schedule a message to the orchestrator instead";
+
+/** `waiting: <why>`: a message to an agent that cannot take one yet, tried again at each look. */
+export function resultWaiting(reason: string): string {
+  return `waiting: ${reason}`;
+}
+
+/** Why a job without its kept setup cannot be repeated (Amendment 216): the daemon's refusal, and the button's title. */
+export const NOT_REPEATABLE =
+  'this job was launched before Conductor kept its setup; set it up in Spawn and use repeat…';
 
 /** `failed: <why>`, as kept. */
 export function resultFailed(reason: string): string {
@@ -158,6 +181,10 @@ export function resultFailed(reason: string): string {
 export function readResult(raw: string | null): RecurringResult | null {
   if (raw === null) return null;
   if (raw === RESULT_STARTED) return { kind: 'started' };
+  if (raw === RESULT_STARTED_HELD) return { kind: 'started', held: true };
   if (raw === RESULT_SKIPPED) return { kind: 'skipped' };
+  if (raw === RESULT_SENT) return { kind: 'sent' };
+  if (raw === RESULT_SENT_QUEUED) return { kind: 'sent', queued: true };
+  if (raw.startsWith('waiting: ')) return { kind: 'waiting', reason: raw.slice('waiting: '.length) };
   return { kind: 'failed', reason: raw.replace(/^failed:\s*/, '') };
 }

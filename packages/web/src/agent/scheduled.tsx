@@ -15,12 +15,20 @@
  *
  * One you sent while every slot was taken (Amendment 168) says **⏲ waiting for a slot**: the
  * daemon made it, it goes when a slot frees, and cancelling it puts the agent back.
+ *
+ * A message that repeats (Amendment 216) is one line here too, after them: **⟳ every weekday at
+ * 09:00**, its name, and pause or resume and cancel, which asks first (✕ cancel → confirm). ⟳ repeat… beside ⏲ later saves one from the
+ * box (`RepeatRow`); the Repeating screen lists them all, with edit and ▶ run now.
  */
 
 import { useMemo, useState } from 'react';
-import type { AgentStatus, ScheduledMessage } from '@conductor/shared';
+import type { AgentStatus, Every, RecurringJob, ScheduledMessage } from '@conductor/shared';
+import { RECURRING_NAME_MAX, everyProblem, everyWords, recurringNameProblem } from '@conductor/shared';
 import { errorText } from '../lib/errors.js';
-import { useAgent, useScheduled } from '../lib/store.js';
+import { useAgent, useRecurring, useScheduled } from '../lib/store.js';
+import { DEFAULT_RULE, RuleFields, ruleOf, type RuleDraft } from '../shell/RuleFields.js';
+import { defaultName, ruleLine } from '../spawn/repeat.js';
+import { cancelRecurring, patchRecurring } from '../fleet/endpoints.js';
 import { useNow } from '../shell/clock.js';
 import { Chevron } from '../shell/chevron.js';
 import { fmtIn, fmtWhen, fromLocalInput, nextHour, toLocalInput, tomorrowMorning, whenProblem } from '../lib/when.js';
@@ -30,6 +38,17 @@ import { cancelScheduled } from './endpoints.js';
 export function useAgentScheduled(agentId: string): ScheduledMessage[] {
   const all = useScheduled();
   return useMemo(() => all.filter((m) => m.agentId === agentId), [all, agentId]);
+}
+
+/** This agent's messages that repeat (Amendment 216). */
+export function useAgentRepeating(agentId: string): RecurringJob[] {
+  const all = useRecurring();
+  return useMemo(() => all.filter((r) => r.kind === 'message' && r.agentId === agentId), [all, agentId]);
+}
+
+/** A repeating message's line: "⟳ every weekday at 09:00", or paused. */
+export function repeatLine(r: Pick<RecurringJob, 'every' | 'paused'>): string {
+  return `⟳ ${everyWords(r.every)}${r.paused ? ' · paused' : ''}`;
 }
 
 /**
@@ -100,6 +119,7 @@ const firstLine = (text: string): string => {
 
 export function ScheduledList({ agentId }: { agentId: string }) {
   const items = useAgentScheduled(agentId);
+  const repeating = useAgentRepeating(agentId);
   const agent = useAgent(agentId);
   const status = agent?.status;
   const orchestrator = (agent?.helperCap ?? 0) > 0;
@@ -107,6 +127,8 @@ export function ScheduledList({ agentId }: { agentId: string }) {
   const firstSlot = items.find((m) => m.trigger === 'slot' && !m.error)?.id;
   const now = new Date(useNow(30_000));
   const [why, setWhy] = useState<string | null>(null);
+  // A repeating message's ✕ asks first (✕ cancel → confirm): it would go on being sent for weeks.
+  const [arming, setArming] = useState<string | null>(null);
   // Which rows are open to their full text (Amendment 118). A row shows one line until clicked.
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string): void =>
@@ -116,7 +138,7 @@ export function ScheduledList({ agentId }: { agentId: string }) {
       else n.add(id);
       return n;
     });
-  if (items.length === 0) return null;
+  if (items.length === 0 && repeating.length === 0) return null;
   return (
     <div className="ag-sched" aria-label="scheduled messages">
       {items.map((m) => (
@@ -175,6 +197,61 @@ export function ScheduledList({ agentId }: { agentId: string }) {
         )}
         </div>
       ))}
+      {repeating.map((r) => (
+        <div key={r.id} className="ag-sched-item">
+          <div className={`ag-sched-row is-repeat${r.paused ? ' is-paused' : ''}`}>
+            <span className="ag-sched-open" title={r.text}>
+              <span className="ag-sched-when">{repeatLine(r)}</span>
+              <span className="ag-sched-text">{r.name}</span>
+            </span>
+            <button
+              type="button"
+              className="ag-sched-x"
+              aria-label={r.paused ? 'resume it' : 'pause it'}
+              title={r.paused ? 'Resume: it is sent on its rule again, next due from now' : 'Pause: it is not sent until you resume it'}
+              onClick={() => {
+                setWhy(null);
+                patchRecurring(r.id, { paused: !r.paused }).catch((err: unknown) => setWhy(errorText(err)));
+              }}
+            >
+              {r.paused ? '▶' : '❚❚'}
+            </button>
+            {arming === r.id ? (
+              <>
+                <button
+                  type="button"
+                  className="ag-sched-x is-confirm"
+                  aria-label="confirm: cancel it"
+                  title="Cancel: it will not be sent again. What it sent stays."
+                  onClick={() => {
+                    setWhy(null);
+                    setArming(null);
+                    cancelRecurring(r.id).catch((err: unknown) => setWhy(errorText(err)));
+                  }}
+                >
+                  confirm
+                </button>
+                <button type="button" className="ag-sched-x" aria-label="keep it" title="Keep it" onClick={() => setArming(null)}>
+                  keep
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ag-sched-x"
+                aria-label="cancel it"
+                title="Cancel it: asks first"
+                onClick={() => {
+                  setWhy(null);
+                  setArming(r.id);
+                }}
+              >
+                ✕ cancel
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
       {why && <div className="ag-sched-row is-failed">{why}</div>}
     </div>
   );
@@ -225,6 +302,57 @@ export function LaterRow({
         {busy ? 'scheduling…' : 'schedule'}
       </button>
       <span className="ui-lab">{problem ?? (iso ? `${fmtWhen(iso, now)} · ${fmtIn(iso, now)}` : '')}</span>
+      <button type="button" className="ag-sched-x" aria-label="close" title="Close" onClick={onClose}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/**
+ * ⟳ repeat…'s row under the message box (Amendment 216): a name, starting as the text's first line,
+ * and a rule. `onSave` gets both; the composer saves what's typed to be sent on it, to this agent.
+ */
+export function RepeatRow({
+  busy,
+  text,
+  onSave,
+  onClose,
+}: {
+  busy: boolean;
+  text: string;
+  onSave: (name: string, every: Every) => void;
+  onClose: () => void;
+}) {
+  const [named, setNamed] = useState<string | null>(null);
+  const [rule, setRule] = useState<RuleDraft>(DEFAULT_RULE);
+  const name = named ?? defaultName('', text);
+  const every = ruleOf(rule);
+  const problem = (text.trim() ? null : 'write the message first') ?? recurringNameProblem(name) ?? everyProblem(every);
+  return (
+    <div className="ag-later" role="group" aria-label="send it on a rule">
+      <span className="ui-lab">repeat as</span>
+      <input
+        className="ag-repeat-name"
+        aria-label="a name for the schedule"
+        value={name}
+        maxLength={RECURRING_NAME_MAX}
+        placeholder="A name for the schedule"
+        onChange={(e) => setNamed(e.target.value)}
+        spellCheck={false}
+        autoComplete="off"
+      />
+      <RuleFields rule={rule} onChange={setRule} />
+      <button
+        type="button"
+        className="fl-btn is-primary"
+        disabled={busy || problem !== null}
+        title={problem ?? 'Send this message on this rule until you cancel it'}
+        onClick={() => onSave(name.trim(), every)}
+      >
+        {busy ? 'saving…' : 'save'}
+      </button>
+      <span className="ui-lab">{problem ?? ruleLine(rule, new Date())}</span>
       <button type="button" className="ag-sched-x" aria-label="close" title="Close" onClick={onClose}>
         ✕
       </button>

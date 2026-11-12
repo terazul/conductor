@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   Autonomy,
   BlockMode,
+  CreateJobRequest,
   DaySpend,
   DecisionSummary,
   HelperRole,
@@ -114,6 +115,8 @@ interface NoteRow {
   updated_at: string;
   due?: string | null;
   done_at?: string | null;
+  agent_id?: string | null;
+  agent_label?: string | null;
 }
 
 const toNote = (r: NoteRow): ProjectNote => ({
@@ -125,6 +128,9 @@ const toNote = (r: NoteRow): ProjectNote => ({
   // Only when set, so a plain note's shape is what it was (Amendment 63).
   ...(r.due ? { due: r.due } : {}),
   ...(r.done_at ? { doneAt: r.done_at } : {}),
+  // The agent whose screen it was typed on (Amendment 214), only when there was one.
+  ...(r.agent_id ? { agentId: r.agent_id } : {}),
+  ...(r.agent_label ? { agentLabel: r.agent_label } : {}),
 });
 
 /** Every open note due today or before, for Needs You. */
@@ -146,12 +152,22 @@ export function getNote(db: Db, id: string): ProjectNote | undefined {
   return r ? toNote(r) : undefined;
 }
 
-export function insertNote(db: Db, projectId: string, text: string, due: string | null = null): ProjectNote {
+/**
+ * A new note. `agent` is the agent whose screen it was typed on (Amendment 214): its id, and its
+ * role as it reads now, kept so the tag still reads once the agent is gone.
+ */
+export function insertNote(
+  db: Db,
+  projectId: string,
+  text: string,
+  due: string | null = null,
+  agent: { id: string; label: string } | null = null,
+): ProjectNote {
   const at = nowIso();
   const id = newId('note');
   db.prepare(
-    'INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(id, projectId, text, at, at, due);
+    'INSERT INTO project_notes (id, project_id, text, created_at, updated_at, due, agent_id, agent_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(id, projectId, text, at, at, due, agent?.id ?? null, agent?.label ?? null);
   return getNote(db, id)!;
 }
 
@@ -366,6 +382,8 @@ interface JobRow {
   name: string | null;
   /** Amendment 211; absent on a row read before migration 360 ran. */
   recurring_id?: string | null;
+  /** Amendment 216: the setup it was launched from, JSON; absent before migration 380 ran. */
+  request?: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -381,6 +399,7 @@ const toJob = (r: JobRow): Job => ({
   budgetUsd: r.budget_usd,
   ...(r.name ? { name: r.name } : {}),
   ...(r.recurring_id ? { recurringId: r.recurring_id } : {}),
+  ...(r.request ? { repeatable: true as const } : {}),
 });
 
 export function listJobs(db: Db): Job[] {
@@ -398,12 +417,16 @@ export function getJob(db: Db, id: string): Job | undefined {
   return r ? toJob(r) : undefined;
 }
 
-export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
-  const job: Job = { ...j, createdAt: nowIso(), endedAt: null };
+/**
+ * A new job. `request` is the setup it was launched from (Amendment 216), kept so it can be
+ * repeated; a job made without one is not repeatable.
+ */
+export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt' | 'repeatable'>, request?: CreateJobRequest): Job {
+  const job: Job = { ...j, createdAt: nowIso(), endedAt: null, ...(request ? { repeatable: true as const } : {}) };
   db.prepare(
     `INSERT INTO jobs (id, project_id, prompt, isolation, worktree_path, branch,
-                       status, budget_usd, created_at, ended_at, name, recurring_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+                       status, budget_usd, created_at, ended_at, name, recurring_id, request)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
   ).run(
     job.id,
     job.projectId,
@@ -416,8 +439,15 @@ export function insertJob(db: Db, j: Omit<Job, 'createdAt' | 'endedAt'>): Job {
     job.createdAt,
     job.name ?? null,
     job.recurringId ?? null,
+    request ? JSON.stringify(request) : null,
   );
   return job;
+}
+
+/** The setup a job was launched from (Amendment 216), or null for one from before it was kept. */
+export function jobRequest(db: Db, id: string): CreateJobRequest | null {
+  const r = row<{ request: string | null }>(db.prepare('SELECT request FROM jobs WHERE id = ?').get(id));
+  return r?.request ? (JSON.parse(r.request) as CreateJobRequest) : null;
 }
 
 /** The name a launched stack is shown by, or with null its original prompt again. */

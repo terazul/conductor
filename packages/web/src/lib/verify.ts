@@ -957,7 +957,7 @@ console.log('\n15 · a screen can be reached without having a tab (Amendment 42)
   {
     // The made-up key really is one nothing has: no screen registers it.
     const real: string[] = [];
-    for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'settings', 'diagnostics', 'spawn']) {
+    for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'repeating', 'settings', 'diagnostics', 'spawn']) {
       const code = readFileSync(new URL(`../${dir}/route.tsx`, import.meta.url), 'utf8');
       for (const m of code.matchAll(/hotkey:\s*'(.)'/g)) real.push(m[1]!);
     }
@@ -1144,7 +1144,7 @@ console.log('\n24 · notes on a project, on its card (Amendment 55)');
   const projectScreen = readFileSync(new URL('../fleet/project.tsx', import.meta.url), 'utf8');
   const inspector = readFileSync(new URL('../agent/inspector.tsx', import.meta.url), 'utf8');
   check('the Project screen edits the same notes (Amendment 56)', /<NotesPanel project=\{project\} \/>/.test(projectScreen));
-  check("and the Agent screen, its agent's project's", /<NotesPanel project=\{project\} \/>/.test(inspector) && /p\.id === agent\.projectId/.test(inspector));
+  check("and the Agent screen, its agent's project's", /<NotesPanel project=\{project\} agentId=\{agent\.id\} \/>/.test(inspector) && /p\.id === agent\.projectId/.test(inspector));
   check('typing in it never opens the project', /onKeyDown: \(e: React\.KeyboardEvent\) => e\.stopPropagation\(\)/.test(notes));
 
   // Copy, and a delete that says so (Amendment 83).
@@ -3325,7 +3325,7 @@ await (async () => {
   const now = new Date(2026, 10, 11, 12, 0);
   const iso = (h: number, m = 0, day = 11): string => new Date(2026, 10, day, h, m).toISOString();
   const rec = (extra: Partial<RecurringJob>): RecurringJob => ({
-    id: 'rec_1', projectId: 'p1', name: 'Nightly tests', request: launchBody(input), every: { kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' },
+    id: 'rec_1', projectId: 'p1', name: 'Nightly tests', kind: 'job', request: launchBody(input), every: { kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' },
     nextAt: iso(9, 0, 12), lastAt: null, lastJobId: null, lastResult: null, createdAt: iso(8), paused: false, ...extra,
   });
   check('a last result in words: not run yet, started, skipped, failed',
@@ -3336,15 +3336,15 @@ await (async () => {
   const row = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_run' }), agents: [run] }));
   // The row reads the real clock: on 12 Nov itself the next time is "09:00", any other day "12 Nov 09:00".
   check('a row: its name, the rule in words, the next time, and its last result with a link to its job',
-    /^Nightly testsevery weekday at 09:00 · next (12 Nov )?09:00started/.test(text(row)) && /<button type="button" class="pj-rep-link"[^>]*>its job<\/button>/.test(row), text(row));
-  check('…and pause, edit time and cancel', /❚❚ pause<\/button>/.test(row) && />edit time<\/button>/.test(row) && />✕ cancel<\/button>/.test(row));
+    /^Nightly tests⟳ jobevery weekday at 09:00 · next (12 Nov )?09:00started/.test(text(row)) && /<button type="button" class="pj-rep-link"[^>]*>its job<\/button>/.test(row), text(row));
+  check('…and pause, edit and cancel (edit was edit time until Amendment 216 widened it)', /❚❚ pause<\/button>/.test(row) && />edit<\/button>/.test(row) && />✕ cancel<\/button>/.test(row));
   const gone = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_removed' }), agents: [run] }));
   check('…no link when its job has been removed', !gone.includes('its job'));
   const paused = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ paused: true, lastAt: iso(9), lastResult: 'skipped' }), agents: [] }));
   check('a paused row says paused, not a next time, and offers resume', /class="pj-rep is-paused"/.test(paused) && text(paused).includes('every weekday at 09:00 · paused') && /▶ resume<\/button>/.test(paused) && /pj-rep-last is-skip/.test(paused));
   const rep = src('../fleet/repeating.tsx');
   check('cancel asks first, and says the jobs it started stay', /Cancel this schedule\? The jobs it started stay\./.test(rep) && /\) : armed \? \(/.test(rep) && /onClick=\{\(\) => setArmed\(true\)\}>\s*✕ cancel/.test(rep));
-  check('edit time is the same rule control, saved as a new rule', /<RuleFields rule=\{editing\} onChange=\{setEditing\} \/>/.test(rep) && /patchRecurring\(r\.id, \{ every: ruleOf\(editing\) \}\)/.test(rep) && /setEditing\(draftOf\(r\.every\)\)/.test(rep));
+  check('edit\'s time is the same rule control, saved as a new rule', /<RuleFields rule=\{editing\.rule\} onChange=\{\(rule\) => setEditing\(\{ \.\.\.editing, rule \}\)\} \/>/.test(rep) && /patchRecurring\(r\.id, editPatch\(r, editing\)\)/.test(rep) && /rule: draftOf\(r\.every\)/.test(rep) && /every \} : \{\}\)/.test(rep));
   const project = src('../fleet/project.tsx');
   check('the list sits under the project\'s notes, its own projects\' rows only', /<NotesPanel project=\{project\} \/>\s*<\/div>\s*\{\/\*[^*]*\*\/\}\s*<RepeatingList projectId=\{project\.id\} \/>/.test(project) &&
     /useRecurring\(\)\.filter\(\(r\) => r\.projectId === projectId\)/.test(rep) && /<span className="ui-lab">Repeating · \{recurring\.length\}<\/span>/.test(rep));
@@ -3470,9 +3470,315 @@ await (async () => {
   check('the reply\'s, the quote\'s and the message\'s copy all use copyProse, and preload', /function ReplyCopy[\s\S]{0,80}usePreloadReplyCopy\(\);/.test(tr) && /copyProse\(proseOf\(reply\), reply\)/.test(tr) && (qb.match(/usePreloadReplyCopy\(\);/g) ?? []).length === 2 && !/copyRich|import\('\.\/replycopy/.test(tr + qb));
 })();
 
+console.log('\n60 · every note in one place, by project and by the agent whose screen it was typed on (Amendment 214)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { NO_NOTE_FILTER, noteMatches, noteGroups, noteAgents, agentTag, notesSummary } = await import('../fleet/notewords.js');
+  const today = '2026-11-12';
+  const note = (id: string, projectId: string, over: { createdAt?: string; due?: string; doneAt?: string; agentId?: string; agentLabel?: string; text?: string } = {}) => ({ id, projectId, text: `note ${id}`, createdAt: `2026-11-0${id.length}T10:00:00Z`, ...over });
+  const a = [
+    note('a1', 'pa', { createdAt: '2026-11-01T10:00:00Z' }),
+    note('a2', 'pa', { createdAt: '2026-11-05T10:00:00Z', agentId: 'ag_dev', agentLabel: 'developer' }),
+    note('a3', 'pa', { createdAt: '2026-11-06T10:00:00Z', doneAt: '2026-11-07T10:00:00Z', agentId: 'ag_dev', agentLabel: 'developer' }),
+  ];
+  const b = [
+    note('b1', 'pb', { createdAt: '2026-11-02T10:00:00Z', due: '2026-11-10' }),
+    note('b2', 'pb', { createdAt: '2026-11-03T10:00:00Z', due: '2026-11-08', agentId: 'ag_rev', agentLabel: 'reviewer' }),
+    note('b3', 'pb', { createdAt: '2026-11-04T10:00:00Z', due: today, text: 'Ship the Release' }),
+  ];
+  const projects = [
+    { id: 'pa', name: 'alpha', notes: a },
+    { id: 'pb', name: 'beta', notes: b },
+    { id: 'pc', name: 'gamma', notes: [] },
+  ];
+  const ids = (g: { project: { id: string }; notes: { id: string }[] }[]): string => g.map((x) => `${x.project.id}:${x.notes.map((n) => n.id).join(',')}`).join(' ');
+
+  // ── which notes, in what order ──
+  const open = noteGroups(projects, NO_NOTE_FILTER, today);
+  check('open notes to begin with, grouped by project, a project with none left out', ids(open) === 'pb:b2,b1,b3 pa:a2,a1', ids(open));
+  check('…late first, the longest late first, then due today, then the newest; the group with the most urgent note at the top', open[0]?.project.id === 'pb' && open[0].notes.map((n) => n.id).join() === 'b2,b1,b3');
+  check('done shows the ticked ones only, all shows every one', ids(noteGroups(projects, { ...NO_NOTE_FILTER, show: 'done' }, today)) === 'pa:a3' && noteGroups(projects, { ...NO_NOTE_FILTER, show: 'all' }, today).reduce((s, g) => s + g.notes.length, 0) === 6);
+  check('one project\'s', ids(noteGroups(projects, { ...NO_NOTE_FILTER, projectId: 'pa' }, today)) === 'pa:a2,a1');
+  check('one agent\'s, done and open, and a note with no agent is not one of them', ids(noteGroups(projects, { ...NO_NOTE_FILTER, agentId: 'ag_dev', show: 'all' }, today)) === 'pa:a3,a2');
+  check('words the text holds, any case, around spaces', ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: '  release ' }, today)) === 'pb:b3' && !noteMatches(a[0]!, { ...NO_NOTE_FILTER, q: 'release' }));
+  check('each word, in any order and any case: "ship release" finds "Ship the Release", and a word it lacks finds nothing', ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: 'ship release' }, today)) === 'pb:b3' && ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: 'RELEASE the' }, today)) === 'pb:b3' && noteGroups(projects, { ...NO_NOTE_FILTER, q: 'ship tomorrow' }, today).length === 0);
+  check('ties keep the projects\' own order', ids(noteGroups([{ id: 'x', notes: [note('x1', 'x', { createdAt: '2026-11-01T10:00:00Z' })] }, { id: 'y', notes: [note('y1', 'y', { createdAt: '2026-11-01T10:00:00Z' })] }], NO_NOTE_FILTER, today)).startsWith('x:'));
+
+  // ── the agent picker, and a note's tag ──
+  const picks = noteAgents(projects, null);
+  check('the agent picker offers those with notes, each once, named with their project when there are several', JSON.stringify(picks) === JSON.stringify([{ agentId: 'ag_dev', label: 'alpha / developer' }, { agentId: 'ag_rev', label: 'beta / reviewer' }]), JSON.stringify(picks));
+  check('…and by its role alone within one project', JSON.stringify(noteAgents(projects, 'pa')) === JSON.stringify([{ agentId: 'ag_dev', label: 'developer' }]) && noteAgents(projects, 'pc').length === 0);
+  const twins = [{ id: 'pt', name: 'twins', notes: [note('t1', 'pt', { agentId: 'ag_d1', agentLabel: 'developer' }), note('t2', 'pt', { agentId: 'ag_d2', agentLabel: 'developer' }), note('t3', 'pt', { agentId: 'ag_d3', agentLabel: 'developer' }), note('t4', 'pt', { agentId: 'ag_r', agentLabel: 'reviewer' })] }];
+  const jobOf = (id: string): string | undefined => ({ ag_d1: 'Nightly tests', ag_d2: 'Fix the login page' })[id];
+  const twin = noteAgents(twins, 'pt', jobOf).map((p) => p.label);
+  check('two agents of one project with one role are told apart by their job, removed once gone; a role alone stays bare', JSON.stringify(twin) === JSON.stringify(['developer · Fix the login page', 'developer · Nightly tests', 'developer · removed', 'reviewer']), JSON.stringify(twin));
+  const { jobWords } = await import('../fleet/notewords.js');
+  check('…the job by its name, else its prompt\'s first five words', jobWords({ name: ' Nightly ', prompt: 'x' }) === 'Nightly' && jobWords({ prompt: 'run the whole test suite again please' }) === 'run the whole test suite…' && jobWords({ prompt: 'fix it' }) === 'fix it' && jobWords({ prompt: '' }) === 'waiting for instructions');
+  check('a note\'s tag is its role, to open; once the agent is gone, removed; none typed nowhere', JSON.stringify(agentTag(a[1]!, true)) === '{"label":"developer","removed":false}' && agentTag(a[1]!, false)?.removed === true && agentTag(a[0]!, true) === null);
+  check('the summary counts notes and projects, and says when there are none', notesSummary(open, 'open') === '5 open notes in 2 projects' && notesSummary([{ notes: [1] }], 'all') === '1 note in 1 project' && notesSummary([], 'done') === 'no done notes');
+
+  // ── where it is drawn ──
+  const route = src('../notes/route.tsx');
+  const notes = src('../fleet/Notes.tsx');
+  check('the inspector tags what is typed there with its agent, and addNote sends it', /<NotesPanel project=\{project\} agentId=\{agent\.id\} \/>/.test(src('../agent/inspector.tsx')) && /addNote\(project\.id, text, due, agentId\)/.test(notes) && /\.\.\.\(agentId \? \{ agentId \} : \{\}\)/.test(src('../fleet/endpoints.ts')));
+  check('the Notes screen\'s rows are every project list\'s row, not a copy of it', /export function NoteRow\(/.test(notes) && /import \{ NoteRow \} from '\.\.\/fleet\/Notes\.js';/.test(route) && /<NoteRow key=\{n\.id\} project=\{project\} note=\{n\} \/>/.test(route) && !/fl-note-text/.test(route));
+  check('…whose meta line leads with the agent, which opens it', /<AgentTag note=\{note\} \/>/.test(notes) && /onClick=\{\(\) => openAgent\(agent\)\}/.test(notes) && /\{tag\.label\} · removed/.test(notes));
+  check('a top-bar screen, Notes, order 82, hotkey n, in the reserved table and the status bar', /id: 'notes',\s*label: 'Notes',\s*hotkey: 'n',\s*order: 82,/.test(route) && /82\s+'n'\s+Notes/.test(src('./screens.ts')) && /<kbd>n<\/kbd> notes/.test(src('../shell/shell.tsx')));
+  const keyed: string[] = [];
+  for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'repeating', 'settings', 'diagnostics', 'spawn']) for (const m of src(`../${dir}/route.tsx`).matchAll(/hotkey:\s*'(.)'/g)) keyed.push(m[1]!);
+  check('…and n is no other screen\'s', keyed.filter((k) => k === 'n').length === 1, keyed.join());
+  check('the filters are kept outside the screen, read when it mounts and written on each change, so they last until reload', /^let kept: NoteFilter = NO_NOTE_FILTER;$/m.test(route) && /useState<NoteFilter>\(\(\) => kept\)/.test(route) && /setFilter\(\(f\) => \(kept = \{ \.\.\.f, \.\.\.patch \}\)\)/.test(route));
+  check('…and the agent picker is given each agent\'s job', /noteAgents\(projects, projectId, jobOf\)/.test(route) && /jobWords\(job\)/.test(route));
+  check('each group opens its project, under its colour bar', /className=\{`nt-group \$\{projClass\(colors\.get\(project\.id\)\)\}`\}/.test(route) && /onClick=\{\(\) => openProject\(project\.id\)\}/.test(route));
+  const css = src('../notes/notes.css') + src('../fleet/fleet.css').slice(src('../fleet/fleet.css').indexOf('.fl-note-agent'));
+  check('…drawn in tokens only, the bar a bar and never a fill', !/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')) && /\.nt-ghead \{[^}]*box-shadow: inset 4px 0 0 var\(--proj, var\(--line2\)\);/.test(css) && !/background:[^;]*--proj/.test(css));
+})();
+
+console.log('\n61 · the message box says, across its top in its project\'s colour, which project and agent it writes to (Amendment 215)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { replyBarWords, replyBarLine } = await import('../agent/replybar.js');
+
+  // ── its words ──
+  const w = replyBarWords('conductor', 'developer', 'Nightly tests');
+  check('project / agent, and the job\'s name when it has one', replyBarLine(w) === 'conductor / developer · Nightly tests' && w.project === 'conductor' && w.agent === 'developer' && w.job === 'Nightly tests');
+  check('…no job name, none shown; a blank one is none', replyBarLine(replyBarWords('conductor', 'developer', undefined)) === 'conductor / developer' && replyBarWords('conductor', 'developer', '  ').job === null);
+  check('…and the agent alone until its project is known', replyBarLine(replyBarWords(undefined, 'developer', undefined)) === 'developer' && replyBarWords(undefined, 'developer', undefined).project === null);
+  const comp = src('../agent/composer.tsx');
+  const box = comp.slice(comp.indexOf('<div className={`ag-cbox'), comp.indexOf('<textarea', comp.indexOf('<div className={`ag-cbox')));
+  check('the bar is inside the box, above the textarea', /<div className="ag-cbar" title=\{replyBarLine\(bar\)\}>/.test(box) && box.length < 1200, box.slice(0, 120));
+  check('…the project\'s name opens the project, the role is plain text, the job\'s name quieter', /className="ag-cbar-proj"[^>]*onClick=\{\(\) => openProject\(agent\.projectId\)\}/.test(box) && /<span className="ag-cbar-agent">\{bar\.agent\}<\/span>/.test(box) && /<span className="ag-cbar-quiet"> · \{bar\.job\}<\/span>/.test(box));
+  check('…its words from the agent\'s project, role and job', /replyBarWords\(\s*useProjects\(\)\.find\(\(p\) => p\.id === agent\.projectId\)\?\.name,\s*agent\.role,\s*useJobs\(agent\.projectId\)\.find\(\(j\) => j\.id === agent\.jobId\)\?\.name,\s*\)/.test(comp));
+
+  // ── its colour: 18% of the project's over the box's own, ink and ink2 past 4.5:1 for all eight, both themes ──
+  const css = src('../agent/agent.css');
+  const tinted = /\.ag-cbox\.has-proj > \.ag-cbar \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const pct = Number(/background: color-mix\(in srgb, var\(--proj\) (\d+)%, var\(--surf\)\);/.exec(tinted)?.[1] ?? NaN);
+  check('with a colour, the bar is the project\'s colour mixed into the box\'s --surf', pct > 0 && pct < 100 && /\.ag-cbox \{[^}]*background: var\(--surf\);/.test(css), tinted);
+  const mix = (a: string, b: string, p: number): string =>
+    '#' + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * p + parseInt(b.slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('');
+  const themes = themeTokens();
+  const keys = ['sky', 'mint', 'plum', 'yellow', 'blue', 'pink', 'indigo', 'magenta'];
+  let worst = { ratio: Infinity, at: '' };
+  for (const [name, t] of [['dark', themes.dark], ['light', themes.light]] as const) {
+    for (const k of keys) {
+      const bg = mix(t.get(`proj-${k}`) ?? '#000000', t.get('surf') ?? '#000000', pct / 100);
+      for (const ink of ['ink', 'ink2']) {
+        const r = contrast(t.get(ink) ?? '#000000', bg);
+        if (r < worst.ratio) worst = { ratio: r, at: `--${ink} on ${k} in ${name}` };
+      }
+    }
+  }
+  check(`…and its text, --ink and the quieter --ink2, clears 4.5:1 on all eight colours in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, keys.every((k) => themes.dark.has(`proj-${k}`) && themes.light.has(`proj-${k}`)) && worst.ratio >= 4.5, worst.at);
+  const plain = /\.ag-cbar \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  check('with no colour known, a plain bar in the box\'s own colours, --ink on --surf', /background: var\(--surf\);/.test(plain) && /color: var\(--ink\);/.test(plain) && contrast(themes.dark.get('ink')!, themes.dark.get('surf')!) >= 4.5 && contrast(themes.light.get('ink2')!, themes.light.get('surf')!) >= 4.5);
+  check('…its text in --ink and --ink2 only, and it doesn\'t scroll: it is part of the box', /\.ag-cbar-proj \{[^}]*color: var\(--ink\);/.test(css) && /\.ag-cbar-quiet \{\s*color: var\(--ink2\);/.test(css) && /flex: none;/.test(plain) && !/position:\s*(sticky|fixed)/.test(plain));
+  const block = css.slice(css.indexOf('.ag-cbar {'), css.indexOf('.ag-input {'));
+  check('…drawn in tokens only', block.length > 200 && !/#[0-9a-fA-F]{3,8}\b/.test(block.replace(/\/\*[\s\S]*?\*\//g, '')));
+})();
+
+console.log('\n62 · every schedule on one Repeating screen, by project; a message to an agent repeats; a job you ran repeats from its setup (Amendment 216)');
+await (async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const text = (html: string): string => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
+  const {
+    RepeatJobButton, RepeatJobForm, RepeatJobSaved, RepeatingRow, editOf, editPatch, editProblem, kindWords, repeatJobTitle, repeatableJobs, repeatingGroups, repeatingSummary, resultLine, runNowText, savedText,
+  } = await import('../fleet/repeating.js');
+  const { agentLabels, noteAgents } = await import('../fleet/notewords.js');
+  const { RepeatRow, repeatLine } = await import('../agent/scheduled.js');
+  const { runRecurring, saveRecurringFromJob, saveRecurringMessage } = await import('../fleet/endpoints.js');
+  const { BEING_RUN, HELPER_NOT_SCHEDULED, NOT_REPEATABLE } = await import('@conductor/shared');
+  const { draftOf } = await import('../shell/RuleFields.js');
+
+  const iso = (h: number, m = 0, day = 11): string => new Date(2026, 10, day, h, m).toISOString();
+  const now = new Date(2026, 10, 11, 12, 0);
+  const dev = { id: 'ag_dev', role: 'developer', jobId: 'job_a', projectId: 'p1' } as unknown as Agent;
+  const msg = (extra: Partial<RecurringJob> = {}): RecurringJob => ({
+    id: 'rec_m', projectId: 'p1', name: 'Morning summary', kind: 'message', agentId: 'ag_dev', text: 'Summarise what changed yesterday',
+    every: { kind: 'weekly', days: [1, 2, 3, 4, 5], at: '09:00' }, nextAt: iso(9, 0, 12), lastAt: null, lastJobId: null, lastResult: null, createdAt: iso(8), paused: false, ...extra,
+  });
+  const jobRec = (extra: Partial<RecurringJob> = {}): RecurringJob => ({
+    id: 'rec_j', projectId: 'p2', name: 'Changelog', kind: 'job', request: { projectId: 'p2', prompt: 'Write the changelog' } as RecurringJob['request'],
+    every: { kind: 'daily', at: '18:00' }, nextAt: iso(18), lastAt: null, lastJobId: null, lastResult: null, createdAt: iso(8), paused: false, ...extra,
+  });
+
+  // ── the screen's grouping and count ──
+  const projects = [{ id: 'p2', name: 'site' }, { id: 'p1', name: 'conductor' }, { id: 'p3', name: 'empty' }];
+  const groups = repeatingGroups(projects, [msg(), jobRec(), msg({ id: 'rec_m2' })]);
+  check('every schedule by its project, in the projects\' order, a project with none left out',
+    groups.map((g) => `${g.project.id}:${g.items.map((r) => r.id).join('+')}`).join() === 'p2:rec_j,p1:rec_m+rec_m2', JSON.stringify(groups.map((g) => g.project.id)));
+  check('the count: 3 schedules in 2 projects, one in the singular, and none said',
+    repeatingSummary(groups) === '3 schedules in 2 projects' && repeatingSummary(repeatingGroups(projects, [msg()])) === '1 schedule in 1 project' && repeatingSummary([]) === 'nothing repeats yet');
+
+  // ── what a row says ──
+  check('what it repeats: ⟳ job, or ⟳ message to the agent\'s role', kindWords(jobRec(), [dev]) === '⟳ job' && kindWords(msg(), [dev]) === '⟳ message to developer' && kindWords(msg(), []) === '⟳ message to an agent');
+  check('a message\'s last result reads sent', resultLine(msg({ lastAt: iso(9), lastResult: 'sent' }), now) === 'sent 09:00' && resultLine(msg({ lastAt: iso(9), lastResult: 'failed: agent ag_dev cannot receive messages yet' }), now) === 'failed 09:00: agent ag_dev cannot receive messages yet');
+  const mrow = renderToStaticMarkup(createElement(RepeatingRow, { r: msg({ lastAt: iso(9), lastResult: 'sent' }), agents: [dev] }));
+  check('a message row: its name, ⟳ message to developer, its rule, sent, and a link to its agent, not a job',
+    /^Morning summary⟳ message to developerevery weekday at 09:00 · next (12 Nov )?09:00sent/.test(text(mrow)) && />its agent<\/button>/.test(mrow) && !mrow.includes('its job') && /title="Summarise what changed yesterday"/.test(mrow), text(mrow));
+  check('…and ▶ run now, pause, edit and cancel, run now saying its next time stays',
+    />▶ run now<\/button>/.test(mrow) && /❚❚ pause<\/button>/.test(mrow) && />edit<\/button>/.test(mrow) && />✕ cancel<\/button>/.test(mrow) && mrow.includes('title="Send it once now; its next time stays"'));
+  const jrow = renderToStaticMarkup(createElement(RepeatingRow, { r: jobRec(), agents: [dev] }));
+  check('a job row says ⟳ job, its prompt as its title, and run now that it is skipped while its last run goes', text(jrow).startsWith('Changelog⟳ job') && /title="Write the changelog"/.test(jrow) && jrow.includes('it is skipped if its last run is still going') && !jrow.includes('its agent'));
+  check('a schedule whose agent is gone has no link', !renderToStaticMarkup(createElement(RepeatingRow, { r: msg(), agents: [] })).includes('its agent'));
+
+  // ── edit in place: the name, the rule, and the text or the prompt ──
+  check('an edit starts as it is: a message\'s text, a job\'s prompt',
+    JSON.stringify(editOf(msg())) === JSON.stringify({ name: 'Morning summary', rule: draftOf(msg().every), body: 'Summarise what changed yesterday' }) && editOf(jobRec()).body === 'Write the changelog');
+  check('nothing changed, nothing sent', JSON.stringify(editPatch(msg(), editOf(msg()))) === '{}' && JSON.stringify(editPatch(jobRec(), editOf(jobRec()))) === '{}');
+  check('…a message\'s new text goes as text, a job\'s as prompt, each trimmed, and the name alone when only it changed',
+    JSON.stringify(editPatch(msg(), { ...editOf(msg()), body: ' Summarise the week \n' })) === '{"text":"Summarise the week"}' &&
+      JSON.stringify(editPatch(jobRec(), { ...editOf(jobRec()), body: 'Write the release notes' })) === '{"prompt":"Write the release notes"}' &&
+      JSON.stringify(editPatch(msg(), { ...editOf(msg()), name: ' Standup ' })) === '{"name":"Standup"}');
+  check('…a new rule goes as every', JSON.stringify(editPatch(jobRec(), { ...editOf(jobRec()), rule: { ...editOf(jobRec()).rule, at: '07:00' } })) === '{"every":{"kind":"daily","at":"07:00"}}');
+  check('…and an empty body, name or rule is refused in words, as the daemon does',
+    editProblem(msg(), { ...editOf(msg()), body: '  ' }) === 'Write the message first.' && editProblem(jobRec(), { ...editOf(jobRec()), body: '' }) === 'Write what needs doing first.' &&
+      editProblem(msg(), { ...editOf(msg()), name: ' ' }) !== null && editProblem(msg(), { ...editOf(msg()), rule: { ...editOf(msg()).rule, days: [] } }) !== null && editProblem(msg(), editOf(msg())) === null);
+
+  // ── a job you ran: which can repeat, and its button ──
+  const jobs = [
+    { id: 'j_old', projectId: 'p1', createdAt: iso(7), repeatable: true as const },
+    { id: 'j_kept', projectId: 'p1', createdAt: iso(10), repeatable: true as const },
+    { id: 'j_before', projectId: 'p1', createdAt: iso(11) },
+    { id: 'j_other', projectId: 'p2', createdAt: iso(11), repeatable: true as const },
+  ];
+  check('a project\'s jobs that can repeat: those whose setup was kept, newest first', repeatableJobs(jobs, 'p1').map((j) => j.id).join() === 'j_kept,j_old');
+  check('…a job from before setups were kept says why, in the daemon\'s words', repeatJobTitle({}) === NOT_REPEATABLE && repeatJobTitle({ repeatable: true }) !== NOT_REPEATABLE);
+  const on = renderToStaticMarkup(createElement(RepeatJobButton, { job: { repeatable: true }, open: false, onToggle: () => {} }));
+  const off = renderToStaticMarkup(createElement(RepeatJobButton, { job: {}, open: false, onToggle: () => {} }));
+  check('⟳ repeat… on a job: open on one whose setup was kept', on.includes('⟳ repeat…') && !on.includes('disabled') && /aria-expanded="false"/.test(on));
+  check('…shut on one from before, its title the reason', /disabled=""/.test(off) && text(off.match(/title="([^"]*)"/)?.[1] ?? '') === NOT_REPEATABLE, off);
+  const form = renderToStaticMarkup(createElement(RepeatJobForm, { job: { id: 'j_kept', name: undefined, prompt: '\nRun the nightly tests\nand report' } as never, onClose: () => {} }));
+  check('its form: the name from the prompt\'s first line, the prompt to keep or change, the rule, and how each run goes',
+    /aria-label="name"[^>]*value="Run the nightly tests"/.test(form) && /<textarea class="pj-rep-body" aria-label="the prompt"[^>]*>\s*Run the nightly tests\nand report<\/textarea>/.test(form) &&
+      form.includes('every day at') && />save schedule<\/button>/.test(form) && text(form).includes("Each run is a new job with this job's setup and this prompt."), form);
+  check('…and the job\'s name, when it has one', /aria-label="name"[^>]*value="Changelog"/.test(renderToStaticMarkup(createElement(RepeatJobForm, { job: { id: 'j', name: 'Changelog', prompt: 'x' } as never, onClose: () => {} }))));
+
+  // ── the message box's ⟳ repeat… ──
+  check('a repeating message\'s line above the box: ⟳ the rule, and paused', repeatLine({ every: msg().every, paused: false }) === '⟳ every weekday at 09:00' && repeatLine({ every: msg().every, paused: true }) === '⟳ every weekday at 09:00 · paused');
+  const row = renderToStaticMarkup(createElement(RepeatRow, { busy: false, text: '\n  Check the deploy\nthen report', onSave: () => {}, onClose: () => {} }));
+  check('its row: the name from the text\'s first line, the rule, and save', /class="ag-repeat-name"[^>]*value="Check the deploy"/.test(row) && /type="time"/.test(row) && /class="fl-btn is-primary"[^>]*>save<\/button>/.test(row) && !/is-primary" disabled/.test(row), row);
+  const empty = renderToStaticMarkup(createElement(RepeatRow, { busy: false, text: '  ', onSave: () => {}, onClose: () => {} }));
+  check('…shut until something is written', /class="fl-btn is-primary" disabled=""/.test(empty) && text(empty).includes('write the message first'));
+
+  // ── what they send ──
+  const realFetch = globalThis.fetch;
+  const sent: { url: string; method: string; body: unknown }[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    sent.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({ recurring: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  await saveRecurringMessage('Morning summary', { kind: 'daily', at: '09:00' }, 'ag_dev', 'Summarise');
+  await saveRecurringFromJob('Changelog', { kind: 'hours', n: 6 }, 'j_kept', 'Write it');
+  await runRecurring('rec 1');
+  globalThis.fetch = realFetch;
+  check('a message is saved as its agent and text', sent[0]?.url === '/api/recurring' && sent[0].method === 'POST' && JSON.stringify(sent[0].body) === '{"name":"Morning summary","every":{"kind":"daily","at":"09:00"},"agentId":"ag_dev","text":"Summarise"}', JSON.stringify(sent[0]));
+  check('…a job you ran as its id and the prompt', sent[1]?.url === '/api/recurring' && JSON.stringify(sent[1].body) === '{"name":"Changelog","every":{"kind":"hours","n":6},"fromJobId":"j_kept","prompt":"Write it"}', JSON.stringify(sent[1]));
+  check('…and ▶ run now is a POST to the schedule\'s run', sent[2]?.url === '/api/recurring/rec%201/run' && sent[2].method === 'POST');
+
+  // ── where it is ──
+  const comp = src('../agent/composer.tsx');
+  check('the message box: ⟳ repeat… right after ⏲ later, saving what is typed to this agent, then emptied',
+    /⏲ later\s*<\/button>\s*<button[^>]*className=\{`ag-later-btn\$\{repeat \? ' is-on' : ''\}`\}[\s\S]{0,300}?>\s*⟳ repeat…\s*<\/button>/.test(comp) && /saveRecurringMessage\(name, every, agent\.id, body\)/.test(comp) && /if \(ok\) \{\s*setText\(''\);\s*setRepeat\(false\);/.test(comp) &&
+      /\{repeat && !helper && \(\s*<RepeatRow busy=\{send\.busy\} text=\{text\}/.test(comp));
+  const sched = src('../agent/scheduled.tsx');
+  check('…and the agent\'s repeating messages are listed with its waiting ones, pause and cancel each', /useRecurring\(\)/.test(sched) && /r\.kind === 'message' && r\.agentId === agentId/.test(sched) && /\{repeating\.map\(\(r\) =>/.test(sched) && /patchRecurring\(r\.id, \{ paused: !r\.paused \}\)/.test(sched) && /cancelRecurring\(r\.id\)/.test(sched));
+  const route = src('../repeating/route.tsx');
+  check('the Repeating screen: order 84, hotkey r', /id: 'repeating',\s*label: 'Repeating',\s*hotkey: 'r',\s*order: 84,/.test(route) && /^\s*\*\s+84\s+'r'\s+Repeating\s+wave 14\s+\(Amendment 216\)/m.test(src('./screens.ts')) && /<kbd>r<\/kbd> repeating/.test(src('../shell/shell.tsx')));
+  const keys = ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'repeating', 'settings', 'diagnostics', 'spawn']
+    .map((d) => { try { return /hotkey:\s*'(.)'/.exec(src(`../${d}/route.tsx`))?.[1]; } catch { return undefined; } })
+    .filter((k): k is string => k !== undefined);
+  check(`…r taken by no other screen (${keys.join(' ')})`, keys.filter((k) => k === 'r').length === 1 && new Set(keys).size === keys.length);
+  check('…grouped as repeatingGroups says, each group under its project\'s colour bar, opening it, each row the Project screen\'s',
+    /const groups = repeatingGroups\(projects, recurring\);/.test(route) && /className=\{`rp-group \$\{projClass\(colors\.get\(project\.id\)\)\}`\}/.test(route) && /onClick=\{\(\) => openProject\(project\.id\)\}/.test(route) && /<RepeatingRow key=\{r\.id\} r=\{r\} agents=\{agents\} \/>/.test(route) && /\{repeatingSummary\(groups\)\}/.test(route));
+  check('+ new: a message to an agent or a job like one you ran, and a link to set up a new launch in Spawn',
+    /label: 'a message to an agent'/.test(route) && /label: 'a job like one you ran'/.test(route) && /\{adding === 'message' \? <NewMessage \/> : <NewJob \/>\}/.test(route) && /onClick=\{\(\) => openSpawn\(\)\}[^>]*>\s*set up a new launch in Spawn/.test(route));
+  check('…the message: its project\'s agents only, the save refused until each is picked and written',
+    /allAgents\.filter\(\(a\) => a\.projectId === projectId && !a\.parentId\)/.test(route) && /'Pick a project first\.'/.test(route) && /'Pick the agent it goes to\.'/.test(route) && /saveRecurringMessage\(name\.trim\(\), every, agent\.id, text\.trim\(\)\)/.test(route));
+  check('…the job: its project\'s repeatable jobs, then the job\'s own form', /const choices = repeatableJobs\(jobs, projectId\);/.test(route) && /<RepeatJobForm key=\{job\.id\} job=\{job\}/.test(route));
+  const card = src('../fleet/card.tsx');
+  const project = src('../fleet/project.tsx');
+  check('the job\'s ⟳ repeat… on its Fleet card and its Project screen, each opening the same form',
+    /<RepeatJobButton job=\{job\} open=\{repeatOpen\}/.test(card) && /<RepeatJobForm key=\{job\.id\} job=\{job\} onClose=\{\(\) => setRepeatOpen\(false\)\} \/>/.test(card) &&
+      /<RepeatJobButton job=\{job\} open=\{repeating\}/.test(project) && /<RepeatJobForm job=\{job\} onClose=\{\(\) => setRepeating\(false\)\} \/>/.test(project));
+
+  // ── the review of 216 ──
+  // 1. ▶ run now on one already being run says so, and runs nothing.
+  check('▶ run now on one already being run says it was skipped and why; one that ran says to read its last result',
+    runNowText({ recurring: msg(), skipped: BEING_RUN }) === 'Skipped: it is being run now.' && runNowText({ recurring: msg() }) === 'Done: its last result says how it went.' &&
+      /cmd\.run\('Running it now', \(\) => runRecurring\(r\.id\), runNowText\)/.test(src('../fleet/repeating.tsx')));
+  // 2. A message to an agent not started yet says it waits, in the last result's place.
+  check('a message whose agent has not started says it waits, since when',
+    resultLine(msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), now) === 'waiting since 09:00: reviewer has not started yet', resultLine(msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), now));
+  const wrow = renderToStaticMarkup(createElement(RepeatingRow, { r: msg({ lastAt: iso(9), lastResult: 'waiting: reviewer has not started yet' }), agents: [dev] }));
+  check('…on its row, where the last result goes, in the skip colour, not the failure one', /class="pj-rep-last is-skip">waiting since (\d+ \w+ )?09:00: reviewer has not started yet/.test(wrow), wrow);
+  // 3. Saved, ⟳ repeat… on a job has no save left to press twice.
+  const saved = renderToStaticMarkup(createElement(RepeatJobSaved, { text: savedText({ nextAt: iso(18) }, now), onClose: () => {} }));
+  check('a job saved to repeat: the form gives way to the line that says so, and close, with no save left',
+    savedText({ nextAt: iso(18) }, now) === 'Saved: next 18:00. It is on the Repeating screen.' && text(saved).startsWith('Saved: next 18:00.') && />close<\/button>/.test(saved) && !saved.includes('save schedule') && !saved.includes('<textarea'), saved);
+  const repSrc = src('../fleet/repeating.tsx');
+  check('…the form turns into it once the save is back, and save is shut while one is going',
+    /if \(saved !== null\) return <RepeatJobSaved text=\{saved\} onClose=\{onClose\} \/>;/.test(repSrc) && /await saveRecurringFromJob\(name\.trim\(\), every, job\.id, prompt\.trim\(\)\);\s*setSaved\(savedText\(res\.recurring\)\);/.test(repSrc) &&
+      /disabled=\{cmd\.busy \|\| why !== null\}/.test(repSrc));
+  check('…and the message forms cannot save twice either: the box\'s ⟳ repeat… shuts and empties, + new\'s message empties, so its save is shut',
+    /if \(ok\) \{\s*setText\(''\);\s*setRepeat\(false\);/.test(comp) && /\.then\(\(ok\) => \{\s*if \(!ok\) return;\s*setText\(''\);/.test(route) && /\(text\.trim\(\) \? null : 'Write the message first\.'\)/.test(route));
+  // 5. A helper takes no schedule: its orchestrator directs it.
+  check('a helper: left out of + new\'s agents, and ⟳ repeat… shut in its message box, its title saying why, in the daemon\'s words',
+    /!a\.parentId/.test(route) && /const helper = Boolean\(agent\.parentId\);/.test(comp) && /disabled=\{helper\}/.test(comp) && /title=\{helper \? HELPER_NOT_SCHEDULED :/.test(comp) &&
+      HELPER_NOT_SCHEDULED === "a helper is its orchestrator's to direct; schedule a message to the orchestrator instead");
+  // 6. Two of one role in one job are told apart by the end of their ids, on both pickers.
+  const twins = agentLabels([
+    { agentId: 'ag_x1a3f2', role: 'developer', job: 'Nightly tests' },
+    { agentId: 'ag_x2b7c1', role: 'developer', job: 'Nightly tests' },
+    { agentId: 'ag_x3', role: 'developer', job: 'Fix the login page' },
+    { agentId: 'ag_x4', role: 'reviewer', job: 'Nightly tests' },
+  ]);
+  check('twins in one job: role, job and the last four of the id; a role alone when it does not repeat',
+    twins.join() === 'developer · Nightly tests · a3f2,developer · Nightly tests · b7c1,developer · Fix the login page,reviewer', twins.join());
+  check('…with every agent\'s job when asked (the Repeating picker), and the role alone with no job',
+    agentLabels([{ agentId: 'ag_1', role: 'developer', job: 'Nightly tests' }, { agentId: 'ag_2', role: 'reviewer' }], true).join() === 'developer · Nightly tests,reviewer');
+  const twinNotes = noteAgents(
+    [{ id: 'p1', name: 'conductor', notes: [
+      { id: 'n1', projectId: 'p1', text: 'a', createdAt: iso(9), agentId: 'ag_n1a3f2', agentLabel: 'developer' },
+      { id: 'n2', projectId: 'p1', text: 'b', createdAt: iso(9), agentId: 'ag_n2b7c1', agentLabel: 'developer' },
+    ] }],
+    null,
+    () => 'Nightly tests',
+  );
+  check('…on the Notes screen\'s picker as on the Repeating screen\'s, by one rule',
+    twinNotes.map((a) => a.label).join() === 'developer · Nightly tests · a3f2,developer · Nightly tests · b7c1' && /agentLabels\(/.test(route) && /agentLabels\(items\)/.test(src('../fleet/notewords.ts')), twinNotes.map((a) => a.label).join());
+  // 7 and 8. What run now during Pause all, and a send that waits for a slot, say.
+  check('run now while everything is paused: started, and that it waits for Pause all to end',
+    resultLine(jobRec({ lastAt: iso(9), lastResult: 'started (waits for Pause all to end)' }), now) === 'started 09:00: waits for Pause all to end');
+  check('a message sent while every slot was taken: sent, waiting for a slot',
+    resultLine(msg({ lastAt: iso(9), lastResult: 'sent (waiting for a slot)' }), now) === 'sent 09:00: waiting for a slot');
+  check('a repeating message\'s ✕ above the box asks first: ✕ cancel, then confirm or keep',
+    /arming === r\.id \?[\s\S]*?cancelRecurring\(r\.id\)[\s\S]*?>\s*confirm\s*<\/button>[\s\S]*?>\s*keep\s*<\/button>[\s\S]*?setArming\(r\.id\);\s*\}\}\s*>\s*✕ cancel\s*<\/button>/.test(sched));
+
+  // ── its colours ──
+  const fleet = src('../fleet/fleet.css');
+  const agentCss = src('../agent/agent.css');
+  const css = src('../repeating/repeating.css') + fleet.slice(fleet.indexOf('/* Amendment 216'), fleet.indexOf('.fl-from {')) +
+    agentCss.slice(agentCss.indexOf('/* A message that repeats (Amendment 216)'), agentCss.indexOf('/* ── ⏸ pause until a time'));
+  check('drawn in tokens only, the group\'s bar a bar and never a fill', css.length > 2000 && !/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')) &&
+    /\.rp-ghead \{[^}]*box-shadow: inset 4px 0 0 var\(--proj, var\(--line2\)\);/.test(css) && !/background:[^;]*--proj/.test(css));
+  const themes = themeTokens();
+  const pairs: [string, string][] = [['ink', 'bg'], ['ink2', 'bg'], ['ink2', 'bg2'], ['ink', 'surf3'], ['ink', 'well'], ['ink', 'surf'], ['ink2', 'surf'], ['ink3', 'bg'], ['ink3', 'bg2']];
+  let worst = { ratio: Infinity, at: '' };
+  for (const [name, t] of [['dark', themes.dark], ['light', themes.light]] as const) {
+    for (const [fg, bg] of pairs) {
+      const r = contrast(t.get(fg) ?? '#000000', t.get(bg) ?? '#000000');
+      if (r < worst.ratio) worst = { ratio: r, at: `--${fg} on --${bg} in ${name}` };
+    }
+  }
+  check(`…its text clears 4.5:1 on its backgrounds in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

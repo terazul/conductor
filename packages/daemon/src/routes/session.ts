@@ -633,12 +633,22 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   };
   app.post<{ Params: { projectId: string } }>('/api/projects/:projectId/notes', async (req, reply) => {
     if (!getProject(db, req.params.projectId)) return fail(reply, 404, 'no such project');
-    const body = (req.body ?? {}) as { text?: unknown; due?: unknown };
+    const body = (req.body ?? {}) as { text?: unknown; due?: unknown; agentId?: unknown };
     const text = noteText(body.text);
     if (!text) return fail(reply, 400, 'a note needs text', `up to ${NOTE_MAX} characters`);
     const due = noteDue(body.due);
     if (due instanceof Error) return fail(reply, 400, 'not a due date', due.message);
-    const note = insertNote(db, req.params.projectId, text, due ?? null);
+    // The agent whose screen it was typed on (Amendment 214): one of this project's, or none.
+    let agent: { id: string; label: string } | null = null;
+    if (body.agentId !== undefined && body.agentId !== null) {
+      const found = typeof body.agentId === 'string' ? getAgent(db, body.agentId) : undefined;
+      if (!found) return fail(reply, 400, 'no such agent', 'a note is tagged with an agent of its own project, or none');
+      if (found.projectId !== req.params.projectId) {
+        return fail(reply, 400, 'that agent is not on this project', 'a note is tagged with an agent of its own project, or none');
+      }
+      agent = { id: found.id, label: found.role };
+    }
+    const note = insertNote(db, req.params.projectId, text, due ?? null, agent);
     return reply.code(201).send({ note, project: sendProject(req.params.projectId) });
   });
   app.patch<{ Params: { projectId: string; noteId: string } }>('/api/projects/:projectId/notes/:noteId', async (req, reply) => {

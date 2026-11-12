@@ -1,7 +1,7 @@
 /**
  * A rule for a job that repeats, as you set it (Amendment 211): every day at a time, these
- * weekdays at a time, or every N hours. One control for Spawn's repeat… form and the Project
- * screen's edit time, so the two can't offer different rules.
+ * weekdays at a time, or every N hours. One control for Spawn's repeat… form, a schedule's edit
+ * and every ⟳ repeat… (Amendment 216), so none can offer different rules.
  *
  * The draft keeps every field, so switching from weekdays to every day and back keeps the days
  * you picked; `ruleOf` makes the `Every` the daemon is sent. `everyProblem` (shared) says what is

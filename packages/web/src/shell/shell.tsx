@@ -260,6 +260,12 @@ function StatusBar() {
       <span>
         <kbd>0</kbd> diagnostics
       </span>
+      <span>
+        <kbd>n</kbd> notes
+      </span>
+      <span>
+        <kbd>r</kbd> repeating
+      </span>
       <DockButton />
       <span className="sh-right">
         <PauseAll />

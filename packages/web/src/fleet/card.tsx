@@ -44,7 +44,7 @@ import { monthlyDraft, projectPairWords, projectSpendOf } from '../shell/spend.j
 import { useNavParams } from '../lib/nav.js';
 import { useUnseenJobs } from '../lib/seen.js';
 import { headlineTags, restOf } from './rest.js';
-import { fromMark, repeatingCount } from './repeating.js';
+import { RepeatJobButton, RepeatJobForm, fromMark, repeatingCount } from './repeating.js';
 import { FLEET_AGENTS_KEY, agentsOpen, agentsToggleWords, needsYou, shownAgents, toggleAgents } from './agentlist.js';
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import {
@@ -647,6 +647,8 @@ export function ProjectCard({
 }) {
   // The card's notes panel, open or not (Amendment 55).
   const [notesOpen, setNotesOpen] = useState(false);
+  // ⟳ repeat… on its job, open or not (Amendment 216).
+  const [repeatOpen, setRepeatOpen] = useState(false);
   const status = useProjectStatus(project.id);
   const key = STATUS_KEY[status];
   const jobs = useJobs(project.id);
@@ -823,6 +825,7 @@ export function ProjectCard({
               ▤ files
             </button>
           )}
+          {job && <RepeatJobButton job={job} open={repeatOpen} onToggle={() => setRepeatOpen((o) => !o)} />}
           {server && (
             <button
               type="button"
@@ -846,6 +849,7 @@ export function ProjectCard({
         </span>
       </div>
       {notesOpen && <NotesPanel project={project} />}
+      {repeatOpen && job && <RepeatJobForm key={job.id} job={job} onClose={() => setRepeatOpen(false)} />}
     </div>
   );
 }
