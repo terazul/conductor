@@ -88,8 +88,9 @@ export function noteMatches(n: NoteLike, f: NoteFilter): boolean {
   if (f.agentId !== null && n.agentId !== f.agentId) return false;
   if (f.show === 'open' && n.doneAt) return false;
   if (f.show === 'done' && !n.doneAt) return false;
-  const q = f.q.trim().toLowerCase();
-  return q === '' || n.text.toLowerCase().includes(q);
+  // Each word, in any order and any case: "ship release" finds "Ship the Release".
+  const text = n.text.toLowerCase();
+  return f.q.toLowerCase().split(/\s+/).every((w) => w === '' || text.includes(w));
 }
 
 /**
@@ -126,22 +127,34 @@ export function noteGroups<P extends { id: string; notes?: readonly NoteLike[] }
 /**
  * The agents the agent picker offers: those with notes, in the filter's project if it has one, each
  * once, by the label its notes keep, and named with their project when there are several projects.
+ * Two of one project's agents with the same role are told apart by their job (`jobOf`: its name, or
+ * its prompt's first words), `developer · Nightly tests`, or *removed* once the agent is gone.
  */
 export function noteAgents(
   projects: readonly { id: string; name: string; notes?: readonly NoteLike[] }[],
   projectId: string | null,
+  jobOf: (agentId: string) => string | undefined = () => undefined,
 ): { agentId: string; label: string }[] {
-  const seen = new Map<string, string>();
+  const out: { agentId: string; label: string }[] = [];
   const many = projectId === null && projects.filter((p) => (p.notes ?? []).some((n) => n.agentId)).length > 1;
   for (const p of projects) {
     if (projectId !== null && p.id !== projectId) continue;
-    for (const n of p.notes ?? []) {
-      if (!n.agentId || seen.has(n.agentId)) continue;
-      const label = n.agentLabel ?? 'agent';
-      seen.set(n.agentId, many ? `${p.name} / ${label}` : label);
+    const roles = new Map<string, string>();
+    for (const n of p.notes ?? []) if (n.agentId && !roles.has(n.agentId)) roles.set(n.agentId, n.agentLabel ?? 'agent');
+    const repeats = (role: string): boolean => [...roles.values()].filter((r) => r === role).length > 1;
+    for (const [agentId, role] of roles) {
+      const label = repeats(role) ? `${role} · ${jobOf(agentId) ?? 'removed'}` : role;
+      out.push({ agentId, label: many ? `${p.name} / ${label}` : label });
     }
   }
-  return [...seen].map(([agentId, label]) => ({ agentId, label })).sort((a, b) => a.label.localeCompare(b.label));
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** A job as the agent picker names it: its name, else its prompt's first five words. */
+export function jobWords(job: { name?: string; prompt: string }): string {
+  if (job.name?.trim()) return job.name.trim();
+  const words = job.prompt.trim().split(/\s+/).filter(Boolean);
+  return words.length === 0 ? 'waiting for instructions' : words.slice(0, 5).join(' ') + (words.length > 5 ? '…' : '');
 }
 
 /**

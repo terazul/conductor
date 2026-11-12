@@ -3501,12 +3501,19 @@ await (async () => {
   check('one project\'s', ids(noteGroups(projects, { ...NO_NOTE_FILTER, projectId: 'pa' }, today)) === 'pa:a2,a1');
   check('one agent\'s, done and open, and a note with no agent is not one of them', ids(noteGroups(projects, { ...NO_NOTE_FILTER, agentId: 'ag_dev', show: 'all' }, today)) === 'pa:a3,a2');
   check('words the text holds, any case, around spaces', ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: '  release ' }, today)) === 'pb:b3' && !noteMatches(a[0]!, { ...NO_NOTE_FILTER, q: 'release' }));
+  check('each word, in any order and any case: "ship release" finds "Ship the Release", and a word it lacks finds nothing', ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: 'ship release' }, today)) === 'pb:b3' && ids(noteGroups(projects, { ...NO_NOTE_FILTER, q: 'RELEASE the' }, today)) === 'pb:b3' && noteGroups(projects, { ...NO_NOTE_FILTER, q: 'ship tomorrow' }, today).length === 0);
   check('ties keep the projects\' own order', ids(noteGroups([{ id: 'x', notes: [note('x1', 'x', { createdAt: '2026-11-01T10:00:00Z' })] }, { id: 'y', notes: [note('y1', 'y', { createdAt: '2026-11-01T10:00:00Z' })] }], NO_NOTE_FILTER, today)).startsWith('x:'));
 
   // ── the agent picker, and a note's tag ──
   const picks = noteAgents(projects, null);
   check('the agent picker offers those with notes, each once, named with their project when there are several', JSON.stringify(picks) === JSON.stringify([{ agentId: 'ag_dev', label: 'alpha / developer' }, { agentId: 'ag_rev', label: 'beta / reviewer' }]), JSON.stringify(picks));
   check('…and by its role alone within one project', JSON.stringify(noteAgents(projects, 'pa')) === JSON.stringify([{ agentId: 'ag_dev', label: 'developer' }]) && noteAgents(projects, 'pc').length === 0);
+  const twins = [{ id: 'pt', name: 'twins', notes: [note('t1', 'pt', { agentId: 'ag_d1', agentLabel: 'developer' }), note('t2', 'pt', { agentId: 'ag_d2', agentLabel: 'developer' }), note('t3', 'pt', { agentId: 'ag_d3', agentLabel: 'developer' }), note('t4', 'pt', { agentId: 'ag_r', agentLabel: 'reviewer' })] }];
+  const jobOf = (id: string): string | undefined => ({ ag_d1: 'Nightly tests', ag_d2: 'Fix the login page' })[id];
+  const twin = noteAgents(twins, 'pt', jobOf).map((p) => p.label);
+  check('two agents of one project with one role are told apart by their job, removed once gone; a role alone stays bare', JSON.stringify(twin) === JSON.stringify(['developer · Fix the login page', 'developer · Nightly tests', 'developer · removed', 'reviewer']), JSON.stringify(twin));
+  const { jobWords } = await import('../fleet/notewords.js');
+  check('…the job by its name, else its prompt\'s first five words', jobWords({ name: ' Nightly ', prompt: 'x' }) === 'Nightly' && jobWords({ prompt: 'run the whole test suite again please' }) === 'run the whole test suite…' && jobWords({ prompt: 'fix it' }) === 'fix it' && jobWords({ prompt: '' }) === 'waiting for instructions');
   check('a note\'s tag is its role, to open; once the agent is gone, removed; none typed nowhere', JSON.stringify(agentTag(a[1]!, true)) === '{"label":"developer","removed":false}' && agentTag(a[1]!, false)?.removed === true && agentTag(a[0]!, true) === null);
   check('the summary counts notes and projects, and says when there are none', notesSummary(open, 'open') === '5 open notes in 2 projects' && notesSummary([{ notes: [1] }], 'all') === '1 note in 1 project' && notesSummary([], 'done') === 'no done notes');
 
@@ -3520,6 +3527,8 @@ await (async () => {
   const keyed: string[] = [];
   for (const dir of ['fleet', 'agent', 'attention', 'files', 'preview', 'branches', 'metrics', 'notes', 'settings', 'diagnostics', 'spawn']) for (const m of src(`../${dir}/route.tsx`).matchAll(/hotkey:\s*'(.)'/g)) keyed.push(m[1]!);
   check('…and n is no other screen\'s', keyed.filter((k) => k === 'n').length === 1, keyed.join());
+  check('the filters are kept outside the screen, read when it mounts and written on each change, so they last until reload', /^let kept: NoteFilter = NO_NOTE_FILTER;$/m.test(route) && /useState<NoteFilter>\(\(\) => kept\)/.test(route) && /setFilter\(\(f\) => \(kept = \{ \.\.\.f, \.\.\.patch \}\)\)/.test(route));
+  check('…and the agent picker is given each agent\'s job', /noteAgents\(projects, projectId, jobOf\)/.test(route) && /jobWords\(job\)/.test(route));
   check('each group opens its project, under its colour bar', /className=\{`nt-group \$\{projClass\(colors\.get\(project\.id\)\)\}`\}/.test(route) && /onClick=\{\(\) => openProject\(project\.id\)\}/.test(route));
   const css = src('../notes/notes.css') + src('../fleet/fleet.css').slice(src('../fleet/fleet.css').indexOf('.fl-note-agent'));
   check('…drawn in tokens only, the bar a bar and never a fill', !/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')) && /\.nt-ghead \{[^}]*box-shadow: inset 4px 0 0 var\(--proj, var\(--line2\)\);/.test(css) && !/background:[^;]*--proj/.test(css));

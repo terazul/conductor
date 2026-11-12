@@ -25,7 +25,8 @@ the last of it on 12 Oct).
   of the box, **project / role · job name**, 18% of the project's colour; the name opens the project).*
 - [x] **See every note, and which agent it was typed on.** Asked for (12 Nov): *"provide a way to view all the notes
   that were typed on various agents."* *Done (12 Nov): Amendment 214 (a Notes screen, `n`, filtered by project,
-  agent, open or done and words; a note added on an agent's screen is tagged with it, and its row opens it).*
+  agent, open or done and every word of a search; the filters last until reload; two agents with one role are told
+  apart by their job; a note added on an agent's screen is tagged with it, and its row opens it).*
 - [x] **A ⧉ copy loses its bullets and indents.** Reported (12 Nov): *"When I click on a copy button, it is losing
   formatting, it is not including indentations and bullets. If I select and copy directly, it seems to keep the
   formatting."* *Done (12 Nov): Amendment 213 (the reply's, a quote's and a message's copy put the HTML on the

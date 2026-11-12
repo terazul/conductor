@@ -225,17 +225,22 @@ Daemon (new migration `370_note_agent.sql`, `session/store.ts`, `routes/session.
 various agents."* Answered: tag new notes with the agent whose screen they were typed on, filter by project or agent,
 on a new top-bar screen. `project_notes` gains `agent_id` and `agent_label` (370, both nullable, no foreign key, so a
 note outlives its agent): `POST /api/projects/:id/notes` takes `agentId`, which must name one of that project's agents
-(else 400, `that agent is not on this project`), and keeps its role as `agentLabel`; `PATCH` never changes either, and
+(else 400: `no such agent` for one that isn't there, `that agent is not on this project` for another's), and keeps its role as `agentLabel`; `PATCH` never changes either, and
 a note added anywhere but the Agent inspector has none. `ProjectNote` carries both. The inspector's notes panel sends
 its agent; each note's row, wherever it shows, leads its meta line with that role, which opens the agent, or
 **role · removed** once it is gone. **Notes** (order 82, key `n`, which no screen or handler used; the status bar
 says so) lists every project's notes, read from the projects the page already has, grouped by project under its name
 and colour bar, which opens it; late first (the longest late first), then due today, then newest, and the groups by
 their first note (`noteGroups`, pure). Filters: a project, an agent (those with notes; named with their project when
-several projects have some), open (the default), done or all, and words the text holds. Its rows are `NoteRow`,
+several projects have some, and, where two of one project's agents share a role, with their job's name or its
+prompt's first five words, `developer · Nightly tests`, or `· removed`), open (the default), done or all, and words
+the text holds, each of them in any order and case (`ship release` finds *Ship the Release*). The filters are kept in
+a module-level variable the screen reads when it mounts, so leaving the screen and coming back keeps them until the
+page reloads (found in review: they were the screen's state, and main.tsx mounts only the screen shown). Its rows are `NoteRow`,
 exported from `fleet/Notes.tsx`, so tick, copy, edit, delete and due work as on every list. Notes from before 370 have
-no agent. **Verified:** daemon `session/verify.ts` §41 (the tag, its refusals, PATCH leaving it, removal keeping the
-label, 370 on an old database); `lib/verify.ts` §60 (filters, order, groups, the picker, the tag, the summary, the
+no agent. **Verified:** daemon `session/verify.ts` §41 (the tag, its refusals and their two messages, PATCH leaving it, removal keeping the
+label, 370 on an old database); `lib/verify.ts` §60 (filters, every word of a search, order, groups, the picker and its twins told apart by job,
+the filters kept across a visit, the tag, the summary, the
 wiring, `n` unique) and §15's and `metrics/verify.ts`' hotkey lists now include `notes`; §24's inspector check now
 expects the `agentId`. Not looked at in a browser.
 

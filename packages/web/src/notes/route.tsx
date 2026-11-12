@@ -10,7 +10,8 @@
  * fleet/notewords.ts, pure, so lib/verify.ts checks it).
  *
  * The filters: a project, an agent (those whose screens have notes on them), open, done or all
- * (open to begin with), and words the text holds. They last while the page does.
+ * (open to begin with), and words the text holds, each of them. They last while the page does: kept
+ * in `kept` below, outside the screen, which main.tsx unmounts whenever another is shown.
  *
  * Each row is the one every project's list has (`NoteRow`, fleet/Notes.tsx): tick done, copy, edit,
  * delete and the due badge, and the agent it was typed beside, which opens it.
@@ -19,11 +20,11 @@
 import { useMemo, useState } from 'react';
 import type { ScreenDef } from '../lib/screens.js';
 import { projClass, projectColors } from '../lib/projectColor.js';
-import { useProjects } from '../lib/store.js';
+import { useAgents, useJobs, useProjects } from '../lib/store.js';
 import { useNow } from '../shell/clock.js';
 import { openProject } from '../shell/nav.js';
 import { NoteRow } from '../fleet/Notes.js';
-import { NO_NOTE_FILTER, localDate, noteAgents, noteGroups, notesSummary, type NoteFilter, type NoteShow } from '../fleet/notewords.js';
+import { NO_NOTE_FILTER, jobWords, localDate, noteAgents, noteGroups, notesSummary, type NoteFilter, type NoteShow } from '../fleet/notewords.js';
 import './notes.css';
 
 const SHOWS: { id: NoteShow; label: string; title: string }[] = [
@@ -32,15 +33,24 @@ const SHOWS: { id: NoteShow; label: string; title: string }[] = [
   { id: 'all', label: 'all', title: 'Every note' },
 ];
 
+/** The filters as last set, so leaving the screen and coming back keeps them until the page reloads. */
+let kept: NoteFilter = NO_NOTE_FILTER;
+
 function Notes() {
   const projects = useProjects();
+  const allAgents = useAgents();
+  const jobs = useJobs();
   const today = localDate(useNow(60_000));
-  const [filter, setFilter] = useState<NoteFilter>(NO_NOTE_FILTER);
-  const set = (patch: Partial<NoteFilter>): void => setFilter((f) => ({ ...f, ...patch }));
+  const [filter, setFilter] = useState<NoteFilter>(() => kept);
+  const set = (patch: Partial<NoteFilter>): void => setFilter((f) => (kept = { ...f, ...patch }));
   const colors = useMemo(() => projectColors(projects), [projects]);
   // A project or agent that has since gone is every project, or any agent, again.
   const projectId = filter.projectId !== null && projects.some((p) => p.id === filter.projectId) ? filter.projectId : null;
-  const agents = noteAgents(projects, projectId);
+  const jobOf = (agentId: string): string | undefined => {
+    const job = jobs.find((j) => j.id === allAgents.find((a) => a.id === agentId)?.jobId);
+    return job ? jobWords(job) : undefined;
+  };
+  const agents = noteAgents(projects, projectId, jobOf);
   const agentId = filter.agentId !== null && agents.some((a) => a.agentId === filter.agentId) ? filter.agentId : null;
   const shown = { ...filter, projectId, agentId };
   const groups = noteGroups(projects, shown, today);

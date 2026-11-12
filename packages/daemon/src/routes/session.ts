@@ -642,7 +642,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     let agent: { id: string; label: string } | null = null;
     if (body.agentId !== undefined && body.agentId !== null) {
       const found = typeof body.agentId === 'string' ? getAgent(db, body.agentId) : undefined;
-      if (!found || found.projectId !== req.params.projectId) {
+      if (!found) return fail(reply, 400, 'no such agent', 'a note is tagged with an agent of its own project, or none');
+      if (found.projectId !== req.params.projectId) {
         return fail(reply, 400, 'that agent is not on this project', 'a note is tagged with an agent of its own project, or none');
       }
       agent = { id: found.id, label: found.role };

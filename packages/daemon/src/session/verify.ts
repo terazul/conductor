@@ -9947,7 +9947,7 @@ async function main(): Promise<void> {
       send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: 7 }),
       send<NoteReply>('POST', notesUrl(npid), { text: 'x', agentId: '' }),
     ]);
-    check('an agent of another project, one that is not there, a number or empty is a 400 that says why', refused.every((r) => r.status === 400 && /not on this project/.test(r.body.error ?? '')), refused.map((r) => `${r.status} ${r.body.error}`).join(' | '));
+    check('an agent of another project, one that is not there, a number or empty is a 400 that says why', refused.every((r) => r.status === 400) && refused[0]!.body.error === 'that agent is not on this project' && refused.slice(1).every((r) => r.body.error === 'no such agent'), refused.map((r) => `${r.status} ${r.body.error}`).join(' | '));
     check('and none of them is kept', projectNotesCount(npid) === before);
     const edited = await send<NoteReply>('PATCH', `${notesUrl(npid)}/${tagged.body.note!.id}`, { text: 'changed', agentId: 'agt_note214_other', agentLabel: 'someone' });
     check('PATCH changes the text and never the agent', edited.status === 200 && edited.body.note?.text === 'changed' && edited.body.note?.agentId === 'agt_note214' && edited.body.note?.agentLabel === 'developer', JSON.stringify(edited.body.note));
