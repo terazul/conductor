@@ -2745,7 +2745,7 @@ await (async () => {
   const shown = renderToStaticMarkup(createElement(Fragment, null, ...renderMarkdown(reply)));
   check('the quote is drawn as before, with a ⧉ copy beside it', /<div class="ag-quote"><button type="button" class="ag-quote-copy"[^>]*>⧉ copy<\/button><blockquote><p>Hi all,<\/p>/.test(shown), shown);
   const qb = src('../agent/QuoteBlock.tsx');
-  check('it copies the quote\'s own source, unquoted, and that drawn as a reply is', /const text = unquoted\(source\);/.test(qb) && /copyRich\(text, html\)/.test(qb) && /replyClipboard\(\[\{ kind: 'prose', text \}\]\)\.html/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
+  check('it copies the quote\'s own source, unquoted, and that drawn as a reply is', /const text = unquoted\(source\);/.test(qb) && /copyProse\(text, \[\{ kind: 'prose', text \}\]\)/.test(qb) && /const source = quoted\.join\('\\n'\);/.test(src('../agent/markdown.tsx')));
   const { unquoted } = await import('../agent/QuoteBlock.js');
   check('a quote inside the quote is unquoted too, every level', unquoted('outer line\n> inner line\n>> deeper\n  > spaced') === 'outer line\ninner line\ndeeper\nspaced' && unquoted('plain\nnot > a mark') === 'plain\nnot > a mark');
   check('inside a code fence, a > that is the code\'s stays', unquoted('Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter') === 'Here is a diff:\n```diff\n> old line\n+ new line\n```\nafter');
@@ -2988,7 +2988,7 @@ await (async () => {
   check('the block is drawn as the message, its markdown rendered, not as code', /<div class="ag-message"><button type="button" class="ag-quote-copy ag-message-copy"[^>]*>⧉ copy<\/button><div class="ag-message-body"><p><strong>Subject: VLT-329<\/strong><\/p><p>Hi Olena,<\/p><ul><li>one<\/li>/.test(shown) && !shown.includes('ag-code'), shown);
   check('…and the notes around it stay outside it', shown.indexOf('open the ticket') < shown.indexOf('ag-message') && shown.lastIndexOf('Tell me if') > shown.lastIndexOf('Durval'));
   const qb = src('../agent/QuoteBlock.tsx');
-  check('its copy is the block\'s own source, as the agent wrote it, drawn as a reply is', /export function MessageBlock[\s\S]*replyClipboard\(\[\{ kind: 'prose', text: source \}\]\)\.html[\s\S]*copyRich\(source, html\)/.test(qb));
+  check('its copy is the block\'s own source, as the agent wrote it, drawn as a reply is', /export function MessageBlock[\s\S]*copyProse\(source, \[\{ kind: 'prose', text: source \}\]\)/.test(qb));
   const clip = replyClipboard([{ kind: 'prose', text: body }]);
   check('what it copies is just the message, with no colour and no notes', clip.text === body && !clip.html.includes('open the ticket') && clip.html.includes('<strong>Subject: VLT-329</strong>') && !/style="(?!font-family: monospace)|class=/.test(clip.html), clip.html);
   const whole = replyClipboard([{ kind: 'prose', text: reply }]);
@@ -3334,8 +3334,9 @@ await (async () => {
       resultLine(rec({ lastAt: iso(9), lastResult: 'failed: no such model' }), now) === 'failed 09:00: no such model');
   const run = { id: 'ag_run', jobId: 'job_run', projectId: 'p1' } as unknown as Agent;
   const row = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_run' }), agents: [run] }));
+  // The row reads the real clock: on 12 Nov itself the next time is "09:00", any other day "12 Nov 09:00".
   check('a row: its name, the rule in words, the next time, and its last result with a link to its job',
-    text(row).startsWith('Nightly testsevery weekday at 09:00 · next 12 Nov 09:00started') && /<button type="button" class="pj-rep-link"[^>]*>its job<\/button>/.test(row), text(row));
+    /^Nightly testsevery weekday at 09:00 · next (12 Nov )?09:00started/.test(text(row)) && /<button type="button" class="pj-rep-link"[^>]*>its job<\/button>/.test(row), text(row));
   check('…and pause, edit time and cancel', /❚❚ pause<\/button>/.test(row) && />edit time<\/button>/.test(row) && />✕ cancel<\/button>/.test(row));
   const gone = renderToStaticMarkup(createElement(RepeatingRow, { r: rec({ lastAt: iso(9), lastResult: 'started', lastJobId: 'job_removed' }), agents: [run] }));
   check('…no link when its job has been removed', !gone.includes('its job'));
@@ -3380,9 +3381,77 @@ console.log('\n58 · the message box is edged in its project\'s colour, as thick
   check('with no project colour known, the box is as it was', /\.ag-cbox \{\s*border: 1px solid var\(--line2\);/.test(css));
 }
 
+console.log('\n59 · a ⧉ copy puts its HTML on the clipboard as Cmd-C does, so lists and indents survive the paste (Amendment 213)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { copyByEvent } = await import('./clipboard.js');
+  const g = globalThis as unknown as Record<string, unknown>;
+  const was = { add: g.addEventListener, remove: g.removeEventListener, document: Object.getOwnPropertyDescriptor(globalThis, 'document'), navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'), item: g.ClipboardItem };
+  type Put = (e: Event) => void;
+  let listeners: { fn: Put; capture: boolean }[] = [];
+  let fire = true; // whether execCommand fires a copy event, as a browser does in a click
+  let later: string[] = []; // what a listener after ours (the transcript's Cmd-C) would have done
+  g.addEventListener = (type: string, fn: Put, capture: boolean) => void (type === 'copy' && listeners.push({ fn, capture }));
+  g.removeEventListener = (type: string, fn: Put) => void (listeners = listeners.filter((l) => l.fn !== fn));
+  const set = (k: string, v: unknown): void => void Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  const data: Record<string, string> = {};
+  set('document', {
+    execCommand: (cmd: string) => {
+      if (cmd !== 'copy' || !fire) return false;
+      let stopped = false, prevented = false;
+      const e = { clipboardData: { setData: (k: string, v: string) => void (data[k] = v) }, preventDefault: () => void (prevented = true), stopImmediatePropagation: () => void (stopped = true) } as unknown as Event;
+      for (const l of [...listeners]) l.fn(e);
+      if (!stopped) later.push('selection');
+      return prevented;
+    },
+  });
+  const html = '<meta charset="utf-8"><ul><li>one<ul><li>nested</li></ul></li></ul>';
+  check('it sets text/html and text/plain on a copy event, and says it did', copyByEvent('- one\n  - nested', html) === true && data['text/html'] === html && data['text/plain'] === '- one\n  - nested');
+  check('…on the window, capturing, and stops it there, so the transcript\'s Cmd-C never swaps in a selection', later.length === 0 && listeners.length === 0, JSON.stringify(later));
+  fire = false;
+  check('where the browser won\'t fire one, it says so, and leaves no listener behind', copyByEvent('x', '<p>x</p>') === false && listeners.length === 0);
+  set('document', {});
+  check('…and where there is no execCommand at all', copyByEvent('x', '<p>x</p>') === false);
+
+  // copyProse: before the renderer has loaded it is copyRich, after it the copy event.
+  fire = true;
+  set('document', { execCommand: (cmd: string) => { if (!fire) return false; const e = { clipboardData: { setData: (k: string, v: string) => void (data[k] = v) }, preventDefault: () => undefined, stopImmediatePropagation: () => undefined } as unknown as Event; for (const l of [...listeners]) l.fn(e); return cmd === 'copy'; } });
+  const wrote: string[] = [];
+  class Item { constructor(readonly parts: Record<string, Blob | Promise<Blob>>) {} }
+  set('navigator', { clipboard: { write: async (items: Item[]) => void wrote.push(await (await items[0]!.parts['text/html']!).text()), writeText: async () => undefined } });
+  g.ClipboardItem = Item;
+  const { copyProse, loadReplyCopy } = await import('../agent/copyreply.js');
+  const md = '1. **First**\n   - a\n   - b\n2. Second';
+  for (const k of Object.keys(data)) delete data[k];
+  await copyProse(md, [{ kind: 'prose', text: md }]);
+  const first = wrote.length === 1 && !data['text/html'];
+  await loadReplyCopy();
+  await copyProse(md, [{ kind: 'prose', text: md }]);
+  const { replyClipboard } = await import('../agent/replycopy.js');
+  const want = replyClipboard([{ kind: 'prose', text: md }]).html;
+  check('before the renderer has loaded, a copy waits for it through clipboard.write, as before', first, JSON.stringify(wrote));
+  check('once loaded, the copy event carries the reply drawn, numbered and nested lists kept', wrote.length === 1 && data['text/html'] === want && data['text/plain'] === md && /<ol><li><strong>First<\/strong><ul><li>a<\/li><li>b<\/li><\/ul><\/li><li>Second<\/li><\/ol>/.test(want), want);
+  fire = false;
+  await copyProse(md, [{ kind: 'prose', text: md }]);
+  check('…and where the event won\'t fire, clipboard.write with the same HTML', wrote.length === 2 && wrote[1] === want);
+
+  g.addEventListener = was.add;
+  g.removeEventListener = was.remove;
+  for (const [k, d] of [['document', was.document], ['navigator', was.navigator]] as const) {
+    if (d) Object.defineProperty(globalThis, k, d);
+    else delete g[k];
+  }
+  g.ClipboardItem = was.item;
+
+  // Every ⧉ copy on markdown goes this way, and loads the renderer when it shows.
+  const tr = src('../agent/transcript.tsx');
+  const qb = src('../agent/QuoteBlock.tsx');
+  check('the reply\'s, the quote\'s and the message\'s copy all use copyProse, and preload', /function ReplyCopy[\s\S]{0,80}usePreloadReplyCopy\(\);/.test(tr) && /copyProse\(proseOf\(reply\), reply\)/.test(tr) && (qb.match(/usePreloadReplyCopy\(\);/g) ?? []).length === 2 && !/copyRich|import\('\.\/replycopy/.test(tr + qb));
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

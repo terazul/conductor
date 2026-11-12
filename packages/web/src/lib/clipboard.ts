@@ -37,6 +37,39 @@ export async function copyRich(text: string, html: Promise<string>): Promise<voi
   await copyText(text);
 }
 
+/**
+ * Text and HTML the way Cmd-C puts them (Amendment 213): a copy event, its data set by hand.
+ * A copy button goes this way when its HTML is ready inside the click, because what
+ * `clipboard.write` puts on the pasteboard is not always what a paste reads as a document: lists
+ * and their indents came out flat where the same HTML, by Cmd-C, kept them. The listener is on
+ * the window, first, and stops the event there, so the transcript's own Cmd-C (copySelection)
+ * never swaps a selection in. False where the browser wouldn't fire it; the caller then uses
+ * `copyRich`.
+ */
+export function copyByEvent(text: string, html: string): boolean {
+  const win = globalThis as { addEventListener?: Window['addEventListener']; removeEventListener?: Window['removeEventListener']; document?: Document };
+  if (!win.document?.execCommand || !win.addEventListener || !win.removeEventListener) return false;
+  let wrote = false;
+  const put = (e: Event): void => {
+    const data = (e as ClipboardEvent).clipboardData;
+    if (!data) return;
+    data.setData('text/html', html);
+    data.setData('text/plain', text);
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    wrote = true;
+  };
+  win.addEventListener('copy', put, true);
+  try {
+    win.document.execCommand('copy');
+  } catch {
+    // Not allowed here: the caller falls back.
+  } finally {
+    win.removeEventListener('copy', put, true);
+  }
+  return wrote;
+}
+
 // ── copied HTML, without the app's colours (Amendment 201) ────────────────────
 
 /** What survives as itself: a document's structure, and nothing that carries a look. */

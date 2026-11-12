@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { copyRich } from '../lib/clipboard.js';
+import { copyProse, usePreloadReplyCopy } from './copyreply.js';
 
 /** A fence's opening or closing line, as markdown.tsx reads one. */
 const FENCE = /^\s*(`{3,}|~{3,})/;
@@ -54,6 +54,7 @@ export function unquoted(source: string): string {
 }
 
 export function QuoteBlock({ source, children }: { source: string; children: ReactNode }) {
+  usePreloadReplyCopy();
   const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -68,8 +69,7 @@ export function QuoteBlock({ source, children }: { source: string; children: Rea
     // The quote's own text, drawn as a reply is: the renderer loads on the first copy. A quote
     // inside it is unquoted too, so no level of it pastes with a bar or a > mark.
     const text = unquoted(source);
-    const html = import('./replycopy.js').then((m) => m.replyClipboard([{ kind: 'prose', text }]).html);
-    void copyRich(text, html).then(
+    void copyProse(text, [{ kind: 'prose', text }]).then(
       () => say({ ok: true }),
       (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
     );
@@ -99,6 +99,7 @@ export function QuoteBlock({ source, children }: { source: string; children: Rea
  * reply's copy took the notes around it too.
  */
 export function MessageBlock({ source, children }: { source: string; children: ReactNode }) {
+  usePreloadReplyCopy();
   const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -110,8 +111,7 @@ export function MessageBlock({ source, children }: { source: string; children: R
     timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
   };
   const copy = (): void => {
-    const html = import('./replycopy.js').then((m) => m.replyClipboard([{ kind: 'prose', text: source }]).html);
-    void copyRich(source, html).then(
+    void copyProse(source, [{ kind: 'prose', text: source }]).then(
       () => say({ ok: true }),
       (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
     );

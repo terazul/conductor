@@ -53,7 +53,8 @@ import { lineCount, renderMarkdown } from './markdown.js';
 import { fmtStamp, fullStamp } from '../lib/when.js';
 import { userPause } from './sleep.js';
 import { Chevron, ChevronSpace } from '../shell/chevron.js';
-import { cleanHtml, copyRich } from '../lib/clipboard.js';
+import { cleanHtml } from '../lib/clipboard.js';
+import { copyProse, usePreloadReplyCopy } from './copyreply.js';
 
 // ── model ───────────────────────────────────────────────────────────────────
 
@@ -578,6 +579,7 @@ function carried(turn: Turn): string {
  * couldn't, as a code block's does (CodeBlock.tsx).
  */
 function ReplyCopy({ reply }: { reply: Block[] }) {
+  usePreloadReplyCopy();
   const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -589,8 +591,7 @@ function ReplyCopy({ reply }: { reply: Block[] }) {
     timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
   };
   const copy = (): void => {
-    const html = import('./replycopy.js').then((m) => m.replyClipboard(reply).html);
-    void copyRich(proseOf(reply), html).then(
+    void copyProse(proseOf(reply), reply).then(
       () => say({ ok: true }),
       (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
     );
