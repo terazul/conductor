@@ -3413,6 +3413,27 @@ await (async () => {
   set('document', {});
   check('…and where there is no execCommand at all', copyByEvent('x', '<p>x</p>') === false);
 
+  // Safari: a span off screen is selected for the copy, and your own selection is put back.
+  fire = true;
+  later = [];
+  let selected: unknown[] = ['yours'];
+  const body: unknown[] = [];
+  let seenAtCopy: unknown[] = [];
+  set('document', {
+    body: { appendChild: (n: unknown) => void body.push(n) },
+    createElement: () => { const n = { textContent: '', style: { cssText: '' }, setAttribute: () => undefined, remove: () => void body.splice(body.indexOf(n), 1) }; return n; },
+    createRange: () => ({ selectNodeContents(n: unknown) { (this as { node?: unknown }).node = n; } }),
+    getSelection: () => ({ get rangeCount() { return selected.length; }, getRangeAt: (i: number) => selected[i], removeAllRanges: () => void (selected = []), addRange: (r: unknown) => void selected.push(r) }),
+    execCommand: (cmd: string) => {
+      seenAtCopy = selected.map((r) => (r as { node?: { textContent: string } }).node?.textContent ?? r);
+      const e = { clipboardData: { setData: (k: string, v: string) => void (data[k] = v) }, preventDefault: () => undefined, stopImmediatePropagation: () => undefined } as unknown as Event;
+      for (const l of [...listeners]) l.fn(e);
+      return cmd === 'copy';
+    },
+  });
+  check('…with the text selected in a span off screen while it copies, for Safari', copyByEvent('- one', html) && seenAtCopy.join() === '- one', JSON.stringify(seenAtCopy));
+  check('…the span gone after, and what you had selected selected again', body.length === 0 && selected.join() === 'yours', JSON.stringify({ body: body.length, selected }));
+
   // copyProse: before the renderer has loaded it is copyRich, after it the copy event.
   fire = true;
   set('document', { execCommand: (cmd: string) => { if (!fire) return false; const e = { clipboardData: { setData: (k: string, v: string) => void (data[k] = v) }, preventDefault: () => undefined, stopImmediatePropagation: () => undefined } as unknown as Event; for (const l of [...listeners]) l.fn(e); return cmd === 'copy'; } });

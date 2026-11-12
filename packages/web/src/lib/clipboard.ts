@@ -59,13 +59,35 @@ export function copyByEvent(text: string, html: string): boolean {
     e.stopImmediatePropagation();
     wrote = true;
   };
+  // Safari fires no copy event with nothing selected, so a span off screen is selected for the
+  // moment of the copy, as copy-to-clipboard does, and what you had selected is put back after.
+  const doc = win.document;
+  const sel = doc.getSelection?.() ?? null;
+  const kept = sel ? Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i)) : [];
+  let span: HTMLSpanElement | null = null;
   win.addEventListener('copy', put, true);
   try {
-    win.document.execCommand('copy');
+    if (sel && doc.body && doc.createRange) {
+      span = doc.createElement('span');
+      span.textContent = text || ' ';
+      span.setAttribute('aria-hidden', 'true');
+      span.style.cssText = 'position:fixed;top:0;left:-9999px;white-space:pre;user-select:text;-webkit-user-select:text';
+      doc.body.appendChild(span);
+      const range = doc.createRange();
+      range.selectNodeContents(span);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    doc.execCommand('copy');
   } catch {
     // Not allowed here: the caller falls back.
   } finally {
     win.removeEventListener('copy', put, true);
+    if (span) {
+      span.remove();
+      sel?.removeAllRanges();
+      for (const r of kept) sel?.addRange(r);
+    }
   }
   return wrote;
 }
