@@ -959,7 +959,7 @@ console.log('\n· a full terminal on macOS and Ubuntu (Amendment 112)');
   const view = readFileSync(new URL('./Xterm.tsx', import.meta.url), 'utf8');
   const agentCss = readFileSync(new URL('./agent.css', import.meta.url), 'utf8');
   const screen = readFileSync(new URL('./agent.tsx', import.meta.url), 'utf8');
-  check('when the daemon says available, the tab mounts Xterm on the terminal chosen', /<XtermView key=\{shown\.id\} termId=\{shown\.id\}/.test(panel) && /const shown = list\.terminals\.find\(\(t\) => t\.id === selected\)/.test(panel));
+  check('when the daemon says available, the tab mounts Xterm on the terminal chosen', /<XtermView\s+key=\{shown\.id\}\s+termId=\{shown\.id\}/.test(panel) && /const shown = list\.terminals\.find\(\(t\) => t\.id === selected\)/.test(panel));
   check('when it says not, the tab shows the old command runner under a banner with the reason', /if \(!list\.available\) \{[\s\S]*?fallbackBanner\(list\.reason\)[\s\S]*?\{fallback\}/.test(panel) && /fallback=\{<TerminalPanel agent=\{agent\} \/>\}/.test(panel));
   check('the runner is not shown beside a working terminal', (panel.match(/<TerminalPanel /g) ?? []).length === 1);
   check('the Agent screen mounts the panel on its terminal tab, not the runner', /bottomTab === 'terminal' \? <TermPanel agent=\{agent\} \/>/.test(screen) && !/<TerminalPanel/.test(screen));

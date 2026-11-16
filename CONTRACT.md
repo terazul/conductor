@@ -200,6 +200,57 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 218 — post-merge, applied. **⧉ copy clean in a terminal: the selection as markdown.**
+
+Web only (new `lib/termclean.ts`, `agent/Xterm.tsx`, `agent/TermPanel.tsx`, `agent/agent.css`, `lib/verify.ts`,
+`agent/verify.ts`) and
+`docs/MANUAL.md`. Asked 16 Nov, beside the agent quoted in 217 saying *"Selecting text in the terminal view picks up line
+wrapping and indentation, and markdown such as `**bold**` pastes as literal characters"*: a **⧉ copy clean** in an agent's ›_
+terminal and the Terminal dock that joins wrapped lines and drops the terminal's indent, copying the markdown as text
+and drawn as HTML. `TermTabs`, which both use, has it at the right of its tab bar (`CopyClean`), greyed with **Select
+text in the terminal first** until `XtermView` reports a selection: its new `onSelection` prop is called from xterm's
+`onSelectionChange` with a reader, or `null` when the selection goes or the terminal unmounts. The click reads it then
+(`getSelection()`, the column it starts at, `t.cols`), cleans it (`cleanTermText`, pure) and copies it through
+`copyProse`, as a reply's ⧉ copy (Amendment 213); `mousedown` is prevented so the terminal keeps the keyboard. The
+cleaner pads the first line to its start column, takes `⏺ ` as two spaces of indent, drops trailing spaces, joins
+wrapped rows, drops the indent the non-blank lines share, turns a drawn `•`/`◦` bullet into `-`, keeps one blank line
+between paragraphs and keeps list markers and their nesting. xterm's own wraps are already joined by
+`getSelection()`; Claude Code's CLI wraps by itself, with real line ends, so those are joined by a guess: a row at
+the indent of the line's words (after its marker, for a list item), after a row longer than half the width that its
+first word would have overflowed (within 6 columns of the edge, for the CLI's margin), and never a row that starts a
+list item, heading, quote, table, fence or box-drawing line, nor inside a fence. Without the width, only a list
+item's continuation rows join. ⌘C is unchanged. *Departures:* none from the brief; joining is a heuristic, and
+widths count characters, so a line of wide characters (CJK, emoji) may be left unjoined. `getSelectionPosition()` is
+1-based by its d.ts but 0-based in xterm 6's code; it is taken as 0-based. **Verified:** `lib/verify.ts` §64 (the
+cleaner on a wrapped bullet, a nested list, `⏺ ` and a two-space indent with a wrapped paragraph and runs of blank
+lines, a mid-row start with `\r\n` and `•`, short lines, a fence, no width, `**bold**` kept and `<strong>` in the
+HTML; the wiring in `XtermView` and `TermTabs`, ⌘C unchanged, the dock using `TermTabs`; tokens only and 4.5:1 in
+both themes, worst 5.25:1). `agent/verify.ts`'s Amendment 141 check that the tab mounts `XtermView` on the chosen
+terminal now lets its props sit on lines of their own, as they do with `onSelection` added. Not tried in a browser or on a real Claude Code selection.
+
+### Amendment 217 — post-merge, applied. **Every block an agent says has a ⧉ copy, and agents are told how they are shown.**
+
+Daemon (`session/background.ts`, `session/verify.ts`), web (`agent/transcript.tsx`, `agent/agent.css`,
+`lib/verify.ts`) and `docs/MANUAL.md`. Reported 16 Nov, pasted from an agent: *"There's no copy button because my
+replies come through as plain text in a terminal session … I can copy drafts to your clipboard myself, as I did for
+the Matt message."* Two gaps: prose an agent said before a tool call is activity (`splitTurn`), and a turn still going
+has no reply, so neither had a copy; and agents were never told how they are shown. Web: `Blocks` takes `copy`, and
+with it wraps each prose block in `.ag-prose` with a `ProseCopy` before its `.ag-md`: the quote's chip
+(`ag-quote-copy ag-prose-copy`, so `cleanHtml` drops it from ⌘C and the reply's copy), at the block's top right,
+shown on hover, focus within, while it says **✓ copied**, and always where nothing hovers, on `--bg` so text under it
+doesn't show through. It copies that block's markdown through `copyProse`. The activity passes `copy` everywhere,
+open or folded; the folded latest step, when it is prose, keeps its last line and copies the whole block. The reply
+passes it only when it has more than one prose block, beside its own `ReplyCopy`, which is unchanged. Daemon: a new
+`SHOWN_LINE` closes `MESSAGE_LINE`, so Claude (through `CONDUCTOR_LINES`) and Copilot (its system message) both get
+it: replies are shown in the web view as markdown with a copy button on each reply, each block between tool calls,
+each code and message block; don't say there is none, and don't pbcopy or xclip unasked. *Departures:* none. Prose
+still without a block copy: the text of an ask (its own box), and a turn that is Conductor's own (a helper's report,
+which is the user's side). **Verified:** daemon `session/verify.ts` (the line closes `MESSAGE_LINE` and
+`CONDUCTOR_LINES`, and Copilot's system message); `lib/verify.ts` §63 (a turn of prose, tool, prose, tool, reply,
+opened, and a live one, folded and opened: each block has its button, the reply of one block its chip alone, a reply
+of several one on each, `cleanHtml` drops them, the block's HTML keeps `<strong>`; tokens only and 4.5:1, worst
+4.56:1, `--live` on its hover in light). Not looked at in a browser.
+
 ### Amendment 216 — post-merge, applied. **Repeating: a message to an agent, a job like one you ran, every schedule on one screen.**
 
 Daemon (new migration `380_recurring_more.sql`, `session/recurring.ts`, `routes/recurring.ts`, `session/store.ts`,

@@ -38,6 +38,7 @@ import { SCREEN } from '../shell/nav.js';
 import { TERM_FONT_SIZE, TERM_SCROLLBACK, fontSizeOf, scrollbackOf } from '../terminal/prefs.js';
 import { dockKey, findHint, isMac, termKey } from '../terminal/keys.js';
 import { findPathLinks, termFileTarget } from '../terminal/paths.js';
+import type { TermSelection } from '../lib/termclean.js';
 import {
   TERM_TOKENS,
   binaryFrame,
@@ -78,10 +79,13 @@ export function XtermView({
   termId,
   onEnded,
   links,
+  onSelection,
 }: {
   termId: string;
   onEnded: (why: 'ended' | 'gone') => void;
   links?: TermLinks;
+  /** Told when text is selected, with a way to read it, and `null` when none is (Amendment 218). */
+  onSelection?: (read: (() => TermSelection) | null) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
@@ -98,6 +102,8 @@ export function XtermView({
   ended.current = onEnded;
   const linksRef = useRef(links);
   linksRef.current = links;
+  const selRef = useRef(onSelection);
+  selRef.current = onSelection;
   const fontSize = fontSizeOf(useSetting(TERM_FONT_SIZE.key));
   const scrollback = scrollbackOf(useSetting(TERM_SCROLLBACK.key));
 
@@ -250,6 +256,10 @@ export function XtermView({
       return false;
     });
 
+    // Read when it is copied, not here: the selection, where it starts, and how wide a row is.
+    const read = (): TermSelection => ({ text: t.getSelection(), startCol: t.getSelectionPosition()?.start.x ?? 0, cols: t.cols });
+    const selected = t.onSelectionChange(() => selRef.current?.(t.hasSelection() ? read : null));
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     const watch = new ResizeObserver(() => {
       clearTimeout(timer);
@@ -267,6 +277,8 @@ export function XtermView({
       bytes.dispose();
       sized.dispose();
       pathLinks.dispose();
+      selected.dispose();
+      selRef.current?.(null);
       socket?.close();
       t.dispose();
       term.current = null;
