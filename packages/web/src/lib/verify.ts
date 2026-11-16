@@ -3831,6 +3831,33 @@ await (async () => {
   check('shown on hover or focus, and always where nothing hovers, in tokens only',
     mine.length > 400 && !/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(mine.replace(/\/\*[\s\S]*?\*\//g, '')) &&
       /\.ag-prose:hover > \.ag-prose-copy,\s*\.ag-prose:focus-within > \.ag-prose-copy,/.test(mine) && /@media \(hover: none\) \{\s*\.ag-prose > \.ag-prose-copy \{\s*opacity: 1;/.test(mine), mine);
+  // The chip sits in a gutter of its own, so it never covers a code block's, quote's or message's
+  // ⧉ copy, or the block's first line: measured from the CSS, not only that the rules are there.
+  const rule = (sel: string, at: string = css): string => {
+    const i = at.indexOf(`\n${sel} {`);
+    return i < 0 ? '' : at.slice(i, at.indexOf('}', i));
+  };
+  const px = (body: string, prop: string): number => Number(new RegExp(`(?:^|\\s)${prop}: (-?[\\d.]+)(?:px)?;`).exec(body)?.[1] ?? NaN);
+  const prose = rule('.ag-prose', mine);
+  const chipRule = rule('.ag-prose > .ag-prose-copy', mine);
+  const quoteChip = rule('.ag-quote-copy');
+  const chip = px(prose, '--prose-chip');
+  const gutter = /padding-right: calc\(var\(--prose-chip\) \+ (\d+)px\);/.exec(prose);
+  const fsSm = Number(/--fs-sm: ([\d.]+)px;/.exec(src('../../../shared/src/tokens.css'))?.[1] ?? NaN);
+  const [padY, padX] = (/padding: (\d+)px (\d+)px;/.exec(quoteChip) ?? []).slice(1).map(Number);
+  const border = Number(/border: (\d+)px solid/.exec(quoteChip)?.[1] ?? NaN);
+  const lineH = Number(/line-height: ([\d.]+);/.exec(quoteChip)?.[1] ?? NaN);
+  // IBM Plex Mono is 0.6em a character; "couldn't copy" is the longest label.
+  const longest = "couldn't copy".length * 0.6 * fsSm + 2 * padX! + 2 * border;
+  const tall = lineH * fsSm + 2 * padY! + 2 * border;
+  check(`…in a gutter of its own at the block's right: ${chip}px wide, holding "couldn't copy" (${longest.toFixed(1)}px), with ${gutter?.[1]}px to the words, and the block at least the chip's ${tall.toFixed(1)}px tall`,
+    chip >= longest && Number(gutter?.[1]) >= 4 && /\swidth: var\(--prose-chip\);/.test(chipRule) && /box-sizing: border-box/.test(src('../styles.css')) &&
+      px(quoteChip, 'top') === 0 && px(quoteChip, 'right') === 0 && !/\s(?:top|right|left|margin[a-z-]*):/.test(chipRule) &&
+      /position: absolute;/.test(quoteChip) && /position: relative;/.test(prose) && px(prose, 'min-height') >= tall,
+    `${prose}\n${chipRule}`);
+  check('…and nothing in the block reaches into it: its words, a code block and a message are in the content box, and the folded line stops short of it',
+    !/\.ag-prose[^{]*\{[^}]*margin-right: -/.test(css) && !/\.ag-md[^{]*\{[^}]*margin-right: -/.test(css) && /\.ag-act-last \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/.test(css));
+
   const mix = (a: string, b: string, p: number): string =>
     `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * p + parseInt(b.slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
   const themes = themeTokens();
@@ -3868,6 +3895,36 @@ await (async () => {
   check('code in a fence is never joined', fenced.split('\n').length === 4, JSON.stringify(fenced));
   check('without the width, only a list item\'s own continuation joins', cleanTermText({ text: '- item\n  more of it\nplain\nlines' }) === '- item more of it\nplain\nlines');
   const bold = cleanTermText({ text: '⏺ This is **bold** text.' });
+  const logged = cleanTermText({ text: `${'a'.repeat(30)} ${'b'.repeat(30)}\nnext line here`, cols: 40 });
+  check('a line xterm wrapped itself, longer than the width, is never joined to the next', logged === `${'a'.repeat(30)} ${'b'.repeat(30)}\nnext line here`, JSON.stringify(logged));
+  const mid = cleanTermText({ text: 'brown fox jumps over the\nlazy dog and then runs off.', startCol: 12, cols: 40 });
+  check('a selection started mid-paragraph has no indent of its own, and joins the row after it', mid === 'brown fox jumps over the lazy dog and then runs off.', JSON.stringify(mid));
+  const midIn = cleanTermText({ text: 'brown fox jumps over the\n  lazy dog and then runs off.\n  Next one.', startCol: 14, cols: 40 });
+  check('…under a reply\'s indent too', midIn === 'brown fox jumps over the lazy dog and then runs off.\nNext one.', JSON.stringify(midIn));
+  const url = '  See https://example.com/docs/a/very/lo';
+  const cut = cleanTermText({ text: `${url}\n  ng/page.html for the details.`, cols: url.length });
+  check('a long word the CLI cut at the edge, a URL, is joined without a space', cut === 'See https://example.com/docs/a/very/long/page.html for the details.', JSON.stringify(cut));
+  const edge = '  The quick brown fox jumps over the lazy';
+  const word = cleanTermText({ text: `${edge}\n  dog and runs.`, cols: edge.length });
+  check('…but two words that met the edge keep their space', word === 'The quick brown fox jumps over the lazy dog and runs.', JSON.stringify(word));
+  const unfenced = cleanTermText({ text: '  const first = computeTheFirstValue(a);\n  const second = computeTheSecond(b);', cols: 44 });
+  check('code shown without a fence, as Claude Code shows it, is not joined: a line ending in ;', unfenced.split('\n').length === 2, JSON.stringify(unfenced));
+  const braces = cleanTermText({ text: 'if (a) { return this.value + other.v\n} else { go(); }', cols: 40 });
+  const labelled = cleanTermText({ text: '  This change does the following:\n  keeps the lines the screen broke', cols: 40 });
+  const prompt = cleanTermText({ text: '  Run it from the folder you cloned it to\n  $ make test', cols: 44 });
+  check('…a line that ends a block, or a label with :, and a line that closes one or is a prompt',
+    braces.split('\n').length === 2 && labelled.split('\n').length === 2 && prompt.split('\n').length === 2, JSON.stringify([braces, labelled, prompt]));
+  const heading = cleanTermText({ text: '  Summary of what changed\n  The parser now keeps blank lines in a fence.', cols: 60 });
+  check('…and a short line, a heading drawn in bold, stays its own', heading === 'Summary of what changed\nThe parser now keeps blank lines in a fence.', JSON.stringify(heading));
+  const spaced = cleanTermText({ text: '```\nconst a = 1;\n\n\nconst b = 2;\n```\n\n\nAfter.', cols: 40 });
+  check('blank lines in a fence are kept as they are; outside one, a run is one break', spaced === '```\nconst a = 1;\n\n\nconst b = 2;\n```\n\nAfter.', JSON.stringify(spaced));
+  let whole = '';
+  try {
+    whole = cleanTermText({ text: '  x\n'.repeat(200_000), cols: 80 });
+  } catch (err) {
+    whole = String(err);
+  }
+  check('a selection of 200,000 lines cleans without running out of stack', whole.length === 399_999 && whole.startsWith('x\nx'), whole.slice(0, 80));
   check('**bold** stays in the text, and is <strong> in the HTML', bold === 'This is **bold** text.' && /<strong>bold<\/strong>/.test(replyClipboard([{ kind: 'prose', text: bold }]).html), bold);
 
   const panel = src('../agent/TermPanel.tsx');
@@ -3879,7 +3936,8 @@ await (async () => {
   check('TermTabs, the Agent screen\'s terminal and the dock\'s, has ⧉ copy clean in its header, greyed with no selection',
     /<CopyClean read=\{reader\} \/>\s*<\/div>/.test(panel) && /onSelection=\{\(read\) => setReader\(\(\) => read\)\}/.test(panel) && /disabled=\{!read && !said\}/.test(panel) &&
       panel.includes("'Select text in the terminal first'") && panel.includes("'⧉ copy clean'") && /<TermTabs\b/.test(src('../terminal/dock.tsx')));
-  check('…copying the cleaned selection as text, and drawn as HTML', /const text = cleanTermText\(read\(\)\);\s*void copyProse\(text, \[\{ kind: 'prose', text \}\]\)/.test(panel));
+  check('…copying the cleaned selection as text, and drawn as HTML, and saying couldn\'t copy, with why, if cleaning it fails',
+    /try \{\s*text = cleanTermText\(read\(\)\);\s*\} catch \(err\) \{\s*say\(\{ ok: false, why: errorText\(err\) \}\);\s*return;\s*\}\s*void copyProse\(text, \[\{ kind: 'prose', text \}\]\)/.test(panel));
 
   const css = src('../agent/agent.css');
   const mine = css.slice(css.indexOf('/* ⧉ copy clean (Amendment 218)'), css.indexOf('/* Where the agent\'s changes are'));

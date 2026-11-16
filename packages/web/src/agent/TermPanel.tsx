@@ -255,7 +255,13 @@ function CopyClean({ read }: { read: (() => TermSelection) | null }) {
   };
   const copy = (): void => {
     if (!read) return;
-    const text = cleanTermText(read());
+    let text: string;
+    try {
+      text = cleanTermText(read());
+    } catch (err) {
+      say({ ok: false, why: errorText(err) });
+      return;
+    }
     void copyProse(text, [{ kind: 'prose', text }]).then(
       () => say({ ok: true }),
       (err: unknown) => say({ ok: false, why: errorText(err) }),

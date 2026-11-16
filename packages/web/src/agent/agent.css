@@ -292,13 +292,24 @@
  * Each block of what an agent said outside its reply has a ⧉ copy too (Amendment 217): the
  * quote's chip, top right, shown only on hover or focus (and while it says it copied), so a long
  * run isn't a column of buttons. On the transcript's own background, so text it sits over doesn't
- * show through. Where nothing hovers, it is always shown.
+ * show through. Where nothing hovers, it is always shown. It sits in a gutter of its own at the
+ * block's right, so it never covers the block's words or a code block's, quote's or message's own
+ * ⧉ copy inside it: as wide as "couldn't copy", its longest label (13ch of 12.5px mono, 7.5px
+ * each, and the chip's padding and border), and the block at least as tall as the chip, so a
+ * folded one-line block doesn't let it hang over the next step.
  */
 .ag-prose {
+  --prose-chip: 118px;
   position: relative;
+  padding-right: calc(var(--prose-chip) + 8px);
+  min-height: 24px;
 }
 
 .ag-prose > .ag-prose-copy {
+  width: var(--prose-chip);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   z-index: 1;
   background: var(--bg);
   opacity: 0;

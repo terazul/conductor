@@ -211,20 +211,37 @@ and drawn as HTML. `TermTabs`, which both use, has it at the right of its tab ba
 text in the terminal first** until `XtermView` reports a selection: its new `onSelection` prop is called from xterm's
 `onSelectionChange` with a reader, or `null` when the selection goes or the terminal unmounts. The click reads it then
 (`getSelection()`, the column it starts at, `t.cols`), cleans it (`cleanTermText`, pure) and copies it through
-`copyProse`, as a reply's ⧉ copy (Amendment 213); `mousedown` is prevented so the terminal keeps the keyboard. The
-cleaner pads the first line to its start column, takes `⏺ ` as two spaces of indent, drops trailing spaces, joins
-wrapped rows, drops the indent the non-blank lines share, turns a drawn `•`/`◦` bullet into `-`, keeps one blank line
-between paragraphs and keeps list markers and their nesting. xterm's own wraps are already joined by
-`getSelection()`; Claude Code's CLI wraps by itself, with real line ends, so those are joined by a guess: a row at
-the indent of the line's words (after its marker, for a list item), after a row longer than half the width that its
-first word would have overflowed (within 6 columns of the edge, for the CLI's margin), and never a row that starts a
-list item, heading, quote, table, fence or box-drawing line, nor inside a fence. Without the width, only a list
-item's continuation rows join. ⌘C is unchanged. *Departures:* none from the brief; joining is a heuristic, and
+`copyProse`, as a reply's ⧉ copy (Amendment 213); `mousedown` is prevented so the terminal keeps the keyboard, and
+an error cleaning it says **couldn't copy** with why, as a failed copy does. The cleaner places the first row's end
+at its start column (for the width test) but gives it the next row's indent, so a selection started mid-paragraph
+has no indent of its own (unless it starts at column 0 or at a list marker, where it keeps the screen's), takes `⏺ `
+as two spaces of indent, drops trailing spaces, joins wrapped rows, drops the indent the non-blank lines share
+(found with a loop, so a whole scrollback doesn't overflow the stack), turns a drawn `•`/`◦` bullet into `-`, keeps
+one blank line between paragraphs and keeps list markers and their nesting; blank lines inside a fence are kept as
+they are. xterm's own wraps are already joined by `getSelection()`, so a line longer than the width came from a
+program that doesn't wrap and is never joined to its neighbours. Claude Code's CLI wraps by itself, with real line
+ends, so those are joined by a guess: a row at the indent of the line's words (after its marker, for a list item),
+after a row longer than half the width that its first word would have overflowed (within 6 columns of the edge, for
+the CLI's margin), and never a row that starts a list item, heading, quote, table, fence or box-drawing line, nor
+inside a fence. A row that ran exactly to the width, cut inside a word longer than a row holds (a URL, a path), joins
+without a space. Claude Code shows code without its fences, so as best it can tell code isn't joined either: not
+after a line ending in `;`, `{`, `}`, `:` or `=>`, nor before one starting `}`, `)`, `]`, `//`, `#` or `$ ` (a line
+ending in `,` or `)` before an indented one never joined, its indent being different), and a short line, such as a
+heading the CLI draws in bold, already ends too far from the edge. Without the width, only a list item's
+continuation rows join. ⌘C is unchanged. *Review, 16 Nov:* the first build joined a line xterm had wrapped into the
+next (its length was over the width, so the width test always passed), padded a mid-paragraph start to its column so
+it pasted as an indented code block and never joined, put a space into a cut URL, joined two unfenced code lines,
+collapsed blank lines in a fence, and spread every line into `Math.min`; each is fixed and checked. An Alt-drag
+(column) selection starts every row at its column, but only the first row is placed there; that is left. *Departures:* none from the brief; joining is a heuristic, and
 widths count characters, so a line of wide characters (CJK, emoji) may be left unjoined. `getSelectionPosition()` is
 1-based by its d.ts but 0-based in xterm 6's code; it is taken as 0-based. **Verified:** `lib/verify.ts` §64 (the
 cleaner on a wrapped bullet, a nested list, `⏺ ` and a two-space indent with a wrapped paragraph and runs of blank
 lines, a mid-row start with `\r\n` and `•`, short lines, a fence, no width, `**bold**` kept and `<strong>` in the
-HTML; the wiring in `XtermView` and `TermTabs`, ⌘C unchanged, the dock using `TermTabs`; tokens only and 4.5:1 in
+HTML; from the review, a 61-character line xterm wrapped at 40 left apart from the next, a selection started at
+column 12 mid-paragraph with no indent and joined, and under a reply's indent, a URL cut at the edge joined without
+a space and two words at the edge with one, unfenced code ending in `;`, `{`/`}`, a label ending in `:` and a `$ `
+prompt left unjoined, a short heading line kept, blank lines in a fence kept, 200,000 lines cleaned, and the click's
+error caught; the wiring in `XtermView` and `TermTabs`, ⌘C unchanged, the dock using `TermTabs`; tokens only and 4.5:1 in
 both themes, worst 5.25:1). `agent/verify.ts`'s Amendment 141 check that the tab mounts `XtermView` on the chosen
 terminal now lets its props sit on lines of their own, as they do with `onSelection` added. Not tried in a browser or on a real Claude Code selection.
 
@@ -238,7 +255,12 @@ has no reply, so neither had a copy; and agents were never told how they are sho
 with it wraps each prose block in `.ag-prose` with a `ProseCopy` before its `.ag-md`: the quote's chip
 (`ag-quote-copy ag-prose-copy`, so `cleanHtml` drops it from ⌘C and the reply's copy), at the block's top right,
 shown on hover, focus within, while it says **✓ copied**, and always where nothing hovers, on `--bg` so text under it
-doesn't show through. It copies that block's markdown through `copyProse`. The activity passes `copy` everywhere,
+doesn't show through. It sits in a gutter of its own: `.ag-prose` has `padding-right` of the chip's width
+(`--prose-chip`, 118px, which holds **couldn't copy**, 13ch of 12.5px mono with the chip's padding and border) and 8px,
+and is at least the chip's height, so it never covers a code block's, quote's or message block's own ⧉ copy (the
+first build put it over them: an agent's block that was only a draft, then a tool call, copied the whole block from
+its draft's corner), nor the block's first line or the folded line, which ellipsizes before it. Each chip is a tab
+stop: the keyboard has no other way to copy a block that isn't a reply, so it is left one. It copies that block's markdown through `copyProse`. The activity passes `copy` everywhere,
 open or folded; the folded latest step, when it is prose, keeps its last line and copies the whole block. The reply
 passes it only when it has more than one prose block, beside its own `ReplyCopy`, which is unchanged. Daemon: a new
 `SHOWN_LINE` closes `MESSAGE_LINE`, so Claude (through `CONDUCTOR_LINES`) and Copilot (its system message) both get
@@ -249,7 +271,9 @@ which is the user's side). **Verified:** daemon `session/verify.ts` (the line cl
 `CONDUCTOR_LINES`, and Copilot's system message); `lib/verify.ts` §63 (a turn of prose, tool, prose, tool, reply,
 opened, and a live one, folded and opened: each block has its button, the reply of one block its chip alone, a reply
 of several one on each, `cleanHtml` drops them, the block's HTML keeps `<strong>`; tokens only and 4.5:1, worst
-4.56:1, `--live` on its hover in light). Not looked at in a browser.
+4.56:1, `--live` on its hover in light; the gutter measured from the CSS: the chip's width from `--prose-chip`
+against its longest label from `--fs-sm` and `.ag-quote-copy`'s padding and border, the gap, the chip at the top
+right with nothing moving it, the block's `min-height` against the chip's height, and the folded line ellipsized). Not looked at in a browser.
 
 ### Amendment 216 — post-merge, applied. **Repeating: a message to an agent, a job like one you ran, every schedule on one screen.**
 
