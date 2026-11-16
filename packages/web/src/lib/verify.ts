@@ -3776,9 +3776,186 @@ await (async () => {
   check(`…its text clears 4.5:1 on its backgrounds in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
 })();
 
+console.log('\n63 · every block an agent says has its own ⧉ copy: between its tools, while it works, and in a reply of several (Amendment 217)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { setFold, updateActivityOpen } = await import('../agent/folds.js');
+  const AG = 'agt_copyall';
+  const e = (n: number, payload: EventPayload): Event => ({ seq: n, ts: new Date(Date.UTC(2026, 10, 16, 9, 0, n)).toISOString(), projectId: P, jobId: J, agentId: AG, payload });
+  const say = (n: number, text: string): Event => e(n, { kind: 'text', text });
+  const tool = (n: number): Event => e(n, { kind: 'tool_start', toolUseId: `tu${n}`, tool: 'Read', input: { file_path: 'a.ts' }, label: 'Read a.ts' });
+  const done = (n: number): Event => e(n, { kind: 'status', status: 'done' });
+  const draw = (events: Event[], streaming: boolean): string => renderToStaticMarkup(createElement(Transcript, { turns: buildTranscript(events), agentId: AG, role: 'developer', streaming, links: null }));
+  const copies = (html: string): number => html.split('ag-prose-copy').length - 1;
+  const turnOf = (html: string, k: string, next: string): string => html.slice(html.indexOf(`id="t-${k}"`), next ? html.indexOf(`id="t-${next}"`) : undefined);
+  const said = (marker: string) => new RegExp(`class="ag-prose"><button[^>]*class="ag-quote-copy ag-prose-copy"[^>]*>⧉ copy</button><div class="ag-md">[^]*?${marker}`);
+
+  // A turn of prose, a tool, prose, a tool and its reply; then one still going.
+  const events = [
+    e(1, { kind: 'user_text', text: 'go' }), say(2, 'FIRST_SAID: I will look.'), tool(3), say(4, 'BETWEEN_SAID: found it, **now** fixing.'), tool(5), say(6, 'THE_REPLY'), done(7),
+    e(8, { kind: 'user_text', text: 'more' }), say(9, 'LIVE_ONE'), tool(10), say(11, 'LIVE_TWO\nLIVE_LAST'),
+  ];
+  updateActivityOpen((f) => setFold(f, AG, 'a2', true));
+  const open = draw(events, true);
+  const ended = turnOf(open, 'a2', 'u8');
+  const live = turnOf(open, 'a9', '');
+  check('what it said before and between its tools each has a ⧉ copy, in a box of its own above its markdown',
+    said('FIRST_SAID').test(ended) && said('BETWEEN_SAID').test(ended) && copies(ended.slice(0, ended.indexOf('class="ag-reply"'))) === 2, ended);
+  check('…its button says what it copies, and is the quote\'s chip, which a copy leaves out',
+    ended.includes('aria-label="Copy this block of what the agent said"') && ended.includes('title="Copy what the agent said here, without its colours, to paste anywhere"') && ended.includes('class="ag-quote-copy ag-prose-copy"'));
+  check('a reply of one block keeps its own ⧉ copy and has none of its own besides',
+    ended.includes('class="ag-reply-copy"') && ended.includes('THE_REPLY') && copies(ended.slice(ended.indexOf('class="ag-reply"'))) === 0, ended);
+  check('a turn still going: the latest step it folds to has its ⧉ copy, of the whole block, its last line still shown',
+    copies(live) === 1 && /class="ag-prose is-last"><button[^>]*ag-prose-copy[^>]*>⧉ copy<\/button><div class="ag-act-last">LIVE_LAST</.test(live) && !live.includes('LIVE_ONE'), live);
+  updateActivityOpen((f) => setFold(f, AG, 'a9', true));
+  const liveOpen = turnOf(draw(events, true), 'a9', '');
+  check('…and unfolded, every block of it', copies(liveOpen) === 2 && said('LIVE_ONE').test(liveOpen) && said('LIVE_TWO').test(liveOpen), liveOpen);
+  writeSetting('conductor.agentActivityOpen', null);
+
+  const several = turnOf(draw([e(20, { kind: 'user_text', text: 'x' }), tool(21), say(22, 'REPLY_ONE'), say(23, 'REPLY_TWO'), done(24)], false), 'a21', '');
+  const reply = several.slice(several.indexOf('class="ag-reply"'));
+  check('a reply of several blocks: its own ⧉ copy, and one on each block', reply.includes('class="ag-reply-copy"') && copies(reply) === 2 && said('REPLY_ONE').test(reply) && said('REPLY_TWO').test(reply), reply);
+  const talk = draw([e(30, { kind: 'user_text', text: 'hi' }), say(31, 'ONLY_REPLY'), done(32)], false);
+  check('…of one, the reply\'s alone', talk.includes('class="ag-reply-copy"') && copies(talk) === 0);
+
+  const cleaned = cleanHtml(ended);
+  check('the reply\'s copy and Cmd-C leave every block\'s button out', !cleaned.includes('⧉') && !cleaned.includes('ag-prose-copy') && cleaned.includes('FIRST_SAID') && cleaned.includes('BETWEEN_SAID'), cleaned);
+  const tsx = src('../agent/transcript.tsx');
+  check('a block copies its markdown as the reply does: copyProse, the text and the block drawn', /copyProse\(block\.text, \[block\]\)/.test(tsx) && /<strong>now<\/strong>/.test(replyClipboard([{ kind: 'prose', text: 'BETWEEN_SAID: found it, **now** fixing.' }]).html));
+  check('…in the activity, folded or not, and in a reply only of several',
+    (tsx.match(/<Blocks blocks=\{(?:blocks|kept|\[latest\])\} links=\{links\} copy \/>/g) ?? []).length === 4 &&
+      /copy=\{split\.reply\.filter\(\(b\) => b\.kind === 'prose'\)\.length > 1\}/.test(tsx));
+
+  const css = src('../agent/agent.css');
+  const mine = css.slice(css.indexOf('/*\n * Each block of what an agent said outside its reply'), css.indexOf('.ag-md pre {'));
+  check('shown on hover or focus, and always where nothing hovers, in tokens only',
+    mine.length > 400 && !/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(mine.replace(/\/\*[\s\S]*?\*\//g, '')) &&
+      /\.ag-prose:hover > \.ag-prose-copy,\s*\.ag-prose:focus-within > \.ag-prose-copy,/.test(mine) && /@media \(hover: none\) \{\s*\.ag-prose > \.ag-prose-copy \{\s*opacity: 1;/.test(mine), mine);
+  // The chip sits in a gutter of its own, so it never covers a code block's, quote's or message's
+  // ⧉ copy, or the block's first line: measured from the CSS, not only that the rules are there.
+  const rule = (sel: string, at: string = css): string => {
+    const i = at.indexOf(`\n${sel} {`);
+    return i < 0 ? '' : at.slice(i, at.indexOf('}', i));
+  };
+  const px = (body: string, prop: string): number => Number(new RegExp(`(?:^|\\s)${prop}: (-?[\\d.]+)(?:px)?;`).exec(body)?.[1] ?? NaN);
+  const prose = rule('.ag-prose', mine);
+  const chipRule = rule('.ag-prose > .ag-prose-copy', mine);
+  const quoteChip = rule('.ag-quote-copy');
+  const chip = px(prose, '--prose-chip');
+  const gutter = /padding-right: calc\(var\(--prose-chip\) \+ (\d+)px\);/.exec(prose);
+  const fsSm = Number(/--fs-sm: ([\d.]+)px;/.exec(src('../../../shared/src/tokens.css'))?.[1] ?? NaN);
+  const [padY, padX] = (/padding: (\d+)px (\d+)px;/.exec(quoteChip) ?? []).slice(1).map(Number);
+  const border = Number(/border: (\d+)px solid/.exec(quoteChip)?.[1] ?? NaN);
+  const lineH = Number(/line-height: ([\d.]+);/.exec(quoteChip)?.[1] ?? NaN);
+  // IBM Plex Mono is 0.6em a character; "couldn't copy" is the longest label.
+  const longest = "couldn't copy".length * 0.6 * fsSm + 2 * padX! + 2 * border;
+  const tall = lineH * fsSm + 2 * padY! + 2 * border;
+  check(`…in a gutter of its own at the block's right: ${chip}px wide, holding "couldn't copy" (${longest.toFixed(1)}px), with ${gutter?.[1]}px to the words, and the block at least the chip's ${tall.toFixed(1)}px tall`,
+    chip >= longest && Number(gutter?.[1]) >= 4 && /\swidth: var\(--prose-chip\);/.test(chipRule) && /box-sizing: border-box/.test(src('../styles.css')) &&
+      px(quoteChip, 'top') === 0 && px(quoteChip, 'right') === 0 && !/\s(?:top|right|left|margin[a-z-]*):/.test(chipRule) &&
+      /position: absolute;/.test(quoteChip) && /position: relative;/.test(prose) && px(prose, 'min-height') >= tall,
+    `${prose}\n${chipRule}`);
+  check('…and nothing in the block reaches into it: its words, a code block and a message are in the content box, and the folded line stops short of it',
+    !/\.ag-prose[^{]*\{[^}]*margin-right: -/.test(css) && !/\.ag-md[^{]*\{[^}]*margin-right: -/.test(css) && /\.ag-act-last \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/.test(css));
+
+  const mix = (a: string, b: string, p: number): string =>
+    `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * p + parseInt(b.slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
+  const themes = themeTokens();
+  let worst = { ratio: Infinity, at: '' };
+  for (const [name, t] of [['dark', themes.dark], ['light', themes.light]] as const) {
+    const bg = t.get('bg') ?? '#000000';
+    const live = t.get('live') ?? '#000000';
+    for (const [fg, on, at] of [[live, bg, '--live on --bg'], [live, mix(live, bg, 0.16), '--live on its hover'], [t.get('fail') ?? '#000000', bg, '--fail on --bg']] as const) {
+      const r = contrast(fg, on);
+      if (r < worst.ratio) worst = { ratio: r, at: `${at} in ${name}` };
+    }
+  }
+  check(`…its words clear 4.5:1 in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
+})();
+
+console.log('\n64 · ⧉ copy clean in the terminal: the selection as markdown, its screen wraps joined and its indent dropped (Amendment 218)');
+await (async () => {
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { cleanTermText } = await import('./termclean.js');
+  const wrapped = cleanTermText({ text: '  - a bullet the CLI broke at the edge of\n    its screen, and went on', cols: 44 });
+  check('a bullet the screen wrapped is one line again, its marker kept', wrapped === '- a bullet the CLI broke at the edge of its screen, and went on', JSON.stringify(wrapped));
+  const nested = cleanTermText({ text: '    - one\n      - under one\n        - under that\n    - two', cols: 80 });
+  check('a nested list keeps how deep each item is, the indent they share dropped', nested === '- one\n  - under one\n    - under that\n- two', JSON.stringify(nested));
+  const marked = cleanTermText({
+    text: '⏺ The fix is in, and the tests that cover it\n  pass now.\n\n\n  Next:\n  1. review it\n  2. merge it   ',
+    cols: 48,
+  });
+  check('⏺ and its two-space indent go, a wrapped paragraph joins, blank lines are one paragraph break, trailing spaces dropped',
+    marked === 'The fix is in, and the tests that cover it pass now.\n\nNext:\n1. review it\n2. merge it', JSON.stringify(marked));
+  const started = cleanTermText({ text: 'Done.\r\n  • one\r\n  • two', startCol: 2, cols: 80 });
+  check('a selection started mid-row is indented as on the screen, its line ends Windows\' or not, and a drawn bullet is a markdown one', started === 'Done.\n- one\n- two', JSON.stringify(started));
+  const short = cleanTermText({ text: 'Short line.\nAnother short line.', cols: 80 });
+  check('lines that stopped short of the edge stay lines', short === 'Short line.\nAnother short line.', JSON.stringify(short));
+  const fenced = cleanTermText({ text: '```\nconst a = "a long line of code that ran to the edge";\nconst b = 2;\n```', cols: 52 });
+  check('code in a fence is never joined', fenced.split('\n').length === 4, JSON.stringify(fenced));
+  check('without the width, only a list item\'s own continuation joins', cleanTermText({ text: '- item\n  more of it\nplain\nlines' }) === '- item more of it\nplain\nlines');
+  const bold = cleanTermText({ text: '⏺ This is **bold** text.' });
+  const logged = cleanTermText({ text: `${'a'.repeat(30)} ${'b'.repeat(30)}\nnext line here`, cols: 40 });
+  check('a line xterm wrapped itself, longer than the width, is never joined to the next', logged === `${'a'.repeat(30)} ${'b'.repeat(30)}\nnext line here`, JSON.stringify(logged));
+  const mid = cleanTermText({ text: 'brown fox jumps over the\nlazy dog and then runs off.', startCol: 12, cols: 40 });
+  check('a selection started mid-paragraph has no indent of its own, and joins the row after it', mid === 'brown fox jumps over the lazy dog and then runs off.', JSON.stringify(mid));
+  const midIn = cleanTermText({ text: 'brown fox jumps over the\n  lazy dog and then runs off.\n  Next one.', startCol: 14, cols: 40 });
+  check('…under a reply\'s indent too', midIn === 'brown fox jumps over the lazy dog and then runs off.\nNext one.', JSON.stringify(midIn));
+  const url = '  See https://example.com/docs/a/very/lo';
+  const cut = cleanTermText({ text: `${url}\n  ng/page.html for the details.`, cols: url.length });
+  check('a long word the CLI cut at the edge, a URL, is joined without a space', cut === 'See https://example.com/docs/a/very/long/page.html for the details.', JSON.stringify(cut));
+  const edge = '  The quick brown fox jumps over the lazy';
+  const word = cleanTermText({ text: `${edge}\n  dog and runs.`, cols: edge.length });
+  check('…but two words that met the edge keep their space', word === 'The quick brown fox jumps over the lazy dog and runs.', JSON.stringify(word));
+  const unfenced = cleanTermText({ text: '  const first = computeTheFirstValue(a);\n  const second = computeTheSecond(b);', cols: 44 });
+  check('code shown without a fence, as Claude Code shows it, is not joined: a line ending in ;', unfenced.split('\n').length === 2, JSON.stringify(unfenced));
+  const braces = cleanTermText({ text: 'if (a) { return this.value + other.v\n} else { go(); }', cols: 40 });
+  const labelled = cleanTermText({ text: '  This change does the following:\n  keeps the lines the screen broke', cols: 40 });
+  const prompt = cleanTermText({ text: '  Run it from the folder you cloned it to\n  $ make test', cols: 44 });
+  check('…a line that ends a block, or a label with :, and a line that closes one or is a prompt',
+    braces.split('\n').length === 2 && labelled.split('\n').length === 2 && prompt.split('\n').length === 2, JSON.stringify([braces, labelled, prompt]));
+  const heading = cleanTermText({ text: '  Summary of what changed\n  The parser now keeps blank lines in a fence.', cols: 60 });
+  check('…and a short line, a heading drawn in bold, stays its own', heading === 'Summary of what changed\nThe parser now keeps blank lines in a fence.', JSON.stringify(heading));
+  const spaced = cleanTermText({ text: '```\nconst a = 1;\n\n\nconst b = 2;\n```\n\n\nAfter.', cols: 40 });
+  check('blank lines in a fence are kept as they are; outside one, a run is one break', spaced === '```\nconst a = 1;\n\n\nconst b = 2;\n```\n\nAfter.', JSON.stringify(spaced));
+  let whole = '';
+  try {
+    whole = cleanTermText({ text: '  x\n'.repeat(200_000), cols: 80 });
+  } catch (err) {
+    whole = String(err);
+  }
+  check('a selection of 200,000 lines cleans without running out of stack', whole.length === 399_999 && whole.startsWith('x\nx'), whole.slice(0, 80));
+  check('**bold** stays in the text, and is <strong> in the HTML', bold === 'This is **bold** text.' && /<strong>bold<\/strong>/.test(replyClipboard([{ kind: 'prose', text: bold }]).html), bold);
+
+  const panel = src('../agent/TermPanel.tsx');
+  const xterm = src('../agent/Xterm.tsx');
+  check('XtermView says when there is a selection, with a way to read it, and that there is none when it goes',
+    /t\.onSelectionChange\(\(\) => selRef\.current\?\.\(t\.hasSelection\(\) \? read : null\)\)/.test(xterm) &&
+      /text: t\.getSelection\(\), startCol: t\.getSelectionPosition\(\)\?\.start\.x \?\? 0, cols: t\.cols/.test(xterm) && /selected\.dispose\(\);\s*selRef\.current\?\.\(null\);/.test(xterm));
+  check('…and Cmd-C still copies the selection as it is', /if \(t\.hasSelection\(\)\) void navigator\.clipboard\?\.writeText\(t\.getSelection\(\)\);/.test(xterm));
+  check('TermTabs, the Agent screen\'s terminal and the dock\'s, has ⧉ copy clean in its header, greyed with no selection',
+    /<CopyClean read=\{reader\} \/>\s*<\/div>/.test(panel) && /onSelection=\{\(read\) => setReader\(\(\) => read\)\}/.test(panel) && /disabled=\{!read && !said\}/.test(panel) &&
+      panel.includes("'Select text in the terminal first'") && panel.includes("'⧉ copy clean'") && /<TermTabs\b/.test(src('../terminal/dock.tsx')));
+  check('…copying the cleaned selection as text, and drawn as HTML, and saying couldn\'t copy, with why, if cleaning it fails',
+    /try \{\s*text = cleanTermText\(read\(\)\);\s*\} catch \(err\) \{\s*say\(\{ ok: false, why: errorText\(err\) \}\);\s*return;\s*\}\s*void copyProse\(text, \[\{ kind: 'prose', text \}\]\)/.test(panel));
+
+  const css = src('../agent/agent.css');
+  const mine = css.slice(css.indexOf('/* ⧉ copy clean (Amendment 218)'), css.indexOf('/* Where the agent\'s changes are'));
+  check('drawn in tokens only', mine.length > 200 && !/#[0-9a-fA-F]{3,8}\b|rgb/.test(mine.replace(/\/\*[\s\S]*?\*\//g, '')), mine);
+  const themes = themeTokens();
+  let worst = { ratio: Infinity, at: '' };
+  for (const [name, t] of [['dark', themes.dark], ['light', themes.light]] as const) {
+    for (const [fg, bg] of [['ink2', 'well'], ['ink', 'surf3'], ['fail', 'well']]) {
+      const r = contrast(t.get(fg!) ?? '#000000', t.get(bg!) ?? '#000000');
+      if (r < worst.ratio) worst = { ratio: r, at: `--${fg} on --${bg} in ${name}` };
+    }
+  }
+  check(`…its words clear 4.5:1 in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
+})();
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216); and every block an agent says has its own ⧉ copy, between its tools, while it works and in a reply of several, a reply of one keeping its own alone, and none of them is copied (Amendment 217); and ⧉ copy clean copies the terminal\'s selection as markdown, its screen wraps joined, its indent and ⏺ dropped and its lists kept, as text and as HTML (Amendment 218).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

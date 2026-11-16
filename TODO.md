@@ -20,6 +20,14 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **Copy what an agent says between its tools, and copy clean from a terminal.** Reported (16 Nov), an agent
+  saying *"There's no copy button because my replies come through as plain text in a terminal session … I can copy
+  drafts to your clipboard myself"*; asked for a **⧉ copy clean** in a terminal that joins wrapped lines and drops the
+  indent. *Done (16 Nov): Amendment 217 (every block an agent says outside its reply, folded or open, live or done,
+  has a ⧉ copy on hover; a reply of several blocks one on each; every agent, Copilot too, is told it is shown in the
+  web view with copy buttons and not to pbcopy unasked) and Amendment 218 (⧉ copy clean in the Agent screen's
+  terminal and the dock: the selection as markdown, wraps joined, indent and ⏺ dropped, lists kept, as text and
+  HTML; ⌘C unchanged).*
 - [x] **Make repeating easier, and see every schedule without opening each project.** Asked for (12 Nov): *"make it
   easier to schedule recurring tasks, and also provide a way to view the recurring tasks without having to go into
   each project."* *Done (12 Nov): Amendment 216 (a Repeating screen, `r`, every schedule by project with ▶ run now

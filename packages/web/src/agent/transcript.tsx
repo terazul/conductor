@@ -508,17 +508,30 @@ const DECISION_WORD: Record<string, string> = {
   expired: 'expired',
 };
 
-function Blocks({ blocks, links }: { blocks: Block[]; links: FileLinks | null }) {
+/**
+ * Turn blocks. With `copy`, each prose block carries a ⧉ copy of its own (Amendment 217): an
+ * agent's activity, and a reply of more than one block, so what it said between tool calls, a
+ * draft it wrote and then ran a tool, or a turn still going, copies as a reply does.
+ */
+function Blocks({ blocks, links, copy = false }: { blocks: Block[]; links: FileLinks | null; copy?: boolean }) {
   return (
     <>
       {blocks.map((b) => {
         if (b.kind === 'prose') {
           // Markdown, because that is what agents write. See markdown.tsx for why
           // rendering it here does not contradict the daemon's server-side renderer.
-          return (
+          const md = (
             <div key={b.key} className="ag-md">
               {renderMarkdown(b.text, links?.named)}
             </div>
+          );
+          return copy ? (
+            <div key={b.key} className="ag-prose">
+              <ProseCopy block={b} />
+              {md}
+            </div>
+          ) : (
+            md
           );
         }
         if (b.kind === 'tool') return <ToolCall key={b.key} block={b} links={links} />;
@@ -610,6 +623,45 @@ function ReplyCopy({ reply }: { reply: Block[] }) {
 }
 
 /**
+ * One prose block's ⧉ copy (Amendment 217), at its top right, shown on hover or focus so a long
+ * run isn't a column of buttons: that block's markdown, and it drawn without colour, through
+ * `copyProse` as the reply's. ag-quote-copy, so the reply's copy and Cmd-C leave it out
+ * (cleanHtml's CHROME). Prose said before a tool call, or in a turn still going, isn't the
+ * reply and had no copy, so a draft an agent wrote and then ran a tool after could only be
+ * selected by hand.
+ */
+function ProseCopy({ block }: { block: ProseBlock }) {
+  usePreloadReplyCopy();
+  const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const say = (next: { ok: boolean; why?: string }): void => {
+    setSaid(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
+  };
+  const copy = (): void => {
+    void copyProse(block.text, [block]).then(
+      () => say({ ok: true }),
+      (err: unknown) => say({ ok: false, why: err instanceof Error ? err.message : String(err) }),
+    );
+  };
+  return (
+    <button
+      type="button"
+      className={`ag-quote-copy ag-prose-copy${said ? ' is-said' : ''}${said && !said.ok ? ' is-failed' : ''}`}
+      aria-label="Copy this block of what the agent said"
+      title={said && !said.ok ? `Couldn't copy: ${said.why}` : 'Copy what the agent said here, without its colours, to paste anywhere'}
+      onClick={copy}
+    >
+      {said ? (said.ok ? '✓ copied' : "couldn't copy") : '⧉ copy'}
+    </button>
+  );
+}
+
+/**
  * Cmd-C in the transcript (Amendment 201): the selection, `cleanHtml`'d, so what you paste takes
  * the target's colours rather than the theme's that the browser would have inlined. Anything
  * going wrong leaves the browser's own copy to it: this never stops a copy.
@@ -654,7 +706,7 @@ function Activity({
   links: FileLinks | null;
 }) {
   const opened = useActivityOpen();
-  if (blocks.length < 2) return <Blocks blocks={blocks} links={links} />;
+  if (blocks.length < 2) return <Blocks blocks={blocks} links={links} copy />;
   const open = isFolded(opened, agentId, turnKey);
   const toggle = (): void => updateActivityOpen((f) => setFold(f, agentId, turnKey, !open));
   const earlier = blocks.length - 1;
@@ -674,14 +726,18 @@ function Activity({
         {open ? `hide ${earlier} earlier step${earlier === 1 ? '' : 's'}` : `${earlier} earlier step${earlier === 1 ? '' : 's'}`}
       </button>
       {open ? (
-        <Blocks blocks={blocks} links={links} />
+        <Blocks blocks={blocks} links={links} copy />
       ) : (
         <>
-          <Blocks blocks={kept} links={links} />
+          <Blocks blocks={kept} links={links} copy />
           {latest.kind === 'prose' ? (
-            <div className="ag-act-last">{lastLine(latest.text)}</div>
+            // Its last line shows; its copy is the whole block, as it is unfolded.
+            <div className="ag-prose is-last">
+              <ProseCopy block={latest} />
+              <div className="ag-act-last">{lastLine(latest.text)}</div>
+            </div>
           ) : (
-            <Blocks blocks={[latest]} links={links} />
+            <Blocks blocks={[latest]} links={links} copy />
           )}
         </>
       )}
@@ -771,7 +827,8 @@ function AgentTurn({
             <Activity blocks={split.activity} agentId={agentId} turnKey={turn.key} since={turn.ts} links={links} />
             {split.reply.length > 0 && (
               <div className="ag-reply">
-                <Blocks blocks={split.reply} links={links} />
+                {/* One block is the reply's own ⧉ copy; of several, each has its own too. */}
+                <Blocks blocks={split.reply} links={links} copy={split.reply.filter((b) => b.kind === 'prose').length > 1} />
               </div>
             )}
             {seq !== null && (

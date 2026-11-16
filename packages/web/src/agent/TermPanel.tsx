@@ -22,9 +22,11 @@ import { termScopeKey, type Agent, type TermInfo, type TermScope } from '@conduc
 import { dirRoot } from '../files/tabs.js';
 import { copyText } from '../lib/clipboard.js';
 import { errorText } from '../lib/errors.js';
+import { cleanTermText, type TermSelection } from '../lib/termclean.js';
 import { useJobs, useProjects } from '../lib/store.js';
 import { tildePath } from '../shell/ui.js';
 import { onTerminals } from '../terminal/live.js';
+import { copyProse, usePreloadReplyCopy } from './copyreply.js';
 import { TerminalPanel } from './Terminal.js';
 import { XtermView, type TermLinks } from './Xterm.js';
 import { closeTerminal, endedLine, fallbackBanner, listTerminals, nextSelected, openTerminal, tabLabel, tabTitle, worktreeNote } from './term.js';
@@ -88,6 +90,7 @@ export function TermTabs({
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reader, setReader] = useState<(() => TermSelection) | null>(null);
   const current = useRef(key);
   current.current = key;
 
@@ -200,10 +203,18 @@ export function TermTabs({
           ) : null}
           . It keeps running if you leave.
         </span>
+        <CopyClean read={reader} />
       </div>
       {about}
       {shown ? (
-        <XtermView key={shown.id} termId={shown.id} onEnded={() => void refresh()} links={links(shown)} />
+        <XtermView
+          key={shown.id}
+          termId={shown.id}
+          onEnded={() => void refresh()}
+          links={links(shown)}
+          // A function in state is set through one that returns it.
+          onSelection={(read) => setReader(() => read)}
+        />
       ) : (
         <div className="ag-termx-wait">
           No terminal is open.{' '}
@@ -222,5 +233,57 @@ export function TermTabs({
       )}
       {error && <div className="ag-term-err">{error}</div>}
     </div>
+  );
+}
+
+/**
+ * ⧉ copy clean (Amendment 218): the terminal's selection as markdown, its screen wraps joined
+ * and its indent and `⏺ ` dropped (lib/termclean.ts), as text and drawn as HTML, as a reply's
+ * ⧉ copy puts it. Cmd-C still copies the selection as the terminal shows it.
+ */
+function CopyClean({ read }: { read: (() => TermSelection) | null }) {
+  usePreloadReplyCopy();
+  const [said, setSaid] = useState<{ ok: boolean; why?: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const say = (next: { ok: boolean; why?: string }): void => {
+    setSaid(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid(null), next.ok ? 2000 : 4000);
+  };
+  const copy = (): void => {
+    if (!read) return;
+    let text: string;
+    try {
+      text = cleanTermText(read());
+    } catch (err) {
+      say({ ok: false, why: errorText(err) });
+      return;
+    }
+    void copyProse(text, [{ kind: 'prose', text }]).then(
+      () => say({ ok: true }),
+      (err: unknown) => say({ ok: false, why: errorText(err) }),
+    );
+  };
+  return (
+    <button
+      type="button"
+      className={`ag-termx-clean${said && !said.ok ? ' is-failed' : ''}`}
+      disabled={!read && !said}
+      title={
+        said && !said.ok
+          ? `Couldn't copy: ${said.why}`
+          : read
+            ? 'Copy the selection as markdown: lines the screen broke joined, the indent and ⏺ dropped'
+            : 'Select text in the terminal first'
+      }
+      // The terminal keeps the keyboard, and its selection, when this is clicked.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={copy}
+    >
+      {said ? (said.ok ? '✓ copied' : "couldn't copy") : '⧉ copy clean'}
+    </button>
   );
 }

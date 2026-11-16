@@ -65,6 +65,16 @@ export function declinedHere(tool: string): string | null {
 }
 
 /**
+ * Where an agent's replies are shown (Amendment 217): agents took themselves to be in a terminal,
+ * told the user there was no copy button, and put drafts on the clipboard with pbcopy unasked.
+ */
+export const SHOWN_LINE =
+  "Your replies are shown in Conductor's web view, rendered as markdown, with a copy button on each reply, " +
+  'each block of what you say between tool calls, each code block and each message block; the user copies from ' +
+  "there. Don't tell them there is no copy button, and don't put text on their clipboard (pbcopy, xclip) unless " +
+  'they ask you to.';
+
+/**
  * How an agent hands you a message to send (Amendment 207): in a ```message block, which the
  * transcript shows as the message with a ⧉ copy of its own that copies only it. Agents had set a
  * draft apart with --- lines, which Conductor can't tell from the text around it, so the reply's
@@ -75,7 +85,9 @@ export const MESSAGE_LINE =
   'an announcement), put only the message itself in a fenced block marked message: a line with ```message, ' +
   'the message in markdown, and a line with ```. Keep your notes about it outside the block, before or after. ' +
   'Conductor shows the block as the message, with a copy button that copies only what is inside. One block per ' +
-  'message; if the message itself holds a code block, open and close the message block with four backticks.';
+  'message; if the message itself holds a code block, open and close the message block with four backticks. ' +
+  // Amendment 217: agents guessed they were in a terminal, told the user there was no copy button, and ran pbcopy.
+  SHOWN_LINE;
 
 /** Every agent's lines from Conductor: the turn-end line, then how to hand over a message. */
 export const CONDUCTOR_LINES = `${TURN_END_LINE}\n\n${MESSAGE_LINE}`;
