@@ -200,6 +200,124 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 220 — post-merge, applied. **⏎ new line is each agent's own.**
+
+Web only (`agent/settingsfold.ts`, `agent/composer.tsx`, the checks in `lib/verify.ts`) and `docs/MANUAL.md`. Asked
+20 Nov: *"make the "check box New Line" be specific to each agent, today it is a setting that goes across all
+agents."* Amendment 203's **⏎ new line** was one setting, `conductor.enterNewline`, for every agent. Each agent's choice
+is now kept in Settings under `conductor.agentEnterNewline`, `{agentId: 'newline' | 'send'}` (`parseEnterChoices`;
+anything else stored is no choice). An agent with no choice of its own does what `conductor.enterNewline` says
+(`agentEnterSends`), so a box ticked before reads as it did, on every agent, until each is ticked or unticked; the old
+key is never written again. Ticking or unticking writes only that agent's choice (`setEnterChoice`, through the
+composer's `writeEnterChoice`, read from the settings at the moment, so two quick ticks both land): unticking is kept
+as `send`, so it holds where the old setting is a new line. As the reply ticks are (`setAck`, Amendment 200), the
+agents the hub no longer has drop out as it is written, never the one being ticked, and none before the snapshot has
+any; the newest 200 agents are kept. The box's title says it is this agent's (*Tick it to make ⏎ a new line on this
+agent, for a long message; other agents keep their own*). *Decisions:* folds have no pruning of removed agents (they
+are bounded by recency), so the reply ticks' pruning is the one copied, with a recency bound beside it. *Departures:*
+none. **Verified:** `lib/verify.ts` §66, 16 checks (the key; what parses; the fallback and the own choice; one agent
+written alone, the others kept; untick held over the old setting; a removed agent dropped, never the one ticked, and
+none before the agents are known; the bound and recency; the composer writing this agent only, never the old key; its
+title; the manual), and §49's three source checks now read the per-agent form. Not tried in a browser.
+
+### Amendment 219 — post-merge, applied. **When done: commit, test, merge, push and clean up, per agent.**
+
+Shared (new `shared/src/whendone.ts`, `wire.ts`), daemon (migration `390_finish_steps.sql`, `session/finish.ts`,
+`session/store.ts`, `session/supervisor.ts`, `routes/session.ts`, `workspace/branches.ts`, `workspace/project-repo.ts`,
+`session/verify-finish.ts`), web (`agent/composer.tsx`, `agent/settingsfold.ts`, `agent/agent.css`, `spawn/autonomy.ts`,
+`spawn/defaults.ts`, `spawn/route.tsx`, `spawn/spawn.css`, `settings/route.tsx`, `fleet/card.tsx`, `fleet/endpoints.ts`,
+`attention/alerts.ts`, `attention/AlertCard.tsx`, `attention/attention.css`, `shell/describe.ts`, and the checks in
+`lib/verify.ts`, `agent/verify.ts`, `spawn/verify.ts`, `attention/verify.ts`) and `docs/MANUAL.md`. Asked 20 Nov, after
+*"but cleanup destroys the agent"*: *"why not have "Merge" "Commit" "Push" "Test" "Cleanup", I can always delete with the
+"Remove" button today"*. `Autonomy.mergeWhenDone` (Amendment 144) becomes `whenDone?: {commit?, test?, merge?, push?,
+cleanup?: true}`, absent meaning off. One normaliser, `whenDoneOf` (and `normaliseAutonomy` over a whole autonomy), is
+what the daemon and the web read it with: an old `mergeWhenDone: true` is merge and clean up, so nothing is migrated.
+POST `/api/agents/:id/autonomy` takes the new shape; a body with `mergeWhenDone` and no `whenDone` (`withOldMerge`)
+turns merge and clean up on, or off, beside the agent's other steps, and `whenDone: {}` clears them. When a job
+settles done (`finishJob`, `notAllDone` kept), the steps any of its agents has on run in the order commit → test →
+merge → push → clean up, each only when the one before it succeeded or was off; the first that can't run stops the
+rest, which are named as not run. Worktree jobs only. **Commit** commits what is uncommitted as `<job name, or the
+prompt's first line> — <the first line of the newest reply>`, cut to 72 characters (`whenDoneCommitMessage`); nothing
+uncommitted is skipped. **Test** runs the project's `testCommand` (new `projects.test_command`, set on the Fleet card's
+Edit through `PATCH /api/projects/:id`, at most 2000 characters, blank for none) in the job's folder, in the login
+shell, for at most 30 minutes, keeping the last 200 lines; exit 0 passes, and with no command it fails with
+*set a test command on the project's Edit first*. **Merge** previews first and merges clean merges only; a conflict or
+a dirty target checkout stops it, and the job gets the offer card. **Push** pushes the target after a merge, else the
+job's branch, to `origin`, never forced; a refusal stops with git's own sentence, condensed to one line, and no
+remote says so. **Clean up** runs only on a merged branch: `git worktree remove`, `git branch -d`, never `-D`
+(`cleanUpMerged`), closing the workspace record; the job, its agents and their transcripts stay, and Remove still
+deletes. Each agent of the job gets one synthetic note: *When done: committed a1b2c3d · tests passed (make test, 2m
+10s) · merged into main as 9f8e7d6 · pushed main to origin · cleaned up the folder and branch.* `job_finishes` keeps
+`steps` (each `{step, outcome, said}`), `stopped_at`, `test_output`, and `state`/`current_step` while they run: a daemon
+that stops part way finds the row on boot (`recoverFinishes`) and records it **interrupted at <step>**, as `merged` if
+the merge went in, else as an offer, running nothing again; a step never runs twice (a row at or after the job's end,
+and an in-process set). After a clean-up, `sendMessage`, resume and a queued launch put the folder back
+(`restoreFolder`) only when the newest finish says its clean-up removed it (`cleanedByFinish`, then `restored_at`); a
+folder gone any other way is refused as before (Amendment 114). Needs You: `finishAlerts` sends `steps`, `stoppedAt`
+and `testOutput`. A stop before the merge is the **Finished** card, offering **Merge into <target>** (primary; the merge
+alone, previewed, since the job and its agents stay) with open Branches and dismiss, its title *stopped at test when
+done: merge into main?*; the card lists the steps, names the stop and why, and folds the Test's last lines under
+*the test's last lines*. A run that merged is the **Merged** card, now listing the steps (*did its when-done steps: …*),
+or naming a stop after the merge (*was merged into main, then stopped at push when done*); its note says what is
+still there, whether anything was pushed (never force-pushed) and that Remove still deletes. Web: the composer's
+guardrails are followed by **when done:** and five pills (commit, test, merge, push, clean up), each hint saying what
+it does and what it never does (never amends, never changes the command, never resolves a conflict, never
+force-pushes, never removes an unmerged branch or the agent) and *Worktree jobs only.*; Spawn has the same five
+before its effort row, disabled with *Only a job on a branch of its own, in a folder of its own, does steps when it
+is done. Pick a new branch to use them.* for **in place**, which then sends none; Settings' "What Spawn starts from"
+has them too, and a saved `mergeWhenDone` reads as merge and clean up. Test is disabled, titled *set a test command on
+the project's Edit first*, while the project has none. The folded settings line names the steps on (*ask me · high ·
+sonnet-5-5 · when done: commit, test, merge · $4.10 of $25 today*). *Decisions:* the composer shuts the pills too on a
+job in the project's own folder, with the Spawn title (the brief asked it of Spawn); a shut pill that is on stays
+clickable, so a step can be turned off; disabled pills are dashed in `--ink3` rather than faded, for 4.5:1; step
+changes on a working agent are not "from the next run", since they apply at the finish; the plain Finished card
+(no stop) keeps merge and clean up, Amendment 144's; a message sent while the folder is being put back waits in
+memory only. *Departures:* none from the brief. **Verified:** `session/verify-finish.ts`, rewritten, 73 checks in 14
+sections against real git repos in tmp, pushes to a local bare repo (the setting and its old form; each step alone;
+a failing test stopping merge, push and clean up with its tail; a clean, a conflicting and a dirty-target merge; no
+remote, then a push; all five in order; a rejected push; clean up keeping the job and refusing an unmerged branch; a
+message after clean up putting the folder back and being sent; what gets no steps; a finish twice running once; a
+finish stopped part way recorded interrupted; migration 390 on an older database). `lib/verify.ts` §65 (the steps,
+labels and hints; Test shut without a command; Spawn shut for in place and sending nothing; the folded line; the old
+form normalised; the Edit's test command; the cards' words; tokens only, 4.5:1 in both themes, worst 5.43:1).
+`attention/verify.ts` §11 (the stop card's actions, label, rows, fold, note, title and top-bar word; the all-done and
+the stop-after-merge cards), `spawn/verify.ts` §24 and `agent/verify.ts` (the when-done pills, rewritten from
+Amendment 144's). `lib/verify.ts` §61's reply-bar check now reads the composer's hoisted `project` and `job`. Not tried
+in a browser or on a real project's finish.
+
+**Review fixes (one commit on `finish-steps`).** Daemon (`session/finish.ts`, `session/supervisor.ts`,
+`session/verify-finish.ts`), web (`agent/composer.tsx`, `spawn/autonomy.ts`, `attention/alerts.ts`,
+`attention/AlertCard.tsx`, `lib/verify.ts`, `attention/verify.ts`) and `docs/MANUAL.md`. (1) One job's finishes run one at a
+time (`finishJob` chains per job): a settling that arrives while one runs is **queued**, not dropped, and runs after it
+against the job as it is then. Before each step the job and its agents are read again: a job no longer done, an
+`endedAt` that changed, an agent not done, or one waiting to start (`agentWaiting`) stops it with *an agent started
+again, so the rest didn't run*, recorded as that step failed, with the offer card while the job is done and unmerged.
+Test records the branch's tip; merge refuses a tip that moved since with *the branch moved after its tests ran*. While a
+finish with steps runs on a worktree job, `sendMessage`, resume, a queued launch and a slot's message wait for it
+(`Supervisor.#afterFinish`, which marks the job waited on, so the rest stop) and then go as they would have;
+`sendMessage` answers `'resumed'`, and the transcript says *Waiting for the when-done steps to finish; your message goes
+once they have.* once per finish. (2) Test process groups are kept; `shutdown()` runs `stopRunningTests()` (SIGTERM to
+each group, SIGKILL after 2 s). (3) `recoverFinishes` records the step after the last recorded when none was marked
+running, or *the daemon stopped after <step> ran, before the finish was recorded* with no stop when every step went in;
+`cleaned` is set from the steps (and by each step's progress write), and `cleanedByFinish` counts a running row whose
+clean-up is done. (4) A test's result is its shell's `exit`; its group is then stopped (SIGTERM, SIGKILL after 2 s) and
+its output gets 2 s to close. (5) The composer shuts the pills on any job whose isolation isn't `worktree`. (6) The test
+env drops every `CONDUCTOR_*`. (7) After a failed Test the Finished card's primary is **open Branches** and the merge a
+plain **Merge anyway into <target>**, titled that the tests failed; a stop at any other step keeps **Merge into
+<target>** primary. (8) Before pushing the target, commits on it not on its upstream (or on `origin` at all, with no
+upstream), before the merge this run made, stop the push: *didn't push: main has N commit(s) of yours that aren't on
+origin; push it yourself from Branches*; the push hint says so. (9) Test output is decoded with `StringDecoder`; a
+queued wake message to a cleaned-up job puts the folder back first; the MANUAL says a message after clean-up puts back
+a new branch of the same name from the target. *Decisions:* a queued settling, not dropped, since a job that settles
+again with new work should still get its steps; a waiting message also stops the remaining steps, since the person is
+working on the branch again; the wait is in memory, so a daemon stopped meanwhile loses it. **Verified:**
+`session/verify-finish.ts` §15-20, 100 checks in all (a message during Test waits, is said once, stops the merge and
+goes after; two settlings one after the other, the first stopped; a moved tip refused; a test leaving a child exits
+promptly and the child goes; shutdown kills a running group; no `CONDUCTOR_*` in the test's env; a split character
+decoded; recovery's derived step and cleaned; the push refusing your own commits, then pushing once you did).
+`attention/verify.ts` §11 (the failed-test card's order, labels and titles; a stop at push keeping the merge primary),
+`lib/verify.ts` §65 (the composer's worktree test; the push hint).
+
 ### Amendment 218 — post-merge, applied. **⧉ copy clean in a terminal: the selection as markdown.**
 
 Web only (new `lib/termclean.ts`, `agent/Xterm.tsx`, `agent/TermPanel.tsx`, `agent/agent.css`, `lib/verify.ts`,

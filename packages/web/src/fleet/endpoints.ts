@@ -28,7 +28,7 @@ export { removeProject, type ProjectRemoval } from '../spawn/endpoints.js';
  */
 export function editProject(
   projectId: string,
-  patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null; color?: ProjectColor | null },
+  patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null; color?: ProjectColor | null; testCommand?: string | null },
 ): Promise<{ project: Project }> {
   return api(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: patch });
 }

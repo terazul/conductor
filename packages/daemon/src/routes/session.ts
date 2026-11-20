@@ -43,7 +43,7 @@ import type {
   StopRetryingResponse,
   StopWaitingResponse,
 } from '@conductor/shared';
-import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PROJECT_COLORS, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, type ProjectColor, type ProviderInfo } from '@conductor/shared';
+import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PROJECT_COLORS, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, whenDoneFrom, whenDoneOf, type ProjectColor, type ProviderInfo, type WhenDone } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
@@ -64,11 +64,12 @@ import {
   listJobs,
   listProjects,
 } from '../session/store.js';
-import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, setProjectColor, setProjectMonthlyBudget, updateNote } from '../session/store.js';
+import { deleteNote, deleteRule, getNote, getRule, insertNote, rulesForProject, setProjectColor, setProjectMonthlyBudget, setProjectTestCommand, updateNote } from '../session/store.js';
 import { monthlyBudgetProblem } from '../daily.js';
 import { describeRule } from '../session/rules.js';
 import { LaunchBranchError } from '../workspace/worktree.js';
 import { STACKS_KEY, stacksLimit } from '../slots.js';
+import { recoverFinishes } from '../session/finish.js';
 import {
   FolderGoneError,
   HandOffRefusedError,
@@ -101,6 +102,9 @@ function folderRefused(reply: FastifyReply, error: string, err: FolderGoneError)
   return reply.code(409).send(body);
 }
 
+/** The longest test command a project takes (Amendment 219): a line of shell, not a script. */
+const TEST_COMMAND_MAX = 2000;
+
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
 }
@@ -128,8 +132,9 @@ function parseAutonomy(raw: unknown): Autonomy {
   const effort = EFFORTS.includes(a['effort'] as EffortLevel)
     ? (a['effort'] as EffortLevel)
     : undefined;
-  // Amendment 144: only `true` turns it on; anything else is off, and off is left out.
-  const mergeWhenDone = a['mergeWhenDone'] === true;
+  // Amendment 219: only `true` turns a step on; anything else is off, and none on is left out.
+  // A body from before it, `mergeWhenDone: true`, is merge and clean up (`whenDoneOf`).
+  const whenDone = whenDoneFrom(whenDoneOf({ whenDone: a['whenDone'] as WhenDone | undefined, mergeWhenDone: a['mergeWhenDone'] }));
 
   return {
     mode,
@@ -139,8 +144,27 @@ function parseAutonomy(raw: unknown): Autonomy {
     // Absent when uncapped, so a Claude agent's autonomy is the shape it always was.
     ...(capTokens !== null ? { budgetTokens: capTokens } : {}),
     ...(effort ? { effort } : {}),
-    ...(mergeWhenDone ? { mergeWhenDone } : {}),
+    ...(whenDone ? { whenDone } : {}),
   };
+}
+
+/**
+ * A change of autonomy from a client from before Amendment 219, which sends `mergeWhenDone` and no
+ * `whenDone`: true turns merge and clean up on beside the agent's other steps, and false turns
+ * those two off and leaves the rest. Anything else passes as it came.
+ */
+function withOldMerge(current: Autonomy, change: Record<string, unknown>): Record<string, unknown> {
+  if (!('mergeWhenDone' in change) || 'whenDone' in change) return change;
+  const { mergeWhenDone, ...rest } = change;
+  const steps: WhenDone = { ...whenDoneOf(current) };
+  if (mergeWhenDone === true) {
+    steps.merge = true;
+    steps.cleanup = true;
+  } else {
+    delete steps.merge;
+    delete steps.cleanup;
+  }
+  return { ...rest, whenDone: steps };
 }
 
 /**
@@ -471,6 +495,8 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
   // Then the agents no request covers: ones left `working` by a hard stop. Order matters —
   // see Supervisor.reconcile.
   sup.reconcile();
+  // A finish whose when-done steps a stop cut short is recorded interrupted, nothing re-run (Amendment 219).
+  recoverFinishes(db);
   // Pause everything until a time, and messages sent at a time (Amendment 111). Before the
   // pump: a pause still on holds the supervisor before anything queued can start.
   const sched = initScheduler(db, sup);
@@ -520,7 +546,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    * patch shape would mean a W0 edit for every field the form grows.
    */
   app.patch<{ Params: { projectId: string } }>('/api/projects/:projectId', async (req, reply) => {
-    const body = (req.body ?? {}) as { name?: unknown; path?: unknown; monthlyBudgetUsd?: unknown; color?: unknown };
+    const body = (req.body ?? {}) as { name?: unknown; path?: unknown; monthlyBudgetUsd?: unknown; color?: unknown; testCommand?: unknown };
     const patch: { name?: string; path?: string } = {};
     if (typeof body.name === 'string') patch.name = body.name;
     if (typeof body.path === 'string') patch.path = body.path;
@@ -537,8 +563,16 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     if (color !== undefined && color !== null && !(PROJECT_COLORS as readonly unknown[]).includes(color)) {
       return fail(reply, 400, 'not a project colour', `one of ${PROJECT_COLORS.join(', ')}, or null for auto`);
     }
-    if (patch.name === undefined && patch.path === undefined && monthly === undefined && color === undefined) {
-      return fail(reply, 400, 'nothing to change', 'send a name, a path, a monthly budget, a colour, or any of them');
+    // The when-done Test step's command (Amendment 219): a line of shell, or null (or blank) for none.
+    const test = body.testCommand;
+    if (test !== undefined && test !== null && typeof test !== 'string') {
+      return fail(reply, 400, 'not a test command', 'a command as text, such as make test, or null for none');
+    }
+    if (typeof test === 'string' && test.length > TEST_COMMAND_MAX) {
+      return fail(reply, 400, 'not a test command', `at most ${TEST_COMMAND_MAX} characters`);
+    }
+    if (patch.name === undefined && patch.path === undefined && monthly === undefined && color === undefined && test === undefined) {
+      return fail(reply, 400, 'nothing to change', 'send a name, a path, a monthly budget, a colour, a test command, or any of them');
     }
     if (!getProject(db, req.params.projectId)) return fail(reply, 404, 'no such project');
     try {
@@ -550,6 +584,10 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
       }
       if (color !== undefined) {
         setProjectColor(db, req.params.projectId, color as ProjectColor | null);
+        project = sendProject(req.params.projectId);
+      }
+      if (test !== undefined) {
+        setProjectTestCommand(db, req.params.projectId, typeof test === 'string' && test.trim() !== '' ? test.trim() : null);
         project = sendProject(req.params.projectId);
       }
       if (!project) return fail(reply, 404, 'no such project');
@@ -1043,7 +1081,7 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     const body = (req.body ?? {}) as SetAutonomyRequest;
     let next: Autonomy;
     try {
-      next = autonomyFor(getAgentProvider(db, agent.id), { ...agent.autonomy, ...asRecord(body.autonomy) });
+      next = autonomyFor(getAgentProvider(db, agent.id), { ...agent.autonomy, ...withOldMerge(agent.autonomy, asRecord(body.autonomy)) });
     } catch (err) {
       return fail(reply, 400, 'invalid autonomy', (err as Error).message);
     }

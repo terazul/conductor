@@ -25,7 +25,11 @@ import { addAgentProblems, addAgentSpec, addedAutonomy, budgetDefault, feedOptio
 import {
   DEFAULT_BUDGET_USD,
   DEFAULT_MODE,
-  MERGE_WHEN_DONE_LABEL,
+  NO_TEST_COMMAND_TITLE,
+  WHEN_DONE_HINTS,
+  WHEN_DONE_NEEDS_WORKTREE,
+  WHEN_DONE_PILLS,
+  withoutWhenDone,
   MODES,
   EFFORTS,
   PILLS,
@@ -668,7 +672,7 @@ console.log('\n10 · how the agents interact with you, chosen at launch (Amendme
   check('a saved default is read, and a bad one is the default', launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'auto' : null)).mode === 'auto' && launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'yolo' : null)).mode === 'acceptEdits');
   check('the summary says when nothing will ask, shell included', describeAutonomy(bypass).startsWith('⚠ asks you nothing · runs shell unattended'), describeAutonomy(bypass));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed(, inAll)?)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
+  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed(, inAll)?)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
 }
 
 console.log('\n11 · MCP tools, and what a reading role never gets (Amendment 67)');
@@ -812,7 +816,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('budget 500k tokens a day') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /const jobBudget = jobBudgetUsd\(budgetPerAgent, specs\.length, caps\);/.test(src) && /budgetUsd: jobBudget,/.test(src));
+  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /const jobBudget = jobBudgetUsd\(budgetPerAgent, specs\.length, caps\);/.test(src) && /budgetUsd: jobBudget,/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's visible list or an id when it cannot list", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /<ProviderModelSelect/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd, its hint saying it warns and never stops (Amendment 180)', !/ceilingWords/.test(src) && /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title=\{`[^`]*per day[^`]*never stops it[^`]*`\}\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
@@ -1568,25 +1572,44 @@ console.log('\n23 · a Custom setup can orchestrate, and saves the roles it list
   check("the tick's rule uses ink tokens only: no hex, no status colour", tick.length > 0 && !/#[0-9a-f]{3,8}\b/i.test(tick) && [...tick.matchAll(/var\(--([a-z0-9-]+)\)/g)].every((m) => !['live', 'need', 'fail', 'done', 'you', 'queue', 'idle'].includes(m[1]!)));
 }
 
-console.log('\n24 · "merge into main and clean up when done", a launch option (Amendment 144)');
+console.log('\n24 · when done: commit, test, merge, push and clean up, launch options (Amendments 144, 219)');
 {
-  const pill = PILLS.find((p) => p.id === 'mergeWhenDone');
-  check('it is a pill, with its words, off by default', pill?.label === 'merge into main and clean up when done' && MERGE_WHEN_DONE_LABEL === pill.label && defaultPills()['mergeWhenDone'] === false);
-  check("its hint says the agents can't be messaged afterwards, the transcripts stay, and it never pushes", /can't be messaged afterwards/.test(pill?.hint ?? '') && /transcripts stay/.test(pill?.hint ?? '') && /never pushes/.test(pill?.hint ?? ''));
+  check('five pills, in the order they run, with their words, all off by default',
+    WHEN_DONE_PILLS.map((p) => p.label).join() === 'commit,test,merge,push,clean up' && WHEN_DONE_PILLS.every((p) => defaultPills()[p.id] === false) && !PILLS.some((p) => p.id === 'mergeWhenDone'));
+  check("each hint says what it never does, and that it's for worktree jobs only",
+    /never amends/.test(WHEN_DONE_HINTS.commit) && /never changes the command/.test(WHEN_DONE_HINTS.test) && /never resolves/.test(WHEN_DONE_HINTS.merge) &&
+      /never force-pushes/.test(WHEN_DONE_HINTS.push) && /never removes an unmerged branch, and never removes the agent/.test(WHEN_DONE_HINTS.cleanup) &&
+      WHEN_DONE_PILLS.every((p) => p.hint === WHEN_DONE_HINTS[p.step] && /Worktree jobs only\./.test(p.hint)));
+  const id = (step: string): string => WHEN_DONE_PILLS.find((p) => p.step === step)!.id;
   const off = toAutonomy(defaultPills(), 5);
-  const on = toAutonomy({ ...defaultPills(), mergeWhenDone: true }, 5);
-  check('off, the autonomy has no such field: as before', !('mergeWhenDone' in off));
-  check('on, it says so, and no tool list changes', on.mergeWhenDone === true && JSON.stringify(on.allowedTools) === JSON.stringify(off.allowedTools) && JSON.stringify(on.disallowedTools) === JSON.stringify(off.disallowedTools) && on.mode === off.mode);
-  const specs = toAgentSpecs(presetById('full'), { ...defaultPills(), mergeWhenDone: true }, 5);
-  check('every agent of the launch gets it, a reading role too', specs.length > 1 && specs.every((x) => x.autonomy.mergeWhenDone === true), specs.map((x) => `${x.role}:${x.autonomy.mergeWhenDone}`).join(','));
-  const saved = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ ...defaultPills(), mergeWhenDone: true }) : null));
-  check('Settings → What Spawn starts from keeps it, as it keeps every pill', saved.pills['mergeWhenDone'] === true);
-  const older = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ allowBash: true }) : null));
-  check('a saved set of pills from before it reads it as off', older.pills['mergeWhenDone'] === false && older.pills['allowBash'] === true);
+  const pills = { ...defaultPills(), [id('commit')]: true, [id('push')]: true };
+  const on = toAutonomy(pills, 5);
+  check('off, the autonomy has no such field: as before', !('whenDone' in off) && !('mergeWhenDone' in off));
+  check('on, it carries the steps that are on, and no tool list changes', JSON.stringify(on.whenDone) === '{"commit":true,"push":true}' && JSON.stringify(on.allowedTools) === JSON.stringify(off.allowedTools) && JSON.stringify(on.disallowedTools) === JSON.stringify(off.disallowedTools) && on.mode === off.mode, JSON.stringify(on.whenDone));
+  const specs = toAgentSpecs(presetById('full'), pills, 5);
+  check('every agent of the launch gets them, a reading role too', specs.length > 1 && specs.every((x) => x.autonomy.whenDone?.commit === true && x.autonomy.whenDone?.push === true), specs.map((x) => `${x.role}:${JSON.stringify(x.autonomy.whenDone)}`).join(','));
+  check('a job in the project\'s own folder launches with none of them', !('whenDone' in toAutonomy(withoutWhenDone(pills), 5)));
+  const saved = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify(pills) : null));
+  check('Settings → What Spawn starts from keeps them, as it keeps every pill', saved.pills[id('commit')] === true && saved.pills[id('push')] === true && saved.pills[id('merge')] === false);
+  const older = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ allowBash: true, mergeWhenDone: true }) : null));
+  check('a set saved with Amendment 144\'s "merge into main and clean up" reads as merge and clean up', older.pills[id('merge')] === true && older.pills[id('cleanup')] === true && older.pills[id('commit')] === false && older.pills['allowBash'] === true);
+  const oldest = launchDefaults((k) => (k === LAUNCH_KEYS.pills ? JSON.stringify({ allowBash: true }) : null));
+  check('a set from before either reads them as off', WHEN_DONE_PILLS.every((p) => oldest.pills[p.id] === false));
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check("Spawn draws it with the other pills (PILLS.map)", /\{PILLS\.map\(\(p\) => \{/.test(route));
+  check('Spawn draws them in a row of their own after "when done:", beside the guardrail rows',
+    /<span className="ui-lab">when done:<\/span>\s*\{WHEN_DONE_PILLS\.map\(\(p\) => \{/.test(route) && route.indexOf('{WHEN_DONE_PILLS.map') > route.indexOf('{PILLS.map((p) => {'));
+  check("shut, saying why, when the method doesn't make its own worktree, and what launches has none",
+    /const ownsFolder = isolationOf\(method\) === 'worktree';/.test(route) && /ownsFolder \? pills : withoutWhenDone\(pills\)/.test(route) &&
+      /const why = !ownsFolder \? WHEN_DONE_NEEDS_WORKTREE : noCommand \? NO_TEST_COMMAND_TITLE : p\.hint;/.test(route) && /disabled=\{shut\}\s*title=\{why\}/.test(route) &&
+      isolationOf('in_place') !== 'worktree' && isolationOf('named') === 'worktree' && isolationOf('worktree') === 'worktree');
+  check('Test shut, with its title, for a project with no test command', /const noCommand = p\.step === 'test' && !selected\?\.testCommand;/.test(route) && NO_TEST_COMMAND_TITLE === "set a test command on the project's Edit first");
+  check('the toAutonomy and toAgentSpecs of the launch are from those pills', /toAutonomy\(launchPills,/.test(route) && /toAgentSpecs\(preset, launchPills,/.test(route));
+  const css = readFileSync(new URL('./spawn.css', import.meta.url), 'utf8');
+  const shut = css.slice(css.indexOf('.sp-pill.is-step:disabled {'));
+  check('a shut step is dashed in --ink3, not faded, so its words clear 4.5:1', /opacity: 1;/.test(shut) && /color: var\(--ink3\);/.test(shut) && /border-style: dashed;/.test(shut));
+  check('the worktree title says to pick a new branch', /Pick a new branch/.test(WHEN_DONE_NEEDS_WORKTREE));
   const settings = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
-  check('and Settings does too', /\{PILLS\.map\(\(p\) => \(/.test(settings));
+  check('and Settings has them too', /\{PILLS\.map\(\(p\) => \(/.test(settings) && /\{WHEN_DONE_PILLS\.map\(\(p\) => \(/.test(settings));
 }
 
 console.log('\n25 · what you click is what runs: a persona does not change the guardrails, and a pinned row says so (Amendment 147)');
@@ -1754,7 +1777,7 @@ console.log('\n27 · an orchestrated stack chooses its helpers in all, and sends
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
   check('Spawn shows a "helpers in all" select on the listed roles, styled as the helpers picker', /className="ui-select sp-helpers sp-pipe-helpers"/.test(picker) && /aria-label="Helpers in all"/.test(picker) && /helperChoices\(listed\)/.test(picker) && /in all/.test(picker) && /onHelpers\(Number\(e\.target\.value\)\)/.test(picker));
-  check('it defaults to helperCapFor and is sent as helpers', /const inAll = helpersInAll\(listed, pipeHelpers\)/.test(route) && /toAgentSpecs\(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll\)/.test(route) && /helpers=\{inAll\}/.test(route) && /onHelpers=\{setPipeHelpers\}/.test(route));
+  check('it defaults to helperCapFor and is sent as helpers', /const inAll = helpersInAll\(listed, pipeHelpers\)/.test(route) && /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll\)/.test(route) && /helpers=\{inAll\}/.test(route) && /onHelpers=\{setPipeHelpers\}/.test(route));
   check('it is kept for the launch as the per-role helpers are: a preset change puts the default back', /useState<number \| null>\(null\)/.test(route) && /setHelpers\(\{\}\);\s*setListedEdit\(null\);\s*setPipeHelpers\(null\);/.test(route));
   check('a Custom setup that orchestrates shows the same, under its row', /listsRoles && r\.role === listsUnder && \(\s*<Pipeline[\s\S]*?helpers=\{inAll\}/.test(route));
   check('the plan\'s words say lanes: a role and a name, sent back at most twice each', /Each piece of work is a lane, a role and a name/.test(sendBackWords()) && /send a lane's work back/.test(sendBackWords()) && !/send a role's work back/.test(sendBackWords()));

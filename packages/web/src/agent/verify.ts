@@ -1239,12 +1239,12 @@ console.log('\n· the terminal, the rest of the plan (Amendment 141)');
   check("Settings (9) has a Terminal section: the two numbers as the slot limit is edited, and the shell from the daemon's list", /<Section title="Terminal">\s*<TerminalSection \/>/.test(settings) && /range=\{TERM_FONT_SIZE\}/.test(settings) && /range=\{TERM_SCROLLBACK\}/.test(settings) && /listShells\(\)/.test(settings) && /onBlur=\{commit\}[\s\S]*?e\.key === 'Escape'\) setDraft\(null\)/.test(settings));
 }
 
-console.log('\n· "merge into main and clean up when done" in the agent\'s settings (Amendment 144)');
+console.log("\n· when done: commit, test, merge, push and clean up, in the agent's settings (Amendments 144, 219)");
 {
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
-  check('the composer has the pill, worded as Spawn words it', /label: MERGE_WHEN_DONE_LABEL,\s*hint: MERGE_WHEN_DONE_HINT,/.test(comp) && /from '\.\.\/spawn\/autonomy\.js'/.test(comp));
-  check('it reads mergeWhenDone and sends only that field', /on: \(a\) => a\.mergeWhenDone === true,/.test(comp) && /flip: \(_a, on\) => \(\{ mergeWhenDone: on \}\),/.test(comp));
-  check('it sits with the guardrails, so it folds with them', comp.indexOf("id: 'merge_when_done'") > comp.indexOf('const PILLS: PillDef[] = [') && comp.indexOf("id: 'merge_when_done'") < comp.indexOf('interface ModeDef'));
+  check('the composer has the five, worded as Spawn words them', /label: WHEN_DONE_LABELS\[step\],\s*hint: WHEN_DONE_HINTS\[step\],/.test(comp) && /WHEN_DONE_STEPS\.map\(\(step\) => \(\{/.test(comp) && /from '\.\.\/spawn\/autonomy\.js'/.test(comp) && !/mergeWhenDone|merge_when_done/.test(comp));
+  check('each reads the normalised steps and sends the whole set', /on: \(a\) => whenDoneOf\(a\)\[step\] === true,/.test(comp) && /const next: WhenDone = \{ \.\.\.whenDoneOf\(a\) \};[\s\S]{0,120}return \{ whenDone: next \};/.test(comp) && /normaliseAutonomy\(agent\.autonomy\)/.test(comp));
+  check('it sits with the guardrails, after "when done:", so it folds with them', comp.indexOf('<span className="ui-lab">when done:</span>') > comp.indexOf('<span className="ui-lab">guardrails</span>') && comp.indexOf('{WHEN_DONE_PILLS.map((p) => {') > comp.indexOf('<span className="ui-lab">when done:</span>') && comp.indexOf('{WHEN_DONE_PILLS.map((p) => {') < comp.indexOf('<div className="ag-crow-r">'));
 }
 
 console.log("\n· an orchestrator's auto turns start folded, and one you open stays open (Amendment 164)");
@@ -1334,7 +1334,7 @@ console.log('\n· a working agent says what its run took (Amendment 178)');
   check('a tool changed on a working agent is its next run\'s', appliesSays('tools', true, 'now') === 'From the next run — this one keeps the tools it started with.');
   check('a mode or effort its run took says now; one it could not, the next run', appliesSays('mode', true, 'now').startsWith('Now') && appliesSays('effort', true, 'next run').startsWith('From the next run'));
   check('an agent not working is told nothing: every run is built from what is set', appliesSays('tools', false, 'now') === '' && appliesSays('mode', false, 'next run') === '');
-  check('the pills, the modes and effort say it, and merging when done is not a tool', /appliesSays\('tools', working, r\.appliesTo\)/.test(comp) && /appliesSays\('mode', working, r\.appliesTo\)/.test(comp) && /appliesSays\('effort', working, r\.appliesTo\)/.test(comp) && /pill\.id !== 'merge_when_done'/.test(comp));
+  check('the pills, the modes and effort say it, and the when-done steps are not a tool', /appliesSays\('tools', working, r\.appliesTo\)/.test(comp) && /appliesSays\('mode', working, r\.appliesTo\)/.test(comp) && /appliesSays\('effort', working, r\.appliesTo\)/.test(comp) && /agent\.status === 'working' && !pill\.id\.startsWith\('done\.'\)/.test(comp));
   check('and under the mode row, while it works, which of them its run takes now', WORKING_SAYS === 'mode and effort now · tools and budget from the next run' && /ag-modesays-when"> · \{WORKING_SAYS\}/.test(comp) && !comp.includes('· takes effect on the next run</span>'));
 }
 
