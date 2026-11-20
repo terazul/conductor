@@ -19,6 +19,7 @@
  * Nothing newer than git 2.30 is used.
  */
 
+import { existsSync } from 'node:fs';
 import type {
   BranchTargetSource,
   BranchAction,
@@ -73,6 +74,12 @@ export interface BranchJob {
 export interface BranchJobs {
   jobs: () => BranchJob[];
   forgetJob: (jobId: string) => Promise<void>;
+  /**
+   * Amendment 219's clean-up, which keeps the job: stop watching its folder and mark its
+   * workspace removed, as `workspace().close` does, before the folder goes. Never throws.
+   * Absent where there is no workspace service; the folder is still removed.
+   */
+  closeJob?: (jobId: string) => Promise<void>;
 }
 
 export interface BranchRepo {
@@ -813,12 +820,13 @@ interface Deleted {
  * Remove one merged branch and its worktree, or refuse with one plain sentence (409 unless
  * said). Every check runs before anything changes, in this order: the target; the project
  * folder's own branch; not merged into the target; what `git branch -d` would judge it by;
- * uncommitted files in its folder; a live agent; a job that owns it without `forget`. Then:
- * the owning jobs are removed (`forget` only), `git worktree remove -- <path>` (never
- * `--force`, so git refuses a dirty folder itself too), `git worktree prune`, and
- * `git branch -d -- <name>` (never `-D`). Nothing here talks to a remote.
+ * uncommitted files in its folder; a live agent; a job that owns it with `jobs` 'refuse'. Then:
+ * the owning jobs are removed ('forget'), or kept with their workspaces closed ('keep',
+ * Amendment 219's clean-up), `git worktree remove -- <path>` (never `--force`, so git refuses a
+ * dirty folder itself too), `git worktree prune`, and `git branch -d -- <name>` (never `-D`).
+ * Nothing here talks to a remote.
  */
-async function deleteOne(repo: BranchRepo, state: BranchesResponse, name: string, forget: boolean): Promise<Deleted> {
+async function deleteOne(repo: BranchRepo, state: BranchesResponse, name: string, jobsMode: 'refuse' | 'forget' | 'keep'): Promise<Deleted> {
   const b = known(state, name);
   const target = state.target;
   if (b.isTarget) throw new BranchError(409, `${b.name} is the branch everything is compared with; it isn't deleted here`);
@@ -861,15 +869,20 @@ async function deleteOne(repo: BranchRepo, state: BranchesResponse, name: string
     throw new BranchError(409, `an agent is working on ${b.name}${live ? ` (job ${live.id})` : ''}; wait for it to finish or stop it`);
   }
   const owner = jobs[0];
-  if (owner && !forget) throw new BranchError(409, ownedSentence(owner.id));
+  if (owner && jobsMode === 'refuse') throw new BranchError(409, ownedSentence(owner.id));
 
-  // Past every check. The job goes first, as the Project screen's ✕ removes it.
+  // Past every check. The job goes first, as the Project screen's ✕ removes it; or, kept, its
+  // workspace is closed, which removes the folder itself when it can.
   const forgot: string[] = [];
   for (const j of jobs) {
+    if (jobsMode === 'keep') {
+      await repo.jobs.closeJob?.(j.id);
+      continue;
+    }
     await repo.jobs.forgetJob(j.id);
     forgot.push(j.id);
   }
-  if (path) {
+  if (path && existsSync(path)) {
     try {
       await git(repo.root, ['worktree', 'remove', '--', path]);
     } catch (err) {
@@ -899,6 +912,20 @@ export function mergedBranches(state: BranchesResponse): BranchInfo[] {
   return state.branches
     .filter((b) => !b.isTarget && b.ahead === 0 && b.forkedAt !== null)
     .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.name.localeCompare(b.name)));
+}
+
+/**
+ * Amendment 219's when-done clean-up: remove a job's merged branch and its folder and KEEP the job
+ * and its agents, done, so their transcripts and sessions stay and a message to one puts the
+ * folder back (`Supervisor.restoreFolder`). Every check `delete` makes is made, so an unmerged
+ * branch is refused with its sentence and `git branch -d` is never `-D`. Daemon-internal, not a
+ * wire action: from the Branches screen, a job-owned branch still goes only with its job.
+ */
+export async function cleanUpMerged(repo: BranchRepo, branch: string): Promise<BranchActionResult> {
+  return locks.run(`branches:${repo.root}`, async () => {
+    const d = await deleteOne(repo, await listBranches(repo), branch, 'keep');
+    return { ok: true, merged: [], removed: [d.branch], forgotJobs: [], ...(d.output ? { output: d.output } : {}), branches: await listBranches(repo) };
+  });
 }
 
 /** Run one action under the repo's lock, and answer with the state after it. */
@@ -1034,7 +1061,7 @@ async function act(
     }
 
     case 'delete': {
-      const d = await deleteOne(repo, state, action.branch, action.forgetJob === true);
+      const d = await deleteOne(repo, state, action.branch, action.forgetJob === true ? 'forget' : 'refuse');
       return { ok: true, merged: [], removed: [d.branch], forgotJobs: d.forgot, ...(d.output ? { output: d.output } : {}) };
     }
 
@@ -1047,7 +1074,7 @@ async function act(
       for (const b of mergedBranches(state)) {
         try {
           const now = await listBranches(repo);
-          const d = await deleteOne(repo, now, b.name, action.forgetJobs === true);
+          const d = await deleteOne(repo, now, b.name, action.forgetJobs === true ? 'forget' : 'refuse');
           removed.push(d.branch);
           forgotJobs.push(...d.forgot);
         } catch (err) {

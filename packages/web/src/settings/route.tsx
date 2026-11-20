@@ -31,7 +31,7 @@ import { useModels } from '../lib/models.js';
 import { ModelSelect } from '../shell/ui.js';
 import { chooseTheme, useTheme, type ThemeChoice } from '../shell/theme.js';
 import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL, TERMINAL_DOCK } from '../shell/panels.js';
-import { EFFORTS, MODES, PILLS } from '../spawn/autonomy.js';
+import { EFFORTS, MODES, PILLS, WHEN_DONE_PILLS } from '../spawn/autonomy.js';
 import { PRESETS } from '../spawn/presets.js';
 import { BUILT_IN, LAUNCH_KEYS, launchDefaults, launchPatch, type LaunchDefaults } from '../spawn/defaults.js';
 import { METHODS } from '../spawn/launch.js';
@@ -713,6 +713,23 @@ function LaunchSection() {
         <span>how much rope — on means the agent may do it unattended</span>
         <div className="st-pills">
           {PILLS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="st-pill"
+              title={p.hint}
+              aria-pressed={d.pills[p.id] === true}
+              onClick={() => put({ pills: { ...d.pills, [p.id]: !d.pills[p.id] } })}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="st-field">
+        <span>when done — what a job on a branch of its own does by itself (Amendment 219)</span>
+        <div className="st-pills">
+          {WHEN_DONE_PILLS.map((p) => (
             <button
               key={p.id}
               type="button"

@@ -1244,3 +1244,15 @@
   font-size: var(--fs-sm);
   color: var(--ink);
 }
+
+/*
+ * A when-done step that can't be set here (Amendment 219): a job in the project's own folder,
+ * or Test with no command. Dashed and in --ink3 rather than faded or struck through, so its
+ * words still clear 4.5:1 and its title says why.
+ */
+.sp-pill.is-step:disabled {
+  opacity: 1;
+  text-decoration: none;
+  border-style: dashed;
+  color: var(--ink3);
+}

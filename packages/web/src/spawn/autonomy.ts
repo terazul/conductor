@@ -16,7 +16,7 @@
  * permission mode, so anything genuinely forbidden goes there.
  */
 
-import type { Autonomy, EffortLevel } from '@conductor/shared';
+import { WHEN_DONE_LABELS, WHEN_DONE_STEPS, type Autonomy, type EffortLevel, type WhenDone, type WhenDoneStep } from '@conductor/shared';
 import { tokenWords } from '../lib/providers.js';
 
 export interface PillDef {
@@ -34,10 +34,29 @@ export interface PillDef {
   hint: string;
 }
 
-/** The per-agent setting of Amendment 144, worded the same in Spawn, Settings and the composer. */
-export const MERGE_WHEN_DONE_LABEL = 'merge into main and clean up when done';
-export const MERGE_WHEN_DONE_HINT =
-  "When its job finishes on a branch of its own and the merge would be clean, the branch is merged into main, then the job, its folder and its branch are removed: its agents can't be messaged afterwards, and their transcripts stay. Off, or when it can't merge cleanly, Needs You asks instead. It never pushes.";
+/**
+ * What a job does by itself when it's done (Amendment 219, which replaced Amendment 144's one
+ * "merge into main and clean up" with five), worded the same in Spawn, Settings and the composer.
+ * Each says what the step does and what it never does.
+ */
+export const WHEN_DONE_HINTS: Record<WhenDoneStep, string> = {
+  commit:
+    "When its job is done, commits what's left uncommitted in the job's folder, named after the job and its last reply. Nothing uncommitted is skipped. It never amends or rewrites a commit. Worktree jobs only.",
+  test:
+    "Then runs the project's test command in the job's folder, for up to 30 minutes. Anything but a pass stops the steps after it, and Needs You shows the end of its output. It never changes the command. Worktree jobs only.",
+  merge:
+    "Then merges the job's branch into the project's main branch, only when the merge is clean. A conflict asks you in Needs You instead; it never resolves one for you. Worktree jobs only.",
+  push:
+    "Then pushes to origin: the branch it merged into, or with merge off the job's own branch. It never force-pushes, so a rejected push stops and says why. Worktree jobs only.",
+  cleanup:
+    "Then, once its branch is merged, removes the job's folder and its branch (git branch -d). It never removes an unmerged branch, and never removes the agent: the job and its transcript stay, a message puts the folder back, and Remove still deletes. Worktree jobs only.",
+};
+
+/** The Test pill's title when the project has no command to run (Amendment 219). */
+export const NO_TEST_COMMAND_TITLE = "set a test command on the project's Edit first";
+
+/** The when-done pills' title when the job runs in the project's own folder (Amendment 219). */
+export const WHEN_DONE_NEEDS_WORKTREE = 'Only a job on a branch of its own, in a folder of its own, does steps when it is done. Pick a new branch to use them.';
 
 /** Read-only tools an agent needs to do anything useful. Always auto-approved. */
 const READ_TOOLS = ['Read', 'Glob', 'Grep'];
@@ -79,10 +98,35 @@ export const PILLS: PillDef[] = [
     label: 'allow MCP tools',
     hint: 'Tools from your MCP servers (Jira, Lucid, Obsidian…) run without asking. Off sends each to your queue. Some of them change things outside this folder.',
   },
-  // Amendment 144: what happens when the job finishes, not a tool rule, so `toAutonomy` sets
-  // `mergeWhenDone` from it and no tool list changes.
-  { id: 'mergeWhenDone', label: MERGE_WHEN_DONE_LABEL, hint: MERGE_WHEN_DONE_HINT },
 ];
+
+/** A when-done step's pill id: `done.commit` and the rest. */
+export const whenDonePillId = (s: WhenDoneStep): string => `done.${s}`;
+
+/**
+ * What happens when the job is done (Amendment 219), not tool rules, so `toAutonomy` sets
+ * `whenDone` from them and no tool list changes. A row of their own, after **when done:**.
+ */
+export const WHEN_DONE_PILLS: (PillDef & { step: WhenDoneStep })[] = WHEN_DONE_STEPS.map((s) => ({
+  id: whenDonePillId(s),
+  step: s,
+  label: WHEN_DONE_LABELS[s],
+  hint: WHEN_DONE_HINTS[s],
+}));
+
+/** The steps the pills turn on, or null for none. */
+export function whenDoneOfPills(pills: PillState): WhenDone | null {
+  const out: WhenDone = {};
+  for (const p of WHEN_DONE_PILLS) if (pills[p.id]) out[p.step] = true;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** The pills with every when-done step off: what a job in the project's own folder launches with. */
+export function withoutWhenDone(pills: PillState): PillState {
+  const out = { ...pills };
+  for (const p of WHEN_DONE_PILLS) out[p.id] = false;
+  return out;
+}
 
 export type PillState = Record<string, boolean>;
 
@@ -121,7 +165,7 @@ export function defaultPills(): PillState {
     network: false,
     mcp: false,
     plan: false,
-    mergeWhenDone: false,
+    ...Object.fromEntries(WHEN_DONE_PILLS.map((p) => [p.id, false])),
   };
 }
 
@@ -217,7 +261,8 @@ export function toAutonomy(
         ? 'acceptEdits'
         : 'default');
 
-  return { mode, allowedTools, disallowedTools, budgetUsd, effort, ...(pills['mergeWhenDone'] ? { mergeWhenDone: true } : {}) };
+  const whenDone = whenDoneOfPills(pills);
+  return { mode, allowedTools, disallowedTools, budgetUsd, effort, ...(whenDone ? { whenDone } : {}) };
 }
 
 /** One-line plain-English summary of what the agent may do unattended. */

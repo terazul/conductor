@@ -48,7 +48,7 @@ import {
   setOtherText,
   toggleChoice,
 } from './interaction.js';
-import { MONTHLY_TITLE, alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, monthlyNote, resumable, waitingRoles, type AlertAction } from './alerts.js';
+import { MONTHLY_TITLE, alertActions, alertNotice, alertProject, finishedConfirm, handOffChip, handOffDraft, handOffMissing, handOffProblem, jobRaiseTarget, mergeAndClean, mergeFinished, monthlyNote, resumable, waitingRoles, whenDoneMergedNote, whenDoneStopNote, type AlertAction } from './alerts.js';
 import { badgeState, dueForChime, soundHint } from './notify.js';
 import { alertTitle, alertWord } from '../shell/describe.js';
 
@@ -791,6 +791,42 @@ console.log('\n11 · a job finished: merge it, merge and clean up, or open Branc
   check('the card dismisses itself after a merge', /await mergeFinished\(a\);\s*await dismissAlert\(alert\.id\)/.test(card));
   check('open Branches goes to the project’s Branches screen', /case 'branches':\s*openBranches\(a\.projectId\)/.test(card));
   check('the labels', /return 'merge and clean up'/.test(card) && /return 'open Branches'/.test(card) && /finished: \{ label: 'Finished'/.test(card));
+
+  // Amendment 219: the when-done steps' cards. A stop before the merge, a stop after it, and all done.
+  const stopped: Alert = {
+    ...finished,
+    id: 'finished:9',
+    cause: 'stopped at test',
+    stoppedAt: 'test',
+    steps: ['committed a1b2c3d', "didn't test: make test exited 2"],
+    detail: "didn't test: make test exited 2",
+    testOutput: 'FAIL  one\n1 failed',
+  };
+  const stopActs = alertActions(stopped, []);
+  check('a stop before the merge offers the merge alone, then Branches and dismiss: never merge and clean up', stopActs.map((a) => a.id).join(' ') === 'merge branches dismiss', stopActs.map((a) => a.id).join(' '));
+  check('its merge is marked as the stop card’s', stopActs[0]?.id === 'merge' && stopActs[0].stopped === true);
+  check('a plain finished card still offers merge and clean up first', alertActions(finished, []).map((a) => a.id).join(' ') === 'merge_clean merge branches dismiss');
+  check('the stop card’s merge reads "Merge into <target>" and is the primary button', /return a\.stopped \? `Merge into \$\{a\.into\}` : 'merge'/.test(card) && /a\.id === 'merge' && a\.stopped === true/.test(card));
+  check('the stop card says which step stopped and why', /k=\{`stopped at \$\{WHEN_DONE_LABELS\[alert\.stoppedAt\]\}`\}/.test(card) && /v=\{alert\.detail\}/.test(card));
+  check('the steps are listed, in the order they ran', /<Kv k="when done" v=\{alert\.steps\.join\(' · '\)\} \/>/.test(card));
+  check('the Test output tail is in a fold', /<details className="atn-fold">\s*<summary>the test's last lines<\/summary>\s*<pre>\{alert\.testOutput\}<\/pre>/.test(card));
+  const stopNote = whenDoneStopNote('test', 'main');
+  check('the stop note: nothing after it ran, the job and agents stay, the merge only if clean', /stopped at test, so nothing after it ran/.test(stopNote) && /its agents stay/.test(stopNote) && /Merge into main merges it only if it merges cleanly/.test(stopNote), stopNote);
+  check('the stop card has its own note, not the plain finished one', /alert\.stoppedAt !== undefined && \(\s*<div className="atn-note">\s*\{whenDoneStopNote\(/.test(card));
+  check('the title names the stop', alertTitle(stopped, []).subject === 'stopped at test when done: merge into main?', alertTitle(stopped, []).subject);
+  check('the top bar too', alertWord(stopped) === 'stopped at test: merge?', alertWord(stopped));
+
+  const allDone: Alert = { ...merged, id: 'merged:10', cause: 'when done', steps: ['committed a1b2c3d', 'tests passed (make test, 2m 10s)', 'merged into main as feedfac', 'pushed main to origin', 'cleaned up the folder and branch'] };
+  check('the all-done card is information: Branches and dismiss', alertActions(allDone, []).map((a) => a.id).join(' ') === 'branches dismiss');
+  check('its title lists the steps', alertTitle(allDone, []).subject === 'did its when-done steps: committed a1b2c3d · tests passed (make test, 2m 10s) · merged into main as feedfac · pushed main to origin · cleaned up the folder and branch', alertTitle(allDone, []).subject);
+  check('and the top bar says they are done', alertWord(allDone) === 'when-done steps done');
+  const doneNote = whenDoneMergedNote(allDone);
+  check('cleaned up: the job, agents and transcripts stay, a message puts the folder back, pushed never forced', /the job, its agents and their transcripts stay, and a message puts the folder back/.test(doneNote) && /never force-pushed/.test(doneNote) && /Remove on the agent still deletes it/.test(doneNote), doneNote);
+  const keptNote = whenDoneMergedNote({ cleaned: false, steps: ['merged into main as feedfac'] });
+  check('not cleaned up and not pushed: says both', /are all still there/.test(keptNote) && /Nothing was pushed/.test(keptNote), keptNote);
+  const late: Alert = { ...merged, id: 'merged:11', cause: 'stopped at push', stoppedAt: 'push', cleaned: false, detail: "didn't push main: the project has no remote called origin to push to" };
+  check('a stop after the merge is still the merged card, saying so', alertTitle(late, []).subject === 'was merged into main, then stopped at push when done' && alertWord(late) === 'merged, stopped at push', alertTitle(late, []).subject);
+  check('the old "merge into main and clean up when done" sentence is gone', !/merge into main and clean up when done/.test(card));
 }
 
 console.log('\n12 · the sound plays after a reload too, once you click or type (Amendment 172)');

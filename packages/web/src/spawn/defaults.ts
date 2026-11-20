@@ -7,7 +7,7 @@
  */
 
 import type { Autonomy, EffortLevel } from '@conductor/shared';
-import { DEFAULT_BUDGET_USD, DEFAULT_EFFORT, DEFAULT_MODE, EFFORTS, MODES, PILLS, defaultPills, type PillState } from './autonomy.js';
+import { DEFAULT_BUDGET_USD, DEFAULT_EFFORT, DEFAULT_MODE, EFFORTS, MODES, PILLS, WHEN_DONE_PILLS, defaultPills, whenDonePillId, type PillState } from './autonomy.js';
 import { DEFAULT_METHOD, methodFrom, type Method } from './launch.js';
 import { DEFAULT_PRESET, PRESETS } from './presets.js';
 
@@ -71,9 +71,15 @@ function parsePills(raw: string | null): PillState {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object') {
-      for (const p of PILLS) {
-        const v = (parsed as Record<string, unknown>)[p.id];
+      const r = parsed as Record<string, unknown>;
+      for (const p of [...PILLS, ...WHEN_DONE_PILLS]) {
+        const v = r[p.id];
         if (typeof v === 'boolean') out[p.id] = v;
+      }
+      // Saved before Amendment 219: "merge into main and clean up when done" is merge and clean up.
+      if (r['mergeWhenDone'] === true && !WHEN_DONE_PILLS.some((p) => p.id in r)) {
+        out[whenDonePillId('merge')] = true;
+        out[whenDonePillId('cleanup')] = true;
       }
     }
   } catch {

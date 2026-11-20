@@ -62,7 +62,11 @@ import {
 import { confirmLine, doneLine, fmtBytes, storageLine } from '../diagnostics/storage.js';
 import { behindLine, buildTag, buildTitle, fmtWhen, type Build } from '../diagnostics/build.js';
 import { catalogLine, modelGroups, modelProblem, resolveTier, shortModel } from './models.js';
-import type { ModelCatalog } from '@conductor/shared';
+import type { Autonomy, ModelCatalog } from '@conductor/shared';
+import { WHEN_DONE_LABELS, WHEN_DONE_STEPS, normaliseAutonomy } from '@conductor/shared';
+import { NO_TEST_COMMAND_TITLE, WHEN_DONE_HINTS } from '../spawn/autonomy.js';
+import { isolationOf } from '../spawn/launch.js';
+import { settingsSummary } from '../agent/settingsfold.js';
 import { screenForKey, tabbed } from './screens.js';
 import { addReferenced, addedLine, nameFrom, tidyPath } from '../fleet/addproject.js';
 import { DECLINE_NOTE, bannerLine, bringLine, homeish, questionLines } from '../settings/storage.js';
@@ -3548,7 +3552,7 @@ await (async () => {
   const box = comp.slice(comp.indexOf('<div className={`ag-cbox'), comp.indexOf('<textarea', comp.indexOf('<div className={`ag-cbox')));
   check('the bar is inside the box, above the textarea', /<div className="ag-cbar" title=\{replyBarLine\(bar\)\}>/.test(box) && box.length < 1200, box.slice(0, 120));
   check('…the project\'s name opens the project, the role is plain text, the job\'s name quieter', /className="ag-cbar-proj"[^>]*onClick=\{\(\) => openProject\(agent\.projectId\)\}/.test(box) && /<span className="ag-cbar-agent">\{bar\.agent\}<\/span>/.test(box) && /<span className="ag-cbar-quiet"> · \{bar\.job\}<\/span>/.test(box));
-  check('…its words from the agent\'s project, role and job', /replyBarWords\(\s*useProjects\(\)\.find\(\(p\) => p\.id === agent\.projectId\)\?\.name,\s*agent\.role,\s*useJobs\(agent\.projectId\)\.find\(\(j\) => j\.id === agent\.jobId\)\?\.name,\s*\)/.test(comp));
+  check('…its words from the agent\'s project, role and job', /const project = useProjects\(\)\.find\(\(p\) => p\.id === agent\.projectId\);\s*const job = useJobs\(agent\.projectId\)\.find\(\(j\) => j\.id === agent\.jobId\);\s*const bar = replyBarWords\(project\?\.name, agent\.role, job\?\.name\);/.test(comp));
 
   // ── its colour: 18% of the project's over the box's own, ink and ink2 past 4.5:1 for all eight, both themes ──
   const css = src('../agent/agent.css');
@@ -3953,9 +3957,64 @@ await (async () => {
   check(`…its words clear 4.5:1 in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
 })();
 
+console.log('\n65 · when done: commit, test, merge, push and clean up, per agent, a job on a branch of its own only (Amendment 219)');
+{
+  const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const composer = src('../agent/composer.tsx');
+  const spawn = src('../spawn/route.tsx');
+  const card = src('../fleet/card.tsx');
+  const alertCard = src('../attention/AlertCard.tsx');
+
+  check('five steps, in the order they run, named as the pills say them',
+    WHEN_DONE_STEPS.join(' ') === 'commit test merge push cleanup' && WHEN_DONE_STEPS.map((st) => WHEN_DONE_LABELS[st]).join(', ') === 'commit, test, merge, push, clean up');
+  check('each hint says what it never does, and that it is for worktree jobs only',
+    WHEN_DONE_STEPS.every((st) => /never/.test(WHEN_DONE_HINTS[st]) && WHEN_DONE_HINTS[st].endsWith('Worktree jobs only.')) &&
+      /never force-pushes/.test(WHEN_DONE_HINTS.push) && /never removes an unmerged branch, and never removes the agent/.test(WHEN_DONE_HINTS.cleanup));
+  check('the composer: a "when done:" label and the five pills after the guardrails',
+    /<span className="ui-lab">when done:<\/span>\s*\{WHEN_DONE_PILLS\.map\(/.test(composer) && composer.indexOf('when done:</span>') > composer.indexOf('PILLS.map('));
+  check('…Test shut with no test command, saying where to set one; any step shut on a job in its project\'s own folder',
+    NO_TEST_COMMAND_TITLE === "set a test command on the project's Edit first" &&
+      /const why = inPlace \? WHEN_DONE_NEEDS_WORKTREE : p\.step === 'test' && noTestCommand \? NO_TEST_COMMAND_TITLE : null;/.test(composer) &&
+      /disabled=\{policy\.busy \|\| \(why !== null && !on\)\}/.test(composer) && /title=\{why \?\? p\.hint\}/.test(composer));
+  check('Spawn: the same five, shut with that title for a method that makes no folder of its own, and nothing sent for it',
+    /const ownsFolder = isolationOf\(method\) === 'worktree';/.test(spawn) && /ownsFolder \? pills : withoutWhenDone\(pills\)/.test(spawn) &&
+      /const why = !ownsFolder \? WHEN_DONE_NEEDS_WORKTREE : noCommand \? NO_TEST_COMMAND_TITLE : p\.hint;/.test(spawn) &&
+      isolationOf('in_place') === 'in_place' && isolationOf('worktree') === 'worktree');
+  check('the folded settings line names the steps that are on, and leaves the part out with none',
+    settingsSummary({ mode: 'ask me', effort: 'high', model: 'sonnet-5-5', budget: '$4.10 of $25 today', whenDone: ['commit', 'test', 'merge'] }) ===
+      'ask me · high · sonnet-5-5 · when done: commit, test, merge · $4.10 of $25 today' &&
+      settingsSummary({ mode: 'ask me', effort: 'high', model: 'sonnet-5-5', budget: '$4.10 of $25 today', whenDone: [] }) === 'ask me · high · sonnet-5-5 · $4.10 of $25 today');
+  check('an old "merge when done" reads as merge and clean up, and an empty set as off',
+    JSON.stringify(normaliseAutonomy({ mergeWhenDone: true } as unknown as Autonomy).whenDone) === '{"merge":true,"cleanup":true}' &&
+      normaliseAutonomy({ whenDone: {} } as unknown as Autonomy).whenDone === undefined);
+  check('the Fleet card\'s Edit has a test command, sent through the project PATCH, empty for none',
+    /<span>test command<\/span>/.test(card) && /placeholder="none, e\.g\. make test"/.test(card) &&
+      /patch\.testCommand = testCommand\.trim\(\) \|\| null;/.test(card) && /testCommand\?: string \| null/.test(src('../fleet/endpoints.ts')));
+  check('the cards: the steps listed, the stop named with why, the Test output folded, "Merge into <target>" offered',
+    /k="when done"/.test(alertCard) && /stopped at \$\{WHEN_DONE_LABELS\[alert\.stoppedAt\]\}/.test(alertCard) && /<details className="atn-fold">/.test(alertCard) &&
+      /Merge into \$\{a\.into\}/.test(alertCard));
+
+  const strip = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const fold = src('../attention/attention.css');
+  const foldCss = fold.slice(fold.indexOf('/* ── a stopped when-done Test'), fold.indexOf('/* ── the hand-off boxes'));
+  const shut = [src('../agent/agent.css'), src('../spawn/spawn.css')].map((c) => c.slice(c.lastIndexOf('/*'))).join('\n');
+  check('drawn in tokens only: the fold, and the shut pills dashed rather than faded',
+    foldCss.length > 200 && !/#[0-9a-fA-F]{3,8}\b|rgb/.test(strip(foldCss)) && /\.ag-pill\.is-shut:disabled \{\s*opacity: 1;\s*border-style: dashed;/.test(shut) &&
+      /\.sp-pill\.is-step:disabled \{\s*opacity: 1;[^}]*border-style: dashed;[^}]*color: var\(--ink3\);/.test(shut), shut);
+  const themes = themeTokens();
+  let worst = { ratio: Infinity, at: '' };
+  for (const [name, t] of [['dark', themes.dark], ['light', themes.light]] as const) {
+    for (const [fg, bg] of [['ink3', 'surf'], ['ink3', 'surf2'], ['ink2', 'surf2'], ['need', 'surf']]) {
+      const r = contrast(t.get(fg!) ?? '#000000', t.get(bg!) ?? '#000000');
+      if (r < worst.ratio) worst = { ratio: r, at: `--${fg} on --${bg} in ${name}` };
+    }
+  }
+  check(`…its words clear 4.5:1 in both themes (worst ${worst.ratio.toFixed(2)}:1, ${worst.at})`, worst.ratio >= 4.5, worst.at);
+}
+
 console.log(
   failures === 0
-    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216); and every block an agent says has its own ⧉ copy, between its tools, while it works and in a reply of several, a reply of one keeping its own alone, and none of them is copied (Amendment 217); and ⧉ copy clean copies the terminal\'s selection as markdown, its screen wraps joined, its indent and ⏺ dropped and its lists kept, as text and as HTML (Amendment 218).\n'
+    ? '\nW0 web verify: PASS — store reducer is idempotent and referentially honest; the cleanup button says what it deletes; build info says what is running; model pickers say when a model is wrong; a screen can exist without a tab; one projects list says what needs you; a project is added with its folders; the storage question says what it does; settings are kept by the daemon; a Settings tab sets them; allow-always rules are listed and revoked; helpers nest under their orchestrator; the Fleet cards keep your order; projects carry notes; a daily budget goes yellow then red; notes can be due; drafts survive; every card opens its project; personas can be edited; the OpenRouter key is never shown; a finished job says so until seen; the live and done tags are filled, the lane carries their edge, and a done agent reads finished; an agent\'s own finished clears once you open it; both themes clear 4.5:1 everywhere that matters, the open top-bar tab included; the retry delays are set on Settings, and no budget stops anything; spend reads today and in total for each agent, project and the fleet; a Fleet card\'s agents fold, per card, and what needs you stays; the month reads beside today, against a monthly budget for the fleet and for each project, which only warns; and each engine and Claude route has its month, in its own unit, by provider on Metrics and against a budget on Settings; and an agent waiting for the model to come back says so, its card and the status bar say the provider is down, and its job reads running; and an agent\'s activity folds to its latest step, and a reply stays open until you tick it read, which its row and tab say until you do; and a project\'s and a stack\'s status read in the navigator as on their Fleet card, by one rule; and your messages fold, the long ones to start with, and every message and reply says when; and every fold has one chevron, on its left, 16px and --ink2, and Read it is an 18px box; and one button ticks every reply on an agent read, in one write, and folds them; and a reply copies without the app\'s colours, from its ⧉ copy and from Cmd-C; and an agent you paused counts as N paused in its card\'s headline, on a chip filled in --idle that clears 4.5:1 in both themes, its transcript says until when, and ⏸\'s menu says when each choice wakes it (Amendment 205); and the fleet\'s month can be set to the AI gateway\'s figure from Settings, which the status bar marks with what it is corrected by and when, and the tables by provider say are as counted (Amendment 206); and each agent wears its model\'s maker, a lettered square in that maker\'s colour, in the navigator, its tabs and header, a Fleet card and a Project lane (Amendment 208); and a helper\'s message box is shut, pointing at its orchestrator, until you unlock it (Amendment 209); and each project has a colour bar, kept or auto, in the navigator, on its Fleet card and at the top of its screens, in both themes and never a status colour (Amendment 210); and a launch saved with repeat… runs again on its rule until you cancel it, listed on its project with its next time and last result, its runs marked from it (Amendment 211); and the message box is edged in its project\'s colour, as thick as its bar (Amendment 212); and a ⧉ copy pastes its lists and indents as Cmd-C does (Amendment 213); and every note is on one Notes screen, by project, by the agent whose screen it was typed on, open or done and by its words, each row saying which agent and opening it (Amendment 214); and the message box says across its top which project and agent it writes to, tinted in the project\'s colour, past 4.5:1 for every colour in both themes (Amendment 215); and every schedule is on one Repeating screen by project, a job or a message to an agent, each runs now, saying so when it is already being run, is edited in place, and is saved from the message box\'s ⟳ repeat… or a job\'s, shut when the job kept no setup or on a helper, saved once, its last result saying when it waits for an agent, a slot or Pause all, twins told apart by their ids, and its cancel asked first (Amendment 216); and every block an agent says has its own ⧉ copy, between its tools, while it works and in a reply of several, a reply of one keeping its own alone, and none of them is copied (Amendment 217); and ⧉ copy clean copies the terminal\'s selection as markdown, its screen wraps joined, its indent and ⏺ dropped and its lists kept, as text and as HTML (Amendment 218); and an agent\'s when done: commit, test, merge, push and clean up are five pills, in its settings and in Spawn, shut for a job with no folder of its own and Test for a project with no test command, set on its Fleet card\'s Edit, named in its folded settings, and its cards list the steps, name a stop and why with the Test\'s last lines folded, and offer Merge into its target (Amendment 219).\n'
     : `\nW0 web verify: FAIL — ${failures} check(s) failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);

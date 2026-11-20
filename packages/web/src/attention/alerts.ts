@@ -8,7 +8,18 @@
  * when someone clicks it, which is the worst moment to find out.
  */
 
-import { HANDOFF_SUMMARY_MAX, missingHeadings, providerBudgetLabel, waitersOf, type Agent, type Alert, type Event, type Project } from '@conductor/shared';
+import {
+  HANDOFF_SUMMARY_MAX,
+  WHEN_DONE_LABELS,
+  missingHeadings,
+  providerBudgetLabel,
+  waitersOf,
+  type Agent,
+  type Alert,
+  type Event,
+  type Project,
+  type WhenDoneStep,
+} from '@conductor/shared';
 import { api } from '../lib/feed.js';
 import { handOffAgent, restoreFolder, resumeAgent, sendMessage, setAutonomy } from '../agent/endpoints.js';
 import { BUDGET_RAISES, TOKEN_RAISES, budgetOf, type Budget } from '../shell/autonomy.js';
@@ -62,10 +73,11 @@ export type AlertAction =
   /**
    * A job finished ahead of its target (Amendment 144). `merge_clean`: the merge, then Lane
    * J's delete with `forgetJob`, after a confirm. `merge`: the merge alone; the job, its
-   * folder and its branch stay. `branches`: the project's Branches screen.
+   * folder and its branch stay; `stopped` when a when-done step stopped before it (Amendment
+   * 219), which reads "Merge into <target>". `branches`: the project's Branches screen.
    */
   | { id: 'merge_clean'; projectId: string; branch: string; into: string; jobId: string }
-  | { id: 'merge'; projectId: string; branch: string; into: string }
+  | { id: 'merge'; projectId: string; branch: string; into: string; stopped?: true }
   | { id: 'branches'; projectId: string };
 
 /** The daemon's own resume nudge, so a continue from here reads like one from the composer. */
@@ -219,11 +231,15 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       const branches: AlertAction[] = alert.projectId ? [{ id: 'branches', projectId: alert.projectId }] : [];
       if (!alert.projectId || !alert.branch || !alert.into || !alert.jobId) return [...branches, dismiss];
       const at = { projectId: alert.projectId, branch: alert.branch, into: alert.into };
+      // A when-done step stopped before the merge (Amendment 219): the card offers the merge
+      // alone, since the job and its agents stay; ✕ on the Project screen still removes them.
+      if (alert.stoppedAt !== undefined) return [{ id: 'merge', ...at, stopped: true }, ...branches, dismiss];
       return [{ id: 'merge_clean', ...at, jobId: alert.jobId }, { id: 'merge', ...at }, ...branches, dismiss];
     }
 
     case 'merged':
-      // Information: what the setting merged. Its agent, when it is still there to open.
+      // Information: what the when-done steps did, the merge among them (Amendments 144, 219).
+      // Its agent, when it is still there to open.
       return [...open, ...(alert.projectId ? [{ id: 'branches', projectId: alert.projectId } as const] : []), dismiss];
 
     case 'folder_gone':
@@ -231,6 +247,26 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       // waits in its box, so open is the way back to it.
       return [...(alert.jobId ? [{ id: 'restore_only', jobId: alert.jobId } as const] : []), ...open, dismiss];
   }
+}
+
+/**
+ * The stop card's note (Amendment 219): a when-done step stopped before the merge. What
+ * stays, and what the merge offered does; nothing after the stop ran.
+ */
+export function whenDoneStopNote(stoppedAt: WhenDoneStep, into: string): string {
+  return `Its when-done steps stopped at ${WHEN_DONE_LABELS[stoppedAt]}, so nothing after it ran. The job, its folder, its branch and its agents stay, so they can still be messaged. Merge into ${into} merges it only if it merges cleanly; pushing and cleaning up stay on the Branches screen.`;
+}
+
+/**
+ * The merged card's note (Amendments 144, 219): what the when-done steps left, and what they
+ * never do. A stop after the merge (push or clean up) says so above, in its own row.
+ */
+export function whenDoneMergedNote(alert: Pick<Alert, 'cleaned' | 'steps'>): string {
+  const pushed = alert.steps?.some((s) => s.startsWith('pushed ')) === true;
+  const left = alert.cleaned
+    ? 'Its folder and branch were removed; the job, its agents and their transcripts stay, and a message puts the folder back.'
+    : 'The job, its folder, its branch and its agents are all still there.';
+  return `${left} ${pushed ? 'It was pushed, never force-pushed.' : 'Nothing was pushed.'} Remove on the agent still deletes it.`;
 }
 
 /** The confirm before "merge and clean up" (Amendment 144): what goes, and that the agents can't be messaged after. */

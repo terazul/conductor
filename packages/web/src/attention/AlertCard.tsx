@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { providerBudgetLabel, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
+import { WHEN_DONE_LABELS, providerBudgetLabel, type Agent, type Alert, type AlertKind, type Project } from '@conductor/shared';
 import { checkOutageNow, restoreFolder, retryNowAgent, stopRetryingAgent, stopWaitingOutage, useCommand } from '../agent/endpoints.js';
 import { navigate } from '../lib/nav.js';
 import { openBranches } from '../shell/nav.js';
@@ -38,6 +38,8 @@ import {
   raiseAndContinue,
   raiseBudget,
   waitingRoles,
+  whenDoneMergedNote,
+  whenDoneStopNote,
   type AlertAction,
 } from './alerts.js';
 
@@ -249,8 +251,24 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
           <Kv k="branch" v={alert.ahead !== undefined ? `${alert.branch} · ${alert.ahead} commit${alert.ahead === 1 ? '' : 's'}` : alert.branch} />
         )}
         {alert.kind === 'merged' && alert.sha !== undefined && <Kv k="merge" v={alert.sha.slice(0, 7)} />}
-        {alert.kind === 'finished' && alert.detail !== undefined && <Kv k="not merged by itself" v={alert.detail} tone="var(--need)" />}
-        {alert.kind === 'merged' && alert.detail !== undefined && <Kv k="not cleaned up" v={alert.detail} tone="var(--need)" />}
+        {(alert.kind === 'finished' || alert.kind === 'merged') && alert.steps !== undefined && alert.steps.length > 0 && (
+          <Kv k="when done" v={alert.steps.join(' · ')} />
+        )}
+        {alert.stoppedAt !== undefined && alert.detail !== undefined && (
+          <Kv k={`stopped at ${WHEN_DONE_LABELS[alert.stoppedAt]}`} v={alert.detail} tone="var(--need)" />
+        )}
+        {alert.stoppedAt === undefined && alert.kind === 'finished' && alert.detail !== undefined && (
+          <Kv k="not merged by itself" v={alert.detail} tone="var(--need)" />
+        )}
+        {alert.stoppedAt === undefined && alert.kind === 'merged' && alert.detail !== undefined && (
+          <Kv k="not cleaned up" v={alert.detail} tone="var(--need)" />
+        )}
+        {alert.testOutput !== undefined && (
+          <details className="atn-fold">
+            <summary>the test's last lines</summary>
+            <pre>{alert.testOutput}</pre>
+          </details>
+        )}
         {alert.kind === 'folder_gone' && alert.detail !== undefined && <Kv k="folder" v={alert.detail} tone="var(--need)" />}
         {alert.detail !== undefined && alert.kind !== 'finished' && alert.kind !== 'merged' && alert.kind !== 'folder_gone' && <Kv k="sdk said" v={alert.detail} />}
         {alert.endpoint !== undefined && <Kv k="endpoint" v={alert.endpoint} />}
@@ -292,7 +310,12 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
             </button>
           </div>
         )}
-        {alert.kind === 'finished' && !confirmClean && (
+        {alert.kind === 'finished' && alert.stoppedAt !== undefined && (
+          <div className="atn-note">
+            {whenDoneStopNote(alert.stoppedAt, alert.into ?? 'main')}
+          </div>
+        )}
+        {alert.kind === 'finished' && alert.stoppedAt === undefined && !confirmClean && (
           <div className="atn-note">
             Its job is done and its branch has commits {alert.into ?? 'main'} lacks. Merge keeps the job, its folder and its branch, so
             its agents can still be messaged; merge and clean up removes them, keeping the transcripts. Pushing stays on the Branches
@@ -300,12 +323,7 @@ export function AlertCard({ alert, agents, projects, focused, onAgentScreen = fa
           </div>
         )}
         {alert.kind === 'merged' && (
-          <div className="atn-note">
-            Its agent had "merge into main and clean up when done" on.{' '}
-            {alert.cleaned
-              ? 'The job, its folder and its branch were removed; the transcripts stay. Nothing was pushed.'
-              : 'The job, its folder and its branch are still there. Nothing was pushed.'}
-          </div>
+          <div className="atn-note">{whenDoneMergedNote(alert)}</div>
         )}
         {alert.kind === 'handoff_held' && first && (
           <>
@@ -420,7 +438,8 @@ function isFix(a: AlertAction): boolean {
     a.id === 'restore_only' ||
     a.id === 'retry_now' ||
     a.id === 'check_now' ||
-    a.id === 'merge_clean'
+    a.id === 'merge_clean' ||
+    (a.id === 'merge' && a.stopped === true)
   );
 }
 
@@ -460,7 +479,7 @@ function labelOf(a: AlertAction): string {
     case 'merge_clean':
       return 'merge and clean up';
     case 'merge':
-      return 'merge';
+      return a.stopped ? `Merge into ${a.into}` : 'merge';
     case 'branches':
       return 'open Branches';
   }

@@ -24,6 +24,7 @@ import { agentsForJob, defaultBranchIsSet, getProject, jobsForProject, setDefaul
 import { BranchError, openRepo, type BranchJob, type BranchLookup, type BranchRepo } from './branches.js';
 import type { ChangeSet } from './changes.js';
 import { git, isRepo, repoRoot } from './git.js';
+import { workspace } from './service.js';
 import { buildTree } from './tree.js';
 
 /** An agent in one of these is on its branch: nothing may move that branch under it. */
@@ -111,6 +112,19 @@ async function openOwn(db: Db, project: Project, forgetJob: (jobId: string) => P
     forgetJob: async (jobId) => {
       try {
         await forgetJob(jobId);
+      } finally {
+        forget();
+      }
+    },
+    // Amendment 219's clean-up keeps the job: its workspace is closed as `workspace().close`
+    // closes it (the watcher stopped, the folder removed, the record marked removed).
+    closeJob: async (jobId) => {
+      try {
+        await workspace().close(jobId);
+      } catch (err) {
+        // Not recorded (a job from before the workspace table, or no service in a check):
+        // `delete` removes the folder itself.
+        console.warn(`[branches] closing ${jobId}'s workspace: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         forget();
       }

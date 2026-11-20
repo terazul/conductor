@@ -538,9 +538,20 @@ export function alertTitle(alert: Alert, agents: readonly Agent[]): { head: stri
     case 'failed':
       return { head: who[0] ?? 'an agent', subject: failureSentence(alert.cause, one) };
     case 'finished':
-      // A worktree job finished ahead of the target (Amendment 144): the card asks.
+      // A worktree job finished ahead of the target (Amendment 144): the card asks. A when-done
+      // step that stopped before the merge says which (Amendment 219).
+      if (alert.cause.startsWith('stopped at ')) {
+        return { head: alert.branch ?? 'a branch', subject: `${alert.cause} when done: merge into ${alert.into ?? 'main'}?` };
+      }
       return { head: 'Finished: merge into', subject: `${alert.into ?? 'main'}?` };
     case 'merged':
+      // A stop after the merge (push or clean up), and an all-success run (Amendment 219).
+      if (alert.cause.startsWith('stopped at ')) {
+        return { head: alert.branch ?? 'a branch', subject: `was merged into ${alert.into ?? 'main'}, then ${alert.cause} when done` };
+      }
+      if (alert.cause === 'when done') {
+        return { head: alert.branch ?? 'a branch', subject: `did its when-done steps: ${(alert.steps ?? []).join(' · ')}` };
+      }
       return {
         head: alert.branch ?? 'a branch',
         subject: alert.cleaned
@@ -581,9 +592,10 @@ export function alertWord(alert: Pick<Alert, 'kind' | 'cause' | 'gaveUp' | 'late
     case 'reconnecting':
       return 'reconnecting';
     case 'finished':
-      return 'finished: merge?';
+      return alert.cause.startsWith('stopped at ') ? `${alert.cause}: merge?` : 'finished: merge?';
     case 'merged':
-      return 'merged';
+      if (alert.cause.startsWith('stopped at ')) return `merged, ${alert.cause}`;
+      return alert.cause === 'when done' ? 'when-done steps done' : 'merged';
     case 'folder_gone':
       return 'folder gone';
   }

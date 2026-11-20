@@ -335,6 +335,34 @@
   line-height: 1.5;
 }
 
+/* ── a stopped when-done Test's last lines (Amendment 219) ─────────────────
+ * Folded, so the card stays short. Tokens only: the dim ink on the sunken
+ * surface, the same pair the card's notes read at. */
+
+.atn-fold {
+  margin-top: 10px;
+  font-size: var(--fs-md);
+  color: var(--ink3);
+}
+
+.atn-fold > summary {
+  cursor: pointer;
+}
+
+.atn-fold > pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--surf2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink2);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+}
+
 /* ── the hand-off boxes (Amendment 104) ────────────────────────────────────
  * Tokens only, so both themes read: the labels and hints are the dim ink, the
  * problem is the failure colour, the boxes sit on the card's own surface. */

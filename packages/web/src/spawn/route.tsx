@@ -47,12 +47,16 @@ import './spawn.css';
 
 import {
   MODES,
+  NO_TEST_COMMAND_TITLE,
   PILLS,
+  WHEN_DONE_NEEDS_WORKTREE,
+  WHEN_DONE_PILLS,
   describeAutonomy,
   effortMovedLine,
   effortsFor,
   nearestEffort,
   toAutonomy,
+  withoutWhenDone,
   type PillState,
 } from './autonomy.js';
 import {
@@ -106,6 +110,7 @@ import {
   STACKS_KEY,
   branchOptions,
   branchProblem,
+  isolationOf,
   launchRequest,
   methodReady,
   pickedNote,
@@ -564,13 +569,17 @@ function Spawn() {
   }, [budget]);
 
   // For Claude, autonomyOn and specsOn hand back what they are given: the launch is as before.
+  // When-done steps are for a job in a folder of its own (Amendment 219): in the project's folder
+  // their pills are shut, and what is launched has none of them, whatever they were left at.
+  const ownsFolder = isolationOf(method) === 'worktree';
+  const launchPills = useMemo(() => (ownsFolder ? pills : withoutWhenDone(pills)), [pills, ownsFolder]);
   const autonomy = useMemo(
-    () => autonomyOn(toAutonomy(pills, budgetPerAgent, effort, mode), launchOn),
-    [pills, budgetPerAgent, effort, mode, launchOn],
+    () => autonomyOn(toAutonomy(launchPills, budgetPerAgent, effort, mode), launchOn),
+    [launchPills, budgetPerAgent, effort, mode, launchOn],
   );
   const specs = useMemo(
-    () => specsOn(toAgentSpecs(preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll), launchOn),
-    [preset, pills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll, launchOn],
+    () => specsOn(toAgentSpecs(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll), launchOn),
+    [preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll, launchOn],
   );
   /** The "every role" picker's value: the id every row runs on, or "" for per role. */
   const every = commonPick(preset, picks, tiers);
@@ -1419,6 +1428,34 @@ function Spawn() {
         {tokenWhy && <div className="sp-cf-note t-fail is-still">{tokenWhy}</div>}
         {/* Each stack is a job with this budget of its own (Amendment 181). */}
         {stacksBudgetLine(stacks, jobBudget) && <div className="sp-cf-note">{stacksBudgetLine(stacks, jobBudget)}</div>}
+
+        {/*
+         * What the job does by itself when it's done (Amendment 219): not rope either, so a row
+         * of its own. Shut for a job in the project's own folder, and Test for a project with no
+         * test command, each saying why on hover.
+         */}
+        <div className="sp-efforts">
+          <span className="ui-lab">when done:</span>
+          {WHEN_DONE_PILLS.map((p) => {
+            const noCommand = p.step === 'test' && !selected?.testCommand;
+            const shut = !ownsFolder || (noCommand && pills[p.id] !== true);
+            const why = !ownsFolder ? WHEN_DONE_NEEDS_WORKTREE : noCommand ? NO_TEST_COMMAND_TITLE : p.hint;
+            return (
+              <button
+                key={p.id}
+                className="sp-pill is-tight is-step"
+                aria-pressed={ownsFolder && pills[p.id] === true}
+                disabled={shut}
+                title={why}
+                onClick={() => togglePill(p.id)}
+                onMouseEnter={() => setHint(why)}
+                onMouseLeave={() => setHint('')}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
 
         {/*
          * Effort is not rope — it buys thinking, not permission — so it gets its own row

@@ -23,8 +23,8 @@ import { useDraft } from '../lib/drafts.js';
 import { useJobs, useProjects } from '../lib/store.js';
 import { openProject } from '../shell/nav.js';
 import { replyBarLine, replyBarWords } from './replybar.js';
-import { useEffect, useState } from 'react';
-import { HELPER_NOT_SCHEDULED, everyWords, spentOn, type Agent, type Autonomy, type EffortLevel, type Every, type RecurringJob, type SendMessageResponse } from '@conductor/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { HELPER_NOT_SCHEDULED, WHEN_DONE_LABELS, WHEN_DONE_STEPS, everyWords, normaliseAutonomy, spentOn, stepsOn, whenDoneOf, type Agent, type Autonomy, type EffortLevel, type Every, type RecurringJob, type SendMessageResponse, type WhenDone, type WhenDoneStep } from '@conductor/shared';
 import { BUDGET_RAISES, budgetOf, parseBudget, type Budget } from '../shell/autonomy.js';
 import { Chevron, ModelSelect, ProviderModelSelect, fmtMoney } from '../shell/ui.js';
 import { modelProblem, shortModel, useModels } from '../lib/models.js';
@@ -45,8 +45,9 @@ import {
 import {
   DEFAULT_EFFORT,
   EFFORTS,
-  MERGE_WHEN_DONE_HINT,
-  MERGE_WHEN_DONE_LABEL,
+  NO_TEST_COMMAND_TITLE,
+  WHEN_DONE_HINTS,
+  WHEN_DONE_NEEDS_WORKTREE,
   effortMovedLine,
   effortsFor,
   nearestEffort,
@@ -163,16 +164,27 @@ const PILLS: PillDef[] = [
         : [...a.disallowedTools, PUSH_RULE],
     }),
   },
-  {
-    // Amendment 144: what happens when its job finishes. Not a tool rule; the daemon reads it
-    // when the job settles done (session/finish.ts).
-    id: 'merge_when_done',
-    label: MERGE_WHEN_DONE_LABEL,
-    hint: MERGE_WHEN_DONE_HINT,
-    on: (a) => a.mergeWhenDone === true,
-    flip: (_a, on) => ({ mergeWhenDone: on }),
-  },
 ];
+
+/**
+ * What its job does by itself when it's done (Amendment 219): commit, test, merge, push, clean
+ * up, after **when done:**. Not tool rules: the daemon reads them when the job settles done
+ * (session/finish.ts). Each sends the whole set, since the POST merges `autonomy` a field at a
+ * time, and none on sends an empty one, which the daemon stores as no field at all.
+ */
+const WHEN_DONE_PILLS: (PillDef & { step: WhenDoneStep })[] = WHEN_DONE_STEPS.map((step) => ({
+  id: `done.${step}`,
+  step,
+  label: WHEN_DONE_LABELS[step],
+  hint: WHEN_DONE_HINTS[step],
+  on: (a) => whenDoneOf(a)[step] === true,
+  flip: (a, on) => {
+    const next: WhenDone = { ...whenDoneOf(a) };
+    if (on) next[step] = true;
+    else delete next[step];
+    return { whenDone: next };
+  },
+}));
 
 interface ModeDef {
   id: Autonomy['mode'];
@@ -243,7 +255,8 @@ export function Composer({ agent }: { agent: Agent }) {
    * rather than to a round trip. Reset whenever the daemon reports something
    * different for this agent.
    */
-  const reported = agent.autonomy;
+  // Read through the one normaliser, so an agent saved with Amendment 144's setting shows its steps.
+  const reported = useMemo(() => normaliseAutonomy(agent.autonomy), [agent.autonomy]);
   const [draft, setDraft] = useState<Autonomy | null>(null);
   useEffect(() => {
     setDraft(null);
@@ -365,8 +378,8 @@ export function Composer({ agent }: { agent: Agent }) {
     const nowOn = pill.on(autonomy);
     const patch = pill.flip(autonomy, !nowOn);
     setDraft({ ...autonomy, ...patch });
-    // Merging when done isn't a tool; the rest are the next run's (Amendment 178).
-    const working = agent.status === 'working' && pill.id !== 'merge_when_done';
+    // A when-done step isn't a tool (Amendment 219); the rest are the next run's (Amendment 178).
+    const working = agent.status === 'working' && !pill.id.startsWith('done.');
     const ok = await policy.run(
       `Changing "${pill.label}"`,
       () => setAutonomy(agent.id, { autonomy: patch }),
@@ -530,11 +543,12 @@ export function Composer({ agent }: { agent: Agent }) {
   // The project's colour (Amendment 210), for the box's edge (Amendment 212).
   const boxColor = useProjectColor(agent.projectId);
   // Which project and agent the box writes to, across its top, tinted in that colour (Amendment 215).
-  const bar = replyBarWords(
-    useProjects().find((p) => p.id === agent.projectId)?.name,
-    agent.role,
-    useJobs(agent.projectId).find((j) => j.id === agent.jobId)?.name,
-  );
+  const project = useProjects().find((p) => p.id === agent.projectId);
+  const job = useJobs(agent.projectId).find((j) => j.id === agent.jobId);
+  const bar = replyBarWords(project?.name, agent.role, job?.name);
+  // When-done steps need a folder of its own, and Test a command to run (Amendment 219).
+  const inPlace = job?.isolation === 'in_place';
+  const noTestCommand = !project?.testCommand;
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
   // Past the budget it says so (Amendment 124), and nothing stops it (Amendment 180).
@@ -543,6 +557,7 @@ export function Composer({ agent }: { agent: Agent }) {
     mode: current?.label ?? autonomy.mode,
     effort: has.effort ? effortLabel : null,
     model: shortModel(model),
+    whenDone: stepsOn(whenDoneOf(autonomy)).map((st) => WHEN_DONE_LABELS[st]),
     budget:
       has.budget === 'tokens'
         ? tokensLine(
@@ -640,6 +655,24 @@ export function Composer({ agent }: { agent: Agent }) {
                 onClick={() => void togglePill(p)}
                 disabled={policy.busy}
                 title={p.hint}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          <span className="ui-lab">when done:</span>
+          {WHEN_DONE_PILLS.map((p) => {
+            const on = p.on(autonomy);
+            // Shut only while off, so a step set before the folder or the command went can still be turned off.
+            const why = inPlace ? WHEN_DONE_NEEDS_WORKTREE : p.step === 'test' && noTestCommand ? NO_TEST_COMMAND_TITLE : null;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className={`ag-pill is-step${on ? ' is-on' : ''}${why !== null && !on ? ' is-shut' : ''}`}
+                onClick={() => void togglePill(p)}
+                disabled={policy.busy || (why !== null && !on)}
+                title={why ?? p.hint}
               >
                 {p.label}
               </button>

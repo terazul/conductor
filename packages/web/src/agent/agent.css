@@ -2586,3 +2586,13 @@ a.ag-files-p:focus-visible {
 .ag-pause-at {
   margin: 4px 6px 0;
 }
+
+/*
+ * A when-done step that can't be turned on here (Amendment 219): a job in the project's own
+ * folder, or Test with no command. Dashed rather than faded, so its --ink3 words still clear
+ * 4.5:1, and its title says why.
+ */
+.ag-pill.is-shut:disabled {
+  opacity: 1;
+  border-style: dashed;
+}

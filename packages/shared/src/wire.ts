@@ -22,6 +22,7 @@ import type {
   Event,
   PendingRequest,
 } from './events.js';
+import type { WhenDone, WhenDoneStep } from './whendone.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain entities
@@ -53,6 +54,12 @@ export interface Project {
    * Fleet card's edit form. Absent, or null, for auto: the web picks one (lib/projectColor.ts).
    */
   color?: ProjectColor | null;
+  /**
+   * The command the when-done Test step runs in a job's worktree (Amendment 219), set on the Fleet
+   * card's edit form: `make test`, `npm test`. Run with your login shell, as the terminal is.
+   * Absent, or null, when it has none, and the Test step can't run.
+   */
+  testCommand?: string | null;
 }
 
 /**
@@ -255,13 +262,14 @@ export interface Autonomy {
    */
   effort?: EffortLevel;
   /**
-   * "Merge into main and clean up when done" (Amendment 144). When its job, isolated in a
-   * worktree of its own, settles `done` with its branch ahead of the target, and the merge
-   * would be clean: the branch is merged, then the job, its folder and its branch are removed
-   * (Amendment 143's `delete` with `forgetJob`; the transcripts stay). Off, or when the merge
-   * can't run by itself, Needs You offers it instead. Optional; absent is off.
+   * What its job does by itself when it settles `done` (Amendment 219): commit, test, merge, push,
+   * clean up, in that order, each only when the one before it went through or was off. A step runs
+   * when any agent of the job has it on, and only for a job isolated in a worktree of its own
+   * (finish.ts). Optional; absent is all off. Amendment 144's `mergeWhenDone: true`, still stored
+   * on older agents, reads as `{ merge: true, cleanup: true }` (`normaliseAutonomy`, whendone.ts);
+   * nothing writes it any more.
    */
-  mergeWhenDone?: boolean;
+  whenDone?: WhenDone;
 }
 
 export interface AgentSpec {
@@ -921,8 +929,21 @@ export interface Alert {
   ahead?: number;
   /** merged: the merge commit. */
   sha?: string;
-  /** merged: the job, its folder and its branch were removed too. When false, `detail` says why not. */
+  /**
+   * merged: its folder and its branch were removed too (the job itself, too, before Amendment 219;
+   * now it stays, done). When false, `detail` says why not.
+   */
   cleaned?: boolean;
+  /**
+   * finished and merged (Amendment 219): what each when-done step that ran came to, in order, as
+   * the transcript says it ("committed a1b2c3d", "tests passed (make test, 2m 10s)"). Absent for a
+   * finish with no steps on.
+   */
+  steps?: string[];
+  /** finished and merged (Amendment 219): the step that couldn't run and stopped the rest; `detail` says why. */
+  stoppedAt?: WhenDoneStep;
+  /** finished and merged (Amendment 219): when Test stopped them, the last lines it printed (200 at most). */
+  testOutput?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

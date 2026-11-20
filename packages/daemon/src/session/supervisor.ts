@@ -152,7 +152,7 @@ import {
   type AgentPersona,
 } from './store.js';
 import { reportedWindow } from './windows.js';
-import { finishJob, type Finish } from './finish.js';
+import { cleanedByFinish, finishJob, markRestored, type Finish } from './finish.js';
 import { broadcastRecurring } from './recurring.js';
 import { USER_PAUSE_NOTE, broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, isUserPauseNote, listScheduled, nextForSlot, nextWhenDone, userPauseNote } from './schedule.js';
 
@@ -433,6 +433,10 @@ export class Supervisor implements AgentControl {
   #runners = new Map<string, AgentBackend>();
   /** Agents a restart interrupted, resumed with RESTART_NUDGE on their next run. */
   #restarted = new Set<string>();
+  /** Jobs whose folder their own clean-up took away, being put back (Amendment 219): what waits for it chains on. */
+  #restoring = new Map<string, Promise<unknown>>();
+  /** Put back and failed: the next message is refused as for any missing folder, and the card offers to recreate it. */
+  #restoreFailed = new Set<string>();
   /**
    * Agents whose run in flight began as a restart resume, told RESTART_NUDGE (Amendment 119).
    * `#settle` takes the entry out whatever way the run ends, so it never outlives the run:
@@ -1191,7 +1195,9 @@ export class Supervisor implements AgentControl {
     const job = getJob(this.#db, agent.jobId);
     if (!job) return;
 
-    // Its folder is gone: failed with the reason, rather than a launch error (Amendment 114).
+    // Its folder is gone: put back first when its own clean-up took it (Amendment 219), else
+    // failed with the reason, rather than a launch error (Amendment 114).
+    if (this.#restoreFirst(job, () => void this.#launch(agentId, resumeFrom))) return;
     if (this.#refuseGone(agentId, job)) return;
 
     // Started by pump when its wait ended, or by something else first: either way no longer waiting.
@@ -2266,6 +2272,19 @@ export class Supervisor implements AgentControl {
     // Refused, not launched: the status stays as it is and the sentence says why.
     const job = getJob(this.#db, agent.jobId);
     if (!agent.sdkSessionId && job?.prompt !== '') throw new Error(`agent ${agentId} cannot receive messages yet`);
+    // Its own clean-up took the folder (Amendment 219): put back, then sent as it would have been.
+    if (
+      job &&
+      this.#restoreFirst(job, () => {
+        try {
+          this.sendMessage(agentId, text, synthetic);
+        } catch (err) {
+          console.warn(`[supervisor] ${agentId}: message after the folder came back: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })
+    ) {
+      return 'resumed';
+    }
     if (job && !existsSync(job.worktreePath)) {
       const restorable = job.isolation === 'worktree';
       // Its status stays; Needs You reads this to offer recreating the folder (Amendment 199).
@@ -2337,6 +2356,8 @@ export class Supervisor implements AgentControl {
    */
   #sendForSlot(agent: Agent, m: { id: string; text: string; synthetic: boolean }): void {
     const job = getJob(this.#db, agent.jobId);
+    // Put back first when its own clean-up took it (Amendment 219); pump() gives it a slot again then.
+    if (job && this.#restoreFirst(job, () => this.pump())) return;
     if (!job || !existsSync(job.worktreePath)) {
       failScheduled(
         this.#db,
@@ -2522,6 +2543,7 @@ export class Supervisor implements AgentControl {
     const agent = getAgent(this.#db, agentId);
     const job = agent ? getJob(this.#db, agent.jobId) : undefined;
     if (!agent || !job) return;
+    if (this.#restoreFirst(job, () => void this.#launchWithPrompt(agentId, resume, prompt, synthetic))) return;
     if (this.#refuseGone(agentId, job)) return;
 
     // You wrote to an agent that was waiting for the model: that is its try, with your words (Amendment 123).
@@ -2727,6 +2749,39 @@ export class Supervisor implements AgentControl {
   }
 
   /**
+   * The folder this job's own when-done clean-up took away (Amendment 219): put it back with
+   * `restoreFolder`, then `go` carries on with what was asked. True when that was started, and the
+   * caller stops there. Anything that asks while it is being put back waits on the same restore,
+   * in the order it asked. A folder that went missing any other way is not this: false, and
+   * `#refuseGone` refuses it as before. A restore that fails says so in the transcript, and `go`
+   * then meets that refusal.
+   */
+  #restoreFirst(job: Job, go: () => void): boolean {
+    if (existsSync(job.worktreePath) || job.isolation !== 'worktree') return false;
+    if (this.#restoreFailed.has(job.id)) return false;
+    let pending = this.#restoring.get(job.id);
+    if (!pending) {
+      if (!cleanedByFinish(this.#db, job.id)) return false;
+      pending = this.restoreFolder(job.id)
+        .catch((err) => {
+          this.#restoreFailed.add(job.id);
+          const why = err instanceof Error ? err.message : String(err);
+          console.warn(`[supervisor] ${job.id}: couldn't put back the folder its clean-up took: ${why}`);
+          for (const a of listAgents(this.#db).filter((x) => x.jobId === job.id)) {
+            eventLog().emit(
+              { projectId: a.projectId, jobId: job.id, agentId: a.id },
+              { kind: 'user_text', synthetic: true, text: `Your folder ${job.worktreePath}, cleaned up when the job was done, couldn't be put back: ${why}.` },
+            );
+          }
+        })
+        .finally(() => this.#restoring.delete(job.id));
+      this.#restoring.set(job.id, pending);
+    }
+    void pending.then(go);
+    return true;
+  }
+
+  /**
    * Put a job's worktree back where it was (Amendment 114), so its agents can carry on in
    * their own sessions: the conversation is kept by Claude Code, not in the folder. On its
    * own branch when that still exists, with whatever was committed there; otherwise on a new
@@ -2776,6 +2831,15 @@ export class Supervisor implements AgentControl {
       result = { path: job.worktreePath, branch: job.branch, from: 'base', base: target };
     }
     console.log(`[supervisor] recreated ${job.worktreePath} on ${job.branch} (${result.from === 'branch' ? 'its branch' : `new, from ${result.base}`})`);
+    // Its own clean-up took it (Amendment 219): that is over, and the workspace is watched again.
+    const afterCleanup = cleanedByFinish(this.#db, jobId);
+    if (afterCleanup) {
+      markRestored(this.#db, jobId);
+      this.#restoreFailed.delete(jobId);
+      await workspace()
+        .open({ jobId, projectId: job.projectId, repoPath: project.path, isolation: 'worktree', branch: job.branch })
+        .catch((err) => console.warn(`[supervisor] ${jobId}: the restored folder isn't watched: ${err instanceof Error ? err.message : String(err)}`));
+    }
     // Its agents' transcripts say so, and are told when they next run.
     for (const a of listAgents(this.#db).filter((x) => x.jobId === jobId)) {
       eventLog().emit(
@@ -2783,8 +2847,9 @@ export class Supervisor implements AgentControl {
         {
           kind: 'user_text',
           synthetic: true,
-          text:
-            result.from === 'branch'
+          text: afterCleanup
+            ? `Your folder ${job.worktreePath} was cleaned up when the job was done, and has been put back${result.from === 'branch' ? ` on ${job.branch}` : ` from ${result.base}, on a new ${job.branch}`}, so you can carry on.`
+            : result.from === 'branch'
               ? `Your folder ${job.worktreePath} was deleted and has been recreated on ${job.branch}, with what was committed there. Anything that was not committed is gone: check before relying on it.`
               : `Your folder ${job.worktreePath} was deleted and has been recreated from ${result.base}, on a new ${job.branch}. Your own commits and uncommitted work are not in it: check what is there before relying on it.`,
         },

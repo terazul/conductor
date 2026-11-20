@@ -54,11 +54,17 @@ export interface SettingsLine {
   model: string;
   /** e.g. `$4.10 of $25 today`, `$4.10 spent today`, `184k of 500k tokens today`. */
   budget: string;
+  /** The when-done steps that are on, in order, as their pills name them (Amendment 219). */
+  whenDone?: string[];
 }
 
-/** The folded line: `ask me · high · sonnet-5-5 · $4.10 of $25 today`. */
+/**
+ * The folded line: `ask me · high · sonnet-5-5 · when done: commit, test, merge · $4.10 of $25 today`.
+ * With no when-done step on, that part is left out rather than saying none.
+ */
 export function settingsSummary(s: SettingsLine): string {
-  return [s.mode, s.effort, s.model, s.budget].filter((x): x is string => Boolean(x)).join(' · ');
+  const steps = s.whenDone && s.whenDone.length > 0 ? `when done: ${s.whenDone.join(', ')}` : null;
+  return [s.mode, s.effort, s.model, steps, s.budget].filter((x): x is string => Boolean(x)).join(' · ');
 }
 
 /**

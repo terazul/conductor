@@ -38,6 +38,7 @@ import {
   claudeRoute,
   closingHeadingsOf,
   helperSlug,
+  normaliseAutonomy,
   parseMonthCorrection,
   parseProviderBudgets,
   providerBudgetKey,
@@ -76,6 +77,8 @@ interface ProjectRow {
   monthly_budget_usd?: number | null;
   /** The key of its bar's colour, or null for auto (350_project_color.sql). */
   color?: string | null;
+  /** The when-done Test step's command, or null for none (390_finish_steps.sql). */
+  test_command?: string | null;
 }
 
 /** A project's directories after its first, in the order they were added (Amendment 39). */
@@ -102,6 +105,8 @@ const toProject = (db: Db, r: ProjectRow): Project => {
     ...(r.monthly_budget_usd != null ? { monthlyBudgetUsd: r.monthly_budget_usd } : {}),
     // And again: auto is no field at all (Amendment 210). Only a key the PATCH let in is ever here.
     ...(r.color != null ? { color: r.color as ProjectColor } : {}),
+    // And none is no field (Amendment 219).
+    ...(r.test_command != null ? { testCommand: r.test_command } : {}),
   };
 };
 
@@ -299,6 +304,15 @@ export function setDefaultBranch(db: Db, id: string, branch: string): Project | 
  */
 export function setProjectMonthlyBudget(db: Db, id: string, usd: number | null): Project | undefined {
   db.prepare('UPDATE projects SET monthly_budget_usd = ? WHERE id = ?').run(usd, id);
+  return getProject(db, id);
+}
+
+/**
+ * Set the command the when-done Test step runs, or with null take it away (Amendment 219). The
+ * caller has trimmed it and turned an empty one into null (PATCH /api/projects/:id).
+ */
+export function setProjectTestCommand(db: Db, id: string, command: string | null): Project | undefined {
+  db.prepare('UPDATE projects SET test_command = ? WHERE id = ?').run(command, id);
   return getProject(db, id);
 }
 
@@ -536,7 +550,8 @@ const toAgent = (r: AgentRow, day: string): Agent => ({
   outputTokens: r.output_tokens,
   dependsOn: parse<string[]>(r.depends_on, []),
   // Amendment 7 put this on the shared type. The column was always here.
-  autonomy: parse<Autonomy>(r.autonomy, DEFAULT_AUTONOMY),
+  // Amendment 219: an older `mergeWhenDone: true` reads as its when-done steps, merge and clean up.
+  autonomy: normaliseAutonomy(parse<Autonomy>(r.autonomy, DEFAULT_AUTONOMY)),
   startedAt: r.started_at,
   endedAt: r.ended_at,
   // Only when set, so an ordinary agent's shape is what it always was (Amendment 51).
@@ -829,7 +844,7 @@ export function insertAgent(
     agent.inputTokens,
     agent.outputTokens,
     JSON.stringify(agent.dependsOn),
-    JSON.stringify(a.autonomy),
+    JSON.stringify(normaliseAutonomy(a.autonomy)),
     a.brief ?? null,
     a.helperCap ?? 0,
     a.parentId ?? null,
@@ -884,7 +899,7 @@ export function setAgentSession(db: Db, id: string, sdkSessionId: string): void 
 }
 
 export function setAgentAutonomy(db: Db, id: string, autonomy: Autonomy): void {
-  db.prepare('UPDATE agents SET autonomy = ? WHERE id = ?').run(JSON.stringify(autonomy), id);
+  db.prepare('UPDATE agents SET autonomy = ? WHERE id = ?').run(JSON.stringify(normaliseAutonomy(autonomy)), id);
 }
 
 export function setAgentModel(db: Db, id: string, model: string): void {

@@ -173,7 +173,7 @@ type MenuState = 'closed' | 'menu' | 'edit' | 'dirs' | 'remove';
 /** Roughly how tall each state renders, for deciding which way to open. */
 const NEEDED: Record<Exclude<MenuState, 'closed'>, number> = {
   menu: 112,
-  edit: 450,
+  edit: 500,
   dirs: 300,
   remove: 290,
 };
@@ -202,6 +202,8 @@ function CardMenu({
   const budgetText = (): string => (project.monthlyBudgetUsd == null ? '' : String(project.monthlyBudgetUsd));
   const [monthly, setMonthly] = useState(budgetText);
   const monthlyNow = monthlyDraft(monthly, project.monthlyBudgetUsd);
+  // What a job's when-done Test runs in its folder (Amendment 219), empty for none.
+  const [testCommand, setTestCommand] = useState(project.testCommand ?? '');
   // Its colour bar's key, null for auto (Amendment 210), and the key auto would give it now, so
   // the auto swatch shows what you'd get.
   const [colour, setColour] = useState<ProjectColor | null>(project.color ?? null);
@@ -276,17 +278,20 @@ function CardMenu({
     setPath(project.path);
     setMonthly(budgetText());
     setColour(project.color ?? null);
+    setTestCommand(project.testCommand ?? '');
     setState('closed');
   };
 
   const save = (): void =>
     void cmd.run('Updating the project', async () => {
-      const patch: { name?: string; path?: string; monthlyBudgetUsd?: number | null; color?: ProjectColor | null } = {};
+      const patch: Parameters<typeof editProject>[1] = {};
       if (name.trim() && name.trim() !== project.name) patch.name = name.trim();
       if (path.trim() && path.trim() !== project.path) patch.path = path.trim();
       if ('send' in monthlyNow && monthlyNow.send !== undefined) patch.monthlyBudgetUsd = monthlyNow.send;
       if (colour !== (project.color ?? null)) patch.color = colour;
-      if (patch.name === undefined && patch.path === undefined && patch.monthlyBudgetUsd === undefined && patch.color === undefined) {
+      // Emptied is none, sent as null; the daemon trims it.
+      if (testCommand.trim() !== (project.testCommand ?? '')) patch.testCommand = testCommand.trim() || null;
+      if (Object.keys(patch).length === 0) {
         setState('closed');
         return null;
       }
@@ -399,6 +404,16 @@ function CardMenu({
                   />
                 </label>
                 {'problem' in monthlyNow && <p className="fl-f-warn">{monthlyNow.problem}</p>}
+                <label className="fl-f">
+                  <span>test command</span>
+                  <input
+                    value={testCommand}
+                    spellCheck={false}
+                    placeholder="none, e.g. make test"
+                    title="What a job's when-done Test runs in its folder, in your login shell, for up to 30 minutes. Exit 0 passes; anything else stops the steps after it. Empty for none: Test can't be turned on without one."
+                    onChange={(e) => setTestCommand(e.target.value)}
+                  />
+                </label>
                 {/*
                  * The colour of its bar in the navigator, here and on its screens (Amendment 210).
                  * auto is the default and shows the colour it gives now; a swatch keeps that one.
