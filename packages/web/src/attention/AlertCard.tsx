@@ -439,7 +439,8 @@ function isFix(a: AlertAction): boolean {
     a.id === 'retry_now' ||
     a.id === 'check_now' ||
     a.id === 'merge_clean' ||
-    (a.id === 'merge' && a.stopped === true)
+    (a.id === 'merge' && a.stopped === true && a.testsFailed !== true) ||
+    (a.id === 'branches' && a.primary === true)
   );
 }
 
@@ -479,6 +480,7 @@ function labelOf(a: AlertAction): string {
     case 'merge_clean':
       return 'merge and clean up';
     case 'merge':
+      if (a.testsFailed) return `Merge anyway into ${a.into}`;
       return a.stopped ? `Merge into ${a.into}` : 'merge';
     case 'branches':
       return 'open Branches';
@@ -510,6 +512,7 @@ function titleOf(a: AlertAction): string | undefined {
     case 'merge_clean':
       return `Merge ${a.branch} into ${a.into}, then remove its job, folder and branch (asks first)`;
     case 'merge':
+      if (a.testsFailed) return `The tests failed: merge ${a.branch} into ${a.into} anyway, untested; the job, its folder and its branch stay`;
       return `Merge ${a.branch} into ${a.into}; the job, its folder and its branch stay`;
     default:
       return undefined;

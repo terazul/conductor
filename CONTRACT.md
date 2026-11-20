@@ -285,6 +285,39 @@ the stop-after-merge cards), `spawn/verify.ts` §24 and `agent/verify.ts` (the w
 Amendment 144's). `lib/verify.ts` §61's reply-bar check now reads the composer's hoisted `project` and `job`. Not tried
 in a browser or on a real project's finish.
 
+**Review fixes (one commit on `finish-steps`).** Daemon (`session/finish.ts`, `session/supervisor.ts`,
+`session/verify-finish.ts`), web (`agent/composer.tsx`, `spawn/autonomy.ts`, `attention/alerts.ts`,
+`attention/AlertCard.tsx`, `lib/verify.ts`, `attention/verify.ts`) and `docs/MANUAL.md`. (1) One job's finishes run one at a
+time (`finishJob` chains per job): a settling that arrives while one runs is **queued**, not dropped, and runs after it
+against the job as it is then. Before each step the job and its agents are read again: a job no longer done, an
+`endedAt` that changed, an agent not done, or one waiting to start (`agentWaiting`) stops it with *an agent started
+again, so the rest didn't run*, recorded as that step failed, with the offer card while the job is done and unmerged.
+Test records the branch's tip; merge refuses a tip that moved since with *the branch moved after its tests ran*. While a
+finish with steps runs on a worktree job, `sendMessage`, resume, a queued launch and a slot's message wait for it
+(`Supervisor.#afterFinish`, which marks the job waited on, so the rest stop) and then go as they would have;
+`sendMessage` answers `'resumed'`, and the transcript says *Waiting for the when-done steps to finish; your message goes
+once they have.* once per finish. (2) Test process groups are kept; `shutdown()` runs `stopRunningTests()` (SIGTERM to
+each group, SIGKILL after 2 s). (3) `recoverFinishes` records the step after the last recorded when none was marked
+running, or *the daemon stopped after <step> ran, before the finish was recorded* with no stop when every step went in;
+`cleaned` is set from the steps (and by each step's progress write), and `cleanedByFinish` counts a running row whose
+clean-up is done. (4) A test's result is its shell's `exit`; its group is then stopped (SIGTERM, SIGKILL after 2 s) and
+its output gets 2 s to close. (5) The composer shuts the pills on any job whose isolation isn't `worktree`. (6) The test
+env drops every `CONDUCTOR_*`. (7) After a failed Test the Finished card's primary is **open Branches** and the merge a
+plain **Merge anyway into <target>**, titled that the tests failed; a stop at any other step keeps **Merge into
+<target>** primary. (8) Before pushing the target, commits on it not on its upstream (or on `origin` at all, with no
+upstream), before the merge this run made, stop the push: *didn't push: main has N commit(s) of yours that aren't on
+origin; push it yourself from Branches*; the push hint says so. (9) Test output is decoded with `StringDecoder`; a
+queued wake message to a cleaned-up job puts the folder back first; the MANUAL says a message after clean-up puts back
+a new branch of the same name from the target. *Decisions:* a queued settling, not dropped, since a job that settles
+again with new work should still get its steps; a waiting message also stops the remaining steps, since the person is
+working on the branch again; the wait is in memory, so a daemon stopped meanwhile loses it. **Verified:**
+`session/verify-finish.ts` §15-20, 100 checks in all (a message during Test waits, is said once, stops the merge and
+goes after; two settlings one after the other, the first stopped; a moved tip refused; a test leaving a child exits
+promptly and the child goes; shutdown kills a running group; no `CONDUCTOR_*` in the test's env; a split character
+decoded; recovery's derived step and cleaned; the push refusing your own commits, then pushing once you did).
+`attention/verify.ts` §11 (the failed-test card's order, labels and titles; a stop at push keeping the merge primary),
+`lib/verify.ts` §65 (the composer's worktree test; the push hint).
+
 ### Amendment 218 — post-merge, applied. **⧉ copy clean in a terminal: the selection as markdown.**
 
 Web only (new `lib/termclean.ts`, `agent/Xterm.tsx`, `agent/TermPanel.tsx`, `agent/agent.css`, `lib/verify.ts`,

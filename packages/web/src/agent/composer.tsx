@@ -558,8 +558,8 @@ export function Composer({ agent }: { agent: Agent }) {
   const project = useProjects().find((p) => p.id === agent.projectId);
   const job = useJobs(agent.projectId).find((j) => j.id === agent.jobId);
   const bar = replyBarWords(project?.name, agent.role, job?.name);
-  // When-done steps need a folder of its own, and Test a command to run (Amendment 219).
-  const inPlace = job?.isolation === 'in_place';
+  // When-done steps need a folder of its own, a worktree, and Test a command to run (Amendment 219).
+  const ownsFolder = job?.isolation === 'worktree';
   const noTestCommand = !project?.testCommand;
   const toggleSettings = (): void => writeSetting(SETTINGS_KEY, settingsToggled(readSetting(SETTINGS_KEY)));
   const effortLabel = EFFORTS.find((e) => e.id === (autonomy.effort ?? DEFAULT_EFFORT))?.label ?? null;
@@ -676,7 +676,7 @@ export function Composer({ agent }: { agent: Agent }) {
           {WHEN_DONE_PILLS.map((p) => {
             const on = p.on(autonomy);
             // Shut only while off, so a step set before the folder or the command went can still be turned off.
-            const why = inPlace ? WHEN_DONE_NEEDS_WORKTREE : p.step === 'test' && noTestCommand ? NO_TEST_COMMAND_TITLE : null;
+            const why = !ownsFolder ? WHEN_DONE_NEEDS_WORKTREE : p.step === 'test' && noTestCommand ? NO_TEST_COMMAND_TITLE : null;
             return (
               <button
                 key={p.id}

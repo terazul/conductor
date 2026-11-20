@@ -19,7 +19,7 @@
  */
 
 import { onSettingsChanged, readSettings } from '../settings.js';
-import { PERSONAS_KEY, branchTargetKey, isModelWaitNote, personaFor, personasFrom, renamedPersona } from '@conductor/shared';
+import { PERSONAS_KEY, branchTargetKey, isModelWaitNote, jobWhenDone, personaFor, personasFrom, renamedPersona, stepsOn } from '@conductor/shared';
 import { branchExists, git, listWorktrees, repoRoot } from '../workspace/git.js';
 import { canonicalRoot } from '../workspace/paths.js';
 import { resolveTarget } from '../workspace/branches.js';
@@ -152,7 +152,7 @@ import {
   type AgentPersona,
 } from './store.js';
 import { reportedWindow } from './windows.js';
-import { cleanedByFinish, finishJob, markRestored, type Finish } from './finish.js';
+import { agentWaiting, cleanedByFinish, finishJob, markRestored, stopRunningTests, type Finish } from './finish.js';
 import { broadcastRecurring } from './recurring.js';
 import { USER_PAUSE_NOTE, broadcastScheduled, deleteScheduled, failScheduled, insertScheduled, isUserPauseNote, listScheduled, nextForSlot, nextWhenDone, userPauseNote } from './schedule.js';
 
@@ -251,6 +251,8 @@ export const HOLD_NOTE = 'paused with everything until the scheduled time — it
  * message knows the queued status is this one's to undo.
  */
 export const SLOT_WAIT_NOTE = 'waiting for a slot — your message goes when one frees';
+/** Said once in the transcript of an agent whose message waits for its job's when-done steps (Amendment 219). */
+export const FINISH_WAIT_NOTE = 'Waiting for the when-done steps to finish; your message goes once they have.';
 
 /**
  * Why an agent is queued when the decision that landed while its run unwound found every slot
@@ -1197,6 +1199,8 @@ export class Supervisor implements AgentControl {
 
     // Its folder is gone: put back first when its own clean-up took it (Amendment 219), else
     // failed with the reason, rather than a launch error (Amendment 114).
+    // Its job's when-done steps are running (Amendment 219): it starts once they end, as pump() would start it then.
+    if (this.#afterFinish(job, agentId, `launch:${agentId}`, () => this.pump())) return;
     if (this.#restoreFirst(job, () => void this.#launch(agentId, resumeFrom))) return;
     if (this.#refuseGone(agentId, job)) return;
 
@@ -2089,6 +2093,9 @@ export class Supervisor implements AgentControl {
     const m = nextWhenDone(this.#db, agent.id);
     if (!m) return '';
     const job = getJob(this.#db, agent.jobId);
+    // Its own clean-up took the folder (Amendment 219): put back first, as the other paths do; the row stays, and goes
+    // when the agent is next done (`#sendWhenDone`), in the folder put back.
+    if (job && this.#restoreFirst(job, () => this.pump())) return '';
     const refusal = job && !existsSync(job.worktreePath) ? `${agent.role}: ${folderGoneDetail(job.worktreePath, job.isolation === 'worktree')}` : null;
     if (refusal) failScheduled(this.#db, m.id, refusal);
     else deleteScheduled(this.#db, m.id);
@@ -2184,6 +2191,50 @@ export class Supervisor implements AgentControl {
     return this.#finishing.get(jobId);
   }
 
+  /** What waits for a job's when-done steps (`#afterFinish`), by key: pump() asking again doesn't wait twice. */
+  #afterFinishing = new Set<string>();
+  /** `<jobId>:<agentId>` told it waits, once per finish. */
+  #finishWaitTold = new Set<string>();
+
+  /**
+   * While `job`'s when-done steps run (Amendment 219), what would start one of its agents —
+   * a message, a resume, a launch, a slot's message — waits until they end, then `go` carries
+   * on with it; true when it waits, and the caller stops there. Waiting rather than refusing:
+   * the steps are the job's, and a message that went now would work in the folder they are
+   * committing, testing, merging and cleaning up. The step running now ends; the ones after it
+   * don't run (`agentWaiting`), and the agent's transcript says so once. A job
+   * whose finish runs no steps waits for nothing. Held in memory: a daemon stopped meanwhile
+   * loses it, as it loses the steps' own run.
+   */
+  #afterFinish(job: Job, agentId: string, key: string | null, go: () => void): boolean {
+    const run = this.#finishing.get(job.id);
+    if (!run || job.isolation !== 'worktree') return false;
+    const agents = agentsForJob(this.#db, job.id);
+    if (stepsOn(jobWhenDone(agents)).length === 0) return false;
+    if (key !== null) {
+      if (this.#afterFinishing.has(key)) return true;
+      this.#afterFinishing.add(key);
+    }
+    // The steps still to come don't run: the branch is being worked on again.
+    agentWaiting(job.id);
+    const told = `${job.id}:${agentId}`;
+    const agent = agents.find((a) => a.id === agentId);
+    if (agent && !this.#finishWaitTold.has(told)) {
+      this.#finishWaitTold.add(told);
+      eventLog().emit(
+        { projectId: agent.projectId, jobId: job.id, agentId },
+        { kind: 'user_text', synthetic: true, text: FINISH_WAIT_NOTE },
+      );
+    }
+    const release = (): void => {
+      if (key !== null) this.#afterFinishing.delete(key);
+      this.#finishWaitTold.delete(told);
+      go();
+    };
+    void run.then(release, release);
+    return true;
+  }
+
   // ── AgentControl, for the Arbiter ─────────────────────────────────────────
 
   isLive(agentId: string): boolean {
@@ -2263,14 +2314,28 @@ export class Supervisor implements AgentControl {
    * With every slot taken it waits for one (Amendment 168): `'queued'`.
    */
   sendMessage(agentId: string, text: string, synthetic = false): 'sent' | 'resumed' | 'queued' {
+    const agent = getAgent(this.#db, agentId);
+    const job = agent ? getJob(this.#db, agent.jobId) : undefined;
+    // Its job's when-done steps are running (Amendment 219): it waits for them, then goes as it would have.
+    if (
+      job &&
+      this.#afterFinish(job, agentId, null, () => {
+        try {
+          this.sendMessage(agentId, text, synthetic);
+        } catch (err) {
+          console.warn(`[supervisor] ${agentId}: message after the when-done steps: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })
+    ) {
+      return 'resumed';
+    }
+
     const runner = this.#runners.get(agentId);
     if (runner?.send(text, synthetic)) return 'sent';
 
-    const agent = getAgent(this.#db, agentId);
     if (!agent) throw new Error(`agent ${agentId} cannot receive messages yet`);
 
     // Refused, not launched: the status stays as it is and the sentence says why.
-    const job = getJob(this.#db, agent.jobId);
     if (!agent.sdkSessionId && job?.prompt !== '') throw new Error(`agent ${agentId} cannot receive messages yet`);
     // Its own clean-up took the folder (Amendment 219): put back, then sent as it would have been.
     if (
@@ -2356,7 +2421,8 @@ export class Supervisor implements AgentControl {
    */
   #sendForSlot(agent: Agent, m: { id: string; text: string; synthetic: boolean }): void {
     const job = getJob(this.#db, agent.jobId);
-    // Put back first when its own clean-up took it (Amendment 219); pump() gives it a slot again then.
+    // Its job's when-done steps first, then its folder back when its own clean-up took it (Amendment 219); pump() gives it a slot again then.
+    if (job && this.#afterFinish(job, agent.id, `slot:${agent.id}`, () => this.pump())) return;
     if (job && this.#restoreFirst(job, () => this.pump())) return;
     if (!job || !existsSync(job.worktreePath)) {
       failScheduled(
@@ -2543,6 +2609,7 @@ export class Supervisor implements AgentControl {
     const agent = getAgent(this.#db, agentId);
     const job = agent ? getJob(this.#db, agent.jobId) : undefined;
     if (!agent || !job) return;
+    if (this.#afterFinish(job, agentId, null, () => void this.#launchWithPrompt(agentId, resume, prompt, synthetic))) return;
     if (this.#restoreFirst(job, () => void this.#launchWithPrompt(agentId, resume, prompt, synthetic))) return;
     if (this.#refuseGone(agentId, job)) return;
 
@@ -3190,7 +3257,8 @@ export class Supervisor implements AgentControl {
     // Nor the outages (Amendment 192): `reconcile` rejoins their agents from the event log.
     outages().clear();
     for (const id of this.#runners.keys()) this.#userStopped.add(id);
-    await Promise.allSettled([...this.#runners.values()].map((r) => r.stop()));
+    // A when-done test runs in a process group of its own, which nothing else stops (Amendment 219).
+    await Promise.allSettled([...[...this.#runners.values()].map((r) => r.stop()), stopRunningTests()]);
   }
 
   get slots(): { used: number; total: number } {

@@ -47,7 +47,7 @@ export const WHEN_DONE_HINTS: Record<WhenDoneStep, string> = {
   merge:
     "Then merges the job's branch into the project's main branch, only when the merge is clean. A conflict asks you in Needs You instead; it never resolves one for you. Worktree jobs only.",
   push:
-    "Then pushes to origin: the branch it merged into, or with merge off the job's own branch. It never force-pushes, so a rejected push stops and says why. Worktree jobs only.",
+    "Then pushes to origin: the branch it merged into, or with merge off the job's own branch. It never force-pushes, so a rejected push stops and says why, and it never pushes commits of yours: a target with commits not on origin beyond the merge stops, to be pushed from Branches. Worktree jobs only.",
   cleanup:
     "Then, once its branch is merged, removes the job's folder and its branch (git branch -d). It never removes an unmerged branch, and never removes the agent: the job and its transcript stay, a message puts the folder back, and Remove still deletes. Worktree jobs only.",
 };

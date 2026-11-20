@@ -64,7 +64,7 @@ import { behindLine, buildTag, buildTitle, fmtWhen, type Build } from '../diagno
 import { catalogLine, modelGroups, modelProblem, resolveTier, shortModel } from './models.js';
 import type { Autonomy, ModelCatalog } from '@conductor/shared';
 import { WHEN_DONE_LABELS, WHEN_DONE_STEPS, normaliseAutonomy } from '@conductor/shared';
-import { NO_TEST_COMMAND_TITLE, WHEN_DONE_HINTS } from '../spawn/autonomy.js';
+import { NO_TEST_COMMAND_TITLE, WHEN_DONE_HINTS, WHEN_DONE_NEEDS_WORKTREE } from '../spawn/autonomy.js';
 import { isolationOf } from '../spawn/launch.js';
 import { settingsSummary } from '../agent/settingsfold.js';
 import { screenForKey, tabbed } from './screens.js';
@@ -3969,12 +3969,14 @@ console.log('\n65 · when done: commit, test, merge, push and clean up, per agen
     WHEN_DONE_STEPS.join(' ') === 'commit test merge push cleanup' && WHEN_DONE_STEPS.map((st) => WHEN_DONE_LABELS[st]).join(', ') === 'commit, test, merge, push, clean up');
   check('each hint says what it never does, and that it is for worktree jobs only',
     WHEN_DONE_STEPS.every((st) => /never/.test(WHEN_DONE_HINTS[st]) && WHEN_DONE_HINTS[st].endsWith('Worktree jobs only.')) &&
-      /never force-pushes/.test(WHEN_DONE_HINTS.push) && /never removes an unmerged branch, and never removes the agent/.test(WHEN_DONE_HINTS.cleanup));
+      /never force-pushes/.test(WHEN_DONE_HINTS.push) && /never pushes commits of yours/.test(WHEN_DONE_HINTS.push) && /never removes an unmerged branch, and never removes the agent/.test(WHEN_DONE_HINTS.cleanup));
   check('the composer: a "when done:" label and the five pills after the guardrails',
     /<span className="ui-lab">when done:<\/span>\s*\{WHEN_DONE_PILLS\.map\(/.test(composer) && composer.indexOf('when done:</span>') > composer.indexOf('PILLS.map('));
-  check('…Test shut with no test command, saying where to set one; any step shut on a job in its project\'s own folder',
+  check('…Test shut with no test command, saying where to set one; any step shut on a job without a worktree of its own, a branch of the project\'s folder too',
     NO_TEST_COMMAND_TITLE === "set a test command on the project's Edit first" &&
-      /const why = inPlace \? WHEN_DONE_NEEDS_WORKTREE : p\.step === 'test' && noTestCommand \? NO_TEST_COMMAND_TITLE : null;/.test(composer) &&
+      /const ownsFolder = job\?\.isolation === 'worktree';/.test(composer) && !/isolation === 'in_place'/.test(composer) &&
+      /a folder of its own/.test(WHEN_DONE_NEEDS_WORKTREE) &&
+      /const why = !ownsFolder \? WHEN_DONE_NEEDS_WORKTREE : p\.step === 'test' && noTestCommand \? NO_TEST_COMMAND_TITLE : null;/.test(composer) &&
       /disabled=\{policy\.busy \|\| \(why !== null && !on\)\}/.test(composer) && /title=\{why \?\? p\.hint\}/.test(composer));
   check('Spawn: the same five, shut with that title for a method that makes no folder of its own, and nothing sent for it',
     /const ownsFolder = isolationOf\(method\) === 'worktree';/.test(spawn) && /ownsFolder \? pills : withoutWhenDone\(pills\)/.test(spawn) &&

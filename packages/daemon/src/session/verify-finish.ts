@@ -24,9 +24,9 @@ import { eventLog } from '../eventlog.js';
 import { modelSources } from './models.js';
 import { sdk } from './runner.js';
 import { alerts } from './alerts.js';
-import { finishAlerts, finishJob, NO_TEST_COMMAND, recoverFinishes } from './finish.js';
-import { DEFAULT_AUTONOMY, getAgent, getJob, insertAgent, insertJob, setJobStatus } from './store.js';
-import { supervisor } from './supervisor.js';
+import { cleanedByFinish, finishAlerts, finishJob, NO_TEST_COMMAND, recoverFinishes, runTestCommand, STARTED_AGAIN, stopRunningTests, testEnv } from './finish.js';
+import { DEFAULT_AUTONOMY, getAgent, getJob, insertAgent, insertJob, setAgentStatus, setJobStatus } from './store.js';
+import { FINISH_WAIT_NOTE, supervisor } from './supervisor.js';
 
 modelSources.gateway = () => Promise.reject(new Error('verify asked the real model API'));
 modelSources.claudeCode = () => Promise.reject(new Error('verify started a real Claude Code'));
@@ -37,6 +37,7 @@ const ROOT = join(realpathSync(tmpdir()), `conductor-finish-verify-${Date.now()}
 const BARE = `${ROOT}-origin.git`;
 const OTHER = `${ROOT}-other`;
 const OLD_DB = `${ROOT}-old.db`;
+const SCRATCH = `${ROOT}-scratch`;
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 
 let failures = 0;
@@ -73,11 +74,14 @@ async function until(cond: () => boolean, timeoutMs = 10_000): Promise<boolean> 
 // ── a fake SDK: every run ends as soon as it starts ─────────────────────────
 
 let launched = 0;
+/** What each run was told, as it reached the SDK. */
+const told: string[] = [];
 function fakeQuery({ prompt, options }: { prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }): Query {
   launched++;
   const sessionId = options?.resume ?? `sess_fake_${launched}`;
   void (async () => {
-    if (typeof prompt !== 'string') for await (const _ of prompt) void _;
+    if (typeof prompt === 'string') told.push(prompt);
+    else for await (const m of prompt) told.push(JSON.stringify(m));
   })();
   async function* messages(): AsyncGenerator<unknown> {
     yield { type: 'system', subtype: 'init', session_id: sessionId };
@@ -107,8 +111,9 @@ async function main(): Promise<void> {
   process.env['CONDUCTOR_DB'] = join(ROOT, 'conductor.db');
   process.env['CONDUCTOR_PORT'] = String(PORT);
   process.env['LOG_LEVEL'] = 'silent';
-  for (const p of [ROOT, BARE, OTHER, OLD_DB]) rmSync(p, { recursive: true, force: true });
+  for (const p of [ROOT, BARE, OTHER, OLD_DB, SCRATCH]) rmSync(p, { recursive: true, force: true });
   mkdirSync(ROOT, { recursive: true });
+  mkdirSync(SCRATCH, { recursive: true });
   writeFileSync(join(ROOT, 'README.md'), '# finish verify\n');
   writeFileSync(join(ROOT, 'c.txt'), 'base\n');
   writeFileSync(join(ROOT, '.gitignore'), '.conductor/\n');
@@ -447,12 +452,155 @@ async function main(): Promise<void> {
   old.close();
 
   // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n15 · a message while the steps run waits for them, and stops the rest');
+  const job = (id: string, autonomy: Autonomy): void => {
+    insertJob(db, { id, projectId, prompt: `work ${id}`, isolation: 'worktree', worktreePath: wt(id), branch: `conductor/${id}`, status: 'queued', budgetUsd: null });
+    insertAgent(db, {
+      id: `agt_${id}`, jobId: id, projectId, role: 'builder', model: 'claude-sonnet-5', sdkSessionId: null, status: 'queued',
+      blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy,
+    });
+  };
+  const started = join(SCRATCH, 'started');
+  await setTest(`touch ${started}; sleep 1.5; echo ok`);
+  prepare('job_msg', { 'msg.txt': 'msg\n' });
+  const mainMsg = git(ROOT, 'rev-parse', 'main');
+  job('job_msg', steps({ test: true, merge: true }));
+  sup.pump();
+  await until(() => existsSync(started));
+  const midFinish = sup.finishing('job_msg');
+  const launchedMid = launched;
+  const firstAnswer = sup.sendMessage('agt_job_msg', 'one more thing, please');
+  const secondAnswer = sup.sendMessage('agt_job_msg', 'and another');
+  check('sent while Test runs: taken, not refused', midFinish !== undefined && firstAnswer === 'resumed' && secondAnswer === 'resumed', `${firstAnswer} ${secondAnswer}`);
+  const waitNotes = () => eventsOf('agt_job_msg').filter((e) => e.kind === 'user_text' && e.text === FINISH_WAIT_NOTE).length;
+  check('the transcript says it waits for the when-done steps, once', waitNotes() === 1, `${waitNotes()}`);
+  await settle(200);
+  check('and nothing starts while they run', launched === launchedMid && getAgent(db, 'agt_job_msg')?.status === 'done');
+  await midFinish;
+  check(`the run stops before the merge: "${STARTED_AGAIN}"`, noteOf('agt_job_msg')?.includes(`didn't merge: ${STARTED_AGAIN}`) === true, noteOf('agt_job_msg'));
+  check('main did not move', git(ROOT, 'rev-parse', 'main') === mainMsg);
+  check('then the messages go, after the finish', (await until(() => told.some((t) => t.includes('one more thing, please')) && told.some((t) => t.includes('and another')))) && launched > launchedMid);
+  await setTest('echo ok');
+  await until(() => getJob(db, 'job_msg')?.status === 'done' && sup.finishing('job_msg') === undefined && finishRows('job_msg') === 2);
+  check('and when it is done again, its steps run again, and merge', git(ROOT, 'show', 'main:msg.txt') === 'msg' && /merged into main/.test(noteOf('agt_job_msg') ?? ''), noteOf('agt_job_msg'));
+  rmSync(started, { force: true });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n16 · one finish at a time; an agent that started again stops the one running');
+  const log = join(SCRATCH, 'serial.log');
+  await setTest(`echo start >> ${log}; sleep 1; echo end >> ${log}`);
+  prepare('job_two', { 'two.txt': 'two\n' });
+  const mainTwo = git(ROOT, 'rev-parse', 'main');
+  job('job_two', steps({ test: true, merge: true }));
+  sup.pump();
+  await until(() => existsSync(log));
+  const firstRun = sup.finishing('job_two');
+  // The agent goes on, as a resume would, and settles again: a second finish, while the first runs.
+  setAgentStatus(db, 'agt_job_two', 'working');
+  setJobStatus(db, 'job_two', 'working');
+  await settle(20);
+  setAgentStatus(db, 'agt_job_two', 'done');
+  setJobStatus(db, 'job_two', 'done');
+  const secondRun = finishJob(db, 'job_two', async () => undefined);
+  const [first, second] = await Promise.all([firstRun, secondRun]);
+  check('the first stops before its merge: the job settled again', first !== undefined && first.outcome !== 'none' && first.stoppedAt === 'merge' && first.why === STARTED_AGAIN, JSON.stringify(first));
+  const lines = readFileSync(log, 'utf8').trim().split('\n').join(' ');
+  check('the second ran after it, not alongside: two tests, one after the other', lines === 'start end start end', lines);
+  check('and the second merged', second.outcome === 'merged' && git(ROOT, 'show', 'main:two.txt') === 'two' && git(ROOT, 'rev-parse', 'main^1') === mainTwo, JSON.stringify(second));
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n17 · a branch that moved after its tests ran is not merged');
+  await setTest('git -c user.email=v@example.invalid -c user.name=v commit -q --allow-empty -m "moved by the tests"');
+  prepare('job_mv', { 'mv.txt': 'mv\n' });
+  const mainMv = git(ROOT, 'rev-parse', 'main');
+  await run('job_mv', steps({ test: true, merge: true }));
+  check('the merge is refused, saying why', /tests passed .* · didn't merge: the branch moved after its tests ran\.$/.test(noteOf('agt_job_mv') ?? ''), noteOf('agt_job_mv'));
+  check('main did not move; the card offers the merge', git(ROOT, 'rev-parse', 'main') === mainMv && cardFor('job_mv', 'finished')?.stoppedAt === 'merge');
+  await setTest(null);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n18 · a test command: its exit is its result, its group goes, its env is its own');
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const bgPid = join(SCRATCH, 'bg.pid');
+  const t0 = Date.now();
+  const bg = await runTestCommand(`sleep 30 & echo $! > ${bgPid}; echo hi; exit 0`, SCRATCH);
+  const bgMs = Date.now() - t0;
+  const child = Number(readFileSync(bgPid, 'utf8').trim());
+  check('a test that leaves a child holding its output and exits 0 passes, promptly', bg.code === 0 && !bg.timedOut && bg.tail === 'hi' && bgMs < 3000, `${JSON.stringify(bg)} ${bgMs}ms`);
+  check('and the child is gone', await until(() => !alive(child), 3000), `${child}`);
+  const runPid = join(SCRATCH, 'run.pid');
+  const running = runTestCommand(`sleep 30 & echo $! > ${runPid}; echo $$ >> ${runPid}; wait`, SCRATCH);
+  await until(() => existsSync(runPid) && readFileSync(runPid, 'utf8').trim().split('\n').length === 2);
+  const [sleeper, shell] = readFileSync(runPid, 'utf8').trim().split('\n').map(Number) as [number, number];
+  await stopRunningTests();
+  const stoppedRun = await running;
+  check('shutdown kills a running test’s whole group', !alive(sleeper!) && !alive(shell!) && stoppedRun.code !== 0, `${JSON.stringify(stoppedRun)}`);
+  const supSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'supervisor.ts'), 'utf8');
+  check('…which the supervisor’s shutdown calls', /async shutdown\(\)[\s\S]{0,1500}stopRunningTests\(\)/.test(supSrc));
+  const env = await runTestCommand(`env | grep '^CONDUCTOR_' || echo none; command -v git >/dev/null && echo git`, SCRATCH);
+  check('no CONDUCTOR_* reaches the test, though the daemon has them; PATH is kept', process.env['CONDUCTOR_DB'] !== undefined && env.tail === 'none\ngit', env.tail);
+  const envOf = testEnv({ CONDUCTOR_TOKEN: 't', CONDUCTOR_ANYTHING: 'x', PATH: '/bin', HOME: '/h' });
+  check('…every one of them, not a list', !Object.keys(envOf).some((k) => k.startsWith('CONDUCTOR_')) && envOf['PATH'] === '/bin', JSON.stringify(envOf));
+  const utf = await runTestCommand(`printf a; for i in $(seq 1 400); do printf 'é%.0s' $(seq 1 100); done; echo`, SCRATCH);
+  check('output is decoded across chunks: a character split between two stays one', !utf.tail.includes('�') && utf.tail.length === 40001, `${utf.tail.length}`);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n19 · recovery records the step it was at, and what it cleaned');
+  const stuck = (id: string, autonomy: Autonomy, recorded: object[]): void => {
+    insertJob(db, { id, projectId, prompt: id, isolation: 'worktree', worktreePath: wt(id), branch: `conductor/${id}`, status: 'done', budgetUsd: null });
+    insertAgent(db, {
+      id: `agt_${id}`, jobId: id, projectId, role: 'builder', model: 'claude-sonnet-5', sdkSessionId: null, status: 'done',
+      blockMode: null, costUsd: 0, inputTokens: 0, outputTokens: 0, dependsOn: [], autonomy,
+    });
+    db.prepare(
+      `INSERT INTO job_finishes (job_id, project_id, kind, branch, target, ahead, agent_ids, at, steps, state, current_step)
+       VALUES (?, ?, 'offer', ?, 'main', 1, ?, ?, ?, 'running', NULL)`,
+    ).run(id, projectId, `conductor/${id}`, JSON.stringify([`agt_${id}`]), new Date().toISOString(), JSON.stringify(recorded));
+  };
+  stuck('job_rc1', steps({ commit: true, test: true, merge: true }), [{ step: 'commit', outcome: 'skipped', said: 'nothing to commit' }]);
+  stuck('job_rc2', steps({ merge: true, cleanup: true }), [
+    { step: 'merge', outcome: 'done', said: 'merged into main as abcdef1' },
+    { step: 'cleanup', outcome: 'done', said: 'cleaned up the folder and branch' },
+  ]);
+  check('a running finish whose clean-up is recorded counts as cleaned up, for a message', cleanedByFinish(db, 'job_rc2'));
+  check('(two to recover)', recoverFinishes(db) === 2);
+  await settle(50);
+  check('no step was running: it is the one after the last recorded, test', /^When done: nothing to commit · interrupted at test: the daemon stopped while test ran; nothing was run again\.$/.test(noteOf('agt_job_rc1') ?? '') && cardFor('job_rc1', 'finished')?.stoppedAt === 'test', noteOf('agt_job_rc1'));
+  const rc2 = db.prepare(`SELECT stopped_at AS s, cleaned AS c, kind AS k FROM job_finishes WHERE job_id = 'job_rc2'`).get() as { s: string | null; c: number; k: string };
+  check('every step recorded: it stopped after the last, before the finish was written', /· cleaned up the folder and branch: the daemon stopped after clean up ran, before the finish was recorded; nothing was run again\.$/.test(noteOf('agt_job_rc2') ?? '') && rc2.s === null, `${noteOf('agt_job_rc2')} ${JSON.stringify(rc2)}`);
+  const rc2Card = cardFor('job_rc2', 'merged');
+  check('and it is recorded cleaned, from its steps', rc2.c === 1 && rc2.k === 'merged' && rc2Card?.cleaned === true && rc2Card.stoppedAt === undefined && cleanedByFinish(db, 'job_rc2'), JSON.stringify(rc2Card));
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n20 · push never takes commits of yours with it');
+  git(ROOT, 'push', '-q', '-f', 'origin', 'main');
+  writeFileSync(join(ROOT, 'mine.txt'), 'mine, not pushed\n');
+  git(ROOT, 'add', 'mine.txt');
+  git(ROOT, 'commit', '-q', '-m', 'mine');
+  const originBefore = bare('main');
+  prepare('job_own', { 'own.txt': 'own\n' });
+  await run('job_own', steps({ merge: true, push: true, cleanup: true }));
+  check('main has a commit not on origin besides the merge: the push stops, saying so', /· didn't push: main has 1 commit of yours that isn't on origin; push it yourself from Branches\. Clean up didn't run\.$/.test(noteOf('agt_job_own') ?? ''), noteOf('agt_job_own'));
+  check('origin did not move; the merge stays', bare('main') === originBefore && git(ROOT, 'show', 'main:own.txt') === 'own');
+  git(ROOT, 'push', '-q', 'origin', 'main');
+  prepare('job_own2', { 'own2.txt': 'own2\n' });
+  await run('job_own2', steps({ merge: true, push: true }));
+  check('once you pushed them, the next one pushes what it merged', bare('main') === git(ROOT, 'rev-parse', 'main') && /pushed main to origin\.$/.test(noteOf('agt_job_own2') ?? ''), noteOf('agt_job_own2'));
+
+  // ───────────────────────────────────────────────────────────────────────────
   await until(() => sup.slots.used === 0);
   await app.close();
-  for (const p of [ROOT, BARE, OTHER, OLD_DB]) rmSync(p, { recursive: true, force: true });
+  for (const p of [ROOT, BARE, OTHER, OLD_DB, SCRATCH]) rmSync(p, { recursive: true, force: true });
   console.log(
     failures === 0
-      ? `\nAmendment 219 finish: PASS — ${checks} checks: when a job is done its agents' steps run in order, commit, test, merge, push, clean up, each only after the one before worked or was off; a failing or missing test stops the rest with the output's tail on the card; the push goes to origin and is never forced; the clean-up keeps the job and its agents and refuses an unmerged branch, and a message afterwards puts the folder back; the old mergeWhenDone reads as merge + clean up; a finish runs once, and one a stop cut short is recorded interrupted on boot.\n`
+      ? `\nAmendment 219 finish: PASS — ${checks} checks: when a job is done its agents' steps run in order, commit, test, merge, push, clean up, each only after the one before worked or was off; a failing or missing test stops the rest with the output's tail on the card; the push goes to origin and is never forced; the clean-up keeps the job and its agents and refuses an unmerged branch, and a message afterwards puts the folder back; the old mergeWhenDone reads as merge + clean up; a finish runs once, one at a time per job, stops when an agent starts again and refuses a branch that moved after its tests; a message sent meanwhile waits and goes after it; a test is its shell's exit, its group killed then and on shutdown, with no CONDUCTOR_* in its env; a push never takes commits of yours; one a stop cut short is recorded interrupted on boot, at the step it was at.\n`
       : `\nAmendment 219 finish: FAIL — ${failures} of ${checks} check(s) failed.\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
@@ -460,6 +608,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   console.error('verify crashed', err);
-  for (const p of [ROOT, BARE, OTHER, OLD_DB]) rmSync(p, { recursive: true, force: true });
+  for (const p of [ROOT, BARE, OTHER, OLD_DB, SCRATCH]) rmSync(p, { recursive: true, force: true });
   process.exit(1);
 });

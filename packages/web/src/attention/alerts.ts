@@ -74,11 +74,13 @@ export type AlertAction =
    * A job finished ahead of its target (Amendment 144). `merge_clean`: the merge, then Lane
    * J's delete with `forgetJob`, after a confirm. `merge`: the merge alone; the job, its
    * folder and its branch stay; `stopped` when a when-done step stopped before it (Amendment
-   * 219), which reads "Merge into <target>". `branches`: the project's Branches screen.
+   * 219), which reads "Merge into <target>", and `testsFailed` when that step was Test, which
+   * reads "Merge anyway into <target>" and is never the primary. `branches`: the project's
+   * Branches screen; `primary` where it is the card's first thing to do (after a failed Test).
    */
   | { id: 'merge_clean'; projectId: string; branch: string; into: string; jobId: string }
-  | { id: 'merge'; projectId: string; branch: string; into: string; stopped?: true }
-  | { id: 'branches'; projectId: string };
+  | { id: 'merge'; projectId: string; branch: string; into: string; stopped?: true; testsFailed?: true }
+  | { id: 'branches'; projectId: string; primary?: true };
 
 /** The daemon's own resume nudge, so a continue from here reads like one from the composer. */
 export const CONTINUE_TEXT = 'Continue from where you stopped.';
@@ -233,6 +235,8 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
       const at = { projectId: alert.projectId, branch: alert.branch, into: alert.into };
       // A when-done step stopped before the merge (Amendment 219): the card offers the merge
       // alone, since the job and its agents stay; ✕ on the Project screen still removes them.
+      // After a failed Test the fix is the branch, not the merge: Branches first, the merge second, as "anyway".
+      if (alert.stoppedAt === 'test') return [{ id: 'branches', projectId: alert.projectId, primary: true }, { id: 'merge', ...at, stopped: true, testsFailed: true }, dismiss];
       if (alert.stoppedAt !== undefined) return [{ id: 'merge', ...at, stopped: true }, ...branches, dismiss];
       return [{ id: 'merge_clean', ...at, jobId: alert.jobId }, { id: 'merge', ...at }, ...branches, dismiss];
     }
@@ -254,7 +258,8 @@ export function alertActions(alert: Alert, agents: readonly Agent[]): AlertActio
  * stays, and what the merge offered does; nothing after the stop ran.
  */
 export function whenDoneStopNote(stoppedAt: WhenDoneStep, into: string): string {
-  return `Its when-done steps stopped at ${WHEN_DONE_LABELS[stoppedAt]}, so nothing after it ran. The job, its folder, its branch and its agents stay, so they can still be messaged. Merge into ${into} merges it only if it merges cleanly; pushing and cleaning up stay on the Branches screen.`;
+  const merge = stoppedAt === 'test' ? `Merge anyway into ${into} merges it untested` : `Merge into ${into} merges it`;
+  return `Its when-done steps stopped at ${WHEN_DONE_LABELS[stoppedAt]}, so nothing after it ran. The job, its folder, its branch and its agents stay, so they can still be messaged. ${merge} only if it merges cleanly; pushing and cleaning up stay on the Branches screen.`;
 }
 
 /**

@@ -26,16 +26,22 @@
  *     information card (`merged`) when nothing stopped, or one saying where it stopped and why,
  *     which still offers the merge (`finished`) when the branch is still ahead.
  *
- * A finish runs once: `finishing` is checked and filled before the first await, and a row
- * already written for this settling (`at` after the job's `endedAt`) is never run again. While
- * the steps run the row says `state = 'running'` and which step; a daemon stopped then finds it
- * on boot (`recoverFinishes`) and records it **interrupted at <step>**, running nothing again.
+ * A finish runs once: one job's finishes run one at a time (`finishJob` queues a settling that
+ * arrives while one runs, and it runs after it), and a row already written for this settling
+ * (`at` after the job's `endedAt`) is never run again. Before each step the job and its agents
+ * are read again: one that started again since stops the rest (**an agent started again**), and
+ * a branch that moved after its tests ran isn't merged. The supervisor holds a message to the
+ * job's agents until the finish ends (`Supervisor.#afterFinish`). While the steps run the row
+ * says `state = 'running'` and which step; a daemon stopped then finds it on boot
+ * (`recoverFinishes`) and records where it was interrupted, running nothing again. A daemon
+ * stopping kills a running test's process group (`stopRunningTests`).
  *
  * The cards are derived from `job_finishes` (migrations 230, 390), as the other derived alerts
  * are from what is stored, so a restart keeps them; only dismissals are stored elsewhere.
  */
 
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import type { Agent, Alert, Job, WhenDone, WhenDoneResult, WhenDoneStep } from '@conductor/shared';
 import { WHEN_DONE_LABELS, durationWords, jobWhenDone, stepsOn, whenDoneCommitMessage } from '@conductor/shared';
 import { row, rows, type Db } from '../db/index.js';
@@ -51,7 +57,7 @@ import {
   previewMerge,
   type BranchRepo,
 } from '../workspace/branches.js';
-import { GitError } from '../workspace/git.js';
+import { GitError, git } from '../workspace/git.js';
 import { projectRepo } from '../workspace/project-repo.js';
 import { agentsForJob, getJob, getProject } from './store.js';
 
@@ -61,6 +67,10 @@ export const TEST_TIMEOUT_MS = 30 * 60 * 1000;
 export const TEST_TAIL_LINES = 200;
 /** What Test says, and the web pill's title, when the project has no test command. */
 export const NO_TEST_COMMAND = "set a test command on the project's Edit first";
+/** Why the steps stopped when the job or one of its agents went on working while they ran. */
+export const STARTED_AGAIN = "an agent started again, so the rest didn't run";
+/** After a test command exits: how long its output may still arrive, and its group has to go before SIGKILL. */
+const TEST_GRACE_MS = 2000;
 
 /** What finishing a job came to. `none` is a job this doesn't apply to, with why. */
 export type Finish =
@@ -162,8 +172,11 @@ function insert(db: Db, r: RowStart, end: RowEnd | null): number {
 }
 
 function progress(db: Db, id: number, steps: WhenDoneResult[], current: WhenDoneStep | null): void {
-  db.prepare('UPDATE job_finishes SET steps = ?, current_step = ? WHERE id = ?').run(JSON.stringify(steps), current, id);
+  // `cleaned` as soon as clean-up has gone in, so a daemon stopped before the row settles still knows the folder went.
+  db.prepare('UPDATE job_finishes SET steps = ?, current_step = ?, cleaned = ? WHERE id = ?').run(JSON.stringify(steps), current, cleanedIn(steps) ? 1 : 0, id);
 }
+
+const cleanedIn = (steps: WhenDoneResult[]): boolean => steps.some((s) => s.step === 'cleanup' && s.outcome === 'done');
 
 function settle(db: Db, id: number, ahead: number, end: RowEnd): void {
   db.prepare(
@@ -206,14 +219,42 @@ const short = (sha: string): string => sha.slice(0, 7);
 
 /** Each settling of a job finishes once (Amendment 219): `<jobId>@<endedAt>`. */
 const finishing = new Set<string>();
+/** Each job's finishes, one at a time: the newest, which runs after the ones before it. */
+const chains = new Map<string, Promise<Finish>>();
+/** Jobs one of whose agents waits to start again (`agentWaiting`): their steps stop before the next one. */
+const waiting = new Set<string>();
+
+/**
+ * One of `jobId`'s agents waits for its finish to end before it starts again — a message, a
+ * resume, a launch (`Supervisor.#afterFinish`). The finish stops before its next step, as it
+ * does for an agent that did start: the person is still working on the branch, so it isn't
+ * merged, pushed or cleaned up under them. Cleared once the job's last queued finish ends.
+ */
+export function agentWaiting(jobId: string): void {
+  if (chains.has(jobId)) waiting.add(jobId);
+}
 
 /**
  * What to do now that `jobId` has settled `done`. `forgetJob` removes a job as DELETE
  * /api/jobs/:jobId does (`Supervisor.deleteJob`); the steps never call it, but the repo's
  * Branches screen paths take it. Never throws: a failure is logged, and the job is left as it is.
+ *
+ * One job's finishes run one at a time: a settling that arrives while one runs is queued, and
+ * runs after it, against the job as it is then (the same settling again is "already ran").
  */
-export async function finishJob(db: Db, jobId: string, forgetJob: (jobId: string) => Promise<void>): Promise<Finish> {
-  // Before any await, so a second call for the same settling sees the first (as Amendment 216's pump does).
+export function finishJob(db: Db, jobId: string, forgetJob: (jobId: string) => Promise<void>): Promise<Finish> {
+  const before = chains.get(jobId);
+  const mine = (before ?? Promise.resolve()).then(() => finishOnce(db, jobId, forgetJob));
+  chains.set(jobId, mine);
+  void mine.finally(() => {
+    if (chains.get(jobId) !== mine) return;
+    chains.delete(jobId);
+    waiting.delete(jobId);
+  });
+  return mine;
+}
+
+async function finishOnce(db: Db, jobId: string, forgetJob: (jobId: string) => Promise<void>): Promise<Finish> {
   const job = getJob(db, jobId);
   if (!job || job.status !== 'done') return { outcome: 'none', why: 'the job is not done' };
   const key = `${jobId}@${job.endedAt ?? ''}`;
@@ -255,15 +296,17 @@ async function finish(db: Db, job: Job, forgetJob: (jobId: string) => Promise<vo
 
   const id = insert(db, start, null);
   const run = await runSteps(db, id, job, repo, want, agents);
+  // Told to whoever is on the job now: one that started again since is still one of them.
+  const told = agentsForJob(db, job.id);
 
   const after = (await listBranches(repo)).branches.find((x) => x.name === b.name);
   const ahead = after?.ahead ?? 0;
   const mergedNow = run.steps.some((s) => s.step === 'merge' && s.outcome === 'done');
-  const cleaned = run.steps.some((s) => s.step === 'cleanup' && s.outcome === 'done');
+  const cleaned = cleanedIn(run.steps);
   // Still ahead and not merged here: the card offers the merge. Otherwise it only says what was done.
   const kind: 'offer' | 'merged' = !mergedNow && ahead > 0 ? 'offer' : 'merged';
   const end: RowEnd = { kind, sha: run.sha, cleaned, why: run.why, steps: run.steps, stoppedAt: run.stoppedAt, testOutput: run.testOutput };
-  note(job, agents, run.steps, run.stoppedAt, want);
+  note(job, told.length > 0 ? told : agents, run.steps, run.stoppedAt, want);
   settle(db, id, ahead, end);
   return kind === 'offer'
     ? { outcome: 'offer', why: run.why, steps: run.steps, stoppedAt: run.stoppedAt }
@@ -276,16 +319,28 @@ interface Run {
   why: string | null;
   sha: string | null;
   testOutput: string | null;
+  /** The branch's tip when its tests started: merge refuses one that moved since. */
+  testedTip: string | null;
+}
+
+/** The job or one of its agents went on since it settled at `endedAt`, or one waits to: the steps after this one don't run. */
+function startedAgain(db: Db, jobId: string, endedAt: string | null): boolean {
+  if (waiting.has(jobId)) return true;
+  const now = getJob(db, jobId);
+  if (!now || now.status !== 'done' || now.endedAt !== endedAt) return true;
+  return agentsForJob(db, jobId).some((a) => a.status !== 'done');
 }
 
 async function runSteps(db: Db, id: number, job: Job, repo: BranchRepo, want: WhenDone, agents: Agent[]): Promise<Run> {
-  const run: Run = { steps: [], stoppedAt: null, why: null, sha: null, testOutput: null };
+  const run: Run = { steps: [], stoppedAt: null, why: null, sha: null, testOutput: null, testedTip: null };
   const open = notAllDone(agents);
   for (const step of stepsOn(want)) {
-    if (open) {
-      run.steps.push({ step, outcome: 'failed', said: `didn't ${WHEN_DONE_LABELS[step]}: ${open}` });
+    // Read again before every step: a finish may run for minutes, and the job is its agents' again once one starts.
+    const stop = open ?? (startedAgain(db, job.id, job.endedAt) ? STARTED_AGAIN : null);
+    if (stop) {
+      run.steps.push({ step, outcome: 'failed', said: `didn't ${WHEN_DONE_LABELS[step]}: ${stop}` });
       run.stoppedAt = step;
-      run.why = open;
+      run.why = stop;
       break;
     }
     progress(db, id, run.steps, step);
@@ -331,9 +386,10 @@ const STEPS: Record<WhenDoneStep, (c: StepCtx) => Promise<WhenDoneResult>> = {
     }
   },
 
-  async test({ db, job, run }) {
+  async test({ db, job, repo, run }) {
     const command = getProject(db, job.projectId)?.testCommand?.trim();
     if (!command) return { step: 'test', outcome: 'failed', said: `didn't test: ${NO_TEST_COMMAND}` };
+    run.testedTip = await tipOf(repo, job.branch);
     const t = await runTestCommand(command, job.worktreePath);
     if (t.code === 0 && !t.timedOut) return { step: 'test', outcome: 'done', said: `tests passed (${command}, ${durationWords(t.ms)})` };
     run.testOutput = t.tail;
@@ -358,6 +414,8 @@ const STEPS: Record<WhenDoneStep, (c: StepCtx) => Promise<WhenDoneResult>> = {
     if (preview.reason) return no(preview.reason);
     if (preview.conflicts === null) return no("this git can't tell beforehand whether the merge would conflict, so it wasn't merged by itself");
     if (preview.conflicts.length > 0) return no(`it would conflict with ${state.target} in ${preview.conflicts.join(', ')}`);
+    // What was tested is what goes in: a commit made while the tests ran wasn't tested.
+    if (run.testedTip !== null && (await tipOf(repo, b.name)) !== run.testedTip) return no('the branch moved after its tests ran');
     const merged = await branchAction(repo, { action: 'merge', branch: b.name });
     if (!merged.ok || !merged.sha) {
       return no(merged.conflict ? `the merge conflicted in ${merged.conflict.files.join(', ')} and was undone` : 'the merge did not go in');
@@ -366,10 +424,24 @@ const STEPS: Record<WhenDoneStep, (c: StepCtx) => Promise<WhenDoneResult>> = {
     return { step: 'merge', outcome: 'done', said: `merged into ${state.target} as ${short(merged.sha)}` };
   },
 
-  async push({ job, repo, want }) {
+  async push({ job, repo, want, run }) {
     const state = await listBranches(repo);
     const which = want.merge ? state.target : job.branch;
     if (!state.remote) return { step: 'push', outcome: 'failed', said: `didn't push ${which}: the project has no remote called origin to push to` };
+    if (which === state.target) {
+      // Pushing the target pushes all of it: only what this merge brought in goes by itself, never commits of yours.
+      const t = state.branches.find((x) => x.isTarget);
+      const before = run.sha ? `${run.sha}^1` : `refs/heads/${state.target}`;
+      const notOnRemote = t?.upstream ? [`${t.upstream.ref}..${before}`] : [before, '--not', `--remotes=${state.remote}`];
+      const own = Number((await git(repo.root, ['rev-list', '--count', ...notOnRemote])).trim());
+      if (own > 0) {
+        return {
+          step: 'push',
+          outcome: 'failed',
+          said: `didn't push: ${state.target} has ${own} ${own === 1 ? "commit of yours that isn't" : "commits of yours that aren't"} on ${state.remote}; push it yourself from Branches`,
+        };
+      }
+    }
     await branchAction(repo, { action: 'push', branch: which });
     return { step: 'push', outcome: 'done', said: `pushed ${which} to ${state.remote}` };
   },
@@ -389,6 +461,11 @@ const STEPS: Record<WhenDoneStep, (c: StepCtx) => Promise<WhenDoneResult>> = {
     return { step: 'cleanup', outcome: 'done', said: 'cleaned up the folder and branch' };
   },
 };
+
+/** The commit a branch points at now. */
+async function tipOf(repo: BranchRepo, branch: string): Promise<string> {
+  return (await git(repo.root, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])).trim();
+}
 
 /** The newest thing any agent of the job said, for the commit message. */
 function lastReply(db: Db, jobId: string): string | null {
@@ -457,9 +534,52 @@ export function outputTail(raw: string, lines = TEST_TAIL_LINES): string {
   return clean.slice(-lines).join('\n');
 }
 
+/** The process groups of the test commands running now: a daemon that stops kills them (`stopRunningTests`). */
+const testGroups = new Set<number>();
+
+/** Signal a test's whole process group; false when there is none left. */
+function signalGroup(pid: number, sig: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(-pid, sig);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** SIGTERM to `pid`'s group, and SIGKILL once `TEST_GRACE_MS` has gone by with any of it left. */
+function stopGroup(pid: number): void {
+  if (!signalGroup(pid, 'SIGTERM')) return;
+  setTimeout(() => signalGroup(pid, 'SIGKILL'), TEST_GRACE_MS).unref();
+}
+
+/**
+ * On shutdown: every running test command's process group gets SIGTERM, then SIGKILL after
+ * `TEST_GRACE_MS` for whatever is left. Its group is detached, so nothing else stops it with
+ * the daemon; the finish it ran for is recorded as interrupted on the next boot.
+ */
+export async function stopRunningTests(): Promise<void> {
+  const pids = [...testGroups];
+  if (pids.length === 0) return;
+  for (const pid of pids) signalGroup(pid, 'SIGTERM');
+  const until = Date.now() + TEST_GRACE_MS;
+  while (Date.now() < until && pids.some((pid) => signalGroup(pid, 0))) await new Promise((r) => setTimeout(r, 50));
+  for (const pid of pids) signalGroup(pid, 'SIGKILL');
+}
+
+/** The test command's environment: the terminal's, without any of Conductor's own (`CONDUCTOR_*`). */
+export function testEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = terminalEnv(env);
+  for (const k of Object.keys(out)) if (k.startsWith('CONDUCTOR_')) delete out[k];
+  return out;
+}
+
 /**
  * Run `command` in `cwd` with the login shell the terminal uses (`chosenShell`, its env as
- * `terminalEnv` makes it), in a process group of its own so a timeout stops everything it started.
+ * `testEnv` makes it), in a process group of its own. Its result is the shell's exit; then the
+ * group goes (SIGTERM, then SIGKILL), so nothing it left behind runs on, or holds its output
+ * open: that output has `TEST_GRACE_MS` more to arrive before the tail is read. A timeout stops
+ * the group the same way.
  */
 export function runTestCommand(command: string, cwd: string, timeoutMs = TEST_TIMEOUT_MS): Promise<TestRun> {
   const shell = chosenShell();
@@ -467,8 +587,8 @@ export function runTestCommand(command: string, cwd: string, timeoutMs = TEST_TI
   // Enough bytes for the tail and not the whole run: cut from the front when it grows.
   const KEEP = 512 * 1024;
   let out = '';
-  const take = (chunk: Buffer): void => {
-    out += chunk.toString('utf8');
+  const keep = (text: string): void => {
+    out += text;
     if (out.length > KEEP * 2) out = out.slice(-KEEP);
   };
   return new Promise((resolve) => {
@@ -476,57 +596,91 @@ export function runTestCommand(command: string, cwd: string, timeoutMs = TEST_TI
     let done = false;
     const child = spawn(shell.file, [...shell.args, '-c', command], {
       cwd,
-      env: terminalEnv(process.env),
+      env: testEnv(process.env),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
-    const group = (sig: NodeJS.Signals): void => {
-      try {
-        if (child.pid) process.kill(-child.pid, sig);
-      } catch {
-        // Already gone.
-      }
-    };
+    const pid = child.pid;
+    if (pid) testGroups.add(pid);
+    // One decoder per stream, so a character split across two chunks stays one character.
+    let open = 0;
+    let streamsClosed: () => void = () => {};
+    const closed = new Promise<void>((r) => (streamsClosed = r));
+    for (const stream of [child.stdout, child.stderr]) {
+      if (!stream) continue;
+      open += 1;
+      const decoder = new StringDecoder('utf8');
+      stream.on('data', (chunk: Buffer) => keep(decoder.write(chunk)));
+      stream.on('close', () => {
+        keep(decoder.end());
+        if (--open === 0) streamsClosed();
+      });
+    }
+    if (open === 0) streamsClosed();
     const timer = setTimeout(() => {
       timedOut = true;
-      group('SIGTERM');
-      setTimeout(() => group('SIGKILL'), 5000).unref();
+      if (pid) stopGroup(pid);
     }, timeoutMs);
     timer.unref();
-    child.stdout?.on('data', take);
-    child.stderr?.on('data', take);
     const end = (r: Omit<TestRun, 'tail' | 'ms' | 'timedOut'>): void => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve({ ...r, timedOut, tail: outputTail(out), ms: Date.now() - started });
+      const ms = Date.now() - started;
+      if (pid) stopGroup(pid);
+      const grace = new Promise<void>((r) => setTimeout(r, TEST_GRACE_MS).unref());
+      void Promise.race([closed, grace]).then(() => {
+        if (pid) testGroups.delete(pid);
+        resolve({ ...r, timedOut, tail: outputTail(out), ms });
+      });
     };
     child.on('error', (err) => end({ code: null, signal: null, error: err.message }));
-    child.on('close', (code, signal) => end({ code, signal }));
+    child.on('exit', (code, signal) => end({ code, signal }));
   });
 }
 
 /**
  * On boot: a finish whose steps were running when the daemon stopped is recorded as
  * **interrupted at <step>**, with a card, and nothing is run again — a half-run step is the
- * person's to look at, not something to repeat.
+ * person's to look at, not something to repeat. The step is the one the row says was running,
+ * else the one after the last it recorded; with every step recorded, it stopped **after the
+ * last step**, before the finish itself was written, and that is all it says.
  */
 export function recoverFinishes(db: Db): number {
   const stuck = rows<FinishRow>(db.prepare(`SELECT * FROM job_finishes WHERE state = 'running'`).all());
   for (const r of stuck) {
     const steps = parseSteps(r.steps);
-    const step: WhenDoneStep = r.current_step ?? 'commit';
-    steps.push({ step, outcome: 'interrupted', said: `interrupted at ${WHEN_DONE_LABELS[step]}` });
-    const merged = steps.some((s) => s.step === 'merge' && s.outcome === 'done');
-    const why = `the daemon stopped while ${WHEN_DONE_LABELS[step]} ran; nothing was run again`;
-    db.prepare(
-      `UPDATE job_finishes SET kind = ?, why = ?, steps = ?, stopped_at = ?, state = NULL, current_step = NULL WHERE id = ?`,
-    ).run(merged ? 'merged' : 'offer', why, JSON.stringify(steps), step, r.id);
     const job = getJob(db, r.job_id);
-    if (job) eventsFor(job, agentsForJob(db, r.job_id), `When done: ${steps.map((s) => s.said).join(' · ')}: ${why}.`);
+    const agents = job ? agentsForJob(db, r.job_id) : [];
+    const step = r.current_step ?? nextStep(steps, agents);
+    let why: string;
+    if (step) {
+      steps.push({ step, outcome: 'interrupted', said: `interrupted at ${WHEN_DONE_LABELS[step]}` });
+      why = `the daemon stopped while ${WHEN_DONE_LABELS[step]} ran; nothing was run again`;
+    } else {
+      const last = steps[steps.length - 1];
+      why = `the daemon stopped after ${last ? WHEN_DONE_LABELS[last.step] : 'the steps'} ran, before the finish was recorded; nothing was run again`;
+    }
+    const merged = steps.some((s) => s.step === 'merge' && s.outcome === 'done');
+    db.prepare(
+      `UPDATE job_finishes SET kind = ?, why = ?, steps = ?, stopped_at = ?, cleaned = ?, state = NULL, current_step = NULL WHERE id = ?`,
+    ).run(merged ? 'merged' : 'offer', why, JSON.stringify(steps), step, cleanedIn(steps) ? 1 : 0, r.id);
+    if (job) eventsFor(job, agents, `When done: ${steps.map((s) => s.said).join(' · ')}: ${why}.`);
   }
   if (stuck.length > 0) changed();
   return stuck.length;
+}
+
+/**
+ * The step after the last one `steps` recorded, of those the agents asked for; null when the
+ * last one recorded was the last to run (every step went in, or one failed and stopped the rest).
+ */
+function nextStep(steps: WhenDoneResult[], agents: Agent[]): WhenDoneStep | null {
+  const on = stepsOn(jobWhenDone(agents));
+  const last = steps[steps.length - 1];
+  if (!last) return on[0] ?? 'commit';
+  if (last.outcome === 'failed' || last.outcome === 'interrupted') return null;
+  return on[on.indexOf(last.step) + 1] ?? null;
 }
 
 function parseSteps(raw: string | null): WhenDoneResult[] {
@@ -545,10 +699,11 @@ function parseSteps(raw: string | null): WhenDoneResult[] {
  * of its agents put the folder back by itself; a folder that went missing any other way is refused.
  */
 export function cleanedByFinish(db: Db, jobId: string): boolean {
-  const r = row<{ cleaned: number; restored_at: string | null }>(
-    db.prepare('SELECT cleaned, restored_at FROM job_finishes WHERE job_id = ? AND state IS NULL ORDER BY id DESC LIMIT 1').get(jobId),
+  // A row still running counts once its clean-up is recorded done: the folder went, whatever comes after.
+  const r = row<{ cleaned: number; steps: string | null; restored_at: string | null }>(
+    db.prepare('SELECT cleaned, steps, restored_at FROM job_finishes WHERE job_id = ? ORDER BY id DESC LIMIT 1').get(jobId),
   );
-  return r !== undefined && r.cleaned === 1 && r.restored_at === null;
+  return r !== undefined && r.restored_at === null && (r.cleaned === 1 || cleanedIn(parseSteps(r.steps)));
 }
 
 /** The folder a clean-up took away is back: messages go on as for any other folder. */

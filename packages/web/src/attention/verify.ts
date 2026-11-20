@@ -803,15 +803,24 @@ console.log('\n11 · a job finished: merge it, merge and clean up, or open Branc
     testOutput: 'FAIL  one\n1 failed',
   };
   const stopActs = alertActions(stopped, []);
-  check('a stop before the merge offers the merge alone, then Branches and dismiss: never merge and clean up', stopActs.map((a) => a.id).join(' ') === 'merge branches dismiss', stopActs.map((a) => a.id).join(' '));
-  check('its merge is marked as the stop card’s', stopActs[0]?.id === 'merge' && stopActs[0].stopped === true);
+  check('a failed Test offers Branches first, then the merge, then dismiss: never merge and clean up', stopActs.map((a) => a.id).join(' ') === 'branches merge dismiss', stopActs.map((a) => a.id).join(' '));
+  check('…Branches is its primary, and the merge is the stop card’s, after failed tests', stopActs[0]?.id === 'branches' && stopActs[0].primary === true && stopActs[1]?.id === 'merge' && stopActs[1].stopped === true && stopActs[1].testsFailed === true);
+  check('…which reads "Merge anyway into <target>", a plain button whose title says the tests failed',
+    /if \(a\.testsFailed\) return `Merge anyway into \$\{a\.into\}`;/.test(card) && /a\.id === 'merge' && a\.stopped === true && a\.testsFailed !== true/.test(card) &&
+      /a\.id === 'branches' && a\.primary === true/.test(card) && /if \(a\.testsFailed\) return `The tests failed: merge/.test(card));
+  const pushStop: Alert = { ...stopped, id: 'finished:11', cause: 'stopped at push', stoppedAt: 'push', steps: ['committed a1b2c3d', "didn't push: no origin"], detail: "didn't push: no origin" };
+  delete (pushStop as Partial<Alert>).testOutput;
+  const pushActs = alertActions(pushStop, []);
+  check('a stop at any other step offers the merge alone, then Branches and dismiss', pushActs.map((a) => a.id).join(' ') === 'merge branches dismiss', pushActs.map((a) => a.id).join(' '));
+  check('its merge is marked as the stop card’s, its primary', pushActs[0]?.id === 'merge' && pushActs[0].stopped === true && pushActs[0].testsFailed === undefined);
   check('a plain finished card still offers merge and clean up first', alertActions(finished, []).map((a) => a.id).join(' ') === 'merge_clean merge branches dismiss');
   check('the stop card’s merge reads "Merge into <target>" and is the primary button', /return a\.stopped \? `Merge into \$\{a\.into\}` : 'merge'/.test(card) && /a\.id === 'merge' && a\.stopped === true/.test(card));
   check('the stop card says which step stopped and why', /k=\{`stopped at \$\{WHEN_DONE_LABELS\[alert\.stoppedAt\]\}`\}/.test(card) && /v=\{alert\.detail\}/.test(card));
   check('the steps are listed, in the order they ran', /<Kv k="when done" v=\{alert\.steps\.join\(' · '\)\} \/>/.test(card));
   check('the Test output tail is in a fold', /<details className="atn-fold">\s*<summary>the test's last lines<\/summary>\s*<pre>\{alert\.testOutput\}<\/pre>/.test(card));
   const stopNote = whenDoneStopNote('test', 'main');
-  check('the stop note: nothing after it ran, the job and agents stay, the merge only if clean', /stopped at test, so nothing after it ran/.test(stopNote) && /its agents stay/.test(stopNote) && /Merge into main merges it only if it merges cleanly/.test(stopNote), stopNote);
+  check('the stop note: nothing after it ran, the job and agents stay, the merge anyway, untested, only if clean', /stopped at test, so nothing after it ran/.test(stopNote) && /its agents stay/.test(stopNote) && /Merge anyway into main merges it untested only if it merges cleanly/.test(stopNote), stopNote);
+  check('…and at another step, the plain merge', /Merge into main merges it only if it merges cleanly/.test(whenDoneStopNote('push', 'main')), whenDoneStopNote('push', 'main'));
   check('the stop card has its own note, not the plain finished one', /alert\.stoppedAt !== undefined && \(\s*<div className="atn-note">\s*\{whenDoneStopNote\(/.test(card));
   check('the title names the stop', alertTitle(stopped, []).subject === 'stopped at test when done: merge into main?', alertTitle(stopped, []).subject);
   check('the top bar too', alertWord(stopped) === 'stopped at test: merge?', alertWord(stopped));
