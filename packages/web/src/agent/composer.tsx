@@ -20,7 +20,7 @@
 
 import { projClass, useProjectColor } from '../lib/projectColor.js';
 import { useDraft } from '../lib/drafts.js';
-import { useJobs, useProjects } from '../lib/store.js';
+import { store, useJobs, useProjects } from '../lib/store.js';
 import { openProject } from '../shell/nav.js';
 import { replyBarLine, replyBarWords } from './replybar.js';
 import { useEffect, useMemo, useState } from 'react';
@@ -57,7 +57,7 @@ import { LaterRow, RepeatRow, ScheduledList, whenDoneLabel, whenDoneRefusal } fr
 import { saveRecurringMessage } from '../fleet/endpoints.js';
 import { fmtWhen } from '../lib/when.js';
 import { agentPairWords } from '../shell/spend.js';
-import { ENTER_KEY, SETTINGS_KEY, WORKING_SAYS, enterAction, enterSends, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, settingsToggled, tokensLine } from './settingsfold.js';
+import { ENTER_AGENTS_KEY, ENTER_KEY, SETTINGS_KEY, WORKING_SAYS, agentEnterSends, enterAction, appliesSays, dollarsLine, overSays, settingsShown, settingsSummary, parseEnterChoices, setEnterChoice, settingsToggled, tokensLine } from './settingsfold.js';
 
 interface PillDef {
   id: string;
@@ -243,6 +243,17 @@ const MODES: ModeDef[] = [
 /** `$25` or `$25.50`, the way the field shows a cap it was given. */
 const capText = (cap: number | null): string =>
   cap === null ? '' : Number.isInteger(cap) ? String(cap) : cap.toFixed(2);
+
+/**
+ * This agent's ⏎ new line ticked or unticked (Amendment 220), read from the settings now so two
+ * quick ticks both land. The agents the hub no longer has drop out as it is written, as the reply
+ * ticks do (`markReply`); none do before the snapshot has any.
+ */
+function writeEnterChoice(agentId: string, newline: boolean): void {
+  const ids = store.select('agents:*', (s) => s.agents).map((a) => a.id);
+  const next = setEnterChoice(parseEnterChoices(readSetting(ENTER_AGENTS_KEY)), agentId, newline, ids.length > 0 ? new Set(ids) : undefined);
+  writeSetting(ENTER_AGENTS_KEY, JSON.stringify(next));
+}
 
 export function Composer({ agent }: { agent: Agent }) {
   // Outlives the composer: switching to the terminal, another tab or a reload keeps it (Amendment 64).
@@ -538,8 +549,9 @@ export function Composer({ agent }: { agent: Agent }) {
 
   // Folded or open, for every agent (Amendment 96). Folded keeps one line of what's set.
   const open = settingsShown(useSetting(SETTINGS_KEY));
-  // What ⏎ does in the box (Amendment 203): sends unless you ticked ⏎ new line.
-  const enterSendsNow = enterSends(useSetting(ENTER_KEY));
+  // What ⏎ does in the box (Amendment 203): sends unless you ticked ⏎ new line, on this agent
+  // (Amendment 220); one you haven't ticked or unticked does what the one setting from before says.
+  const enterSendsNow = agentEnterSends(parseEnterChoices(useSetting(ENTER_AGENTS_KEY)), agent.id, useSetting(ENTER_KEY));
   // The project's colour (Amendment 210), for the box's edge (Amendment 212).
   const boxColor = useProjectColor(agent.projectId);
   // Which project and agent the box writes to, across its top, tinted in that colour (Amendment 215).
@@ -684,12 +696,12 @@ export function Composer({ agent }: { agent: Agent }) {
           <div className="ag-crow-r">
             <label
               className={`ag-enter${enterSendsNow ? '' : ' is-on'}`}
-              title={enterSendsNow ? '⏎ sends, ⇧⏎ makes a new line. Tick it to make ⏎ a new line, for a long message' : '⏎ makes a new line; press send to send. Untick it for ⏎ to send again'}
+              title={enterSendsNow ? '⏎ sends, ⇧⏎ makes a new line. Tick it to make ⏎ a new line on this agent, for a long message; other agents keep their own' : '⏎ makes a new line on this agent; press send to send. Untick it for ⏎ to send again here; other agents keep their own'}
             >
               <input
                 type="checkbox"
                 checked={!enterSendsNow}
-                onChange={(e) => writeSetting(ENTER_KEY, e.target.checked ? 'newline' : 'send')}
+                onChange={(e) => writeEnterChoice(agent.id, e.target.checked)}
               />
               ⏎ new line
             </label>

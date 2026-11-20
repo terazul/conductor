@@ -200,6 +200,26 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 220 — post-merge, applied. **⏎ new line is each agent's own.**
+
+Web only (`agent/settingsfold.ts`, `agent/composer.tsx`, the checks in `lib/verify.ts`) and `docs/MANUAL.md`. Asked
+20 Nov: *"make the "check box New Line" be specific to each agent, today it is a setting that goes across all
+agents."* Amendment 203's **⏎ new line** was one setting, `conductor.enterNewline`, for every agent. Each agent's choice
+is now kept in Settings under `conductor.agentEnterNewline`, `{agentId: 'newline' | 'send'}` (`parseEnterChoices`;
+anything else stored is no choice). An agent with no choice of its own does what `conductor.enterNewline` says
+(`agentEnterSends`), so a box ticked before reads as it did, on every agent, until each is ticked or unticked; the old
+key is never written again. Ticking or unticking writes only that agent's choice (`setEnterChoice`, through the
+composer's `writeEnterChoice`, read from the settings at the moment, so two quick ticks both land): unticking is kept
+as `send`, so it holds where the old setting is a new line. As the reply ticks are (`setAck`, Amendment 200), the
+agents the hub no longer has drop out as it is written, never the one being ticked, and none before the snapshot has
+any; the newest 200 agents are kept. The box's title says it is this agent's (*Tick it to make ⏎ a new line on this
+agent, for a long message; other agents keep their own*). *Decisions:* folds have no pruning of removed agents (they
+are bounded by recency), so the reply ticks' pruning is the one copied, with a recency bound beside it. *Departures:*
+none. **Verified:** `lib/verify.ts` §66, 16 checks (the key; what parses; the fallback and the own choice; one agent
+written alone, the others kept; untick held over the old setting; a removed agent dropped, never the one ticked, and
+none before the agents are known; the bound and recency; the composer writing this agent only, never the old key; its
+title; the manual), and §49's three source checks now read the per-agent form. Not tried in a browser.
+
 ### Amendment 219 — post-merge, applied. **When done: commit, test, merge, push and clean up, per agent.**
 
 Shared (new `shared/src/whendone.ts`, `wire.ts`), daemon (migration `390_finish_steps.sql`, `session/finish.ts`,

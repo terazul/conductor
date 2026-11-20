@@ -20,6 +20,9 @@ the last of it on 12 Oct).
 
 ## Right now
 
+- [x] **⏎ new line for each agent, not one for all.** Asked for (20 Nov): *"make the "check box New Line" be specific
+  to each agent, today it is a setting that goes across all agents."* *Done (20 Nov): Amendment 220 (each agent keeps
+  its own, in Settings; one never ticked does what the one setting did; a removed agent's choice drops out).*
 - [x] **Commit, test, merge, push and clean up when a job is done, each on its own.** Asked for (20 Nov), after
   *"but cleanup destroys the agent"*: *"why not have "Merge" "Commit" "Push" "Test" "Cleanup", I can always delete
   with the "Remove" button today"*. *Done (20 Nov): Amendment 219 (five **when done:** pills per agent, in its
