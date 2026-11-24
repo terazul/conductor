@@ -1302,7 +1302,7 @@ console.log('\n30 · the OpenRouter key is never shown, and a daemon without the
   globalThis.fetch = realFetch;
 
   check('the key line says whether and where, and no more', /OPENROUTER_API_KEY/.test(keyLine({ set: true, source: 'env' })) && /^Set/.test(keyLine({ set: true, source: 'settings' })) && /^Not set/.test(keyLine({ set: false, source: null })));
-  check('engines are named for people', providerLabel('openrouter') === 'OpenRouter' && providerLabel('copilot') === 'Copilot' && providerLabel(undefined) === 'Claude' && providerLabel('other') === 'other');
+  check('engines are named for people', providerLabel('openrouter') === 'OpenRouter' && providerLabel('copilot') === 'Copilot' && providerLabel('codex') === 'ChatGPT (Codex)' && providerLabel(undefined) === 'Claude' && providerLabel('other') === 'other');
 
   const route = readFileSync(new URL('../settings/route.tsx', import.meta.url), 'utf8');
   const lib = readFileSync(new URL('./providers.ts', import.meta.url), 'utf8');
@@ -2033,15 +2033,16 @@ console.log('\n39 · this month beside today, and a monthly budget beside the da
 console.log('\n40 · a monthly budget for each engine and each Claude route, in its own unit (Amendment 188)');
 {
   const src = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
-  check('the labels name the engine and the route, never the cloud it is on', providerBudgetLabel('claude') === 'Claude' && providerBudgetLabel('claude/us') === 'Claude · us' && providerBudgetLabel('claude/direct') === 'Claude · no prefix' && providerBudgetLabel('copilot') === 'Copilot' && providerBudgetLabel('openrouter') === 'OpenRouter');
+  check('the labels name the engine and the route, never the cloud it is on', providerBudgetLabel('claude') === 'Claude' && providerBudgetLabel('claude/us') === 'Claude · us' && providerBudgetLabel('claude/direct') === 'Claude · no prefix' && providerBudgetLabel('copilot') === 'Copilot' && providerBudgetLabel('openrouter') === 'OpenRouter' && providerBudgetLabel('codex') === providerLabel('codex'));
   const spend: ProviderSpend[] = [
     { key: 'claude', provider: 'claude', unit: 'usd', today: 1.5, month: 42.1 },
     { key: 'claude/us', provider: 'claude', route: 'us', unit: 'usd', today: 0, month: 12 },
     { key: 'copilot', provider: 'copilot', unit: 'tokens', today: 120_000, month: 5_200_000 },
     { key: 'openrouter', provider: 'openrouter', unit: 'tokens', today: 0, month: 0 },
+    { key: 'codex', provider: 'codex', unit: 'tokens', today: 75, month: 150 },
   ];
   const rows = providerSpendRows(spend, { claude: 100, copilot: 5_000_000 });
-  check('By provider has a row for each, in the order the daemon sent', rows.map((r) => r.name).join() === 'Claude,Claude · us,Copilot,OpenRouter', rows.map((r) => r.name).join());
+  check('By provider has a row for each, in the order the daemon sent', rows.map((r) => r.name).join() === 'Claude,Claude · us,Copilot,OpenRouter,ChatGPT (Codex)', rows.map((r) => r.name).join());
   check('Claude in dollars, Copilot in tokens', rows[0]!.today === '$1.50' && rows[0]!.month === '$42.10' && rows[2]!.today === '120k tok' && rows[2]!.month === '5.2M tok', JSON.stringify(rows));
   check('a budget reads with its share, and over when reached; none is a dash', rows[0]!.budget === '$100.00 · 42%' && !rows[0]!.over && rows[2]!.budget === '5M tok · 104%, over' && rows[2]!.over && rows[3]!.budget === '—', JSON.stringify(rows.map((r) => r.budget)));
   check('a route is marked as one, and nothing shows before the daemon sends figures', rows[1]!.route && !rows[0]!.route && providerSpendRows(null, {}).length === 0);

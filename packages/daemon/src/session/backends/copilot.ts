@@ -51,6 +51,7 @@ import {
   type Tool,
 } from '@github/copilot-sdk';
 import type { Autonomy, EffortLevel, EventPayload } from '@conductor/shared';
+import type { CopilotQuota, OpenRouterKeyUsage } from '@conductor/shared';
 import type { AgentBackend, PermissionDecision, ProviderModel, RunOpts, RunOutcome, RunnerScope } from '../backend.js';
 import { arbiter, toolRuleFor } from '../../arbiter/index.js';
 import type { Db } from '../../db/index.js';
@@ -72,7 +73,7 @@ export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const MODELS_TTL_MS = 10 * 60_000;
 
 /** What Conductor uses of a client and a session. The fake in verify.ts is one of each. */
-export type CopilotClientLike = Pick<CopilotClient, 'start' | 'stop' | 'createSession' | 'resumeSession' | 'getAuthStatus' | 'listModels'>;
+export type CopilotClientLike = Pick<CopilotClient, 'start' | 'stop' | 'createSession' | 'resumeSession' | 'getAuthStatus' | 'listModels'> & Partial<Pick<CopilotClient, 'rpc'>>;
 export type CopilotSessionLike = Pick<CopilotSession, 'on' | 'send' | 'abort' | 'disconnect' | 'setModel'>;
 
 /**
@@ -202,6 +203,43 @@ export function copilotRefusal(): string | null {
     `not logged in to GitHub Copilot (${lastLogin.note ?? 'not logged in'}) — sign in with ` +
     '`copilot login` or `gh auth login`, or set GH_TOKEN, then try again'
   );
+}
+
+export async function copilotQuota(): Promise<CopilotQuota[]> {
+  if (!copilotSdk.credentialPresent()) return [];
+  const rpc = (await clientFor('copilot')).rpc;
+  if (!rpc) return [];
+  const { quotaSnapshots } = await rpc.account.getQuota({});
+  return Object.entries(quotaSnapshots).flatMap(([kind, quota]) => {
+    if (!quota) return [];
+    const unlimited = quota.isUnlimitedEntitlement === true;
+    const percent = quota.remainingPercentage;
+    const remainingPercent = !unlimited && Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : null;
+    const resetsAt = quota.resetDate && Number.isFinite(Date.parse(quota.resetDate)) ? quota.resetDate : null;
+    return [{ kind, remainingPercent, unlimited, resetsAt }];
+  });
+}
+
+export async function openRouterKeyUsage(): Promise<OpenRouterKeyUsage | null> {
+  const key = openRouterKey();
+  if (!key) return null;
+  const response = await fetch(`${OPENROUTER_BASE_URL}/key`, {
+    headers: { Authorization: `Bearer ${key}` },
+    redirect: 'error',
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) throw new Error('OpenRouter key usage is unavailable.');
+  const { data } = await response.json() as { data?: Record<string, unknown> };
+  if (!data) throw new Error('OpenRouter did not report key usage.');
+  const amount = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const reset = data.limit_reset;
+  return {
+    monthUsd: amount(data.usage_monthly),
+    remainingUsd: amount(data.limit_remaining),
+    limitUsd: amount(data.limit),
+    reset: reset === 'daily' || reset === 'weekly' || reset === 'monthly' ? reset : null,
+  };
 }
 
 export function openRouterRefusal(): string | null {

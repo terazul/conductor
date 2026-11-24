@@ -11,7 +11,8 @@
 
 import type { AddAgentRequest, Agent, AgentRole, Autonomy } from '@conductor/shared';
 import { READ_ONLY_BASH, READ_ONLY_BASH_DENIED, WRITE_TOOLS, createsCycle, isReadOnlyRole, rewireOnRemoval } from '@conductor/shared';
-import { CLAUDE, parseTokens, providerOf } from '../lib/providers.js';
+import { CLAUDE, CODEX, parseTokens, providerOf } from '../lib/providers.js';
+import { codexAutonomy } from './engine.js';
 import { DEFAULT_BUDGET_USD, DEFAULT_MODE, defaultPills, toAutonomy } from './autonomy.js';
 import { DEFAULT_BUDGET_TOKENS } from './engine.js';
 import type { Persona } from './personas.js';
@@ -186,13 +187,14 @@ export function addAgentSpec(draft: AddDraft, agents: readonly Agent[], persona:
   const cap = parseCap(draft.budget, usd);
   const engine = jobEngine(agents);
   const brief = draft.brief.trim() || persona?.brief.trim() || '';
+  const autonomy = addedAutonomy(agents, draft.role, persona, 'why' in cap ? { usd: 0 } : cap);
   return {
     role: draft.role,
     model: draft.model.trim(),
     ...(brief ? { brief } : {}),
     dependsOnRoles: draft.dependsOnRoles,
     ...(draft.feeds.length > 0 ? { feeds: draft.feeds } : {}),
-    autonomy: addedAutonomy(agents, draft.role, persona, 'why' in cap ? { usd: 0 } : cap),
+    autonomy: engine === CODEX ? codexAutonomy(autonomy) : autonomy,
     ...(persona ? { persona: persona.id } : {}),
     ...(persona?.systemPrompt ? { systemPrompt: persona.systemPrompt } : {}),
     ...(persona && persona.skills.length > 0 ? { skills: persona.skills } : {}),

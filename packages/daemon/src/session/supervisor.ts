@@ -977,7 +977,7 @@ export class Supervisor implements AgentControl {
     if (spec.autonomy.budgetUsd === null && (spec.autonomy.budgetTokens ?? null) === null) {
       throw new Error(`${spec.role} needs a budget of its own — a cap per agent, as Spawn sets one`);
     }
-    const readOnly = readOnlyRefusal(spec.role, spec.autonomy);
+    const readOnly = provider === 'codex' && spec.autonomy.mode === 'plan' ? null : readOnlyRefusal(spec.role, spec.autonomy);
     if (readOnly) throw new Error(readOnly);
 
     const agent = insertAgent(this.#db, agentRow(spec, { id: newId('agt'), jobId, projectId: job.projectId, dependsOn }));

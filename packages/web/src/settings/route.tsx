@@ -16,6 +16,9 @@ import {
   parseProviderBudgets,
   providerBudgetLabel,
   type BudgetUnit,
+  type ClaudeSourceResponse,
+  type CopilotQuota,
+  type OpenRouterKeyUsage,
   type EffortLevel,
   type ModelTier,
   type ProviderSpend,
@@ -29,6 +32,7 @@ import { REVOKE_NOTE, copyLine, listRules, revokeRule, ruleOrigin, ruleTitle } f
 import { readSetting, useSetting, writeSetting } from '../lib/settings.js';
 import { useModels } from '../lib/models.js';
 import { ModelSelect } from '../shell/ui.js';
+import { CodexUsage } from '../shell/CodexUsage.js';
 import { chooseTheme, useTheme, type ThemeChoice } from '../shell/theme.js';
 import { AGENT_INSPECTOR, AGENT_NEEDS, PREVIEW_DOCK, PROJECT_COLUMN, PROJECT_DOCK, QUEUE_PANEL, TERMINAL_DOCK } from '../shell/panels.js';
 import { EFFORTS, MODES, PILLS, WHEN_DONE_PILLS } from '../spawn/autonomy.js';
@@ -47,6 +51,8 @@ import {
   type PersonaTools,
 } from '../spawn/personas.js';
 import { errorText } from '../lib/errors.js';
+import { api } from '../lib/feed.js';
+import { fmtWhen } from '../lib/when.js';
 import { homeish, saveHome } from './storage.js';
 import { setStorage, useStorage } from './always.js';
 import {
@@ -499,7 +505,7 @@ function MonthlyField() {
 
 /**
  * A monthly budget for each engine, and under Claude for each route (Amendment 188), below the
- * fleet's. Claude and its routes in dollars, Copilot and OpenRouter in tokens, as each reports.
+ * fleet's. Claude and its routes in dollars, the other engines in tokens.
  * One row each: the month's spend in its unit and a field to set or clear. All of them are one
  * setting, a JSON object, written whole through the same settings route as the others.
  */
@@ -507,10 +513,11 @@ function ProviderBudgets() {
   const stored = useSetting(PROVIDER_BUDGETS_KEY);
   const budgets = parseProviderBudgets(stored);
   const correction = useMonthCorrection();
-  // A daemon from before it sends no figures: the engines alone, at nothing spent.
-  const rows: ProviderSpend[] =
-    useProviderSpend() ??
-    Object.entries(BUDGET_ENGINES).map(([provider, unit]) => ({ key: provider, provider, unit, today: 0, month: 0 }));
+  const figures = useProviderSpend() ?? [];
+  const rows: ProviderSpend[] = Object.entries(BUDGET_ENGINES).flatMap(([provider, unit]) => [
+    figures.find((row) => row.key === provider) ?? { key: provider, provider, unit, today: 0, month: 0 },
+    ...figures.filter((row) => row.provider === provider && row.route !== undefined),
+  ]);
   return (
     <div className="st-field" role="group" aria-label="monthly budget by provider">
       <span>monthly budget by provider — empty for none</span>
@@ -519,9 +526,9 @@ function ProviderBudgets() {
         <ProviderBudgetRow key={r.key} row={r} budget={budgets[r.key] ?? null} stored={stored} />
       ))}
       <p className="st-dim">
-        Claude and its routes are in dollars; a route is the prefix before <code>.anthropic.</code> in the model's name, and
-        no prefix is calling Anthropic directly. Copilot and OpenRouter are in tokens, input plus output: 500k, 2M. Reaching
-        one is a warning in Needs You; nothing is stopped. Each resets on the 1st.
+        Claude and its routes show the SDK’s dollar estimates. Route labels come from the prefix before <code>.anthropic.</code>
+        in the model name. The other engines count input and output tokens. These monthly budgets warn in
+        Needs You and reset on the 1st. Account allowances and billing details are under Providers.
       </p>
     </div>
   );
@@ -558,8 +565,48 @@ function ProviderBudgetRow({ row, budget, stored }: { row: ProviderSpend; budget
   );
 }
 
+function claudeSourceLine(source: ClaudeSourceResponse | null | undefined): string {
+  if (source === undefined) return 'Checking Claude Code…';
+  if (!source || source.mode === 'unknown') return 'Claude Code connection details are unavailable.';
+  if (source.mode === 'gateway') return `API gateway · ${source.host}`;
+  if (source.mode === 'api') {
+    const platforms: Record<string, string> = {
+      bedrock: 'AWS Bedrock',
+      vertex: 'Google Vertex AI',
+      foundry: 'Microsoft Foundry',
+      anthropicAws: 'Claude on AWS',
+      anthropicGoogleCloud: 'Claude on Google Cloud',
+      mantle: 'Anthropic Mantle',
+      gateway: 'API gateway',
+    };
+    const platform = platforms[source.platform ?? ''] ?? 'Anthropic API';
+    return `${platform} · API billing`;
+  }
+  if (source.mode === 'signed-out') return 'Claude Code is signed out.';
+  const plan = source.plan?.replace(/[-_]/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+  return plan ? `Claude ${plan} subscription` : 'Claude subscription';
+}
+
+function copilotQuotaLine(quota: CopilotQuota): string {
+  const kind = quota.kind === 'premium_interactions' ? 'Premium requests'
+    : quota.kind.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+  const remaining = quota.unlimited ? 'unlimited' : quota.remainingPercent === null ? 'allowance unavailable'
+    : `${quota.remainingPercent.toLocaleString(undefined, { maximumFractionDigits: 1 })}% left`;
+  return `${kind} · ${remaining}${quota.resetsAt ? `, resets ${fmtWhen(quota.resetsAt)}` : ''}`;
+}
+
+const usd = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
+
+function openRouterUsageLine(usage: OpenRouterKeyUsage): string {
+  const month = usage.monthUsd === null ? null : `${usd.format(usage.monthUsd)} billed to this key this month`;
+  const limit = usage.limitUsd === null ? 'No key spending cap'
+    : usage.remainingUsd === null ? `${usd.format(usage.limitUsd)} key cap`
+      : `${usd.format(usage.remainingUsd)} left of ${usd.format(usage.limitUsd)}${usage.reset ? ` ${usage.reset}` : ''} key cap`;
+  return [month, limit].filter(Boolean).join(' · ');
+}
+
 /**
- * The engines other than Claude (Amendment 80): OpenRouter's key, and the Copilot login.
+ * Connection, billing source and available account allowances for each engine.
  *
  * THE KEY IS WRITE-ONLY. The daemon says whether one is set and where from, and nothing
  * more; this screen never holds it except in the field while you type, and empties the
@@ -570,6 +617,9 @@ function ProvidersSection() {
   // undefined: still asking. null: this daemon has no such route.
   const [key, setKey] = useState<OpenRouterKeyState | null | undefined>(undefined);
   const [login, setLogin] = useState<CopilotLogin | null | undefined>(undefined);
+  const [claude, setClaude] = useState<ClaudeSourceResponse | null | undefined>(undefined);
+  const [quotas, setQuotas] = useState<CopilotQuota[] | null | undefined>(undefined);
+  const [routerUsage, setRouterUsage] = useState<OpenRouterKeyUsage | null | undefined>(undefined);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
@@ -580,16 +630,38 @@ function ProvidersSection() {
     const failed = (err: unknown): void => {
       if (live) setError(errorText(err));
     };
+    void api<ClaudeSourceResponse>('/api/providers/claude/source').then(
+      (source) => { if (live) setClaude(source); },
+      () => { if (live) setClaude(null); },
+    );
     readKeyState().then((k) => {
       if (live) setKey(k);
     }, failed);
     readCopilotLogin().then((l) => {
-      if (live) setLogin(l);
+      if (!live) return;
+      setLogin(l);
+      if (l?.authenticated) {
+        void api<{ quotas: CopilotQuota[] }>('/api/providers/copilot/quota').then(
+          ({ quotas: result }) => { if (live) setQuotas(result); },
+          () => { if (live) setQuotas(null); },
+        );
+      }
     }, failed);
     return () => {
       live = false;
     };
   }, []);
+
+  useEffect(() => {
+    setRouterUsage(undefined);
+    if (!key?.set) return;
+    let live = true;
+    void api<{ usage: OpenRouterKeyUsage | null }>('/api/providers/openrouter/usage').then(
+      ({ usage }) => { if (live) setRouterUsage(usage); },
+      () => { if (live) setRouterUsage(null); },
+    );
+    return () => { live = false; };
+  }, [key]);
 
   const send = async (next: string | null): Promise<void> => {
     setBusy(true);
@@ -610,8 +682,22 @@ function ProvidersSection() {
   return (
     <>
       <div className="st-field">
-        <span>OpenRouter key</span>
-        <p className="st-dim">{key === undefined ? (error ? '—' : 'Asking the daemon…') : keyLine(key)}</p>
+        <span>{providerBudgetLabel('claude')}</span>
+        <p className="st-dim">{claudeSourceLine(claude)}</p>
+        {claude?.mode === 'subscription' && <p className="st-dim">Check the Claude subscription allowance in Claude Code with <code>/usage</code>.</p>}
+      </div>
+      <div className="st-field">
+        <span>{providerBudgetLabel('copilot')}</span>
+        <p className="st-dim">GitHub account · {login === undefined ? (error ? 'Status unavailable.' : 'Checking sign-in…') : loginLine(login)}</p>
+        {login?.note && !login.authenticated && <p className="st-dim">{login.note}</p>}
+        {login?.authenticated && (quotas?.length
+          ? quotas.map((quota) => <p key={quota.kind} className="st-dim">{copilotQuotaLine(quota)}</p>)
+          : <p className="st-dim">{quotas === undefined ? 'Checking account allowance…' : 'Copilot account allowance is unavailable.'}</p>)}
+      </div>
+      <div className="st-field">
+        <span>{providerBudgetLabel('openrouter')}</span>
+        <p className="st-dim">API key · {key === undefined ? (error ? 'Status unavailable.' : 'Checking key…') : keyLine(key)}</p>
+        {key?.set && <p className="st-dim">{routerUsage === undefined ? 'Checking key usage…' : routerUsage ? openRouterUsageLine(routerUsage) : 'OpenRouter key usage is unavailable.'}</p>}
       </div>
       {key && !fromEnv && (
         <div className="st-row">
@@ -641,9 +727,8 @@ function ProvidersSection() {
         </div>
       )}
       <div className="st-field">
-        <span>GitHub Copilot</span>
-        <p className="st-dim">{login === undefined ? (error ? '—' : 'Asking the daemon…') : loginLine(login)}</p>
-        {login?.note && !login.authenticated && <p className="st-dim">{login.note}</p>}
+        <span>{providerBudgetLabel('codex')}</span>
+        <div className="st-dim"><CodexUsage /></div>
       </div>
       {said && <p className="st-ok">{said}</p>}
       {error && <p className="st-err">{error}</p>}

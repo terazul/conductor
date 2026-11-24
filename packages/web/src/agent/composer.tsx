@@ -40,9 +40,11 @@ import {
   providerOf,
   tokenWords,
   useProviderModels,
+  CODEX,
   useProviders,
 } from '../lib/providers.js';
 import {
+  CODEX_MODES,
   DEFAULT_EFFORT,
   EFFORTS,
   NO_TEST_COMMAND_TITLE,
@@ -289,6 +291,7 @@ export function Composer({ agent }: { agent: Agent }) {
    */
   const claude = providerOf(agent) === CLAUDE;
   const caps = capabilitiesOf(agent, useProviders());
+  const codex = agent.provider === CODEX;
   const has = controlsFor(caps);
   const theirs = useProviderModels(claude ? null : providerOf(agent));
   const [modelText, setModelText] = useState<string | null>(null);
@@ -410,7 +413,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const pickMode = async (mode: Autonomy['mode']) => {
     if (mode === autonomy.mode) return;
     setDraft({ ...autonomy, mode });
-    const working = agent.status === 'working';
+    const working = agent.status === 'working' || agent.status === 'blocked';
     const ok = await policy.run(
       `Switching to "${mode}"`,
       () => setAutonomy(agent.id, { autonomy: { mode } }),
@@ -543,7 +546,13 @@ export function Composer({ agent }: { agent: Agent }) {
   };
 
   const closed = agent.status === 'done' || agent.status === 'failed';
-  const current = MODES.find((m) => m.id === autonomy.mode) ?? null;
+  const codexReadOnly = codex && autonomy.mode === 'plan';
+  const modes: ModeDef[] = codex
+    ? CODEX_MODES.filter((m) => codexReadOnly ? m.id === 'plan' : m.id !== 'plan')
+      .map(({ id, label, hint }) => ({ id, label, says: hint }))
+    : MODES.filter((m) => offersMode(m.id, caps, autonomy.mode));
+  const activeMode = codex && !codexReadOnly && autonomy.mode !== 'dontAsk' ? 'default' : autonomy.mode;
+  const current = modes.find((m) => m.id === activeMode) ?? null;
   const notice: Notice | null =
     send.notice ?? policy.notice ?? (budgetWhy ? { tone: 'warn', text: budgetWhy } : null);
 
@@ -650,8 +659,8 @@ export function Composer({ agent }: { agent: Agent }) {
           </button>
           {open && (
           <>
-          <span className="ui-lab">guardrails</span>
-          {PILLS.map((p) => {
+          {!codex && <span className="ui-lab">guardrails</span>}
+          {!codex && PILLS.map((p) => {
             const on = p.on(autonomy);
             /*
              * Amber marks the RESTRICTED state, not the pill being on. §5.1: --need
@@ -775,14 +784,15 @@ export function Composer({ agent }: { agent: Agent }) {
          */}
         <div className="ag-modes">
           <span className="ui-lab">interaction</span>
-          {MODES.filter((m) => offersMode(m.id, caps, autonomy.mode)).map((m) => (
+          {codexReadOnly && <span>{current?.label}</span>}
+          {!codexReadOnly && modes.map((m) => (
             <button
               key={m.id}
               type="button"
-              className={`ag-mode${m.id === autonomy.mode ? ' is-on' : ''}${
+              className={`ag-mode${m.id === activeMode ? ' is-on' : ''}${
                 m.danger ? ' is-danger' : ''
               }`}
-              aria-pressed={m.id === autonomy.mode}
+              aria-pressed={m.id === activeMode}
               onClick={() => void pickMode(m.id)}
               disabled={policy.busy}
               title={m.says}
@@ -988,7 +998,7 @@ export function Composer({ agent }: { agent: Agent }) {
           <div className={`ag-modesays${current.danger ? ' is-danger' : ''}`}>
             {current.says}
             {agent.status === 'working' && (
-              <span className="ag-modesays-when"> · {WORKING_SAYS}</span>
+              <span className="ag-modesays-when"> · {codex ? 'changes apply on the next turn' : WORKING_SAYS}</span>
             )}
           </div>
         )}

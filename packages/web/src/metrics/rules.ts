@@ -550,4 +550,4 @@ export function providerBudgetCell(month: number, budget: number | null, unit: P
 
 /** The note under the table. */
 export const PROVIDER_SPEND_NOTE =
-  'Every project’s, whichever is picked above, and not the range. Claude is in dollars, and its routes are the prefix before .anthropic. in the model’s name; Copilot and OpenRouter are in tokens, input plus output. A monthly budget only warns.';
+  'Every project’s, whichever is picked above, and not the range. Claude is in dollars, and its routes are the prefix before .anthropic. in the model’s name; ChatGPT (Codex), Copilot and OpenRouter are in tokens, input plus output. A monthly budget only warns.';

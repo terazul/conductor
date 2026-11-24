@@ -356,6 +356,38 @@ export interface ProviderInfo {
   };
 }
 
+export interface ClaudeSourceResponse {
+  mode: 'gateway' | 'api' | 'subscription' | 'signed-out' | 'unknown';
+  host: string | null;
+  plan: string | null;
+  platform: string | null;
+}
+
+export interface CopilotQuota {
+  kind: string;
+  remainingPercent: number | null;
+  unlimited: boolean;
+  resetsAt: string | null;
+}
+
+export interface OpenRouterKeyUsage {
+  monthUsd: number | null;
+  remainingUsd: number | null;
+  limitUsd: number | null;
+  reset: 'daily' | 'weekly' | 'monthly' | null;
+}
+
+/** Account allowance reported by Codex. Resets are ISO timestamps. */
+export interface CodexUsageWindow {
+  remainingPercent: number;
+  durationMinutes: number | null;
+  resetsAt: string | null;
+}
+
+export interface CodexUsageResponse {
+  windows: CodexUsageWindow[];
+}
+
 export interface CreateJobRequest {
   projectId: string;
   prompt: string;

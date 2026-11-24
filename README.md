@@ -19,6 +19,7 @@ Plan and architecture: [PLAN.md](PLAN.md) · Build rules and amendment log: [CON
 | pnpm | 10+ |
 | `claude` | The Claude Code CLI, **authenticated**. The Agent SDK spawns it and inherits its credentials, so if `claude` works in your terminal, agents will run. |
 | optional: GitHub Copilot | To run agents on Copilot: a Copilot login (`copilot login`, `gh auth login`, or `GH_TOKEN`). The runtime ships with `@github/copilot-sdk`; nothing else to install. |
+| optional: Codex CLI signed in with ChatGPT | To use your ChatGPT subscription in Conductor. Run `codex login` as the daemon user, then select **ChatGPT (Codex)** in Spawn. |
 | optional: `OPENROUTER_API_KEY` | To run agents on OpenRouter's models. Or add the key in Settings (`9`). It is never shown, logged or sent anywhere but OpenRouter. |
 
 ```bash
@@ -183,6 +184,12 @@ docs/               the manual, decision records (adr/), plans
 Everything the UI shows is a projection of one append-only event log. The browser
 holds a cursor and resubscribes from it after a reconnect, so a dropped socket replays
 rather than losing state.
+
+## Codex with a ChatGPT subscription
+
+Install the Codex CLI on the machine running the Conductor daemon. Sign in with `codex login` as that same OS user. In Conductor, open **Spawn**, select **ChatGPT (Codex)**, pick a model, and launch an agent. Set `CODEX_BIN` to the executable's absolute path if the daemon cannot find `codex` on its PATH.
+
+Conductor shows your remaining ChatGPT subscription allowance and available reset times under **Settings → Providers** and when you select **ChatGPT (Codex)** in Spawn. The agent’s token budget is a separate warning threshold. It has its own workspace sandbox and approval modes. Workspace mode allows edits inside the workspace. **Workspace, no prompts** automatically declines requests for extra access. For an existing workspace agent, open the **Agent** settings and select it under **Interaction** for the next turn. Select **Read-only** to explore without edits. Conductor surfaces supported Codex approval requests in **Needs You**. Codex agents run independently. Helper pipelines, agent dependencies, and deferred approvals across daemon restarts are unavailable.
 
 ## Known gaps
 

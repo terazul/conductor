@@ -14,8 +14,8 @@
  * Pure, so spawn/verify.ts checks it under Node.
  */
 
-import type { AgentSpec, Autonomy } from '@conductor/shared';
-import { CLAUDE, offersMode, type Capabilities } from '../lib/providers.js';
+import { WRITE_TOOLS, type AgentSpec, type Autonomy } from '@conductor/shared';
+import { CLAUDE, CODEX, offersMode, type Capabilities } from '../lib/providers.js';
 
 export interface EngineLaunch {
   provider: string;
@@ -44,11 +44,22 @@ export function autonomyOn(a: Autonomy, l: EngineLaunch): Autonomy {
   const { effort, budgetTokens: _dropped, ...rest } = a;
   return {
     ...rest,
-    mode: modeOn(a.mode, l.caps),
+    ...(l.provider === CODEX ? codexAutonomy(rest) : { mode: modeOn(a.mode, l.caps) }),
     ...(l.caps.costUsd
       ? { budgetUsd: a.budgetUsd }
       : { budgetUsd: null, ...(l.budgetTokens !== null ? { budgetTokens: l.budgetTokens } : {}) }),
     ...(l.caps.effort && effort ? { effort } : {}),
+  };
+}
+
+/** Translate generated presets to Codex's native sandbox and approval modes. */
+export function codexAutonomy(a: Autonomy): Autonomy {
+  const readOnly = a.mode === 'plan' || WRITE_TOOLS.every((tool) => a.disallowedTools.includes(tool));
+  return {
+    ...a,
+    mode: readOnly ? 'plan' : a.mode === 'dontAsk' ? 'dontAsk' : 'default',
+    allowedTools: [],
+    disallowedTools: [],
   };
 }
 

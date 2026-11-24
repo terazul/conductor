@@ -13,6 +13,7 @@
 import type { Db } from '../../db/index.js';
 import type { AgentBackend, BackendFactory, ProviderId, RunnerScope } from '../backend.js';
 import { catalog } from '../models.js';
+import { CodexBackend, codexModels } from './codex.js';
 import { ClaudeBackend } from './claude.js';
 import {
   CopilotBackend,
@@ -56,10 +57,20 @@ const openrouter: BackendFactory = {
   create: (db, scope) => new CopilotBackend(db, scope, 'openrouter'),
 };
 
+const codex: BackendFactory = {
+  provider: 'codex',
+  capabilities: { defer: false, resume: true, costUsd: false, effort: true, planMode: true, helperTools: false },
+  listModels: codexModels,
+  // Account status is asynchronous and checked by discovery, spawn, and the backend.
+  unavailable: () => null,
+  create: (db, scope) => new CodexBackend(db, scope),
+};
+
 const factories = new Map<ProviderId, BackendFactory>([
   ['claude', claude],
   ['copilot', copilot],
   ['openrouter', openrouter],
+  ['codex', codex],
 ]);
 
 /** Add a provider's factory. Each non-Claude backend registers itself. */

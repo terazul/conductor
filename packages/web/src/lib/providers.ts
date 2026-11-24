@@ -14,13 +14,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Agent, ProviderInfo, ProviderModelList } from '@conductor/shared';
+import { BUDGET_ENGINES, providerBudgetLabel, type Agent, type ProviderInfo, type ProviderModelList } from '@conductor/shared';
 import { api } from './feed.js';
 import { ApiError } from './errors.js';
 
 export type Capabilities = ProviderInfo['capabilities'];
 
 export const CLAUDE = 'claude';
+export const CODEX = 'codex';
 
 /** Everything Claude has always done. */
 export const ALL_ON: Capabilities = { defer: true, resume: true, costUsd: true, effort: true, planMode: true, helperTools: true };
@@ -28,12 +29,10 @@ export const ALL_ON: Capabilities = { defer: true, resume: true, costUsd: true, 
 /** What an engine the daemon hasn't described is trusted with: nothing. */
 export const NONE: Capabilities = { defer: false, resume: false, costUsd: false, effort: false, planMode: false, helperTools: false };
 
-const LABELS: Record<string, string> = { claude: 'Claude', copilot: 'Copilot', openrouter: 'OpenRouter' };
-
 /** `openrouter` → `OpenRouter`. One the UI doesn't know keeps its id. */
 export function providerLabel(id: string | undefined): string {
   const p = id ?? CLAUDE;
-  return LABELS[p] ?? p;
+  return Object.hasOwn(BUDGET_ENGINES, p) ? providerBudgetLabel(p) : p;
 }
 
 /** An agent's engine. Absent is Claude: every agent from before Amendment 74. */

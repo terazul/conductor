@@ -349,23 +349,24 @@ console.log("\n7 · the projects come in the Fleet's order, and a drag sets your
 
 console.log('\n8 · a project\'s agents are grouped by job (Amendment 86)');
 {
-  check('one group per job, newest first', web.jobs.map((j) => j.id).join() === 'jNew,jOld' && api.jobs.map((j) => j.id).join() === 'jApi', web.jobs.map((j) => j.id).join());
+  check('job groups are alphabetical by displayed heading', web.jobs.map((j) => j.id).join() === 'jOld,jNew' && api.jobs.map((j) => j.id).join() === 'jApi', web.jobs.map((j) => j.id).join());
   check(
-    'each group holds its own agents, in the order the flat list has them',
-    web.jobs.flatMap((j) => j.agents.map((a) => a.id)).join() === web.agents.map((a) => a.id).join() && web.jobs[0]!.agents.map((a) => a.id).join() === 'a2,a3',
+    'each group displays its agents alphabetically',
+    web.jobs[0]!.agents.map((a) => a.id).join() === 'a1' &&
+      web.jobs[1]!.rows.map((row) => row.kind === 'agent' ? row.agent.label : row.fold.label).join() === 'builder 1,reviewer',
   );
-  check('a group is headed by its prompt, on one line', web.jobs[0]!.label === 'Fix the login page on Safari' && web.jobs[1]!.label === 'Add dark mode', JSON.stringify(web.jobs[0]!.label));
+  check('a group is headed by its prompt, on one line', web.jobs[0]!.label === 'Add dark mode' && web.jobs[1]!.label === 'Fix the login page on Safari', JSON.stringify(web.jobs[1]!.label));
   const named = groupByJob(web.agents, jobs.map((j) => (j.id === 'jNew' ? { ...j, name: 'Full Stack' } : j)));
   check('a launched stack name replaces its prompt as the group heading', named.find((j) => j.id === 'jNew')?.label === 'Full Stack');
   check('jobLine folds every run of whitespace, newlines too, and trims', jobLine(' a\n\tb  c \n') === 'a b c' && jobLine('') === '');
-  check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 2 && web.jobs[1]!.needs === 1 && api.jobs[0]!.needs === 2);
+  check('a group counts what waits on you across its agents', web.jobs[0]!.needs === 1 && web.jobs[1]!.needs === 2 && api.jobs[0]!.needs === 2);
   const calm = navTree(projects, agents, [], [], jobs)[0]!;
-  check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'working' && calm.jobs[1]!.status === 'done', calm.jobs.map((j) => j.status).join());
+  check("a group's dot is its unhappiest agent's", calm.jobs[0]!.status === 'done' && calm.jobs[1]!.status === 'working', calm.jobs.map((j) => j.status).join());
   const failed = groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }, { id: 'y', jobId: 'j', label: 'y', status: 'failed', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }, { id: 'z', jobId: 'j', label: 'z', status: 'working', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }], []);
   check('a failure outranks working, by the Fleet\'s SORT_RANK', failed.length === 1 && failed[0]!.status === 'failed' && SORT_RANK.failed < SORT_RANK.working);
   check('a project with one job still gets its group', api.jobs.length === 1 && api.jobs[0]!.agents.length === 1);
   const unknown = navTree(projects, agents, [], [])[0]!;
-  check("a job it wasn't told about is headed by its id", unknown.jobs.map((j) => j.label).join() === 'jOld,jNew', unknown.jobs.map((j) => j.label).join());
+  check("a job it wasn't told about is headed by its id", unknown.jobs.map((j) => j.label).join() === 'jNew,jOld', unknown.jobs.map((j) => j.label).join());
   check('a project with no agents has no groups', navTree([{ id: 'e', name: 'e', path: '/e' }], agents, [], [], jobs)[0]!.jobs.length === 0);
   const marked = navTree(projects, agents, [], [], jobs, new Set(['jOld']))[0]!;
   check('a job that finished and you have not seen says so on its group (Amendment 87)', marked.jobs.find((j) => j.id === 'jOld')!.finished && !marked.jobs.find((j) => j.id === 'jNew')!.finished);
@@ -622,7 +623,7 @@ console.log('\n14 · an ended orchestrator\'s ended helpers fold into one row (A
 
   // A helper's helper is the orchestrator's too, as nestHelpers nests it.
   const deep = rowsOf(stack('done', helper('h1', 'done'), helper('g1', 'done', 'h1'), helper('h2', 'done')));
-  check("a helper's own helpers fold with the rest", shape(deep) === 'o,[h1 g1 h2]', shape(deep));
+  check("a helper's own helpers fold with the rest", shape(deep) === 'o,[g1 h1 h2]', shape(deep));
   const two = rowsOf([...stack('done', helper('h1', 'done'), helper('h2', 'done')), agent('v', 'p', 'jS', 'validator', 'done')]);
   check('an agent of the job that is no one\'s helper keeps its row', shape(two) === 'o,[h1 h2],v', shape(two));
   check('groupByJob alone folds nothing: rows are the agents', groupByJob([{ id: 'x', jobId: 'j', label: 'x', status: 'done', needs: 0, toRead: false, orchestrator: false, budget: null, paused: null }], [])[0]!.rows.map((r) => r.kind).join() === 'agent');

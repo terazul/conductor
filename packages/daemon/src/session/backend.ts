@@ -17,8 +17,8 @@ import type { ApiFailure } from './retry.js';
 import type { Db } from '../db/index.js';
 
 /** Where an agent runs. `claude` is the default, and every agent from before this. */
-export type ProviderId = 'claude' | 'copilot' | 'openrouter';
-export const PROVIDERS: readonly ProviderId[] = ['claude', 'copilot', 'openrouter'];
+export type ProviderId = 'claude' | 'copilot' | 'openrouter' | 'codex';
+export const PROVIDERS: readonly ProviderId[] = ['claude', 'copilot', 'openrouter', 'codex'];
 
 export function isProvider(v: unknown): v is ProviderId {
   return typeof v === 'string' && (PROVIDERS as readonly string[]).includes(v);

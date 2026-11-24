@@ -32,6 +32,7 @@
  */
 
 import { CONDUCTOR_LINES, MESSAGE_LINE, SHOWN_LINE, TURN_END_LINE } from './background.js';
+import { codexRuntime } from './backends/codex-client.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -3815,13 +3816,41 @@ async function main(): Promise<void> {
     check("and a claude agent's wire shape is what it was: no provider field", made.body.agents?.[0] !== undefined && !('provider' in made.body.agents[0]!));
     check('it runs on the Claude engine, as before', await until(() => runs.length > start));
     const bad = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', { projectId: pid, prompt: 'p', isolation: 'in_place', agents: [{ ...spec, provider: 'gemini' }] });
-    check('an unknown provider → 400, naming the ones there are', bad.status === 400 && /unknown provider "gemini" — one of claude, copilot, openrouter/.test(bad.body.detail ?? ''), JSON.stringify(bad.body));
+    check('an unknown provider → 400, naming the ones there are', bad.status === 400 && /unknown provider "gemini" — one of claude, copilot, openrouter, codex/.test(bad.body.detail ?? ''), JSON.stringify(bad.body));
     const notYet = await send<{ error?: string; detail?: string }>('POST', '/api/jobs', { projectId: pid, prompt: 'p', isolation: 'in_place', agents: [{ ...spec, provider: 'copilot' }] });
     // Copilot has an engine since Amendment 76; with no login it still can't launch, and says so.
     check("a provider that can't launch now → 400, saying why, rather than failing mid-run", notYet.status === 400 && /GitHub Copilot/.test(notYet.body.detail ?? ''), JSON.stringify(notYet.body));
-    const listed = (await get<{ providers: ProviderInfo[] }>('/api/providers')).body.providers;
-    check('GET /api/providers lists all three, claude ready with every capability', listed.map((p) => p.id).join() === 'claude,copilot,openrouter' && listed[0]!.unavailable === null && Object.values(listed[0]!.capabilities).every(Boolean));
-    check('and the others say why not', listed.slice(1).every((p) => typeof p.unavailable === 'string'));
+    const realCodexClient = codexRuntime.client;
+    let account = 'apiKey';
+    codexRuntime.client = async () => ({
+      call: async (method) => {
+        if (method === 'account/read') return { account: { type: account } };
+        if (method === 'model/list') return { data: [{ model: 'gpt-test', displayName: 'GPT Test', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
+        throw new Error(`unexpected Codex method ${method}`);
+      },
+      watch: () => () => {},
+      reply: () => {},
+      rejectRequest: () => {},
+      close: () => {},
+    });
+    try {
+      const listed = (await get<{ providers: ProviderInfo[] }>('/api/providers')).body.providers;
+      check('GET /api/providers lists all four, claude ready with every capability', listed.map((p) => p.id).join() === 'claude,copilot,openrouter,codex' && listed[0]!.unavailable === null && Object.values(listed[0]!.capabilities).every(Boolean));
+      check('and the others say why not', listed.slice(1).every((p) => typeof p.unavailable === 'string'));
+      const codexJob = { projectId: pid, prompt: 'p', isolation: 'in_place', agents: [{ ...spec, model: 'gpt-test', provider: 'codex' }] };
+      const denied = await send<{ detail?: string }>('POST', '/api/jobs', codexJob);
+      check('Codex refuses API-key-only auth before creating a job', denied.status === 400 && /Sign in with ChatGPT/.test(denied.body.detail ?? ''));
+      account = 'chatgpt';
+      const ready = (await get<{ providers: ProviderInfo[] }>('/api/providers')).body.providers.find((p) => p.id === 'codex');
+      const models = (await get<ProviderModelList>('/api/models?provider=codex&fresh=1')).body.models;
+      check('ChatGPT login enables Codex and lists its model efforts', ready?.unavailable === null && models[0]?.id === 'gpt-test' && models[0].efforts?.[0] === 'low');
+      const ruled = await send<{ detail?: string }>('POST', '/api/jobs', {
+        ...codexJob, agents: [{ ...codexJob.agents[0], autonomy: { ...DEFAULT_AUTONOMY, disallowedTools: ['Bash'] } }],
+      });
+      check('Codex rejects rules its sandbox cannot enforce', ruled.status === 400 && /Clear Conductor tool rules/.test(ruled.body.detail ?? ''));
+    } finally {
+      codexRuntime.client = realCodexClient;
+    }
     check('the old import path still gives the Claude engine', typeof AgentRunner === 'function' && AgentRunner === ClaudeBackend);
     for (const r of runs) if (!r.finished) r.finish({ cost: 0 });
     await until(() => sup.slots.used === 0);
@@ -8629,7 +8658,7 @@ async function main(): Promise<void> {
     ];
     const wrong = routes.filter(([m, r]) => claudeRoute(m) !== r);
     check('a route is the prefix before .anthropic., a [1m] suffix ignored, and none is direct', wrong.length === 0, JSON.stringify(wrong.map(([m]) => [m, claudeRoute(m)])));
-    check('the engines a budget can name are the ones there are, in the unit each reports', Object.keys(BUDGET_ENGINES).every((p) => backendFor(p as Parameters<typeof backendFor>[0]) !== undefined) && BUDGET_ENGINES.claude === 'usd' && BUDGET_ENGINES.copilot === 'tokens' && BUDGET_ENGINES.openrouter === 'tokens');
+    check('the engines a budget can name are the ones there are, in the unit each reports', Object.keys(BUDGET_ENGINES).every((p) => backendFor(p as Parameters<typeof backendFor>[0]) !== undefined) && BUDGET_ENGINES.claude === 'usd' && BUDGET_ENGINES.copilot === 'tokens' && BUDGET_ENGINES.openrouter === 'tokens' && BUDGET_ENGINES.codex === 'tokens');
 
     const ppid = (await send<{ project: { id: string } }>('POST', '/api/projects', { path: ROOT, name: 'prov188' })).body.project.id;
     insertJob(db, { id: 'job_p188', projectId: ppid, prompt: 'the provider prompt', isolation: 'in_place', worktreePath: ROOT, branch: 'main', status: 'working', budgetUsd: null });
@@ -8683,8 +8712,8 @@ async function main(): Promise<void> {
     const all = providerSpend(db);
     const routeSum = all.filter((p) => p.route !== undefined).reduce((s, p) => s + p.month, 0);
     check("Claude's routes add up to Claude, and Claude's month is the fleet's", near(routeSum, spend('claude')?.month ?? -1) && near(spend('claude')?.month, costMonth(db)) && near(costMonth(db), 10.5), `${routeSum} ${spend('claude')?.month} ${costMonth(db)}`);
-    check('engines first, each Claude route under Claude, no prefix last', JSON.stringify(all.map((p) => p.key)) === '["claude","claude/uk","claude/us","claude/direct","copilot","openrouter"]', JSON.stringify(all.map((p) => p.key)));
-    check('an engine with nothing spent reads 0, not missing', spend('openrouter')?.month === 0 && spend('openrouter')?.unit === 'tokens');
+    check('engines first, each Claude route under Claude, no prefix last', JSON.stringify(all.map((p) => p.key)) === '["claude","claude/uk","claude/us","claude/direct","copilot","openrouter","codex"]', JSON.stringify(all.map((p) => p.key)));
+    check('an engine with nothing spent reads 0, not missing', spend('openrouter')?.month === 0 && spend('openrouter')?.unit === 'tokens' && spend('codex')?.unit === 'tokens');
     const hello = (await get<Snapshot>('/api/snapshot')).body;
     check("the snapshot carries each engine's figures", near(hello.providerSpend?.find((p) => p.key === 'claude/us')?.month, 3) && hello.providerSpend?.find((p) => p.key === 'copilot')?.month === 120, JSON.stringify(hello.providerSpend));
 

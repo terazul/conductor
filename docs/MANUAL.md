@@ -1167,8 +1167,8 @@ job in it has finished and you haven't seen it, both when both are true, or the 
 are left out beside it). Pointing at the name says it all in words. A
 project's name opens its Project screen, and its chevron opens it to three submenus:
 
-- **Agents**: grouped by job, newest first. Each group is headed by the job's prompt on
-  one line, with its agent count, the dot of its unhappiest agent, its status and, in amber, how
+- **Agents**: jobs are sorted alphabetically by their displayed heading, and agents
+  within a job by their displayed names. Each heading shows the job's name or prompt, with its agent count, the dot of its unhappiest agent, its status and, in amber, how
   many things in it need you. Its status is what a Fleet card would say of that job alone:
   **N working**, **finished** if it finished and you haven't seen it (never in amber), or
   **done**, **failed**, **paused** and the like. Where the amber count shows, it says that

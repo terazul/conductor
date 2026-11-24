@@ -672,7 +672,7 @@ console.log('\n10 · how the agents interact with you, chosen at launch (Amendme
   check('a saved default is read, and a bad one is the default', launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'auto' : null)).mode === 'auto' && launchDefaults((k) => (k === LAUNCH_KEYS.mode ? 'yolo' : null)).mode === 'acceptEdits');
   check('the summary says when nothing will ask, shell included', describeAutonomy(bypass).startsWith('⚠ asks you nothing · runs shell unattended'), describeAutonomy(bypass));
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode(, personas(, listed(, inAll)?)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
+  check('Spawn sends the mode, and the plan button and edits pill are gone', /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, launchMode(, personas(, listed(, inAll)?)?)?\)/.test(src) && !/plan first, don't write code/.test(src) && !PILLS.some((p) => p.id === 'acceptEdits'));
 }
 
 console.log('\n11 · MCP tools, and what a reading role never gets (Amendment 67)');
@@ -810,13 +810,25 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
   check('the tool rules are untouched — the deny list still holds there', or.every((x, i) => JSON.stringify(x.autonomy.disallowedTools) === JSON.stringify(base[i]!.autonomy.disallowedTools) && JSON.stringify(x.autonomy.allowedTools) === JSON.stringify(base[i]!.autonomy.allowedTools)));
   check('and the Claude specs it came from are unchanged', JSON.stringify(base) === before);
 
+  const codex = specsOn(base, { provider: 'codex', caps: { ...copilotCaps, planMode: true, helperTools: false }, model: 'gpt-test', budgetTokens: 80_000 });
+  check('Codex maps the plan preset to its read-only sandbox and uses subscription tokens', codex.every((s) => s.provider === 'codex' && s.autonomy.mode === 'plan' && s.autonomy.budgetTokens === 80_000 && s.autonomy.budgetUsd === null));
+  check('Codex leaves out generated Conductor tool rules and helper tools', codex.every((s) => !s.autonomy.allowedTools.length && !s.autonomy.disallowedTools.length && !s.helpers));
+
+  const unattended = specsOn(
+    base.map((s) => ({ ...s, autonomy: { ...s.autonomy, mode: 'dontAsk' } })),
+    { provider: 'codex', caps: { ...copilotCaps, planMode: true, helperTools: false }, model: 'gpt-test', budgetTokens: null },
+  );
+  check('Codex sends unattended mode for writers and keeps reading roles read-only',
+    unattended.some((s) => s.role === 'developer' && s.autonomy.mode === 'dontAsk') &&
+      unattended.every((s) => !isReadOnlyRole(s.role) || s.autonomy.mode === 'plan'));
+
   const bare = specsOn(base, { provider: 'copilot', caps: NONE, model: 'gpt-5', budgetTokens: null });
   check('an engine that can do nothing: no effort, no helpers, no cap at all when none is typed', bare.every((x) => !('effort' in x.autonomy) && !('helpers' in x) && !('budgetTokens' in x.autonomy) && x.autonomy.budgetUsd === null), JSON.stringify(bare[0]));
   check('an engine the daemon hasn\'t described is trusted with nothing; Claude with everything', capabilitiesOf('copilot', null) === NONE && capabilitiesOf('copilot', []) === NONE && capabilitiesOf(CLAUDE, null) === ALL_ON && capabilitiesOf('copilot', [{ id: 'copilot', unavailable: null, capabilities: copilotCaps }]) === copilotCaps);
   check('the default token cap is a cap, and says so', DEFAULT_BUDGET_TOKENS > 0 && describeAutonomy(or[0]!.autonomy).includes('budget 500k tokens a day') && !describeAutonomy(base[0]!.autonomy).includes('tokens'));
 
   const src = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
-  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /const jobBudget = jobBudgetUsd\(budgetPerAgent, specs\.length, caps\);/.test(src) && /budgetUsd: jobBudget,/.test(src));
+  check('Spawn sends the specs through specsOn, and the job cap through jobBudgetUsd', /specsOn\(toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, launchMode, personas(, listed(, inAll)?)?\), launchOn\)/.test(src) && /const jobBudget = jobBudgetUsd\(budgetPerAgent, specs\.length, caps\);/.test(src) && /budgetUsd: jobBudget,/.test(src));
   check('the engine defaults to Claude, and one that can\'t launch is off with its reason shown', /useState\(CLAUDE\)/.test(src) && /disabled=\{id !== CLAUDE && why !== null\}/.test(src) && /\{providerLabel\(p\.id\)\}: \{p\.unavailable\}/.test(src));
   check("the model picker follows the engine: Claude's catalog, else the engine's visible list or an id when it cannot list", /\{claude \? \(\s*<div className="sp-efforts">\s*<span className="ui-lab">model<\/span>\s*<ModelSelect/.test(src) && /useProviderModels\(claude \? null : provider\)/.test(src) && /<ProviderModelSelect/.test(src) && /theirs\.list\?\.note/.test(src));
   check('the budget field is dollars or tokens, by costUsd, its hint saying it warns and never stops (Amendment 180)', !/ceilingWords/.test(src) && /has\.budget === 'usd' \? \(\s*<span\s+className="sp-pill"\s+aria-pressed=\{budgetPerAgent !== null\}\s+title=\{`[^`]*per day[^`]*never stops it[^`]*`\}\s*>\s*⏱ budget per agent per day \$/.test(src) && /value=\{budgetTok\}/.test(src));
@@ -827,7 +839,7 @@ console.log('\n15 · an engine other than Claude (Amendment 80)');
       /const to = nearestEffort\(effort, offered\);\s*if \(to === effort\) return;\s*setEffort\(to\);\s*setEffortMoved\(/.test(src) &&
       /effortMoved\.model === engineModel\.trim\(\) && \(\s*<div className="sp-cf-note">\{effortMoved\.line\}<\/div>/.test(src),
   );
-  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && r\.role !== listsUnder && )?\(\s*<select/.test(src) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
+  check('effort, helpers and plan mode show only where the engine has them', /\{has\.effort && \(\s*<div className="sp-efforts">\s*<span className="ui-lab">effort/.test(src) && /\{has\.helpers && (!r\.orchestrates && r\.role !== listsUnder && )?\(\s*<select/.test(src) && /codex \? CODEX_MODES : MODES\.filter\(\(m\) => offersMode\(m\.id, caps\)\)/.test(src));
 }
 
 console.log('\n16 · fewer built-in personas, and the full pipeline reads the plan (Amendment 84)');
@@ -1144,7 +1156,7 @@ console.log('\n19 · a git methodology per launch, and two gaps in Spawn left by
   const wire = readFileSync(new URL('../../../shared/src/wire.ts', import.meta.url), 'utf8');
   check("Spawn's pills are the three choices", /\{METHODS\.map\(\(m, i\) => \{/.test(route) && /onClick=\{\(\) => setMethod\(m\.id\)\}/.test(route) && !/branch in place/.test(route) && !/const ISOLATIONS/.test(route));
   check('(2) shows a name field, and only (2)', /\{method === 'named' && \(\s*<div className="sp-branchrow">/.test(route) && /id="sp-branch"/.test(route));
-  check('the launch waits for the name, and for nothing else new but one agent\'s role (Amendment 179) and the stacks (Amendment 181)', /\(waitForInstructions \|\| prompt\.trim\(\)\.length > 0\) &&\s*projectId !== null &&\s*!busy &&\s*modelsReady &&\s*!customBad &&\s*!singleBad &&\s*methodOk &&\s*stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
+  check('the launch checks its name, roles, models, and Codex dependencies', /\(waitForInstructions \|\| prompt\.trim\(\)\.length > 0\) &&\s*projectId !== null &&\s*!busy &&\s*modelsReady &&\s*!codexDependencies &&\s*!customBad &&\s*!singleBad &&\s*methodOk &&\s*stacksWhy === null;/.test(route) && /const methodOk = methodReady\(method, branchName, refused\);/.test(route));
   check("the project's default branch is among the names it will not take", /const refused = useMemo\(\(\) => \(selected \? \[selected\.defaultBranch\] : \[\]\), \[selected\]\);/.test(route));
   check('what is sent is launchBody, by launchRequest, with the method and the name', /const launchInput: LaunchInput \| null = useMemo\([\s\S]*?\{\s*projectId,\s*title,\s*prompt,\s*waitForInstructions,\s*method,\s*branch: branchName,/.test(route) && /const request = launchRequest\(launchInput, stacks\);/.test(route) && /return n <= 1 \? \{ path: '\/api\/jobs', body: bodies\[0\]! \}/.test(readFileSync(new URL('./launch.ts', import.meta.url), 'utf8')));
   check('a folder with no git moves the launch to (1), and back to what it had', /forced\.current = method;\s*setMethod\('in_place'\);/.test(route) && /setMethod\(back\);/.test(route));
@@ -1777,7 +1789,7 @@ console.log('\n27 · an orchestrated stack chooses its helpers in all, and sends
   const route = readFileSync(new URL('./route.tsx', import.meta.url), 'utf8');
   const picker = readFileSync(new URL('./Pipeline.tsx', import.meta.url), 'utf8');
   check('Spawn shows a "helpers in all" select on the listed roles, styled as the helpers picker', /className="ui-select sp-helpers sp-pipe-helpers"/.test(picker) && /aria-label="Helpers in all"/.test(picker) && /helperChoices\(listed\)/.test(picker) && /in all/.test(picker) && /onHelpers\(Number\(e\.target\.value\)\)/.test(picker));
-  check('it defaults to helperCapFor and is sent as helpers', /const inAll = helpersInAll\(listed, pipeHelpers\)/.test(route) && /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll\)/.test(route) && /helpers=\{inAll\}/.test(route) && /onHelpers=\{setPipeHelpers\}/.test(route));
+  check('it defaults to helperCapFor and is sent as helpers', /const inAll = helpersInAll\(listed, pipeHelpers\)/.test(route) && /toAgentSpecs\(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, launchMode, personas, listed, inAll\)/.test(route) && /helpers=\{inAll\}/.test(route) && /onHelpers=\{setPipeHelpers\}/.test(route));
   check('it is kept for the launch as the per-role helpers are: a preset change puts the default back', /useState<number \| null>\(null\)/.test(route) && /setHelpers\(\{\}\);\s*setListedEdit\(null\);\s*setPipeHelpers\(null\);/.test(route));
   check('a Custom setup that orchestrates shows the same, under its row', /listsRoles && r\.role === listsUnder && \(\s*<Pipeline[\s\S]*?helpers=\{inAll\}/.test(route));
   check('the plan\'s words say lanes: a role and a name, sent back at most twice each', /Each piece of work is a lane, a role and a name/.test(sendBackWords()) && /send a lane's work back/.test(sendBackWords()) && !/send a role's work back/.test(sendBackWords()));

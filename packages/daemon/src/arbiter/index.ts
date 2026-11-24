@@ -355,7 +355,8 @@ export class Arbiter {
      * so `no push` still holds; a reading role never has Bash allowed, only its read-only
      * commands (Amendment 148), and a command they don't cover is asked here as before.
      */
-    const unattended = allowedUnattended(agent.autonomy.allowedTools, ask.toolName);
+    const codex = getAgentProvider(this.#db, agent.id) === 'codex';
+    const unattended = codex ? null : allowedUnattended(agent.autonomy.allowedTools, ask.toolName);
     if (unattended) {
       eventLog().emit(
         { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
@@ -369,7 +370,7 @@ export class Arbiter {
     }
 
     // An "allow always" earned earlier means we must not ask again.
-    const rule = this.#matchRule(agent.projectId, ask.toolName, ask.input);
+    const rule = codex ? null : this.#matchRule(agent.projectId, ask.toolName, ask.input);
     if (rule) {
       eventLog().emit(
         { projectId: agent.projectId, jobId: agent.jobId, agentId: agent.id },
@@ -402,7 +403,7 @@ export class Arbiter {
       cwd: ask.cwd,
       // Claude Code sends no rule for a call its own checks flagged, which left "allow all
       // session" greyed out on exactly the calls that ask most (Amendment 67).
-      suggestions: ask.suggestions && ask.suggestions.length > 0 ? ask.suggestions : fallbackSuggestions(ask.toolName, ask.input),
+      suggestions: codex ? [] : ask.suggestions?.length ? ask.suggestions : fallbackSuggestions(ask.toolName, ask.input),
       reversible: isQuestion ? undefined : reversibility(ask.toolName, ask.input),
       questions,
       createdAt: nowIso(),
@@ -513,6 +514,7 @@ export class Arbiter {
     if (!agent) throw new Error(`request ${requestId} has no agent`);
 
     if (decision.type === 'allow_always') {
+      if (getAgentProvider(this.#db, agent.id) === 'codex') throw new Error('Codex approvals are for one request.');
       this.#persistRules(request.agentId, decision.suggestions);
     }
 

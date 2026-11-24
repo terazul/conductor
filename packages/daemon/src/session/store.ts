@@ -1150,7 +1150,7 @@ export function projectSpend(db: Db): ProjectSpend[] {
 
 /**
  * Each engine's spend today and this local month, in its unit (Amendment 188): Claude's dollars,
- * Copilot's and OpenRouter's tokens, from `provider_spend_daily`. Every engine is listed, with
+ * Codex's, Copilot's and OpenRouter's tokens, from `provider_spend_daily`. Every engine is listed, with
  * zeros when it has spent nothing, and under Claude a row for each route (`claudeRoute`) that
  * spent this month or is in `budgeted` (keys such as `claude/us`), in that order: the routes by
  * name, `direct` last. Claude's month is `costMonth`'s, as both grow by the same deltas.

@@ -149,6 +149,12 @@ export const MODES: { id: Autonomy['mode']; label: string; hint: string; warn?: 
   },
 ];
 
+export const CODEX_MODES: typeof MODES = [
+  { id: 'default', label: 'Workspace, with prompts', hint: 'Codex can edit and run commands in the workspace and ask for extra access.' },
+  { id: 'dontAsk', label: 'Workspace, no prompts', hint: 'Codex can edit and run commands in the workspace. Requests for extra access are automatically declined.' },
+  { id: 'plan', label: 'Read-only', hint: 'Codex can inspect the workspace and plan changes.' },
+];
+
 /** What Spawn did before there was a choice: edits accepted, the rest asks. */
 export const DEFAULT_MODE: Autonomy['mode'] = 'acceptEdits';
 

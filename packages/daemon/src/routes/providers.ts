@@ -5,6 +5,7 @@
  *   GET /api/providers/openrouter/key   { set, source }
  *   PUT /api/providers/openrouter/key   { key: string | null } → { set, source }
  *   GET /api/providers/copilot/login    { authenticated, login, note? }
+ *   GET /api/providers/codex/usage      { windows }
  *
  * THE KEY GOES IN, NEVER OUT. No response carries it, nothing logs it, and it is kept
  * in secrets.json rather than settings.json, which every tab is sent (session/secrets.ts).
@@ -20,11 +21,15 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { copilotLogin, stopCopilotClients } from '../session/backends/copilot.js';
+import { codexUsage } from '../session/backends/codex.js';
+import { stopCodex } from '../session/backends/codex-client.js';
+import { copilotLogin, copilotQuota, openRouterKeyUsage, stopCopilotClients } from '../session/backends/copilot.js';
+import { claudeSource } from '../session/models.js';
 import { openRouterKeyStatus, setOpenRouterKey } from '../session/secrets.js';
 
 export default async function providerRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onClose', async () => {
+    stopCodex();
     await stopCopilotClients();
   });
 
@@ -42,5 +47,37 @@ export default async function providerRoutes(app: FastifyInstance): Promise<void
     }
   });
 
+  app.get('/api/providers/claude/source', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return claudeSource();
+  });
+
   app.get('/api/providers/copilot/login', async () => copilotLogin());
+
+  app.get('/api/providers/copilot/quota', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { quotas: await copilotQuota() };
+    } catch {
+      return reply.code(503).send({ error: 'Copilot account allowance is unavailable.' });
+    }
+  });
+
+  app.get('/api/providers/openrouter/usage', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { usage: await openRouterKeyUsage() };
+    } catch {
+      return reply.code(503).send({ error: 'OpenRouter key usage is unavailable.' });
+    }
+  });
+
+  app.get('/api/providers/codex/usage', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return await codexUsage();
+    } catch {
+      return reply.code(503).send({ error: 'ChatGPT subscription usage is unavailable.' });
+    }
+  });
 }

@@ -115,10 +115,10 @@ export const PROVIDER_BUDGETS_KEY = 'conductor.monthlyBudget.providers';
 
 /**
  * The engines a monthly budget can be set for, and what each one counts. Claude reports dollars;
- * Copilot and OpenRouter report tokens only (input plus output), as their `costUsd: false`
+ * ChatGPT (Codex), Copilot and OpenRouter report tokens only (input plus output), as their `costUsd: false`
  * capability says.
  */
-export const BUDGET_ENGINES = { claude: 'usd', copilot: 'tokens', openrouter: 'tokens' } as const satisfies Record<string, BudgetUnit>;
+export const BUDGET_ENGINES = { claude: 'usd', copilot: 'tokens', openrouter: 'tokens', codex: 'tokens' } as const satisfies Record<string, BudgetUnit>;
 export type BudgetEngine = keyof typeof BUDGET_ENGINES;
 
 /** The most a budget may be, in each unit. */
@@ -154,7 +154,7 @@ export function providerBudgetUnit(key: string): BudgetUnit | null {
   return BUDGET_ENGINES[engine as BudgetEngine];
 }
 
-const ENGINE_NAMES: Readonly<Record<BudgetEngine, string>> = { claude: 'Claude', copilot: 'Copilot', openrouter: 'OpenRouter' };
+const ENGINE_NAMES: Readonly<Record<BudgetEngine, string>> = { claude: 'Claude', copilot: 'Copilot', openrouter: 'OpenRouter', codex: 'ChatGPT (Codex)' };
 
 /** A key as it is said: "Claude", "Claude · us", "Claude · no prefix", "Copilot", "OpenRouter". */
 export function providerBudgetLabel(key: string): string {
@@ -182,7 +182,7 @@ export function providerBudgetsProblem(raw: string): string | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return 'a JSON object of budgets, such as {"claude": 100, "copilot": 5000000}';
   for (const [key, n] of Object.entries(v)) {
     const unit = providerBudgetUnit(key);
-    if (unit === null) return `${JSON.stringify(key).slice(0, 60)}: not an engine (claude, claude/<route>, copilot or openrouter)`;
+    if (unit === null) return `${JSON.stringify(key).slice(0, 60)}: not an engine (claude, claude/<route>, copilot, openrouter or codex)`;
     const why = providerBudgetValueProblem(n, unit);
     if (why) return `${key}: ${why}`;
   }

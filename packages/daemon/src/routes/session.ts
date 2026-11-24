@@ -43,8 +43,9 @@ import type {
   StopRetryingResponse,
   StopWaitingResponse,
 } from '@conductor/shared';
-import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PROJECT_COLORS, PIPELINE_ROLES_MAX, pipelineHelperCap, readOnlyRefusal, whenDoneFrom, whenDoneOf, type ProjectColor, type ProviderInfo, type WhenDone } from '@conductor/shared';
+import { HELPERS_MAX, NOTE_MAX, PIPELINE_HELPERS_MAX, PROJECT_COLORS, PIPELINE_ROLES_MAX, pipelineHelperCap, isReadOnlyRole, readOnlyRefusal, whenDoneFrom, whenDoneOf, type ProjectColor, type ProviderInfo, type WhenDone } from '@conductor/shared';
 import { PROVIDERS, isProvider, type ProviderId } from '../session/backend.js';
+import { codexAutonomyProblem, codexUnavailable } from '../session/backends/codex.js';
 import { backendFor, providerRefusal } from '../session/backends/index.js';
 import { arbiter, initArbiter } from '../arbiter/index.js';
 import { initScheduler, scheduler, timeProblem, userPauseNote } from '../session/schedule.js';
@@ -176,6 +177,10 @@ function autonomyFor(provider: ProviderId, raw: unknown): Autonomy {
   const costUsd = backendFor(provider)?.capabilities.costUsd ?? provider === 'claude';
   const wrongUnit = budgetUnitRefusal(provider, costUsd, autonomy);
   if (wrongUnit) throw new Error(wrongUnit);
+  if (provider === 'codex') {
+    const problem = codexAutonomyProblem(autonomy);
+    if (problem) throw new Error(problem);
+  }
   return autonomy;
 }
 
@@ -318,6 +323,12 @@ function parseAgentSpec(entry: unknown): AgentSpec {
   let autonomy: Autonomy;
   try {
     autonomy = autonomyFor(provider, e['autonomy']);
+    if (provider === 'codex' && isReadOnlyRole(role) && autonomy.mode !== 'plan') {
+      throw new Error('Codex reading roles require read-only mode.');
+    }
+    if (provider === 'codex' && (helpers > 0 || [e['dependsOnRoles'], e['feeds']].some((v) => Array.isArray(v) && v.length))) {
+      throw new Error('Codex agents must run independently. Choose a setup without helpers or agent dependencies.');
+    }
   } catch (err) {
     throw new Error(`agent ${role}: ${(err as Error).message}`);
   }
@@ -373,6 +384,10 @@ function parseAgentSpecs(raw: unknown): AgentSpec[] {
  * refusal reads as it did. A provider that couldn't be asked refuses nothing.
  */
 async function checkProviderModels(specs: AgentSpec[]): Promise<void> {
+  if (specs.some((spec) => spec.provider === 'codex')) {
+    const why = await codexUnavailable();
+    if (why) throw new Error(why);
+  }
   for (const spec of specs) {
     if (!spec.provider || spec.provider === 'claude' || !isProvider(spec.provider)) continue;
     const list = await providerModels(spec.provider, backendFor(spec.provider));
@@ -1081,7 +1096,11 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
     const body = (req.body ?? {}) as SetAutonomyRequest;
     let next: Autonomy;
     try {
-      next = autonomyFor(getAgentProvider(db, agent.id), { ...agent.autonomy, ...withOldMerge(agent.autonomy, asRecord(body.autonomy)) });
+      const provider = getAgentProvider(db, agent.id);
+      next = autonomyFor(provider, { ...agent.autonomy, ...withOldMerge(agent.autonomy, asRecord(body.autonomy)) });
+      if (provider === 'codex' && (isReadOnlyRole(agent.role) || agent.autonomy.mode === 'plan') && next.mode !== 'plan') {
+        throw new Error('A read-only Codex agent must stay in read-only mode. Launch a new agent to enable edits.');
+      }
     } catch (err) {
       return fail(reply, 400, 'invalid autonomy', (err as Error).message);
     }
@@ -1100,14 +1119,14 @@ export default async function sessionRoutes(app: FastifyInstance): Promise<void>
    */
   /** Every engine, whether it can launch agents now, and what it can do (Amendment 74). */
   app.get('/api/providers', async (): Promise<{ providers: ProviderInfo[] }> => ({
-    providers: PROVIDERS.map((id) => {
+    providers: await Promise.all(PROVIDERS.map(async (id) => {
       const f = backendFor(id);
       return {
         id,
-        unavailable: providerRefusal(id),
+        unavailable: id === 'codex' ? await codexUnavailable() : providerRefusal(id),
         capabilities: f?.capabilities ?? { defer: false, resume: false, costUsd: false, effort: false, planMode: false, helperTools: false },
       };
-    }),
+    })),
   }));
 
   /*

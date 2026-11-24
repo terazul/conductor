@@ -26,11 +26,12 @@
  * the same ten minutes (Amendment 78, at the end of this file).
  */
 
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { query, type ModelInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { EffortLevel, ModelCatalog, ModelOption, ModelTier, ProviderModelList } from '@conductor/shared';
+import type { ClaudeSourceResponse, EffortLevel, ModelCatalog, ModelOption, ModelTier, ProviderModelList } from '@conductor/shared';
 import { MODEL_NICKNAMES } from '@conductor/shared';
 import type { BackendFactory } from './backend.js';
 import { recordWindows } from './windows.js';
@@ -124,6 +125,32 @@ function hostOf(base: string): string {
   } catch {
     return base;
   }
+}
+
+/** Only source metadata leaves the daemon. CLI account details and credentials stay local. */
+export function claudeSource(): Promise<ClaudeSourceResponse> {
+  const { base, headers } = endpoint(true);
+  let host: string | null = null;
+  try { host = new URL(base).host || null; } catch { /* An invalid base cannot identify a host. */ }
+  const status: ClaudeSourceResponse = { mode: 'unknown', host, plan: null, platform: null };
+  if (host && host !== 'api.anthropic.com') return Promise.resolve({ ...status, mode: 'gateway' });
+  if (headers.authorization || headers['x-api-key']) return Promise.resolve({ ...status, mode: 'api' });
+  return new Promise((resolve) => {
+    execFile('claude', ['auth', 'status', '--json'], { cwd: homedir(), timeout: 5_000, maxBuffer: 32_768 }, (_err, stdout) => {
+      try {
+        const auth = JSON.parse(stdout) as Record<string, unknown>;
+        const slug = (value: unknown): string | null =>
+          typeof value === 'string' && /^[a-z0-9_-]{1,40}$/i.test(value) ? value : null;
+        const platform = slug(auth.apiProvider);
+        const plan = slug(auth.subscriptionType);
+        const mode = auth.loggedIn === false ? 'signed-out' : auth.loggedIn === true && auth.authMethod === 'claude.ai' ? 'subscription'
+          : auth.loggedIn === true ? 'api' : 'unknown';
+        resolve({ ...status, mode, platform, plan: mode === 'subscription' ? plan : null });
+      } catch {
+        resolve(status);
+      }
+    });
+  });
 }
 
 /** Exported so session/verify.ts can read a served list from a local server (Amendment 120). */

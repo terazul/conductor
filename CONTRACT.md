@@ -200,6 +200,20 @@ path; and precedence is `deny` > `defer` > `ask` > `allow`.
 because Amendment 148 was published first from another session. Their commit messages keep the
 old numbers.*
 
+### Amendment 221 — **Codex agents via ChatGPT subscription**
+
+Conductor registers a Codex provider alongside the existing engines. The daemon owns
+one local App Server process, verifies that it is signed into ChatGPT, and persists
+the Codex thread ID via the existing agent session field. The provider and model
+routes drive Spawn's picker. Each turn writes the existing transcript and usage
+events. Codex's sandbox controls tool access and the Arbiter presents applicable
+approval requests as one-time decisions. Codex launches independent agents.
+The provider uses the existing agent persistence. An additive Codex usage endpoint
+exposes the remaining subscription allowance and resets in Settings and Spawn.
+Spend and Providers share engine labels and ordering. Spend includes Codex tokens,
+and Providers shows the Claude source, Copilot account quotas, OpenRouter key usage,
+and the ChatGPT allowance when available.
+
 ### Amendment 220 — post-merge, applied. **⏎ new line is each agent's own.**
 
 Web only (`agent/settingsfold.ts`, `agent/composer.tsx`, the checks in `lib/verify.ts`) and `docs/MANUAL.md`. Asked

@@ -7,7 +7,7 @@
  * draws it.
  *
  * Nothing here is new judgement. The agents come from `agentTabs`, so the panel and the
- * Agent screen's tabs agree on order, labels and what needs you (Amendment 49). A
+ * Agent screen's tabs agree on labels and what needs you (Amendment 49). A
  * project's count is `projectNeeds`, the rule the projects list marked rows by
  * (Amendment 43). A folder opens Files by `dirRoot` (Amendment 39), and a waiting item
  * opens Needs you by the `requestId` / `alertId` deep link it already reads.
@@ -18,9 +18,8 @@
  * the settings file as a JSON array (`conductor.navTree`), so it is the same after a
  * reload and in every browser; whether the panel is up at all is `conductor.navOpen`.
  *
- * AGENTS ARE GROUPED BY JOB (Amendment 86), newest job first, each group headed by the
- * job's prompt on one line, its agent count, its unhappiest agent's dot and what in it
- * waits on you. A group is `p:<id>:job:<jobId>` (`navJobId`), and it is the one node that
+ * AGENTS ARE GROUPED BY JOB (Amendment 86). Groups and agents are sorted by their labels.
+ * A job heading shows its name or prompt, agent count, status and what waits on you. A group is `p:<id>:job:<jobId>` (`navJobId`), and it is the one node that
  * starts OPEN: its id in the set means you closed it (`jobShown`). A new job's agents
  * show without a click, and a project with one job still gets its heading, so the rows
  * never change shape as a second job starts. Helpers sit in their job like any agent;
@@ -187,6 +186,9 @@ export function projectFolders(project: Pick<Project, 'id' | 'path' | 'extraDirs
   return out;
 }
 
+const labelOrder = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+const byLabel = (a: { label: string }, b: { label: string }): number => labelOrder.compare(a.label, b.label);
+
 /**
  * Every project's node, in the order the projects come. Requests come before alerts, as
  * on the rail: a request is what ⏎ answers, and each kind is already in its own order
@@ -252,7 +254,8 @@ export function navTree(
      * rollup reads them, whether a request waits, and the jobs finished unseen, each in its own
      * status (a job we weren't told the status of reads as its worst agent does).
      */
-    const groups = groupByJob(rows, jobs, finished);
+    const groups = groupByJob(rows, jobs, finished).sort(byLabel);
+    for (const group of groups) group.agents.sort(byLabel);
     const unseenOf = (g: NavJob): Pick<Job, 'status'>[] =>
       g.finished ? [{ status: jobs.find((j) => j.id === g.id)?.status ?? (g.status === 'failed' ? 'failed' : 'done') }] : [];
     const tagsOf = (mine: (a: Agent) => boolean, waits: (r: PendingRequest) => boolean, unseen: Pick<Job, 'status'>[]): HeadTag[] =>
@@ -335,7 +338,7 @@ export function foldHelpers(rows: readonly NavAgent[], agents: readonly Agent[])
   let kept: NavAgent[] = [];
   const close = (): void => {
     if (head && kept.length >= 2) {
-      folds.set(head.id, kept);
+      folds.set(head.id, kept.sort(byLabel));
       for (const h of kept) into.set(h.id, head.id);
     }
   };

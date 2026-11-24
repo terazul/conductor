@@ -46,6 +46,7 @@ import { useProjects, useStatusBar } from '../lib/store.js';
 import './spawn.css';
 
 import {
+  CODEX_MODES,
   MODES,
   NO_TEST_COMMAND_TITLE,
   PILLS,
@@ -130,8 +131,10 @@ import { RoleRow, WaitsFor } from './RoleRow.js';
 import { PERSONAS_KEY, personaFor, personasFrom } from './personas.js';
 import { SINGLE_ID, asRow, parseSingle, singleKey, singlePreset, singleProblems, singleSetting, type SinglePick } from './single.js';
 import { useDraft } from '../lib/drafts.js';
+import { CodexUsage } from '../shell/CodexUsage.js';
 import {
   CLAUDE,
+  CODEX,
   capabilitiesOf,
   controlsFor,
   offersMode,
@@ -321,6 +324,7 @@ function Spawn() {
   const [effort, setEffort] = useState<EffortLevel>(start.effort);
   /** How the agents interact with you, for the whole launch (Amendment 65). */
   const [mode, setMode] = useState<Autonomy['mode']>(start.mode);
+  const [codexMode, setCodexMode] = useState<Autonomy['mode']>('default');
   /** The exact id picked per role. A role with none keeps its preset's tier — the default. */
   const [ownPicks, setPicks] = useState<RoleModels>(() =>
     start.model ? pickAll(presetById(start.preset), start.model) : {},
@@ -336,6 +340,7 @@ function Spawn() {
   const providers = useProviders();
   const [provider, setProvider] = useState(CLAUDE);
   const claude = provider === CLAUDE;
+  const codex = provider === CODEX;
   const caps = capabilitiesOf(provider, providers);
   const has = controlsFor(caps);
   const theirs = useProviderModels(claude ? null : provider);
@@ -350,7 +355,8 @@ function Spawn() {
     [provider, caps, engineModel, tokenCap],
   );
   /** Plan mode, on an engine without it, is sent — and shown — as "ask me". */
-  const shownMode = modeOn(mode, caps);
+  const launchMode = codex ? codexMode : mode;
+  const shownMode = modeOn(launchMode, caps);
   /*
    * The efforts the chosen model takes (Amendment 190): those its engine's list names, or all
    * five where it names none (Claude, OpenRouter, an id typed). A model picked that doesn't take
@@ -468,7 +474,7 @@ function Spawn() {
       : base.orchestrated === true
         ? (preset.roles[0]?.role ?? null)
         : null;
-  const listsRoles = listsUnder !== null;
+  const listsRoles = !codex && listsUnder !== null;
   /** Change a preset row's place or ticks for this launch; back to the preset's own is no change. */
   const arrange = (roles: PresetRole[]): void =>
     setArranged(sameStack(roles, base.roles) ? null : { presetId, roles });
@@ -574,12 +580,12 @@ function Spawn() {
   const ownsFolder = isolationOf(method) === 'worktree';
   const launchPills = useMemo(() => (ownsFolder ? pills : withoutWhenDone(pills)), [pills, ownsFolder]);
   const autonomy = useMemo(
-    () => autonomyOn(toAutonomy(launchPills, budgetPerAgent, effort, mode), launchOn),
-    [launchPills, budgetPerAgent, effort, mode, launchOn],
+    () => autonomyOn(toAutonomy(launchPills, budgetPerAgent, effort, launchMode), launchOn),
+    [launchPills, budgetPerAgent, effort, launchMode, launchOn],
   );
   const specs = useMemo(
-    () => specsOn(toAgentSpecs(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll), launchOn),
-    [preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, mode, personas, listed, inAll, launchOn],
+    () => specsOn(toAgentSpecs(preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, launchMode, personas, listed, inAll), launchOn),
+    [preset, launchPills, budgetPerAgent, effort, picks, tiers, helpers, launchMode, personas, listed, inAll, launchOn],
   );
   /** The "every role" picker's value: the id every row runs on, or "" for per role. */
   const every = commonPick(preset, picks, tiers);
@@ -640,11 +646,13 @@ function Spawn() {
 
   const free = Math.max(0, slots.total - slots.used);
   const willQueue = Math.max(0, specs.length * stacks - free);
+  const codexDependencies = codex && specs.some((spec) => spec.dependsOnRoles?.length);
   const canLaunch =
     (waitForInstructions || prompt.trim().length > 0) &&
     projectId !== null &&
     !busy &&
     modelsReady &&
+    !codexDependencies &&
     !customBad &&
     !singleBad &&
     methodOk &&
@@ -1047,6 +1055,7 @@ function Spawn() {
                     disabled={id !== CLAUDE && why !== null}
                     title={why ?? undefined}
                     onClick={() => {
+                      if (id === CODEX) choosePreset(SINGLE_ID);
                       setProvider(id);
                       setEngineModel('');
                     }}
@@ -1065,6 +1074,7 @@ function Spawn() {
               ))}
           </>
         )}
+        {codex && <div className="sp-provnote"><CodexUsage /></div>}
         {claude ? (
         <div className="sp-efforts">
           <span className="ui-lab">model</span>
@@ -1153,6 +1163,7 @@ function Spawn() {
           </div>
         )}
 
+        {codexDependencies && <div className="sp-cf-note t-fail">Codex agents run independently. Choose a setup without agent dependencies.</div>}
         <div className="sp-plan">
           <div className="sp-plan-head">
             <span className="sp-lab">
@@ -1349,23 +1360,23 @@ function Spawn() {
          * mode. The pills below keep the tool rules, which hold in every mode.
          */}
         <div className="sp-pills sp-modes" role="radiogroup" aria-label="How the agents interact with you">
-          {MODES.filter((m) => offersMode(m.id, caps)).map((m) => (
+          {(codex ? CODEX_MODES : MODES.filter((m) => offersMode(m.id, caps))).map((m) => (
             <button
               key={m.id}
               role="radio"
               className={`sp-pill${m.warn ? ' sp-danger' : ''}`}
               aria-checked={shownMode === m.id}
               aria-pressed={shownMode === m.id}
-              onClick={() => setMode(m.id)}
+              onClick={() => (codex ? setCodexMode : setMode)(m.id)}
               onMouseEnter={() => setHint(m.hint)}
               onMouseLeave={() => setHint('')}
             >
-              {m.warn ? '⚠ ' : ''}
-              {m.label}
+              {m.warn ? '⚠ ' : ''}{m.label}
             </button>
           ))}
         </div>
-        {MODES.find((m) => m.id === shownMode)?.warn && (
+        {codex && <div className="sp-cf-note">Uses your ChatGPT subscription. {(CODEX_MODES.find((m) => m.id === shownMode) ?? CODEX_MODES[0])?.hint}</div>}
+        {!codex && MODES.find((m) => m.id === shownMode)?.warn && (
           <div className="sp-isonote sp-warnmode">{MODES.find((m) => m.id === shownMode)!.warn}</div>
         )}
         {/*
@@ -1374,7 +1385,7 @@ function Spawn() {
          * ask you — which is the only thing that glyph is allowed to mean.
          */}
         <div className="sp-pills">
-          {PILLS.map((p) => {
+          {!codex && PILLS.map((p) => {
             const on = pills[p.id] === true;
             const warns = p.interruptsWhenOff === true && !on;
             return (

@@ -771,6 +771,10 @@ console.log('\nEngines · a non-Claude agent shows only the controls its engine 
   check("a model its engine doesn't list is flagged; an empty list proves nothing", providerModelProblem(list, 'x/y') !== null && providerModelProblem(list, 'anthropic/claude-sonnet-4.5') === null && providerModelProblem({ ...list, models: [] }, 'x/y') === null);
 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
+  check('existing Codex workspace agents can change modes, while read-only stays locked',
+    /CODEX_MODES\.filter\(\(m\) => codexReadOnly \? m\.id === 'plan' : m\.id !== 'plan'\)/.test(comp) &&
+      /!codexReadOnly && modes\.map/.test(comp) &&
+      /setAutonomy\(agent\.id, \{ autonomy: \{ mode \} \}\)/.test(comp));
   check('the composer asks the engine before it shows a control', /const caps = capabilitiesOf\(agent, useProviders\(\)\);/.test(comp) && /MODES\.filter\(\(m\) => offersMode\(m\.id, caps, autonomy\.mode\)\)/.test(comp) && /\{has\.effort && \(\s*<div className="ag-modes">\s*<span className="ui-lab">effort/.test(comp));
   check(
     "the composer offers its model's efforts, and a model switched to that doesn't take the effort moves it, saying so (Amendment 190)",
@@ -801,7 +805,7 @@ console.log('\n9 · the settings under the message box fold away (Amendment 96)'
 
   const comp = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
   check('one setting for every agent, read the same way', /const open = settingsShown\(useSetting\(SETTINGS_KEY\)\);/.test(comp) && SETTINGS_KEY === 'conductor.agentSettings');
-  check('folded hides the guardrails pills and shows the line instead', /\{open && \(\s*<>\s*<span className="ui-lab">guardrails<\/span>/.test(comp) && /\{!open && \(\s*<span className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\}/.test(comp));
+  check('folded hides the guardrails pills and shows the line instead', /\{open && \(\s*<>\s*\{!codex && <span className="ui-lab">guardrails<\/span>\}/.test(comp) && /\{!open && \(\s*<span className=\{`ag-summary\$\{summaryAlarm \? ' is-alarm' : ''\}`\}/.test(comp));
   check('folded hides interaction, effort, model and budget', /\{open && \(\s*<>\s*\{\/\*[\s\S]*?\*\/\}\s*<div className="ag-modes">\s*<span className="ui-lab">interaction/.test(comp));
   check('send stays, and the fold says whether it is open', /aria-expanded=\{open\}/.test(comp) && /\{send\.busy \? 'sending…' : 'send'\}/.test(comp));
   // Amendment 110: a header with the shared chevron, like every other fold, not a "settings" button.
@@ -1335,7 +1339,7 @@ console.log('\n· a working agent says what its run took (Amendment 178)');
   check('a mode or effort its run took says now; one it could not, the next run', appliesSays('mode', true, 'now').startsWith('Now') && appliesSays('effort', true, 'next run').startsWith('From the next run'));
   check('an agent not working is told nothing: every run is built from what is set', appliesSays('tools', false, 'now') === '' && appliesSays('mode', false, 'next run') === '');
   check('the pills, the modes and effort say it, and the when-done steps are not a tool', /appliesSays\('tools', working, r\.appliesTo\)/.test(comp) && /appliesSays\('mode', working, r\.appliesTo\)/.test(comp) && /appliesSays\('effort', working, r\.appliesTo\)/.test(comp) && /agent\.status === 'working' && !pill\.id\.startsWith\('done\.'\)/.test(comp));
-  check('and under the mode row, while it works, which of them its run takes now', WORKING_SAYS === 'mode and effort now · tools and budget from the next run' && /ag-modesays-when"> · \{WORKING_SAYS\}/.test(comp) && !comp.includes('· takes effect on the next run</span>'));
+  check('and under the mode row, while it works, which of them its run takes now', WORKING_SAYS === 'mode and effort now · tools and budget from the next run' && /ag-modesays-when\x22> · \{codex \? 'changes apply on the next turn' : WORKING_SAYS\}/.test(comp) && !comp.includes('· takes effect on the next run</span>'));
 }
 
 console.log("\n· an orchestrator's transcript says its finished helpers were removed (Amendment 177)");
