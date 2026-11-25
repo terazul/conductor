@@ -160,7 +160,8 @@ export class CodexBackend implements AgentBackend {
         threadId, input: textInput(opts.prompt), approvalPolicy, approvalsReviewer: 'user',
         model: scope.model, ...(scope.autonomy.effort ? { effort: scope.autonomy.effort } : {}),
         sandboxPolicy: readOnly ? { type: 'readOnly' } : {
-          type: 'workspaceWrite', writableRoots: [scope.worktreePath, ...(scope.extraDirs ?? [])], networkAccess: false,
+          type: 'workspaceWrite', writableRoots: [scope.worktreePath, ...(scope.extraDirs ?? [])],
+          networkAccess: scope.autonomy.allowNetwork === true,
         },
       });
       this.#turnId ??= string(object(started.turn).id) || null;

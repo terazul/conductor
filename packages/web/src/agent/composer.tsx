@@ -660,6 +660,25 @@ export function Composer({ agent }: { agent: Agent }) {
           {open && (
           <>
           {!codex && <span className="ui-lab">guardrails</span>}
+          {codex && !codexReadOnly && (
+            <button
+              type="button"
+              className={`ag-pill${autonomy.allowNetwork ? ' is-on' : ''}`}
+              aria-pressed={autonomy.allowNetwork === true}
+              title="Allow this chat's shell commands to make outbound connections starting on the next turn."
+              disabled={policy.busy}
+              onClick={() => {
+                const allowNetwork = autonomy.allowNetwork !== true;
+                void policy.run(
+                  allowNetwork ? 'Enabling shell network access' : 'Disabling shell network access',
+                  () => setAutonomy(agent.id, { autonomy: { allowNetwork } }),
+                  'Network setting applies on the next turn.',
+                );
+              }}
+            >
+              Allow network
+            </button>
+          )}
           {!codex && PILLS.map((p) => {
             const on = p.on(autonomy);
             /*

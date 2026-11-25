@@ -139,6 +139,7 @@ function parseAutonomy(raw: unknown): Autonomy {
 
   return {
     mode,
+    ...(a['allowNetwork'] === true ? { allowNetwork: true } : {}),
     allowedTools: list(a['allowedTools']),
     disallowedTools: list(a['disallowedTools']),
     budgetUsd: typeof budget === 'number' && Number.isFinite(budget) && budget > 0 ? budget : null,
@@ -177,6 +178,7 @@ function autonomyFor(provider: ProviderId, raw: unknown): Autonomy {
   const costUsd = backendFor(provider)?.capabilities.costUsd ?? provider === 'claude';
   const wrongUnit = budgetUnitRefusal(provider, costUsd, autonomy);
   if (wrongUnit) throw new Error(wrongUnit);
+  if (autonomy.allowNetwork && provider !== 'codex') throw new Error('Allow network is only available for Codex agents.');
   if (provider === 'codex') {
     const problem = codexAutonomyProblem(autonomy);
     if (problem) throw new Error(problem);

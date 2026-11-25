@@ -237,6 +237,8 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface Autonomy {
   /** SDK permissionMode. */
   mode: 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions' | 'auto';
+  /** Allow outbound shell networking for this Codex agent. Defaults to off. */
+  allowNetwork?: boolean;
   /** SDK allowedTools. */
   allowedTools: string[];
   /** SDK disallowedTools. Survives every mode — the real safety net. */

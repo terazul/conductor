@@ -2691,7 +2691,7 @@ export class Supervisor implements AgentControl {
     budgetChanged();
     const runner = this.#runners.get(agentId);
     if (!runner?.isLive || !runner.setAutonomy) return 'next run';
-    const atStart = (['allowedTools', 'disallowedTools', 'budgetUsd', 'budgetTokens'] as const).some(
+    const atStart = (['allowedTools', 'disallowedTools', 'budgetUsd', 'budgetTokens', 'allowNetwork'] as const).some(
       (k) => JSON.stringify(was?.[k] ?? null) !== JSON.stringify(autonomy[k] ?? null),
     );
     try {
